@@ -1,0 +1,31 @@
+version: '2.1'
+
+jobs:
+  build:
+    parameters:
+       cache_version:
+        default: v1
+        description: Cache version to use - increment this to build a fresh cache.
+        type: string
+    docker:
+      - image: cimg/rust:1.52.1
+    steps:
+      - checkout
+      - restore_cache:
+            keys:
+              - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+      - run: cargo --version
+      - run: cargo test
+      - run: cargo fmt -- --check
+      - run: cargo clippy --all --no-default-features -- -D warnings -D missing_docs
+      - run: cargo build
+      - save_cache:
+            key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+            paths:
+              - ~/.cargo
+workflows:
+  production:
+    jobs:
+      - build
+
+

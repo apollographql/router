@@ -1,0 +1,16 @@
+[package]
+name = "router"
+version = "0.1.0"
+authors = ["bryncooke <bryn@apollographql.com>"]
+edition = "2018"
+license-file = "./LICENSE"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [".", "crates/*"]
+
+[dependencies]
+server = { path = "crates/server" }
+query-planner = { path = "crates/query-planner" }
+execution = { path = "crates/execution" }
+configuration = { path = "crates/configuration" }
