@@ -1,0 +1,8 @@
+query {
+    me {
+        name {
+            first
+            last
+        }
+    }
+}

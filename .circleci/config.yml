@@ -8,14 +8,14 @@ jobs:
         description: Cache version to use - increment this to build a fresh cache.
         type: string
     docker:
-      - image: cimg/rust:1.52.1
+      - image: cimg/rust:1.52.1-node
     steps:
       - checkout
       - restore_cache:
             keys:
               - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
       - run: cargo --version
-      - run: cargo test
+      - run: cargo test --all
       - run: cargo fmt -- --check
       - run: cargo clippy --all --no-default-features -- -D warnings -D missing_docs
       - run: cargo build
