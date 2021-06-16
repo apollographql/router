@@ -17,7 +17,7 @@ jobs:
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
-      - run: cargo clippy --all --no-default-features -- -D warnings -D missing_docs
+      - run: cargo clippy --all --no-default-features -- -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
       - run: cargo build
       - save_cache:
             key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
