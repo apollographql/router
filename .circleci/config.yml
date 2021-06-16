@@ -9,6 +9,8 @@ jobs:
         type: string
     docker:
       - image: cimg/rust:1.52.1-node
+    environment:
+      - RUSTFLAGS: -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
     steps:
       - checkout
       - restore_cache:
@@ -17,8 +19,9 @@ jobs:
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
-      - run: cargo clippy --all --no-default-features -- -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
-      - run: cargo build
+      - run: cargo clippy --all --no-default-features
+      - run: cargo build --all-targets
+      - run: cargo rustdoc
       - save_cache:
             key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
             paths:
