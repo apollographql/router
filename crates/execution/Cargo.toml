@@ -9,3 +9,8 @@ license-file = "./LICENSE"
 
 [dependencies]
 query-planner = { path = "../query-planner" }
+futures = "0.3.15"
+serde_json = "1.0.64"
+serde = "1.0.126"
+derive_more = "0.99.14"
+thiserror = "1.0.25"
