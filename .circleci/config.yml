@@ -3,7 +3,7 @@ version: '2.1'
 jobs:
   build:
     parameters:
-       cache_version:
+      cache_version:
         default: v1
         description: Cache version to use - increment this to build a fresh cache.
         type: string
@@ -12,22 +12,23 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-            keys:
-              - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+          keys:
+            - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
       - run: sudo npm install -g npm
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
       - run: cargo clippy --all --no-default-features
-      - run: cargo build --all-targets
+      - run:
+          name: Strict lint build
+          command: cargo build --all-targets
           environment:
             RUSTFLAGS: -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
-
       - run: cargo rustdoc
       - save_cache:
-            key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
-            paths:
-              - ~/.cargo
+          key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+          paths:
+            - ~/.cargo
 
 workflows:
   production:
