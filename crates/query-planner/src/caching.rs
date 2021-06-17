@@ -28,10 +28,10 @@ impl crate::QueryPlanner for CachingQueryPlanner {
         query: &str,
         operation: &str,
         options: QueryPlanOptions,
-    ) -> &Result<QueryPlan, QueryPlannerError> {
+    ) -> Result<&QueryPlan, &QueryPlannerError> {
         let schema = &self.schema;
         self.cached
-            .entry((query.into(), operation.into(), options.into()))
+            .entry((query.into(), operation.into(), options))
             .or_insert_with(|| {
                 let context = OperationalContext {
                     schema: schema.to_string(),
@@ -43,6 +43,7 @@ impl crate::QueryPlanner for CachingQueryPlanner {
                 let parsed = from_str::<QueryPlan>(result.as_str())?;
                 Ok(parsed)
             })
+            .as_ref()
     }
 }
 
@@ -78,7 +79,7 @@ mod tests {
             QueryPlanOptions::default(),
         );
         assert_eq!(
-            QueryPlan {
+            &QueryPlan {
                 node: Some(Fetch(FetchNode {
                     service_name: "accounts".to_owned(),
                     requires: None,
@@ -86,7 +87,7 @@ mod tests {
                     operation: "{me{name{first last}}}".to_owned()
                 }))
             },
-            result.clone().unwrap()
+            result.unwrap()
         );
     }
 
@@ -96,7 +97,7 @@ mod tests {
         let result = planner.get("", "", QueryPlanOptions::default());
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
-            result.clone().unwrap_err().to_string()
+            result.unwrap_err().to_string()
         );
     }
 }

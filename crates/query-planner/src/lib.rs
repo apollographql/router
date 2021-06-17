@@ -29,5 +29,5 @@ pub trait QueryPlanner: Send + Sync {
         query: &str,
         operation: &str,
         options: QueryPlanOptions,
-    ) -> &Result<model::QueryPlan, QueryPlannerError>;
+    ) -> Result<&model::QueryPlan, &QueryPlannerError>;
 }
