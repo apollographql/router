@@ -3,6 +3,6 @@ RUSTFLAGS="-D warnings -D missing_docs -D future_incompatible -D missing_debug_i
 cargo --version
 cargo test --all
 cargo fmt -- --check
-cargo clippy --all --no-default-features
+cargo clippy --all --no-default-features -- -D warnings
 cargo build --all-targets
 cargo rustdoc

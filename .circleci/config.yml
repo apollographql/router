@@ -18,7 +18,7 @@ jobs:
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
-      - run: cargo clippy --all --no-default-features
+      - run: cargo clippy --all --no-default-features -- -D warnings
       - run:
           name: Strict lint build
           command: cargo build --all-targets
