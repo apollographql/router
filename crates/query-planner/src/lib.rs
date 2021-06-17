@@ -2,6 +2,7 @@
 //! Object model for query plan
 pub mod caching;
 pub mod model;
+pub mod simple;
 
 use thiserror::Error;
 
@@ -23,11 +24,14 @@ impl QueryPlanOptions {
     }
 }
 
+#[cfg(test)]
+use mockall::{automock, predicate::*};
+#[cfg_attr(test, automock)]
 pub trait QueryPlanner: Send + Sync {
     fn get(
         &mut self,
         query: &str,
         operation: &str,
         options: QueryPlanOptions,
-    ) -> Result<&model::QueryPlan, &QueryPlannerError>;
+    ) -> Result<model::QueryPlan, QueryPlannerError>;
 }

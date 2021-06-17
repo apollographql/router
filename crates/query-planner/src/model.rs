@@ -4,9 +4,22 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(from = "QueryPlanSerde", into = "QueryPlanSerde")]
 pub struct QueryPlan {
     pub node: Option<PlanNode>,
+}
+
+impl From<QueryPlanSerde> for QueryPlan {
+    fn from(qps: QueryPlanSerde) -> Self {
+        let QueryPlanSerde::QueryPlan { node } = qps;
+        QueryPlan { node }
+    }
+}
+
+impl Into<QueryPlanSerde> for QueryPlan {
+    fn into(self) -> QueryPlanSerde {
+        QueryPlanSerde::QueryPlan { node: self.node }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
