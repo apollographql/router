@@ -15,6 +15,7 @@ jobs:
           keys:
             - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
       - run: sudo npm install -g npm
+      - run: sudo apt-get install openssl
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
@@ -31,7 +32,7 @@ jobs:
             - ~/.cargo
 
 workflows:
-  production:
+  build:
     jobs:
       - build
 
