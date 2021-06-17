@@ -4,22 +4,9 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(from = "QueryPlanSerde", into = "QueryPlanSerde")]
+#[serde(tag = "kind")]
 pub struct QueryPlan {
     pub node: Option<PlanNode>,
-}
-
-impl From<QueryPlanSerde> for QueryPlan {
-    fn from(qps: QueryPlanSerde) -> Self {
-        let QueryPlanSerde::QueryPlan { node } = qps;
-        QueryPlan { node }
-    }
-}
-
-impl Into<QueryPlanSerde> for QueryPlan {
-    fn into(self) -> QueryPlanSerde {
-        QueryPlanSerde::QueryPlan { node: self.node }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,12 +63,6 @@ pub struct InlineFragment {
 pub type SelectionSet = Vec<Selection>;
 pub type GraphQLDocument = String;
 pub type ResponsePath = Vec<String>;
-/// Hacking Json Serde to match JS.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", tag = "kind")]
-enum QueryPlanSerde {
-    QueryPlan { node: Option<PlanNode> },
-}
 
 #[cfg(test)]
 mod tests {
@@ -91,7 +72,7 @@ mod tests {
     const TYPENAME_FIELD_NAME: &'static str = "__typename";
 
     fn qp_json_string() -> String {
-        include_str!("testdata/model.json").to_owned()
+        include_str!("testdata/query_plan.json").to_owned()
     }
 
     fn query_plan() -> QueryPlan {
