@@ -16,6 +16,7 @@ jobs:
       - restore_cache:
             keys:
               - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+      - run: npm install -g npm
       - run: cargo --version
       - run: cargo test --all
       - run: cargo fmt -- --check
