@@ -1,18 +1,19 @@
 //! Constructs an execution stream from q query plan
 
+mod subgraph;
+
 use futures::Stream;
-use query_planner::model::QueryPlan;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-type Object = Map<String, Value>;
-type Path = Vec<Value>;
-type Extensions = Option<Object>;
-type Errors = Option<Vec<GraphQLError>>;
+pub type Object = Map<String, Value>;
+pub type Path = Vec<Value>;
+pub type Extensions = Option<Object>;
+pub type Errors = Option<Vec<GraphQLError>>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GraphQLRequest {
+pub struct GraphQLRequest {
     query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation_name: Option<String>,
@@ -24,7 +25,7 @@ struct GraphQLRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GraphQLResponse {
+pub struct GraphQLResponse {
     data: Object,
     #[serde(skip_serializing_if = "Option::is_none")]
     errors: Errors,
@@ -34,7 +35,7 @@ struct GraphQLResponse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GraphQLPatchResponse {
+pub struct GraphQLPatchResponse {
     label: String,
     data: Object,
     path: Path,
@@ -47,7 +48,7 @@ struct GraphQLPatchResponse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GraphQLError {
+pub struct GraphQLError {
     message: String,
     locations: Vec<Location>,
     path: Path,
@@ -56,21 +57,22 @@ struct GraphQLError {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Location {
+pub struct Location {
     line: i32,
     column: i32,
 }
 
-//Marker trait for response objects
-trait Response {}
+pub enum GraphQLResponseItem {
+    Primary(GraphQLResponse),
+    Patch(GraphQLPatchResponse),
+}
 
-impl Response for GraphQLResponse {}
-
-impl Response for GraphQLPatchResponse {}
+trait ExecutorManager {
+    fn get(&self, ur: String) -> &dyn Executor;
+}
 
 trait Executor {
-    fn execute(request: &GraphQLRequest, query_plan: &QueryPlan)
-        -> dyn Stream<Item = dyn Response>;
+    fn execute(&self, request: &GraphQLRequest) -> dyn Stream<Item = GraphQLResponseItem>;
 }
 
 #[cfg(test)]
