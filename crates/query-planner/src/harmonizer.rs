@@ -5,19 +5,23 @@ use harmonizer::plan::{plan, OperationalContext, PlanningErrors};
 use serde_json::de::from_str;
 use serde_json::Error;
 
-pub struct SimpleQueryPlanner {
+/// A query planner that calls out to the nodejs harmonizer query planner.
+/// No caching is performed. To cache wrap in a `CachingQueryPlanner`.
+#[derive(Debug)]
+pub struct HarmonizerQueryPlanner {
     schema: String,
 }
 
-impl SimpleQueryPlanner {
-    pub fn new(schema: &str) -> SimpleQueryPlanner {
-        SimpleQueryPlanner {
+impl HarmonizerQueryPlanner {
+    /// Create a new harmonizer query planner
+    pub fn new(schema: &str) -> HarmonizerQueryPlanner {
+        HarmonizerQueryPlanner {
             schema: schema.into(),
         }
     }
 }
 
-impl crate::QueryPlanner for SimpleQueryPlanner {
+impl crate::QueryPlanner for HarmonizerQueryPlanner {
     fn get(
         &mut self,
         query: &str,
@@ -53,7 +57,7 @@ impl From<harmonizer::plan::PlanningErrors> for QueryPlannerError {
 impl From<serde_json::Error> for QueryPlannerError {
     fn from(e: Error) -> Self {
         QueryPlannerError::ParseError {
-            parse_error: e.to_string(),
+            parse_errors: e.to_string(),
         }
     }
 }
@@ -67,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_plan() {
-        let mut planner = SimpleQueryPlanner::new(include_str!("testdata/schema.graphql"));
+        let mut planner = HarmonizerQueryPlanner::new(include_str!("testdata/schema.graphql"));
         let result = planner.get(
             include_str!("testdata/query.graphql"),
             "",
@@ -88,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_plan_error() {
-        let mut planner = SimpleQueryPlanner::new("");
+        let mut planner = HarmonizerQueryPlanner::new("");
         let result = planner.get("", "", QueryPlanOptions::default());
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",

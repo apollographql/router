@@ -1,9 +1,10 @@
-use std::collections::HashMap;
-
-/// Caching query planner that caches responses from a delegate.
 use crate::model::QueryPlan;
 use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
+/// Caching query planner that caches responses from a delegate.
+use std::collections::HashMap;
 
+/// A caching query planner that caches responses from a delegate.
+#[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
     cached:
@@ -11,6 +12,7 @@ pub struct CachingQueryPlanner<T: QueryPlanner> {
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
+    /// Create a new caching query planner
     pub fn new(delegate: T) -> CachingQueryPlanner<T> {
         CachingQueryPlanner {
             delegate,
@@ -46,7 +48,7 @@ mod tests {
             .expect_get()
             .times(1)
             .return_const(Err(QueryPlannerError::ParseError {
-                parse_error: "".to_owned(),
+                parse_errors: "".to_owned(),
             }));
         let mut planner = CachingQueryPlanner::new(delegate);
 

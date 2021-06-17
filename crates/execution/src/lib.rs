@@ -6,13 +6,34 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// A json object
 pub type Object = Map<String, Value>;
-pub type Path = Vec<Value>;
+
+/// A path for an error. This can be composed of strings and numbers
+pub type Path = Vec<PathElement>;
+
+/// Extensions is an untyped map that can be used to pass extra data to requests and from responses.
 pub type Extensions = Option<Object>;
+
+/// A list of graphql errors.
 pub type Errors = Option<Vec<GraphQLError>>;
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+/// A GraphQL path element that is composes of strings or numbers.
+/// e.g `/book/3/name`
+pub enum PathElement {
+    /// An integer path element.
+    Number(i32),
+
+    /// A string path element.
+    String(String),
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A graphql request.
+/// Used for federated and subgraph queries.
 pub struct GraphQLRequest {
     query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,7 +46,9 @@ pub struct GraphQLRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GraphQLResponse {
+/// A graphql response.
+/// Used for federated and subgraph queries.
+pub struct GraphQLPrimaryResponse {
     data: Object,
     #[serde(skip_serializing_if = "Option::is_none")]
     errors: Errors,
@@ -35,6 +58,8 @@ pub struct GraphQLResponse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A graphql patch response .
+/// Used for federated and subgraph queries.
 pub struct GraphQLPatchResponse {
     label: String,
     data: Object,
@@ -48,6 +73,7 @@ pub struct GraphQLPatchResponse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A GraphQL error.
 pub struct GraphQLError {
     message: String,
     locations: Vec<Location>,
@@ -57,28 +83,39 @@ pub struct GraphQLError {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A location in a file in a graphql error.
 pub struct Location {
     line: i32,
     column: i32,
 }
 
-pub enum GraphQLResponseItem {
-    Primary(GraphQLResponse),
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A GraphQL response.
+/// A response stream will typically be composed of a single primary and zero or more patches.
+pub enum GraphQLResponse {
+    /// The first item in a stream of responses will always be a primary response.
+    Primary(GraphQLPrimaryResponse),
+
+    /// Subsequent responses will always be a patch response.
     Patch(GraphQLPatchResponse),
 }
 
+/// Executor manager maintains a map of services to an executor for querying the service.
+/// Used for subgraph queries.
 trait ExecutorManager {
-    fn get(&self, ur: String) -> &dyn Executor;
+    fn get(&self, service: String) -> &dyn Executor;
 }
 
+/// An executor is responsible for turning a graphql request into a stream of responses.
 trait Executor {
-    fn execute(&self, request: &GraphQLRequest) -> dyn Stream<Item = GraphQLResponseItem>;
+    /// Constructs a stream of responses. Note that the stream does not start until it is polled.
+    fn stream(&self, request: &GraphQLRequest) -> dyn Stream<Item = GraphQLResponse>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Number, Value};
+    use serde_json::json;
 
     #[test]
     fn test_request() {
@@ -106,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_response() {
-        let result = serde_json::from_str::<GraphQLResponse>(
+        let result = serde_json::from_str::<GraphQLPrimaryResponse>(
             json!(
             {
               "errors": [
@@ -147,7 +184,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap(),
-            GraphQLResponse {
+            GraphQLPrimaryResponse {
                 data: json!({
                   "hero": {
                     "name": "R2-D2",
@@ -174,10 +211,10 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".to_owned(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: vec!(
-                        Value::String("hero".to_owned()),
-                        Value::String("heroFriends".to_owned()),
-                        Value::Number(Number::from(1)),
-                        Value::String("name".to_owned())
+                        PathElement::String("hero".to_owned()),
+                        PathElement::String("heroFriends".to_owned()),
+                        PathElement::Number(1),
+                        PathElement::String("name".to_owned())
                     ),
                     extensions: json!({
                         "error-extension": 5,
@@ -265,20 +302,20 @@ mod tests {
                 .cloned()
                 .unwrap(),
                 path: vec!(
-                    Value::String("hero".to_owned()),
-                    Value::String("heroFriends".to_owned()),
-                    Value::Number(Number::from(1)),
-                    Value::String("name".to_owned())
+                    PathElement::String("hero".to_owned()),
+                    PathElement::String("heroFriends".to_owned()),
+                    PathElement::Number(1),
+                    PathElement::String("name".to_owned())
                 ),
                 has_next: true,
                 errors: Some(vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".to_owned(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: vec!(
-                        Value::String("hero".to_owned()),
-                        Value::String("heroFriends".to_owned()),
-                        Value::Number(Number::from(1)),
-                        Value::String("name".to_owned())
+                        PathElement::String("hero".to_owned()),
+                        PathElement::String("heroFriends".to_owned()),
+                        PathElement::Number(1),
+                        PathElement::String("name".to_owned())
                     ),
                     extensions: json!({
                         "error-extension": 5,

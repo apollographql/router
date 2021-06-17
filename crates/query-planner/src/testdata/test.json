@@ -1,0 +1,52 @@
+{
+  "data": {
+    "hero": {
+      "name": "R2-D2",
+      "heroFriends": [
+        {
+          "id": "1000",
+          "name": "Luke Skywalker"
+        },
+        {
+          "id": "1002",
+          "name": null
+        },
+        {
+          "id": "1003",
+          "name": "Leia Organa"
+        }
+      ]
+    }
+  },
+  "errors": [
+    {
+      "message": "Name for character with ID 1002 could not be fetched.",
+      "locations": [
+        {
+          "line": 6,
+          "column": 7
+        }
+      ],
+      "path": [
+        {
+          "String": "hero"
+        },
+        {
+          "String": "heroFriends"
+        },
+        {
+          "Number": 1
+        },
+        {
+          "String": "name"
+        }
+      ],
+      "extensions": {
+        "error-extension": 5
+      }
+    }
+  ],
+  "extensions": {
+    "response-extension": 3
+  }
+}
