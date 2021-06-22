@@ -1,14 +1,7 @@
 version: '2.1'
 
-jobs:
+commands:
   setup-env:
-    parameters:
-      cache_version:
-        default: v1
-        description: Cache version to use - increment this to build a fresh cache.
-        type: string
-    docker:
-      - image: cimg/rust:1.53.0-node
     steps:
       - checkout
       - run:
@@ -58,12 +51,17 @@ jobs:
           paths:
             - ~/.cargo
 
+jobs:
+  build:
+    docker:
+      - image: cimg/rust:1.53.0-node
+    steps:
+      - setup-env
+      - build
+
 workflows:
   build:
     jobs:
-      - setup-env
-      - build:
-          requires:
-            - setup-env
+      - build
 
 
