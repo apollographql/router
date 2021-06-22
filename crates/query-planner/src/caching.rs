@@ -1,9 +1,11 @@
-use crate::model::QueryPlan;
-use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
-/// Caching query planner that caches responses from a delegate.
 use std::collections::HashMap;
 
-/// A caching query planner that caches responses from a delegate.
+/// Caching query planner that caches responses from a delegate.
+use crate::model::QueryPlan;
+use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
+
+/// A query planner decorator that caches results.
+/// There is no eviction strategy, query plans will be retained forever.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
@@ -12,8 +14,8 @@ pub struct CachingQueryPlanner<T: QueryPlanner> {
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    /// Create a new caching query planner
-    pub fn new(delegate: T) -> CachingQueryPlanner<T> {
+    /// Decorate a query planner with caching functionality.
+    pub fn decorate(delegate: T) -> CachingQueryPlanner<T> {
         CachingQueryPlanner {
             delegate,
             cached: HashMap::new(),
@@ -46,17 +48,19 @@ mod tests {
         let mut delegate = MockQueryPlanner::new();
         delegate
             .expect_get()
-            .times(1)
+            .times(2)
             .return_const(Err(QueryPlannerError::ParseError {
                 parse_errors: "".to_owned(),
             }));
-        let mut planner = CachingQueryPlanner::new(delegate);
+        let mut planner = CachingQueryPlanner::decorate(delegate);
 
         for _ in 0..5 {
-            assert_eq!(
-                planner.get("", "", QueryPlanOptions::default()).is_err(),
-                true
-            );
+            assert!(planner
+                .get("query1", "", QueryPlanOptions::default())
+                .is_err());
         }
+        assert!(planner
+            .get("query2", "", QueryPlanOptions::default())
+            .is_err());
     }
 }
