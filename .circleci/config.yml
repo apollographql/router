@@ -1,7 +1,7 @@
 version: '2.1'
 
 commands:
-  setup-env:
+  setup_env:
     steps:
       - checkout
       - run:
@@ -52,16 +52,16 @@ commands:
             - ~/.cargo
 
 jobs:
-  build:
+  build_test_lint:
     docker:
       - image: cimg/rust:1.53.0-node
     steps:
-      - setup-env
+      - setup_env
       - build
 
 workflows:
   build:
     jobs:
-      - build
+      - build_test_lint
 
 
