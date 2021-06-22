@@ -65,9 +65,8 @@ impl GraphQLFetcher for HttpSubgraphFetcher {
                         .map_ok(GraphQLResponse::Patch)
                         .boxed()
                 }
-            })
-            .boxed();
-        response_stream
+            });
+        response_stream.boxed()
     }
 }
 
