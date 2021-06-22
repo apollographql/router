@@ -34,8 +34,6 @@ jobs:
         default: v1
         description: Cache version to use - increment this to build a fresh cache.
         type: string
-    docker:
-      - image: cimg/rust:1.53.0-node
     steps:
       - restore_cache:
           keys:
