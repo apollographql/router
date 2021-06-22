@@ -1,7 +1,7 @@
 version: '2.1'
 
 jobs:
-  build:
+  setup-env:
     parameters:
       cache_version:
         default: v1
@@ -21,19 +21,36 @@ jobs:
             chmod +x ~/docker-compose
             sudo mv ~/docker-compose /usr/local/bin/docker-compose
       - setup_remote_docker
-      - restore_cache:
-          keys:
-            - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
+
       - run: cd submodules/supergraph-demo; docker-compose up -d; cd ../..
       - run: sudo npm install -g npm
       - run: sudo apt-get update
       - run: sudo apt-get install libssl-dev
       - run: cargo --version
-      - run: cargo test --all
-      - run: cargo fmt -- --check
-      - run: cargo clippy --all --no-default-features -- -D warnings
+
+  build:
+    parameters:
+      cache_version:
+        default: v1
+        description: Cache version to use - increment this to build a fresh cache.
+        type: string
+    docker:
+      - image: cimg/rust:1.53.0-node
+    steps:
+      - restore_cache:
+          keys:
+            - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
       - run:
-          name: Strict lint build
+          name: Tests
+          command: cargo test --all
+      - run:
+          name: Format lint
+          command: cargo fmt -- --check
+      - run:
+          name: Clippy lint
+          command: cargo clippy --all --no-default-features -- -D warnings
+      - run:
+          name: Strict build
           command: cargo build --all-targets
           environment:
             RUSTFLAGS: -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
@@ -46,6 +63,7 @@ jobs:
 workflows:
   build:
     jobs:
+      - setup-env
       - build
 
 
