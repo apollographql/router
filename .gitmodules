@@ -1,3 +1,0 @@
-[submodule "submodules/supergraph-demo"]
-	path = submodules/supergraph-demo
-	url = git@github.com:apollographql/supergraph-demo.git

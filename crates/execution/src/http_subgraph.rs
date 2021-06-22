@@ -75,11 +75,47 @@ impl GraphQLFetcher for HttpSubgraphFetcher {
 mod tests {
 
     use super::*;
+    use httpmock::Method::POST;
+    use httpmock::{MockServer, Regex};
     use serde_json::json;
 
     #[tokio::test]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
-        let fetcher = HttpSubgraphFetcher::new("http://localhost:4001/graphql".to_string());
+        let response = GraphQLPrimaryResponse {
+            data: json!({
+              "allProducts": [
+                {
+                  "variation": {
+                    "id": "OSS"
+                  },
+                  "id": "apollo-federation"
+                },
+                {
+                  "variation": {
+                    "id": "platform"
+                  },
+                  "id": "apollo-studio"
+                }
+              ]
+            })
+            .as_object()
+            .unwrap()
+            .to_owned(),
+            has_next: None,
+            errors: None,
+            extensions: None,
+        };
+
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_matches(Regex::new(".*").unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&response);
+        });
+        let fetcher = HttpSubgraphFetcher::new(server.url("/graphql"));
         let collect = fetcher
             .stream(&GraphQLRequest {
                 query: r#"{allProducts{variation {id}id}}"#.into(),
@@ -92,31 +128,9 @@ mod tests {
 
         assert_eq!(
             collect[0].as_ref().unwrap(),
-            &GraphQLResponse::Primary(GraphQLPrimaryResponse {
-                data: json!({
-                  "allProducts": [
-                    {
-                      "variation": {
-                        "id": "OSS"
-                      },
-                      "id": "apollo-federation"
-                    },
-                    {
-                      "variation": {
-                        "id": "platform"
-                      },
-                      "id": "apollo-studio"
-                    }
-                  ]
-                })
-                .as_object()
-                .unwrap()
-                .to_owned(),
-                has_next: None,
-                errors: None,
-                extensions: None
-            })
+            &GraphQLResponse::Primary(response)
         );
+        mock.assert();
         Ok(())
     }
 }

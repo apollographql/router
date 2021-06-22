@@ -4,18 +4,6 @@ commands:
   setup_env:
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule sync --recursive; git submodule update --recursive --init
-      - run:
-          name: Install Docker Compose
-          command: |
-            curl -L https://github.com/docker/compose/releases/download/1.25.3/docker-compose-`uname -s`-`uname -m` > ~/docker-compose
-            chmod +x ~/docker-compose
-            sudo mv ~/docker-compose /usr/local/bin/docker-compose
-      - setup_remote_docker
-
-      - run: cd submodules/supergraph-demo; mv ../supergraph-demo-docker-compose.yml .; docker-compose up -d; cd ../..
       - run: sudo npm install -g npm
       - run: sudo apt-get update
       - run: sudo apt-get install libssl-dev
