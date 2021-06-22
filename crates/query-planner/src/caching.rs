@@ -14,8 +14,7 @@ pub struct CachingQueryPlanner<T: QueryPlanner> {
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    /// Decorate a query planner with caching functionality.
-    pub fn decorate(delegate: T) -> CachingQueryPlanner<T> {
+    fn new(delegate: T) -> CachingQueryPlanner<T> {
         CachingQueryPlanner {
             delegate,
             cached: HashMap::new(),
@@ -38,6 +37,19 @@ impl<T: QueryPlanner> crate::QueryPlanner for CachingQueryPlanner<T> {
     }
 }
 
+/// With caching trait. Adds with_caching to any query planner.
+pub trait WithCaching: QueryPlanner
+where
+    Self: Sized + QueryPlanner,
+{
+    /// Wrap this query planner in a caching decorator.
+    /// The original query planner is consumed.
+    fn with_caching(self) -> CachingQueryPlanner<Self> {
+        CachingQueryPlanner::new(self)
+    }
+}
+impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,7 +64,8 @@ mod tests {
             .return_const(Err(QueryPlannerError::ParseError {
                 parse_errors: "".to_owned(),
             }));
-        let mut planner = CachingQueryPlanner::decorate(delegate);
+
+        let mut planner = delegate.with_caching();
 
         for _ in 0..5 {
             assert!(planner
