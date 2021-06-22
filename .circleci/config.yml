@@ -11,9 +11,9 @@ jobs:
       - image: cimg/rust:1.53.0-node
     steps:
       - checkout
-        post:
-          - git submodule sync --recursive
-          - git submodule update --recursive --init
+      - run:
+          name: Initialize submodules
+          command: git submodule sync --recursive; git submodule update --recursive --init
       - restore_cache:
           keys:
             - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
