@@ -1,10 +1,16 @@
 //! Constructs an execution stream from q query plan
 
-mod subgraph;
+/// Federated graph fetcher.
+pub mod federated;
+
+/// Subgraph fetcher that uses http.
+pub mod http_subgraph;
 
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::pin::Pin;
+use thiserror::Error;
 
 /// A json object
 pub type Object = Map<String, Value>;
@@ -17,6 +23,26 @@ pub type Extensions = Option<Object>;
 
 /// A list of graphql errors.
 pub type Errors = Option<Vec<GraphQLError>>;
+
+/// Error types for QueryPlanner
+#[derive(Error, Debug)]
+pub enum FetchError {
+    /// An error when making the request
+    #[error("Response transport error {source}")]
+    ResponseTransportError {
+        /// The source error
+        #[from]
+        source: reqwest::Error,
+    },
+
+    /// The response was malformed
+    #[error("Malformed response error {source}")]
+    MalformedResponseError {
+        /// The source error
+        #[from]
+        source: serde_json::Error,
+    },
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -46,10 +72,12 @@ pub struct GraphQLRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A graphql response.
+/// A graphql primary response.
 /// Used for federated and subgraph queries.
 pub struct GraphQLPrimaryResponse {
     data: Object,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_next: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     errors: Errors,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,16 +128,21 @@ pub enum GraphQLResponse {
     Patch(GraphQLPatchResponse),
 }
 
-/// Executor manager maintains a map of services to an executor for querying the service.
+/// Maintains a map of services to stream builder for querying the service.
 /// Used for subgraph queries.
-trait ExecutorManager {
-    fn get(&self, service: String) -> &dyn Executor;
+trait ServiceManager {
+    fn get(&self, service: String) -> &dyn GraphQLFetcher;
 }
 
-/// An executor is responsible for turning a graphql request into a stream of responses.
-trait Executor {
-    /// Constructs a stream of responses. Note that the stream does not start until it is polled.
-    fn stream(&self, request: &GraphQLRequest) -> dyn Stream<Item = GraphQLResponse>;
+/// A graph response stream consists of one primary response and any number of patch responses.
+pub type GraphQLResponseStream = Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>>>>;
+
+/// A fetcher is responsible for turning a graphql request into a stream of responses.
+/// The goal of this trait is to hide the implementation details of retching a stream of graphql responses.
+/// We can then create multiple implementations that cab be plugged in to federation.
+trait GraphQLFetcher {
+    /// Constructs a stream of responses.
+    fn stream(&self, request: &GraphQLRequest) -> GraphQLResponseStream;
 }
 
 #[cfg(test)]
@@ -185,6 +218,7 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             GraphQLPrimaryResponse {
+                has_next: None,
                 data: json!({
                   "hero": {
                     "name": "R2-D2",
