@@ -64,8 +64,8 @@ workflows:
   build:
     jobs:
       - setup-env
-      - build
-        requires:
-          - setup-env
+      - build:
+          requires:
+            - setup-env
 
 
