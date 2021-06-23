@@ -50,6 +50,7 @@ use mockall::{automock, predicate::*};
 pub trait QueryPlanner: Send + Sync {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
+    #[must_use = "query plan result must be used"]
     fn get(
         &mut self,
         query: &str,

@@ -142,6 +142,7 @@ pub type GraphQLResponseStream = Pin<Box<dyn Stream<Item = Result<GraphQLRespons
 /// We can then create multiple implementations that cab be plugged in to federation.
 trait GraphQLFetcher {
     /// Constructs a stream of responses.
+    #[must_use = "streams do nothing unless polled"]
     fn stream(&self, request: &GraphQLRequest) -> GraphQLResponseStream;
 }
 
