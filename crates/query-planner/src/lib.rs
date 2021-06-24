@@ -53,8 +53,8 @@ pub trait QueryPlanner: Send + Sync {
     #[must_use = "query plan result must be used"]
     fn get(
         &mut self,
-        query: &str,
-        operation: &str,
+        query: String,
+        operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<model::QueryPlan, QueryPlannerError>;
 }

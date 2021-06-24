@@ -24,14 +24,14 @@ impl HarmonizerQueryPlanner {
 impl crate::QueryPlanner for HarmonizerQueryPlanner {
     fn get(
         &mut self,
-        query: &str,
-        operation: &str,
+        query: String,
+        operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<QueryPlan, QueryPlannerError> {
         let context = OperationalContext {
             schema: self.schema.to_string(),
             query: query.to_string(),
-            operation: operation.to_string(),
+            operation: operation.unwrap_or_default(),
         };
 
         let result = plan(context, options.into())?;
@@ -73,17 +73,17 @@ mod tests {
     fn test_plan() {
         let mut planner = HarmonizerQueryPlanner::new(include_str!("testdata/schema.graphql"));
         let result = planner.get(
-            include_str!("testdata/query.graphql"),
-            "",
+            include_str!("testdata/query.graphql").into(),
+            None,
             QueryPlanOptions::default(),
         );
         assert_eq!(
             QueryPlan {
                 node: Some(Fetch(FetchNode {
-                    service_name: "accounts".to_owned(),
+                    service_name: "accounts".into(),
                     requires: None,
                     variable_usages: vec![],
-                    operation: "{me{name{first last}}}".to_owned()
+                    operation: "{me{name{first last}}}".into()
                 }))
             },
             result.unwrap()
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_plan_error() {
         let mut planner = HarmonizerQueryPlanner::new("");
-        let result = planner.get("", "", QueryPlanOptions::default());
+        let result = planner.get("".into(), None, QueryPlanOptions::default());
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()

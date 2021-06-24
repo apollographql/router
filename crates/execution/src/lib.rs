@@ -27,20 +27,20 @@ pub type Errors = Option<Vec<GraphQLError>>;
 /// Error types for QueryPlanner
 #[derive(Error, Debug)]
 pub enum FetchError {
-    /// An error when making the request
-    #[error("Response transport error {source}")]
-    ResponseTransportError {
+    /// An error when fetching from a service.
+    #[error("The service has errors {service}")]
+    ServiceError {
+        /// The service that caused this error
+        service: String,
         /// The source error
-        #[from]
-        source: reqwest::Error,
+        source: Box<dyn std::error::Error>,
     },
 
     /// The response was malformed
-    #[error("Malformed response error {source}")]
-    MalformedResponseError {
+    #[error("The request had errors {source}")]
+    RequestError {
         /// The source error
-        #[from]
-        source: serde_json::Error,
+        source: Box<dyn std::error::Error>,
     },
 }
 

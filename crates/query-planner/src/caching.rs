@@ -9,8 +9,10 @@ use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached:
-        HashMap<(String, String, crate::QueryPlanOptions), Result<QueryPlan, QueryPlannerError>>,
+    cached: HashMap<
+        (String, Option<String>, crate::QueryPlanOptions),
+        Result<QueryPlan, QueryPlannerError>,
+    >,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
@@ -25,14 +27,14 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
 impl<T: QueryPlanner> crate::QueryPlanner for CachingQueryPlanner<T> {
     fn get(
         &mut self,
-        query: &str,
-        operation: &str,
+        query: String,
+        operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<QueryPlan, QueryPlannerError> {
         let delegate = &mut self.delegate;
         self.cached
-            .entry((query.into(), operation.into(), options.clone()))
-            .or_insert_with(|| delegate.get(query, operation, options.clone()))
+            .entry((query.clone(), operation.clone(), options.clone()))
+            .or_insert_with(|| delegate.get(query, operation, options))
             .clone()
     }
 }
@@ -62,18 +64,26 @@ mod tests {
             .expect_get()
             .times(2)
             .return_const(Err(QueryPlannerError::ParseError {
-                parse_errors: "".to_owned(),
+                parse_errors: "".into(),
             }));
 
         let mut planner = delegate.with_caching();
 
         for _ in 0..5 {
             assert!(planner
-                .get("query1", "", QueryPlanOptions::default())
+                .get(
+                    "query1".into(),
+                    Some("".into()),
+                    QueryPlanOptions::default()
+                )
                 .is_err());
         }
         assert!(planner
-            .get("query2", "", QueryPlanOptions::default())
+            .get(
+                "query2".into(),
+                Some("".into()),
+                QueryPlanOptions::default()
+            )
             .is_err());
     }
 }

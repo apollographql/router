@@ -16,6 +16,6 @@ derive_more = "0.99.14"
 thiserror = "1.0.25"
 reqwest = { version = "0.11.3", features = ["json", "stream"] }
 tokio = { version = "1.6.2", features = ["full"] }
-
+bytes = "1.0.1"
 [dev-dependencies]
 httpmock = "0.5.8"
