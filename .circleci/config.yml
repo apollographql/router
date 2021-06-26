@@ -17,15 +17,26 @@ commands:
           working_directory: submodules/federation-demo
           command: npm run start-services
           background: true
-      - run: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4001
-      - run: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4002
-      - run: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4003
+      - run:
+          name: Wait for accounts
+          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4001
+      - run:
+          name: Wait for reviews
+          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4002
+      - run:
+          name: Wait for products
+          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4003
+      - run:
+          name: Wait for inventory
+          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4004
       - run:
           name: Start federation-demo gateway
           working_directory: submodules/federation-demo
           command: npm run start-gateway
           background: true
-      - run: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4000
+      - run:
+          name: Wait for gateway
+          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4000
       - run: sudo apt-get update
       - run: sudo apt-get install libssl-dev
       - run: cargo --version
