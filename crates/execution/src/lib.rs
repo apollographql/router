@@ -3,12 +3,16 @@
 /// Federated graph fetcher.
 pub mod federated;
 
+/// Service registry that uses http_subgraph
+pub mod http_service_registry;
+
 /// Subgraph fetcher that uses http.
 pub mod http_subgraph;
 
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::fmt::Debug;
 use std::pin::Pin;
 use thiserror::Error;
 
@@ -25,29 +29,37 @@ pub type Extensions = Option<Object>;
 pub type Errors = Option<Vec<GraphQLError>>;
 
 /// Error types for QueryPlanner
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Eq, PartialEq)]
 pub enum FetchError {
     /// An error when fetching from a service.
-    #[error("The service has errors {service}")]
+    #[error("Service '{service}' fetch failed: {reason}")]
     ServiceError {
-        /// The service that caused this error
+        /// The service failed.
         service: String,
-        /// The source error
-        source: Box<dyn std::error::Error>,
+
+        /// The reason the fetch failed.
+        reason: String,
+    },
+
+    /// An error when fetching from a service.
+    #[error("Unknown service '{service}'")]
+    UnknownServiceError {
+        /// The service that was unknown.
+        service: String,
     },
 
     /// The response was malformed
-    #[error("The request had errors {source}")]
+    #[error("The request had errors: {reason}")]
     RequestError {
-        /// The source error
-        source: Box<dyn std::error::Error>,
+        /// The failure reason
+        reason: String,
     },
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum PathElement {
     /// An integer path element.
     Number(i32),
@@ -56,10 +68,10 @@ pub enum PathElement {
     String(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// A graphql request.
 /// Used for federated and subgraph queries.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphQLRequest {
     query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,10 +82,10 @@ pub struct GraphQLRequest {
     extensions: Extensions,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphQLPrimaryResponse {
     data: Object,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,10 +96,10 @@ pub struct GraphQLPrimaryResponse {
     extensions: Extensions,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// A graphql patch response .
 /// Used for federated and subgraph queries.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphQLPatchResponse {
     label: String,
     data: Object,
@@ -99,9 +111,9 @@ pub struct GraphQLPatchResponse {
     extensions: Extensions,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// A GraphQL error.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphQLError {
     message: String,
     locations: Vec<Location>,
@@ -109,17 +121,17 @@ pub struct GraphQLError {
     extensions: Extensions,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// A location in a file in a graphql error.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Location {
     line: i32,
     column: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A GraphQL response.
 /// A response stream will typically be composed of a single primary and zero or more patches.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum GraphQLResponse {
     /// The first item in a stream of responses will always be a primary response.
     Primary(GraphQLPrimaryResponse),
@@ -128,22 +140,43 @@ pub enum GraphQLResponse {
     Patch(GraphQLPatchResponse),
 }
 
-/// Maintains a map of services to stream builder for querying the service.
-/// Used for subgraph queries.
-trait ServiceManager {
-    fn get(&self, service: String) -> &dyn GraphQLFetcher;
+impl GraphQLResponse {
+    #[allow(dead_code)]
+    fn primary(self) -> GraphQLPrimaryResponse {
+        if let GraphQLResponse::Primary(primary) = self {
+            primary
+        } else {
+            panic!("Not a primary response")
+        }
+    }
+
+    #[allow(dead_code)]
+    fn patch(self) -> GraphQLPatchResponse {
+        if let GraphQLResponse::Patch(patch) = self {
+            patch
+        } else {
+            panic!("Not patch response")
+        }
+    }
+}
+
+/// Maintains a map of services to fetchers.
+pub trait SubgraphRegistry: Send + Sync + Debug {
+    /// Get a fetcher for a service.
+    fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)>;
 }
 
 /// A graph response stream consists of one primary response and any number of patch responses.
-pub type GraphQLResponseStream = Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>>>>;
+pub type GraphQLResponseStream =
+    Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>> + Send>>;
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
 /// The goal of this trait is to hide the implementation details of retching a stream of graphql responses.
 /// We can then create multiple implementations that cab be plugged in to federation.
-trait GraphQLFetcher {
+pub trait GraphQLFetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    fn stream(&self, request: &GraphQLRequest) -> GraphQLResponseStream;
+    fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream;
 }
 
 #[cfg(test)]

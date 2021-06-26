@@ -30,8 +30,8 @@ pub enum QueryPlannerError {
     },
 }
 
-#[derive(Clone, Eq, Hash, PartialEq, Debug)]
 /// Query planning options.
+#[derive(Clone, Eq, Hash, PartialEq, Debug)]
 pub struct QueryPlanOptions {}
 
 /// Query planning options.
@@ -44,10 +44,11 @@ impl QueryPlanOptions {
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
-#[cfg_attr(test, automock)]
+
 /// QueryPlanner can be used to plan queries.
 /// Implementations may cache query plans.
-pub trait QueryPlanner: Send + Sync {
+#[cfg_attr(test, automock)]
+pub trait QueryPlanner: Send {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]

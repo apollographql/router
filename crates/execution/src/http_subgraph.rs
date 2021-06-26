@@ -6,6 +6,7 @@ use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
     GraphQLResponse, GraphQLResponseStream,
 };
+use futures::stream::iter;
 
 type BytesStream =
     Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, FetchError>> + std::marker::Send>>;
@@ -29,13 +30,13 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    fn request_stream(&self, request: &GraphQLRequest) -> BytesStream {
+    fn request_stream(&self, request: GraphQLRequest) -> BytesStream {
         // Perform the actual request and start streaming.
         // Reqwest doesn't care if there is only one response, in this case it'll be a stream of one element.
         let service = self.service.to_owned();
         self.http_client
             .post(self.url.clone())
-            .json(request)
+            .json(&request)
             .send()
             // We have a future for the response, convert it to a future of the stream.
             .map_ok(|r| r.bytes_stream().boxed())
@@ -44,11 +45,11 @@ impl HttpSubgraphFetcher {
             // Flatten the stream
             .flat_map(|result| match result {
                 Ok(s) => s,
-                Err(err) => futures::stream::iter(vec![Err(err)]).boxed(),
+                Err(err) => iter(vec![Err(err)]).boxed(),
             })
             .map_err(move |err| FetchError::ServiceError {
                 service: service.to_owned(),
-                source: Box::new(err),
+                reason: err.to_string(),
             })
             .boxed()
     }
@@ -70,7 +71,7 @@ impl HttpSubgraphFetcher {
                     futures::future::ready(serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes))
                         .map_err(move |err| FetchError::ServiceError {
                             service,
-                            source: Box::new(err),
+                            reason: err.to_string(),
                         })
                         .map_ok(GraphQLResponse::Primary)
                         .boxed()
@@ -78,7 +79,7 @@ impl HttpSubgraphFetcher {
                     futures::future::ready(serde_json::from_slice::<GraphQLPatchResponse>(&bytes))
                         .map_err(move |err| FetchError::ServiceError {
                             service,
-                            source: Box::new(err),
+                            reason: err.to_string(),
                         })
                         .map_ok(GraphQLResponse::Patch)
                         .boxed()
@@ -92,7 +93,7 @@ trait MapToGraphQL {}
 
 impl GraphQLFetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
-    fn stream(&self, request: &GraphQLRequest) -> GraphQLResponseStream {
+    fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
         let bytes_stream = self.request_stream(request);
         self.map_to_graphql(bytes_stream)
     }
@@ -142,9 +143,9 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&response);
         });
-        let mut fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
+        let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
         let collect = fetcher
-            .stream(&GraphQLRequest {
+            .stream(GraphQLRequest {
                 query: r#"{allProducts{variation {id}id}}"#.into(),
                 extensions: None,
                 operation_name: None,

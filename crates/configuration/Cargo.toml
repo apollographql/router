@@ -1,10 +1,16 @@
 [package]
 name = "configuration"
 version = "0.1.0"
-authors = ["bryncooke <bryncooke@gmail.com>"]
+authors = ["Apollo Graph, Inc. <opensource@apollographql.com>"]
 edition = "2018"
 license-file = "./LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+serde_yaml = "0.8.17"
+serde = { version = "1.0.126", features = ["derive"] }
+thiserror = "1.0.25"
+maplit = "1.0.2"
+[dev-dependencies]
+

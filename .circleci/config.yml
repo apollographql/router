@@ -4,7 +4,11 @@ commands:
   setup_env:
     steps:
       - checkout
+      - run:
+          name: Initialize submodules
+          command: git submodule sync --recursive; git submodule update --recursive --init
       - run: sudo npm install -g npm
+      - run: cd submodules/federation-demo; npm install; npm run start-services &; npm run start-gateway &; cd ../..
       - run: sudo apt-get update
       - run: sudo apt-get install libssl-dev
       - run: cargo --version

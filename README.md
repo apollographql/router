@@ -20,14 +20,21 @@ The versions currently used to compile are specified in [.tool-versions](.tool-v
 The `harmonizer` dependency requires building a nodejs project. This should happen automatically, but may take some time.
 
 ### Getting started
-
 Use `cargo build --all-targets` to build the project.`
+
+Some tests run against the existing nodejs implementation of the router. This requires that the `federation-demo`
+project is running.
+
+```shell
+git submodule sync --recursive; git submodule update --recursive --init
+cd submodules/federation-demo; npm install; npm run start-services &; npm run start-gateway &;
+```
 
 ### Strict linting
 While developing locally doc warnings and other lint checks are disabled. 
 This limits the noise generated while exploration is taking place.
 
-Once you are ready to create a PR you will need to run a build with strict checking enabled.
+When you are ready to create a PR, run a build with strict checking enabled.
 Use `scripts/ci-build.sh` to perform such a build.
 
 ## Project maintainers

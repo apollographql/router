@@ -1,0 +1,3 @@
+[submodule "submodules/federation-demo"]
+	path = submodules/federation-demo
+	url = git@github.com:apollographql/federation-demo.git

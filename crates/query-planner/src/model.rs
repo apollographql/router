@@ -5,17 +5,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The root query plan container
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-/// The root query plan container
 pub struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     pub node: Option<PlanNode>,
 }
 
+/// Query plans are composed of a set of nodes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
-/// Query plans are composed of a set of nodes.
 pub enum PlanNode {
     /// These nodes must be executed in order.
     Sequence {
@@ -36,15 +36,15 @@ pub enum PlanNode {
     Flatten(FlattenNode),
 }
 
+/// A fetch node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A fetch node.
 pub struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
     pub service_name: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// The data that is required for the subgraph fetch.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub requires: Option<SelectionSet>,
 
     /// The variables that are used for the subgraph fetch.
@@ -54,9 +54,9 @@ pub struct FetchNode {
     pub operation: GraphQLQuery,
 }
 
+/// A flatten node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// A flatten node.
 pub struct FlattenNode {
     /// The path when result should be merged.
     pub path: ResponsePath,
@@ -65,10 +65,10 @@ pub struct FlattenNode {
     pub node: Box<PlanNode>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", tag = "kind")]
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase", tag = "kind")]
 pub enum Selection {
     /// A field selection.
     Field(Field),
@@ -77,28 +77,28 @@ pub enum Selection {
     InlineFragment(InlineFragment),
 }
 
+/// The field that is used
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// The field that is used
 pub struct Field {
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// An optional alias for the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
 
     /// The name of the field.
     pub name: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// The selections for the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub selections: Option<SelectionSet>,
 }
 
+/// An inline fragment.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-/// An inline fragment.
 pub struct InlineFragment {
-    #[serde(skip_serializing_if = "Option::is_none")]
     /// The required fragment type.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub type_condition: Option<String>,
 
     /// The selections from the fragment.
