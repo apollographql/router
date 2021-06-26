@@ -12,12 +12,11 @@ commands:
           name: Build federation-demo
           working_directory: submodules/federation-demo
           command: npm install;
-          background: true
       - run:
           name: Start federation-demo services
           working_directory: submodules/federation-demo
           command: npm run start-services
-          background: truenpm run start-gateway
+          background: true
       - run:
           name: Start federation-demo gateway
           working_directory: submodules/federation-demo
