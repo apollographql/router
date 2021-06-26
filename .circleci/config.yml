@@ -8,7 +8,21 @@ commands:
           name: Initialize submodules
           command: git submodule sync --recursive; git submodule update --recursive --init
       - run: sudo npm install -g npm
-      - run: cd submodules/federation-demo; npm install; npm run start-services & npm run start-gateway & cd ../..
+      - run:
+          name: Build federation-demo
+          working_directory: submodules/federation-demo
+          command: npm install;
+          background: true
+      - run:
+          name: Start federation-demo services
+          working_directory: submodules/federation-demo
+          command: npm run start-services
+          background: truenpm run start-gateway
+      - run:
+          name: Start federation-demo gateway
+          working_directory: submodules/federation-demo
+          command: npm run start-gateway
+          background: true
       - run: sudo apt-get update
       - run: sudo apt-get install libssl-dev
       - run: cargo --version
