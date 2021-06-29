@@ -6,6 +6,7 @@ use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
     GraphQLResponse, GraphQLResponseStream,
 };
+use futures::future::ready;
 use futures::stream::iter;
 
 type BytesStream =
@@ -40,7 +41,7 @@ impl HttpSubgraphFetcher {
             .send()
             // We have a future for the response, convert it to a future of the stream.
             .map_ok(|r| r.bytes_stream().boxed())
-            // Convert the entire future to a stream, at this point we have a stream of a single stream
+            // Convert the entire future to a stream, at this point we have a stream of a result of a single stream
             .into_stream()
             // Flatten the stream
             .flat_map(|result| match result {
@@ -60,29 +61,31 @@ impl HttpSubgraphFetcher {
         let response_stream = bytes_stream
             // We want to know if this is the primary response or not, so attach the response count
             .enumerate()
-            .map(|e| match e.1 {
-                Ok(bytes) => Ok((e.0, bytes)),
+            .map(|(index, result)| match result {
+                Ok(bytes) => Ok((index, bytes)),
                 Err(err) => Err(err),
             })
             // If the index is zero then it is a primary response, if it's non-zero it's a secondary response.
             .and_then(move |(index, bytes)| {
                 let service = service.to_owned();
                 if index == 0 {
-                    futures::future::ready(serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes))
-                        .map_err(move |err| FetchError::ServiceError {
-                            service,
-                            reason: err.to_string(),
-                        })
-                        .map_ok(GraphQLResponse::Primary)
-                        .boxed()
+                    ready(
+                        serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes)
+                            .map(GraphQLResponse::Primary)
+                            .map_err(move |err| FetchError::ServiceError {
+                                service,
+                                reason: err.to_string(),
+                            }),
+                    )
                 } else {
-                    futures::future::ready(serde_json::from_slice::<GraphQLPatchResponse>(&bytes))
-                        .map_err(move |err| FetchError::ServiceError {
-                            service,
-                            reason: err.to_string(),
-                        })
-                        .map_ok(GraphQLResponse::Patch)
-                        .boxed()
+                    ready(
+                        serde_json::from_slice::<GraphQLPatchResponse>(&bytes)
+                            .map(GraphQLResponse::Patch)
+                            .map_err(move |err| FetchError::ServiceError {
+                                service,
+                                reason: err.to_string(),
+                            }),
+                    )
                 }
             });
         response_stream.boxed()

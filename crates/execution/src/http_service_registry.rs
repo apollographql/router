@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn test_from_string() {
         let config =
-            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph-config.yaml"))
+            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let registry = HttpServiceRegistry::new(config);
         assert!(registry.get("products".into()).is_some())

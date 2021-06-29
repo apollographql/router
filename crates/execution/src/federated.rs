@@ -2,14 +2,44 @@ use std::sync::Arc;
 
 use futures::lock::Mutex;
 use futures::stream::{empty, iter};
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{Future, FutureExt, StreamExt, TryFutureExt};
 
-use crate::{FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponseStream, SubgraphRegistry};
+use crate::traverser::Traverser;
+use crate::{
+    FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
+    GraphQLResponse, GraphQLResponseStream, SubgraphRegistry,
+};
+use futures::future::ready;
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
 use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
+use serde_json::{Map, Value};
+use std::pin::Pin;
 
-#[derive(Clone)]
-struct Context {}
+type TraversalResponseFuture = Pin<Box<dyn Future<Output = TraversalResponse> + Send>>;
+
+/// Each traversal response contains contains some json content and a path that defines where the content came from.
+/// Unlike the request this does not need to be clonable as we never have to flatmap.
+struct TraversalResponse {
+    traverser: Traverser,
+    #[allow(dead_code)]
+    patches: Vec<GraphQLResponseStream>,
+    #[allow(dead_code)]
+    errors: Vec<GraphQLError>,
+}
+
+impl TraversalResponse {
+    fn to_primary(&self) -> GraphQLResponse {
+        GraphQLResponse::Primary(GraphQLPrimaryResponse {
+            data: match self.traverser.content.to_owned() {
+                Some(Value::Object(obj)) => obj,
+                _ => Map::new(),
+            },
+            has_next: None,
+            errors: None,
+            extensions: None,
+        })
+    }
+}
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
 /// subgraphs.
@@ -19,8 +49,6 @@ pub struct FederatedGraph {
     subgraph_registry: Arc<dyn SubgraphRegistry>,
     branch_buffer_factor: usize,
 }
-
-type Response = GraphQLResponseStream;
 
 impl FederatedGraph {
     /// Create a new federated graph fetcher.
@@ -50,75 +78,110 @@ impl FederatedGraph {
             request.operation_name.to_owned(),
             QueryPlanOptions::default(),
         )?;
-        log::debug!("Query plan: {:#?}", &query_plan);
+        log::debug!(
+            "Query plan: {}",
+            serde_json::to_string_pretty(&query_plan).unwrap()
+        );
         Ok(query_plan)
     }
 
-    fn visit(self, context: Context, node: PlanNode) -> Response {
+    fn visit(self, traverser: Traverser, node: PlanNode) -> TraversalResponseFuture {
         match node {
-            PlanNode::Sequence { nodes } => self.visit_sequence(context, nodes),
-            PlanNode::Parallel { nodes } => self.visit_parallel(context, nodes),
-            PlanNode::Fetch(fetch) => self.visit_fetch(context, fetch),
-            PlanNode::Flatten(flatten) => self.visit_flatten(context, flatten),
+            PlanNode::Sequence { nodes } => self.visit_sequence(traverser, nodes),
+            PlanNode::Parallel { nodes } => self.visit_parallel(traverser, nodes),
+            PlanNode::Fetch(fetch) => self.visit_fetch(traverser, fetch),
+            PlanNode::Flatten(flatten) => self.visit_flatten(traverser, flatten),
         }
     }
 
-    fn visit_sequence(self, context: Context, nodes: Vec<PlanNode>) -> Response {
+    fn visit_sequence(
+        self,
+        _traverser: Traverser,
+        nodes: Vec<PlanNode>,
+    ) -> TraversalResponseFuture {
         log::debug!("Visiting sequence of {:#?}", nodes);
-        iter(nodes)
-            .flat_map(move |node| self.to_owned().visit(context.clone(), node))
-            .boxed()
+        todo!();
     }
 
-    fn visit_parallel(self, context: Context, nodes: Vec<PlanNode>) -> Response {
+    fn visit_parallel(
+        self,
+        _traverser: Traverser,
+        nodes: Vec<PlanNode>,
+    ) -> TraversalResponseFuture {
         log::debug!("Visiting parallel of {:#?}", nodes);
-        let branch_factor = self.branch_buffer_factor;
-        iter(nodes)
-            .map(move |node| self.to_owned().visit(context.clone(), node).into_future())
-            .buffered(branch_factor)
-            .map(|(next, _rest)| match next {
-                Some(next) => iter(vec![next]).boxed(),
-                None => empty().boxed(),
-            })
-            .flatten()
-            .boxed()
+        todo!();
     }
 
-    fn visit_fetch(self, _context: Context, fetch: FetchNode) -> Response {
+    fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
         log::debug!("Visiting fetch {:#?}", fetch);
         let service_name = fetch.service_name;
         let service = self.subgraph_registry.get(service_name.clone());
         match service {
-            Some(fetcher) => fetcher.stream(GraphQLRequest {
-                query: fetch.operation,
-                operation_name: None,
-                variables: None,
-                extensions: None,
-            }),
-            None => err_stream(FetchError::UnknownServiceError {
+            Some(fetcher) => fetcher
+                .stream(GraphQLRequest {
+                    query: fetch.operation,
+                    operation_name: None,
+                    variables: None,
+                    extensions: None,
+                })
+                .into_future()
+                .map(|(primary, rest)| match primary {
+                    Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
+                        traverser,
+                        patches: vec![rest],
+                        errors: primary.errors.unwrap_or_default(),
+                    },
+                    Some(Ok(GraphQLResponse::Patch(_))) => {
+                        panic!("Should not have had patch response as primary!")
+                    }
+                    Some(Err(err)) => traverser.err(err),
+                    None => traverser.err(FetchError::NoResponse {
+                        service: service_name,
+                    }),
+                })
+                .boxed(),
+            None => ready(traverser.err(FetchError::NoResponse {
                 service: service_name,
-            })
+            }))
             .boxed(),
         }
     }
 
-    fn visit_flatten(self, _context: Context, flatten: FlattenNode) -> Response {
+    ///
+    fn visit_flatten(self, _traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
         log::debug!("Visiting flatten {:#?}", flatten);
-        empty().boxed()
+        //let children = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
+
+        todo!();
     }
 }
 
-fn err_stream(error: FetchError) -> GraphQLResponseStream {
-    iter(vec![Err(error)]).boxed()
+impl Traverser {
+    fn err(self, err: FetchError) -> TraversalResponse {
+        TraversalResponse {
+            traverser: self.to_owned(),
+            patches: vec![],
+            errors: vec![GraphQLError {
+                message: err.to_string(),
+                locations: vec![],
+                path: self.path,
+                extensions: None,
+            }],
+        }
+    }
 }
 
 impl GraphQLFetcher for FederatedGraph {
     fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
         let clone = self.to_owned();
         self.to_owned()
-            .plan(request)
+            .plan(request.to_owned())
             .map_ok(move |plan| match plan.node {
-                Some(root) => clone.visit(Context {}, root),
+                Some(root) => clone
+                    .visit(Traverser::new(Arc::new(request)), root)
+                    .into_stream()
+                    .flat_map(|response| iter(vec![Ok(response.to_primary())]))
+                    .boxed(),
                 None => empty().boxed(),
             })
             .map_err(err_stream)
@@ -129,6 +192,10 @@ impl GraphQLFetcher for FederatedGraph {
             })
             .boxed()
     }
+}
+
+fn err_stream(error: FetchError) -> GraphQLResponseStream {
+    iter(vec![Err(error)]).boxed()
 }
 
 impl From<QueryPlannerError> for FetchError {
@@ -163,7 +230,27 @@ mod tests {
     #[tokio::test]
     async fn basic_composition() {
         init();
-        assert_federated_response(r#"{topProducts {upc name reviews {id author {id name}}}}"#).await
+        assert_federated_response(
+            r#"{
+  topProducts {
+    upc
+    name
+
+    reviews {
+      id
+      product{
+        name
+      }
+      author {
+        id
+        name
+      }
+    }
+  }
+}
+"#,
+        )
+        .await
     }
 
     async fn assert_federated_response(request: &str) {
@@ -191,7 +278,7 @@ mod tests {
         let planner =
             HarmonizerQueryPlanner::new(include_str!("testdata/supergraph.graphql").into());
         let config =
-            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph-config.yaml"))
+            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let registry = HttpServiceRegistry::new(config);
         let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), Arc::new(registry));

@@ -9,6 +9,9 @@ pub mod http_service_registry;
 /// Subgraph fetcher that uses http.
 pub mod http_subgraph;
 
+/// Execution context code
+mod traverser;
+
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -27,6 +30,10 @@ pub type Extensions = Option<Object>;
 
 /// A list of graphql errors.
 pub type Errors = Option<Vec<GraphQLError>>;
+
+/// A graph response stream consists of one primary response and any number of patch responses.
+pub type GraphQLResponseStream =
+    Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>> + Send>>;
 
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Eq, PartialEq)]
@@ -54,6 +61,13 @@ pub enum FetchError {
         /// The failure reason
         reason: String,
     },
+
+    /// An error when fetching from a service.
+    #[error("Service '{service}' returned no response")]
+    NoResponse {
+        /// The service that was unknown.
+        service: String,
+    },
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -61,11 +75,24 @@ pub enum FetchError {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PathElement {
-    /// An integer path element.
-    Number(i32),
+    /// An index path element.
+    Index(usize),
 
-    /// A string path element.
-    String(String),
+    /// A key path element.
+    Key(String),
+
+    /// A path element that given an array will flatmap the content.
+    Flatmap,
+}
+
+impl From<&String> for PathElement {
+    fn from(element: &String) -> Self {
+        if element == "@" {
+            PathElement::Flatmap
+        } else {
+            PathElement::Key(element.to_owned())
+        }
+    }
 }
 
 /// A graphql request.
@@ -165,10 +192,6 @@ pub trait SubgraphRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
     fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)>;
 }
-
-/// A graph response stream consists of one primary response and any number of patch responses.
-pub type GraphQLResponseStream =
-    Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>> + Send>>;
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
 /// The goal of this trait is to hide the implementation details of retching a stream of graphql responses.
@@ -279,10 +302,10 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".to_owned(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: vec!(
-                        PathElement::String("hero".to_owned()),
-                        PathElement::String("heroFriends".to_owned()),
-                        PathElement::Number(1),
-                        PathElement::String("name".to_owned())
+                        PathElement::Key("hero".to_owned()),
+                        PathElement::Key("heroFriends".to_owned()),
+                        PathElement::Index(1),
+                        PathElement::Key("name".to_owned())
                     ),
                     extensions: json!({
                         "error-extension": 5,
@@ -370,20 +393,20 @@ mod tests {
                 .cloned()
                 .unwrap(),
                 path: vec!(
-                    PathElement::String("hero".to_owned()),
-                    PathElement::String("heroFriends".to_owned()),
-                    PathElement::Number(1),
-                    PathElement::String("name".to_owned())
+                    PathElement::Key("hero".to_owned()),
+                    PathElement::Key("heroFriends".to_owned()),
+                    PathElement::Index(1),
+                    PathElement::Key("name".to_owned())
                 ),
                 has_next: true,
                 errors: Some(vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".to_owned(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: vec!(
-                        PathElement::String("hero".to_owned()),
-                        PathElement::String("heroFriends".to_owned()),
-                        PathElement::Number(1),
-                        PathElement::String("name".to_owned())
+                        PathElement::Key("hero".to_owned()),
+                        PathElement::Key("heroFriends".to_owned()),
+                        PathElement::Index(1),
+                        PathElement::Key("name".to_owned())
                     ),
                     extensions: json!({
                         "error-extension": 5,

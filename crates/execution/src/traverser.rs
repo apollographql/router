@@ -3,9 +3,11 @@ use futures::{Stream, StreamExt};
 use serde_json::Value;
 use std::pin::Pin;
 
-use crate::PathElement;
 use crate::PathElement::Flatmap;
+use crate::{GraphQLRequest, PathElement};
+use std::sync::Arc;
 
+#[allow(dead_code)]
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 
 /// Each traverser contains some json content and a path that defines where the content came from.
@@ -13,13 +15,15 @@ type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 pub(crate) struct Traverser {
     pub(crate) path: Vec<PathElement>,
     pub(crate) content: Option<Value>,
+    pub(crate) request: Arc<GraphQLRequest>,
 }
 
 impl Traverser {
-    pub(crate) fn new() -> Traverser {
+    pub(crate) fn new(request: Arc<GraphQLRequest>) -> Traverser {
         Traverser {
             path: vec![],
             content: Option::None,
+            request,
         }
     }
 
@@ -27,11 +31,13 @@ impl Traverser {
     /// This expands the path supplied such that any array path elements are exploded into all
     /// combinations possible.
     /// The new path is relative and does not include the parent's original path.
+    #[allow(dead_code)]
     pub(crate) fn stream(&self, path: Vec<PathElement>) -> TraverserStream {
         // The root of our stream. We don't need the parent path as everything is relative to content.
         let mut stream = iter(vec![Traverser {
             path: vec![],
-            content: self.content.clone(),
+            content: self.content.to_owned(),
+            request: self.request.to_owned(),
         }])
         .boxed();
 
@@ -49,7 +55,7 @@ impl Traverser {
                     let new_content = context.content.get_at_path(path_chunk.to_owned()).cloned();
 
                     // Build up the path
-                    let mut new_path = context.path;
+                    let mut new_path = context.path.to_owned();
                     new_path.append(&mut path_chunk.to_owned());
 
                     match new_content {
@@ -64,6 +70,7 @@ impl Traverser {
                                     Traverser {
                                         path: array_path,
                                         content: Some(item),
+                                        request: context.request.to_owned(),
                                     }
                                 })
                                 .boxed()
@@ -73,6 +80,7 @@ impl Traverser {
                             iter(vec![Traverser {
                                 path: new_path,
                                 content: Some(child),
+                                request: context.request,
                             }])
                             .boxed()
                         }
@@ -122,11 +130,28 @@ mod tests {
     use serde_json::Value;
 
     use crate::traverser::{Traverser, ValueUtils};
-    use crate::PathElement;
     use crate::PathElement::Flatmap;
+    use crate::{GraphQLRequest, PathElement};
     use futures::StreamExt;
     use serde_json::value::Value::Number;
+    use std::sync::Arc;
     use PathElement::{Index, Key};
+    fn stub_request() -> GraphQLRequest {
+        GraphQLRequest {
+            query: "".to_string(),
+            operation_name: None,
+            variables: None,
+            extensions: None,
+        }
+    }
+
+    fn stub_traverser() -> Traverser {
+        Traverser {
+            path: vec![],
+            content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
+            request: Arc::new(stub_request()),
+        }
+    }
 
     #[test]
     fn test_get_at_path() {
@@ -149,51 +174,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_no_array() {
-        let context = Traverser {
-            path: vec![],
-            content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
-        };
-
         assert_eq!(
-            context
+            stub_traverser()
                 .stream(vec![Key("obj".into())])
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
                 path: vec![Key("obj".into())],
-                content: Some(json!({"arr":[{"prop1":1},{"prop1":2}]}))
+                content: Some(json!({"arr":[{"prop1":1},{"prop1":2}]})),
+                request: Arc::new(stub_request())
             }]
         )
     }
 
     #[tokio::test]
     async fn test_stream_with_array() {
-        let context = Traverser {
-            path: vec![],
-            content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
-        };
-
         assert_eq!(
-            context
+            stub_traverser()
                 .stream(vec![Key("obj".into()), Key("arr".into())])
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
                 path: vec![Key("obj".into()), Key("arr".into())],
-                content: Some(json!([{"prop1":1},{"prop1":2}]))
+                content: Some(json!([{"prop1":1},{"prop1":2}])),
+                request: Arc::new(stub_request())
             }]
         )
     }
 
     #[tokio::test]
     async fn test_stream_flatmap() {
-        let context = Traverser {
-            path: vec![],
-            content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
-        };
-
         assert_eq!(
-            context
+            stub_traverser()
                 .stream(vec![
                     Key("obj".into()),
                     Key("arr".into()),
@@ -210,7 +222,8 @@ mod tests {
                         Index(0),
                         Key("prop1".into())
                     ],
-                    content: Some(Number(1.into()))
+                    content: Some(Number(1.into())),
+                    request: Arc::new(stub_request())
                 },
                 Traverser {
                     path: vec![
@@ -219,7 +232,8 @@ mod tests {
                         Index(1),
                         Key("prop1".into())
                     ],
-                    content: Some(Number(2.into()))
+                    content: Some(Number(2.into())),
+                    request: Arc::new(stub_request())
                 }
             ]
         )

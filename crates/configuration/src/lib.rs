@@ -25,7 +25,7 @@ mod tests {
     #[test]
     fn test_supergraph_config_serde() {
         let result =
-            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph-config.yaml"));
+            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"));
         assert_eq!(
             result.unwrap(),
             Configuration {
