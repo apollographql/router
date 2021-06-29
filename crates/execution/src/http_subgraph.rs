@@ -6,7 +6,7 @@ use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
     GraphQLResponse, GraphQLResponseStream,
 };
-use futures::future::ready;
+use bytes::Bytes;
 use futures::stream::iter;
 
 type BytesStream =
@@ -61,38 +61,35 @@ impl HttpSubgraphFetcher {
         let response_stream = bytes_stream
             // We want to know if this is the primary response or not, so attach the response count
             .enumerate()
-            .map(|(index, result)| match result {
-                Ok(bytes) => Ok((index, bytes)),
-                Err(err) => Err(err),
-            })
-            // If the index is zero then it is a primary response, if it's non-zero it's a secondary response.
-            .and_then(move |(index, bytes)| {
+            .map(move |(index, result)| {
                 let service = service.to_owned();
-                if index == 0 {
-                    ready(
-                        serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes)
-                            .map(GraphQLResponse::Primary)
-                            .map_err(move |err| FetchError::ServiceError {
-                                service,
-                                reason: err.to_string(),
-                            }),
-                    )
-                } else {
-                    ready(
-                        serde_json::from_slice::<GraphQLPatchResponse>(&bytes)
-                            .map(GraphQLResponse::Patch)
-                            .map_err(move |err| FetchError::ServiceError {
-                                service,
-                                reason: err.to_string(),
-                            }),
-                    )
+                match result {
+                    Ok(bytes) if { index == 0 } => to_primary(service, &bytes),
+                    Ok(bytes) => to_patch(service, &bytes),
+                    Err(err) => Err(err),
                 }
             });
         response_stream.boxed()
     }
 }
 
-trait MapToGraphQL {}
+fn to_patch(service: String, bytes: &Bytes) -> Result<GraphQLResponse, FetchError> {
+    serde_json::from_slice::<GraphQLPatchResponse>(&bytes)
+        .map(GraphQLResponse::Patch)
+        .map_err(move |err| FetchError::ServiceError {
+            service,
+            reason: err.to_string(),
+        })
+}
+
+fn to_primary(service: String, bytes: &Bytes) -> Result<GraphQLResponse, FetchError> {
+    serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes)
+        .map(GraphQLResponse::Primary)
+        .map_err(move |err| FetchError::ServiceError {
+            service,
+            reason: err.to_string(),
+        })
+}
 
 impl GraphQLFetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
