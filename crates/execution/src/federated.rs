@@ -94,26 +94,10 @@ impl FederatedGraph {
         }
     }
 
-    fn visit_sequence(
-        self,
-        _traverser: Traverser,
-        nodes: Vec<PlanNode>,
-    ) -> TraversalResponseFuture {
-        log::debug!("Visiting sequence of {:#?}", nodes);
-        todo!();
-    }
-
-    fn visit_parallel(
-        self,
-        _traverser: Traverser,
-        nodes: Vec<PlanNode>,
-    ) -> TraversalResponseFuture {
-        log::debug!("Visiting parallel of {:#?}", nodes);
-        todo!();
-    }
-
     fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
         log::debug!("Visiting fetch {:#?}", fetch);
+        //TODO construct representation
+        //TODO variable propagation
         let service_name = fetch.service_name;
         let service = self.subgraph_registry.get(service_name.clone());
         match service {
@@ -147,12 +131,74 @@ impl FederatedGraph {
         }
     }
 
-    ///
-    fn visit_flatten(self, _traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
-        log::debug!("Visiting flatten {:#?}", flatten);
-        //let children = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
+    /// Apply visit plan nodes in order, merging the results after each visit.
+    fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
+        log::debug!("Visiting sequence of {:#?}", nodes);
+        let response_traverser = traverser;
 
-        todo!();
+        iter(nodes)
+            .fold(
+                TraversalResponse {
+                    traverser: response_traverser,
+                    patches: vec![],
+                    errors: vec![],
+                },
+                move |acc, next| {
+                    self.to_owned()
+                        .visit(acc.traverser.to_owned(), next)
+                        .map(move |_response|
+                            //TODO Do Merge!
+                            acc)
+                },
+            )
+            .boxed()
+    }
+
+    /// Take a stream query plan nodes and visit them in parallel with the current traverser merging
+    /// the results as they come back.
+    fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
+        log::debug!("Visiting parallel of {:#?}", nodes);
+        let branch_buffer_factor = self.branch_buffer_factor;
+        let response_traverser = traverser.clone();
+        iter(nodes)
+            .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
+            .buffer_unordered(branch_buffer_factor)
+            .fold(
+                TraversalResponse {
+                    traverser: response_traverser,
+                    patches: vec![],
+                    errors: vec![],
+                },
+                |acc, _next| async move {
+                    //TODO Do Merge!
+                    acc
+                },
+            )
+            .boxed()
+    }
+
+    /// Take a stream of nodes at a path in the currently fetched data and visit them with
+    /// the query plan contained in the flatten node merging the results as the come back.
+    fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
+        log::debug!("Visiting flatten {:#?}", flatten);
+        let branch_buffer_factor = self.branch_buffer_factor;
+        let descendants = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
+
+        descendants
+            .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
+            .buffer_unordered(branch_buffer_factor)
+            .fold(
+                TraversalResponse {
+                    traverser,
+                    patches: vec![],
+                    errors: vec![],
+                },
+                |acc, _next| async move {
+                    //TODO Do Merge!
+                    acc
+                },
+            )
+            .boxed()
     }
 }
 
