@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::{QueryPlanner, QueryPlannerError, QueryPlanOptions};
 /// Caching query planner that caches responses from a delegate.
 use crate::model::QueryPlan;
-use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 
 /// A query planner decorator that caches results.
 /// There is no eviction strategy, query plans will be retained forever.
@@ -54,8 +54,9 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::MockQueryPlanner;
+
+    use super::*;
 
     #[test]
     fn test_plan() {

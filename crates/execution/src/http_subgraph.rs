@@ -1,13 +1,13 @@
 use std::pin::Pin;
 
+use bytes::Bytes;
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::stream::iter;
 
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
     GraphQLResponse, GraphQLResponseStream,
 };
-use bytes::Bytes;
-use futures::stream::iter;
 
 type BytesStream =
     Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, FetchError>> + std::marker::Send>>;
@@ -101,8 +101,8 @@ impl GraphQLFetcher for HttpSubgraphFetcher {
 
 #[cfg(test)]
 mod tests {
-    use httpmock::Method::POST;
     use httpmock::{MockServer, Regex};
+    use httpmock::Method::POST;
     use serde_json::json;
 
     use super::*;

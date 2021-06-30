@@ -1,8 +1,9 @@
-use crate::{GraphQLFetcher, SubgraphRegistry};
-
-use crate::http_subgraph::HttpSubgraphFetcher;
-use configuration::Configuration;
 use std::collections::HashMap;
+
+use configuration::Configuration;
+
+use crate::{GraphQLFetcher, SubgraphRegistry};
+use crate::http_subgraph::HttpSubgraphFetcher;
 
 /// Service registry that uses http to connect to subgraphs.
 #[derive(Debug)]
@@ -37,9 +38,10 @@ impl SubgraphRegistry for HttpServiceRegistry {
 
 #[cfg(test)]
 mod tests {
+    use configuration::Configuration;
+
     use crate::http_service_registry::HttpServiceRegistry;
     use crate::SubgraphRegistry;
-    use configuration::Configuration;
 
     #[test]
     fn test_from_string() {

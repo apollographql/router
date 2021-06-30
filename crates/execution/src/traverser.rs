@@ -1,11 +1,14 @@
-use futures::stream::{empty, iter};
-use futures::{Stream, StreamExt};
-use serde_json::Value;
 use std::pin::Pin;
-
-use crate::PathElement::Flatmap;
-use crate::{GraphQLRequest, PathElement};
 use std::sync::Arc;
+
+use futures::{Stream, StreamExt};
+use futures::stream::{empty, iter};
+use serde_json::Value;
+
+use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
+
+use crate::{FetchError, GraphQLRequest, Object, PathElement};
+use crate::PathElement::Flatmap;
 
 #[allow(dead_code)]
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
@@ -48,7 +51,6 @@ impl Traverser {
         for path_chunk in path_split_by_arrays {
             // Materialise the path chunk so it can be moved into closures.
             let path_chunk = path_chunk.to_vec();
-
             stream = stream
                 .flat_map(move |context| {
                     // Fetch the child content and convert it to a stream
@@ -92,6 +94,66 @@ impl Traverser {
         }
         stream
     }
+
+    /// Takes a selection set and extracts a json value from the current content for sending to downstream requests.
+    pub(crate) fn select(
+        &self,
+        selection: Option<SelectionSet>,
+    ) -> Result<Option<Value>, FetchError> {
+        match (self.content.to_owned(), selection) {
+            (_, None) => Ok(None),
+            (Some(Value::Object(content)), Some(requires)) => select_object(&content, &requires),
+            (_, _) => Err(FetchError::RequestError {
+                reason: "Selection on empty content".to_string(),
+            }),
+        }
+    }
+}
+
+fn select_object(content: &Object, selections: &SelectionSet) -> Result<Option<Value>, FetchError> {
+    let mut output = Object::new();
+    for selection in selections {
+        match selection {
+            Selection::Field(field) => {
+                if let Some(value) = select_field(content, &field)? {
+                    output.insert(field.name.to_owned(), value);
+                }
+            }
+            Selection::InlineFragment(fragment) => {
+                if let Some(Value::Object(value)) = select_inline_fragment(content, fragment)? {
+                    output.append(&mut value.to_owned())
+                }
+            }
+        };
+    }
+    Ok(Some(Value::Object(output)))
+}
+
+fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchError> {
+    match (&field.selections, content.get(&field.name)) {
+        (Some(selections), Some(Value::Object(child))) => select_object(&child, selections),
+        (None, Some(value)) => Ok(Some(value.to_owned())),
+        _ => Err(FetchError::RequestError {
+            reason: format!("Missing field '{}'", field.name),
+        }),
+    }
+}
+
+fn select_inline_fragment(
+    content: &Object,
+    fragment: &InlineFragment,
+) -> Result<Option<Value>, FetchError> {
+    match (&fragment.type_condition, &content.get("__typename")) {
+        (Some(condition), Some(Value::String(typename))) => {
+            if condition == typename {
+                select_object(content, &fragment.selections)
+            } else {
+                Ok(None)
+            }
+        }
+        (None, _) => select_object(content, &fragment.selections),
+        (_, _) => Ok(None),
+    }
 }
 
 trait ValueUtils {
@@ -126,16 +188,20 @@ impl ValueUtils for Option<Value> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures::StreamExt;
     use serde_json::json;
     use serde_json::Value;
-
-    use crate::traverser::{Traverser, ValueUtils};
-    use crate::PathElement::Flatmap;
-    use crate::{GraphQLRequest, PathElement};
-    use futures::StreamExt;
     use serde_json::value::Value::Number;
-    use std::sync::Arc;
+
     use PathElement::{Index, Key};
+    use query_planner::model::SelectionSet;
+
+    use crate::{FetchError, GraphQLRequest, PathElement};
+    use crate::PathElement::Flatmap;
+    use crate::traverser::{Traverser, ValueUtils};
+
     fn stub_request() -> GraphQLRequest {
         GraphQLRequest {
             query: "".to_string(),
@@ -237,5 +303,91 @@ mod tests {
                 }
             ]
         )
+    }
+
+    fn stub_selection() -> Value {
+        json!([
+          {
+            "kind": "InlineFragment",
+            "typeCondition": "User",
+            "selections": [
+              {
+                "kind": "Field",
+                "name": "__typename"
+              },
+              {
+                "kind": "Field",
+                "name": "id"
+              },
+              {
+                "kind": "Field",
+                "name": "job",
+                "selections": [
+                  {
+                    "kind": "Field",
+                    "name": "name"
+                  }]
+              }
+            ]
+          }
+        ])
+    }
+
+    #[test]
+    fn test_selection() {
+        let result = selection(
+            stub_selection(),
+            Some(json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}})),
+        );
+        assert_eq!(
+            result,
+            Ok(Some(json!({
+                "__typename": "User",
+                "id": 2,
+                "job": {
+                    "name": "astronaut"
+                }
+            })))
+        );
+    }
+
+    #[test]
+    fn test_selection_missing_field() {
+        let result = selection(
+            stub_selection(),
+            Some(json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}})),
+        );
+        assert_eq!(
+            result,
+            Err(FetchError::RequestError {
+                reason: "Missing field 'id'".into()
+            })
+        );
+    }
+
+    #[test]
+    fn test_selection_no_content() {
+        let result = selection(stub_selection(), None);
+        assert_eq!(
+            result,
+            Err(FetchError::RequestError {
+                reason: "Selection on empty content".into()
+            })
+        );
+    }
+
+    fn selection(
+        selection_set: Value,
+        content: Option<Value>,
+    ) -> Result<Option<Value>, FetchError> {
+        let selection_set = serde_json::from_value::<SelectionSet>(selection_set).unwrap();
+
+        let traverser = Traverser {
+            path: vec![],
+            content,
+            request: Arc::new(stub_request()),
+        };
+
+        traverser.select(Some(selection_set))
     }
 }

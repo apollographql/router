@@ -1,5 +1,13 @@
 //! Constructs an execution stream from q query plan
 
+use std::fmt::Debug;
+use std::pin::Pin;
+
+use futures::Stream;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use thiserror::Error;
+
 /// Federated graph fetcher.
 pub mod federated;
 
@@ -11,13 +19,6 @@ pub mod http_subgraph;
 
 /// Execution context code
 mod traverser;
-
-use futures::Stream;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use std::fmt::Debug;
-use std::pin::Pin;
-use thiserror::Error;
 
 /// A json object
 pub type Object = Map<String, Value>;
@@ -64,7 +65,7 @@ pub enum FetchError {
 
     /// An error when fetching from a service.
     #[error("Service '{service}' returned no response")]
-    NoResponse {
+    NoResponseError {
         /// The service that was unknown.
         service: String,
     },
@@ -204,8 +205,9 @@ pub trait GraphQLFetcher: Send + Sync + Debug {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_request() {

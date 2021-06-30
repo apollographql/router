@@ -1,6 +1,7 @@
 //! Logic for loading configuration in to an object model
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
@@ -19,8 +20,9 @@ pub struct Subgraph {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use maplit::hashmap;
+
+    use super::*;
 
     #[test]
     fn test_supergraph_config_serde() {

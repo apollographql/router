@@ -1,19 +1,20 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::future::ready;
 use futures::lock::Mutex;
 use futures::stream::{empty, iter};
 use futures::{Future, FutureExt, StreamExt, TryFutureExt};
+use serde_json::{Map, Value};
+
+use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
+use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
     GraphQLResponse, GraphQLResponseStream, SubgraphRegistry,
 };
-use futures::future::ready;
-use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
-use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
-use serde_json::{Map, Value};
-use std::pin::Pin;
 
 type TraversalResponseFuture = Pin<Box<dyn Future<Output = TraversalResponse> + Send>>;
 
@@ -96,35 +97,46 @@ impl FederatedGraph {
 
     fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
         log::debug!("Visiting fetch {:#?}", fetch);
-        //TODO construct representation
         //TODO variable propagation
         let service_name = fetch.service_name;
         let service = self.subgraph_registry.get(service_name.clone());
         match service {
-            Some(fetcher) => fetcher
-                .stream(GraphQLRequest {
-                    query: fetch.operation,
-                    operation_name: None,
-                    variables: None,
-                    extensions: None,
-                })
-                .into_future()
-                .map(|(primary, rest)| match primary {
-                    Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
-                        traverser,
-                        patches: vec![rest],
-                        errors: primary.errors.unwrap_or_default(),
-                    },
-                    Some(Ok(GraphQLResponse::Patch(_))) => {
-                        panic!("Should not have had patch response as primary!")
+            Some(fetcher) => {
+                let mut variables = Map::new();
+
+                match traverser.select(fetch.requires) {
+                    Ok(Some(value)) => {
+                        variables.insert("$representation".into(), value);
                     }
-                    Some(Err(err)) => traverser.err(err),
-                    None => traverser.err(FetchError::NoResponse {
-                        service: service_name,
-                    }),
-                })
-                .boxed(),
-            None => ready(traverser.err(FetchError::NoResponse {
+                    Err(err) => return ready(traverser.err(err)).boxed(),
+                    _ => {}
+                }
+
+                fetcher
+                    .stream(GraphQLRequest {
+                        query: fetch.operation,
+                        operation_name: None,
+                        variables: Some(variables),
+                        extensions: None,
+                    })
+                    .into_future()
+                    .map(|(primary, rest)| match primary {
+                        Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
+                            traverser,
+                            patches: vec![rest],
+                            errors: primary.errors.unwrap_or_default(),
+                        },
+                        Some(Ok(GraphQLResponse::Patch(_))) => {
+                            panic!("Should not have had patch response as primary!")
+                        }
+                        Some(Err(err)) => traverser.err(err),
+                        None => traverser.err(FetchError::NoResponseError {
+                            service: service_name,
+                        }),
+                    })
+                    .boxed()
+            }
+            None => ready(traverser.err(FetchError::UnknownServiceError {
                 service: service_name,
             }))
             .boxed(),
@@ -137,20 +149,13 @@ impl FederatedGraph {
         let response_traverser = traverser;
 
         iter(nodes)
-            .fold(
-                TraversalResponse {
-                    traverser: response_traverser,
-                    patches: vec![],
-                    errors: vec![],
-                },
-                move |acc, next| {
-                    self.to_owned()
-                        .visit(acc.traverser.to_owned(), next)
-                        .map(move |_response|
+            .fold(response_traverser.to_response(), move |acc, next| {
+                self.to_owned()
+                    .visit(acc.traverser.to_owned(), next)
+                    .map(move |_response|
                             //TODO Do Merge!
                             acc)
-                },
-            )
+            })
             .boxed()
     }
 
@@ -163,17 +168,10 @@ impl FederatedGraph {
         iter(nodes)
             .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
             .buffer_unordered(branch_buffer_factor)
-            .fold(
-                TraversalResponse {
-                    traverser: response_traverser,
-                    patches: vec![],
-                    errors: vec![],
-                },
-                |acc, _next| async move {
-                    //TODO Do Merge!
-                    acc
-                },
-            )
+            .fold(response_traverser.to_response(), |acc, _next| async move {
+                //TODO Do Merge!
+                acc
+            })
             .boxed()
     }
 
@@ -187,17 +185,10 @@ impl FederatedGraph {
         descendants
             .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
             .buffer_unordered(branch_buffer_factor)
-            .fold(
-                TraversalResponse {
-                    traverser,
-                    patches: vec![],
-                    errors: vec![],
-                },
-                |acc, _next| async move {
-                    //TODO Do Merge!
-                    acc
-                },
-            )
+            .fold(traverser.to_response(), |acc, _next| async move {
+                //TODO Do Merge!
+                acc
+            })
             .boxed()
     }
 }
@@ -215,6 +206,14 @@ impl Traverser {
             }],
         }
     }
+
+    fn to_response(&self) -> TraversalResponse {
+        TraversalResponse {
+            traverser: self.clone(),
+            patches: vec![],
+            errors: vec![],
+        }
+    }
 }
 
 impl GraphQLFetcher for FederatedGraph {
@@ -230,7 +229,7 @@ impl GraphQLFetcher for FederatedGraph {
                     .boxed(),
                 None => empty().boxed(),
             })
-            .map_err(err_stream)
+            .map_err(|err| iter(vec![Err(err)]).boxed())
             .into_stream()
             .flat_map(|result| match result {
                 Ok(s) => s,
@@ -238,10 +237,6 @@ impl GraphQLFetcher for FederatedGraph {
             })
             .boxed()
     }
-}
-
-fn err_stream(error: FetchError) -> GraphQLResponseStream {
-    iter(vec![Err(error)]).boxed()
 }
 
 impl From<QueryPlannerError> for FetchError {
@@ -255,6 +250,7 @@ impl From<QueryPlannerError> for FetchError {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
+    use log::LevelFilter;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -264,7 +260,6 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
 
     use super::*;
-    use log::LevelFilter;
 
     fn init() {
         let _ = env_logger::builder()

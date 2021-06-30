@@ -116,9 +116,10 @@ pub type ResponsePath = Vec<String>;
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::*;
 
-    use serde_json::Value;
     const TYPENAME_FIELD_NAME: &'static str = "__typename";
 
     fn qp_json_string() -> String {
