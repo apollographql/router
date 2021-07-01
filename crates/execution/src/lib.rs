@@ -190,7 +190,7 @@ impl GraphQLResponse {
 }
 
 /// Maintains a map of services to fetchers.
-pub trait SubgraphRegistry: Send + Sync + Debug {
+pub trait ServiceRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
     fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)>;
 }

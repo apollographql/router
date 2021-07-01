@@ -14,7 +14,7 @@ use crate::json_utils::{deep_merge, JsonUtils};
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
-    GraphQLResponse, GraphQLResponseStream, SubgraphRegistry,
+    GraphQLResponse, GraphQLResponseStream, ServiceRegistry,
 };
 
 type TraversalResponseFuture = Pin<Box<dyn Future<Output = TraversalResponse> + Send>>;
@@ -78,7 +78,7 @@ impl TraversalResponse {
 #[derive(Clone, Debug)]
 pub struct FederatedGraph {
     query_planner: Arc<Mutex<dyn QueryPlanner>>,
-    subgraph_registry: Arc<dyn SubgraphRegistry>,
+    subgraph_registry: Arc<dyn ServiceRegistry>,
     branch_buffer_factor: usize,
 }
 
@@ -94,7 +94,7 @@ impl FederatedGraph {
     /// therefore can be used without obtaining a lock.
     pub fn new(
         query_planner: Arc<Mutex<dyn QueryPlanner>>,
-        subgraph_registry: Arc<dyn SubgraphRegistry>,
+        subgraph_registry: Arc<dyn ServiceRegistry>,
     ) -> FederatedGraph {
         FederatedGraph {
             branch_buffer_factor: 1,
@@ -290,6 +290,9 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
 
     use super::*;
+    use maplit::hashmap;
+    use std::collections::hash_map::Entry;
+    use std::collections::HashMap;
 
     fn init() {
         let _ = env_logger::builder()
@@ -302,29 +305,17 @@ mod tests {
     async fn basic_composition() {
         init();
         assert_federated_response(
-            r#"{
-  topProducts {
-    upc
-    name
-
-    reviews {
-      id
-      product {
-        name
-      }
-      author {
-        id
-        name
-      }
-    }
-  }
-}
-"#,
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
+            hashmap! {
+                "products".to_string()=>5,
+                "reviews".to_string()=>3,
+                "accounts".to_string()=>4
+            },
         )
         .await
     }
 
-    async fn assert_federated_response(request: &str) {
+    async fn assert_federated_response(request: &str, service_requests: HashMap<String, usize>) {
         let request = GraphQLRequest {
             query: request.into(),
             operation_name: None,
@@ -332,11 +323,16 @@ mod tests {
             extensions: None,
         };
         let mut expected = query_node(request.clone());
-        let mut actual = query_rust(request.clone());
-        assert_eq!(
-            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap(),
+        let (mut actual, registry) = query_rust(request.clone());
+        log::debug!(
+            "{}",
+            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap()
+        );
+        log::debug!(
+            "{}",
             to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap()
         );
+        assert_eq!(registry.totals(), service_requests);
     }
 
     fn query_node(request: GraphQLRequest) -> GraphQLResponseStream {
@@ -345,14 +341,52 @@ mod tests {
         nodejs_impl.stream(request)
     }
 
-    fn query_rust(request: GraphQLRequest) -> GraphQLResponseStream {
+    fn query_rust(
+        request: GraphQLRequest,
+    ) -> (GraphQLResponseStream, Arc<CountingServiceRegistry>) {
         let planner =
             HarmonizerQueryPlanner::new(include_str!("testdata/supergraph.graphql").into());
         let config =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let registry = HttpServiceRegistry::new(config);
-        let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), Arc::new(registry));
-        federated.stream(request)
+        let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
+            config,
+        )));
+        let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), registry.to_owned());
+        (federated.stream(request), registry)
+    }
+
+    #[derive(Debug)]
+    struct CountingServiceRegistry {
+        counts: Arc<std::sync::Mutex<HashMap<String, usize>>>,
+        delegate: HttpServiceRegistry,
+    }
+
+    impl CountingServiceRegistry {
+        fn new(delegate: HttpServiceRegistry) -> CountingServiceRegistry {
+            CountingServiceRegistry {
+                counts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+                delegate,
+            }
+        }
+
+        fn totals(&self) -> HashMap<String, usize> {
+            self.counts.lock().unwrap().clone()
+        }
+    }
+
+    impl ServiceRegistry for CountingServiceRegistry {
+        fn get(&self, service: String) -> Option<&dyn GraphQLFetcher> {
+            let mut counts = self.counts.lock().unwrap();
+            match counts.entry(service.to_owned()) {
+                Entry::Occupied(mut e) => {
+                    *e.get_mut() += 1;
+                }
+                Entry::Vacant(e) => {
+                    e.insert(1);
+                }
+            }
+            self.delegate.get(service)
+        }
     }
 }
