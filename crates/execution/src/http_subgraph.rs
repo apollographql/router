@@ -1,8 +1,8 @@
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use futures::stream::iter;
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
@@ -101,8 +101,8 @@ impl GraphQLFetcher for HttpSubgraphFetcher {
 
 #[cfg(test)]
 mod tests {
-    use httpmock::{MockServer, Regex};
     use httpmock::Method::POST;
+    use httpmock::{MockServer, Regex};
     use serde_json::json;
 
     use super::*;

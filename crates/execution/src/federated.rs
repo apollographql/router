@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
 use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 
+use crate::json_utils::{deep_merge, JsonUtils};
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
@@ -39,6 +40,36 @@ impl TraversalResponse {
             errors: None,
             extensions: None,
         })
+    }
+
+    fn merge(mut self, mut response: TraversalResponse) -> TraversalResponse {
+        match (
+            &mut self
+                .traverser
+                .content
+                .get_at_path_mut(&response.traverser.path),
+            response.traverser.content,
+        ) {
+            (Some(a), Some(Value::Object(b)))
+                if { b.contains_key("_entities") && b.len() == 1 } =>
+            {
+                if let Some(Value::Array(array)) = b.get("_entities") {
+                    for value in array {
+                        deep_merge(a, &value);
+                    }
+                }
+            }
+            (Some(a), Some(b)) => {
+                deep_merge(a, &b);
+            }
+            (None, Some(b)) => self.traverser.content = Some(b),
+            (_, None) => (),
+        };
+
+        //TODO map patches and errors with the correct path
+        self.errors.append(&mut response.errors);
+        self.patches.append(&mut response.patches);
+        self
     }
 }
 
@@ -79,10 +110,7 @@ impl FederatedGraph {
             request.operation_name.to_owned(),
             QueryPlanOptions::default(),
         )?;
-        log::debug!(
-            "Query plan: {}",
-            serde_json::to_string_pretty(&query_plan).unwrap()
-        );
+        log::debug!("Planning");
         Ok(query_plan)
     }
 
@@ -96,17 +124,17 @@ impl FederatedGraph {
     }
 
     fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
-        log::debug!("Visiting fetch {:#?}", fetch);
+        log::debug!("Fetch {}", fetch.service_name);
         //TODO variable propagation
-        let service_name = fetch.service_name;
+        let service_name = fetch.service_name.to_owned();
         let service = self.subgraph_registry.get(service_name.clone());
         match service {
             Some(fetcher) => {
                 let mut variables = Map::new();
 
-                match traverser.select(fetch.requires) {
+                match traverser.select(fetch.requires.to_owned()) {
                     Ok(Some(value)) => {
-                        variables.insert("$representation".into(), value);
+                        variables.insert("representations".into(), value);
                     }
                     Err(err) => return ready(traverser.err(err)).boxed(),
                     _ => {}
@@ -120,7 +148,7 @@ impl FederatedGraph {
                         extensions: None,
                     })
                     .into_future()
-                    .map(|(primary, rest)| match primary {
+                    .map(move |(primary, rest)| match primary {
                         Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
                             traverser: Traverser {
                                 path: traverser.path,
@@ -149,16 +177,14 @@ impl FederatedGraph {
 
     /// Apply visit plan nodes in order, merging the results after each visit.
     fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
-        log::debug!("Visiting sequence of {:#?}", nodes);
+        log::debug!("Sequence");
         let response_traverser = traverser;
 
         iter(nodes)
             .fold(response_traverser.to_response(), move |acc, next| {
                 self.to_owned()
                     .visit(acc.traverser.to_owned(), next)
-                    .map(move |_response|
-                            //TODO Do Merge!
-                            acc)
+                    .map(move |next| acc.merge(next))
             })
             .boxed()
     }
@@ -166,15 +192,14 @@ impl FederatedGraph {
     /// Take a stream query plan nodes and visit them in parallel with the current traverser merging
     /// the results as they come back.
     fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
-        log::debug!("Visiting parallel of {:#?}", nodes);
+        log::debug!("Parallel");
         let branch_buffer_factor = self.branch_buffer_factor;
         let response_traverser = traverser.clone();
         iter(nodes)
             .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
             .buffer_unordered(branch_buffer_factor)
-            .fold(response_traverser.to_response(), |acc, _next| async move {
-                //TODO Do Merge!
-                acc
+            .fold(response_traverser.to_response(), |acc, next| async move {
+                acc.merge(next)
             })
             .boxed()
     }
@@ -182,16 +207,17 @@ impl FederatedGraph {
     /// Take a stream of nodes at a path in the currently fetched data and visit them with
     /// the query plan contained in the flatten node merging the results as the come back.
     fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
-        log::debug!("Visiting flatten {:#?}", flatten);
+        log::debug!("Flatten");
+        //TODO we want to make a single request rather than lots of requests
+        //Collect the descendants and send them on.
         let branch_buffer_factor = self.branch_buffer_factor;
         let descendants = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
 
         descendants
             .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
             .buffer_unordered(branch_buffer_factor)
-            .fold(traverser.to_response(), |acc, _next| async move {
-                //TODO Do Merge!
-                acc
+            .fold(traverser.to_response(), |acc, next| async move {
+                acc.merge(next)
             })
             .boxed()
     }
@@ -267,7 +293,7 @@ mod tests {
 
     fn init() {
         let _ = env_logger::builder()
-            .filter_level(LevelFilter::Debug)
+            .filter("execution".into(), LevelFilter::Debug)
             .is_test(true)
             .try_init();
     }
@@ -283,7 +309,7 @@ mod tests {
 
     reviews {
       id
-      product{
+      product {
         name
       }
       author {
@@ -308,8 +334,8 @@ mod tests {
         let mut expected = query_node(request.clone());
         let mut actual = query_rust(request.clone());
         assert_eq!(
-            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap(),
-            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap()
+            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap(),
+            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap()
         );
     }
 

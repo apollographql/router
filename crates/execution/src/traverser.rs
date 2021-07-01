@@ -1,14 +1,15 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::{Stream, StreamExt};
 use futures::stream::{empty, iter};
+use futures::{Stream, StreamExt};
 use serde_json::Value;
 
 use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
 
-use crate::{FetchError, GraphQLRequest, Object, PathElement};
+use crate::json_utils::JsonUtils;
 use crate::PathElement::Flatmap;
+use crate::{FetchError, GraphQLRequest, Object, PathElement};
 
 #[allow(dead_code)]
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
@@ -31,7 +32,7 @@ impl Traverser {
     }
 
     /// Create a stream of child traversers.
-    /// This expands the path supplied such that any array path elements are exploded into all
+    /// This expands the path supplied such that any flatmap path elements are exploded into all
     /// combinations possible.
     /// The new path is relative and does not include the parent's original path.
     #[allow(dead_code)]
@@ -54,7 +55,7 @@ impl Traverser {
             stream = stream
                 .flat_map(move |context| {
                     // Fetch the child content and convert it to a stream
-                    let new_content = context.content.get_at_path(path_chunk.to_owned()).cloned();
+                    let new_content = context.content.get_at_path(&path_chunk).cloned();
 
                     // Build up the path
                     let mut new_path = context.path.to_owned();
@@ -110,7 +111,7 @@ impl Traverser {
     }
 }
 
-fn select_object(content: &Object, selections: &SelectionSet) -> Result<Option<Value>, FetchError> {
+fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Value>, FetchError> {
     let mut output = Object::new();
     for selection in selections {
         match selection {
@@ -156,51 +157,21 @@ fn select_inline_fragment(
     }
 }
 
-trait ValueUtils {
-    /// Get a reference to the value at a particular path.
-    /// Note that a flatmap path element will return an array if that is the value at that path.
-    /// It does not actually do any flatmapping, which is instead handled by Traverser::stream.
-    fn get_at_path(&self, path: Vec<PathElement>) -> Option<&Value>;
-}
-impl ValueUtils for Option<Value> {
-    fn get_at_path(&self, path: Vec<PathElement>) -> Option<&Value> {
-        let mut current = self.as_ref();
-        for path_element in path {
-            current = match path_element {
-                PathElement::Index(index) => current
-                    .map(|value| value.as_array())
-                    .flatten()
-                    .map(|array| array.get(index))
-                    .flatten(),
-                PathElement::Key(key) => current
-                    .map(|value| value.as_object())
-                    .flatten()
-                    .map(|object| object.get(key.as_str()))
-                    .flatten(),
-                PathElement::Flatmap => current
-                    .map(|value| if value.is_array() { Some(value) } else { None })
-                    .flatten(),
-            }
-        }
-        current
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
     use serde_json::json;
-    use serde_json::Value;
     use serde_json::value::Value::Number;
+    use serde_json::Value;
 
-    use PathElement::{Index, Key};
     use query_planner::model::SelectionSet;
+    use PathElement::{Index, Key};
 
-    use crate::{FetchError, GraphQLRequest, PathElement};
+    use crate::traverser::Traverser;
     use crate::PathElement::Flatmap;
-    use crate::traverser::{Traverser, ValueUtils};
+    use crate::{FetchError, GraphQLRequest, PathElement};
 
     fn stub_request() -> GraphQLRequest {
         GraphQLRequest {
@@ -217,25 +188,6 @@ mod tests {
             content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
             request: Arc::new(stub_request()),
         }
-    }
-
-    #[test]
-    fn test_get_at_path() {
-        let json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let result = json.get_at_path(vec![
-            Key("obj".into()),
-            Key("arr".into()),
-            Index(1),
-            Key("prop1".into()),
-        ]);
-        assert_eq!(result, Some(&Value::Number(2.into())));
-    }
-
-    #[test]
-    fn test_get_at_path_flatmap() {
-        let json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let result = json.get_at_path(vec![Key("obj".into()), Key("arr".into()), Flatmap]);
-        assert_eq!(result, Some(&json!([{"prop1":1},{"prop1":2}])));
     }
 
     #[tokio::test]

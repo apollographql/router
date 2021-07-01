@@ -17,6 +17,7 @@ pub mod http_service_registry;
 /// Subgraph fetcher that uses http.
 pub mod http_subgraph;
 
+mod json_utils;
 /// Execution context code
 mod traverser;
 
