@@ -150,11 +150,7 @@ impl FederatedGraph {
                     .into_future()
                     .map(move |(primary, rest)| match primary {
                         Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
-                            traverser: Traverser {
-                                path: traverser.path,
-                                content: Some(Value::Object(primary.data)),
-                                request: traverser.request,
-                            },
+                            traverser: traverser.with_content(Some(Value::Object(primary.data))),
                             patches: vec![rest],
                             errors: primary.errors.unwrap_or_default(),
                         },

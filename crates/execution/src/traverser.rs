@@ -1,5 +1,5 @@
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::stream::{empty, iter};
 use futures::{Stream, StreamExt};
@@ -9,25 +9,56 @@ use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
 
 use crate::json_utils::JsonUtils;
 use crate::PathElement::Flatmap;
-use crate::{FetchError, GraphQLRequest, Object, PathElement};
+use crate::{FetchError, GraphQLError, GraphQLRequest, GraphQLResponseStream, Object, PathElement};
+use derivative::Derivative;
+use std::fmt::Formatter;
 
 #[allow(dead_code)]
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 
 /// Each traverser contains some json content and a path that defines where the content came from.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Derivative, Clone)]
+#[derivative(Debug, PartialEq)]
 pub(crate) struct Traverser {
     pub(crate) path: Vec<PathElement>,
     pub(crate) content: Option<Value>,
     pub(crate) request: Arc<GraphQLRequest>,
+
+    #[allow(dead_code)]
+    #[derivative(Debug(format_with = "Traverser::format_streams"))]
+    #[derivative(PartialEq = "ignore")]
+    pub(crate) patches: Arc<Mutex<Vec<GraphQLResponseStream>>>,
+    #[allow(dead_code)]
+    #[derivative(PartialEq = "ignore")]
+    pub(crate) errors: Arc<Mutex<Vec<GraphQLError>>>,
 }
 
 impl Traverser {
+    fn format_streams(
+        streams: &Arc<Mutex<Vec<GraphQLResponseStream>>>,
+        fmt: &mut Formatter,
+    ) -> std::fmt::Result {
+        let streams = streams.lock().unwrap();
+        fmt.write_fmt(format_args!("PatchStream[{}]", streams.len()))
+    }
+
     pub(crate) fn new(request: Arc<GraphQLRequest>) -> Traverser {
         Traverser {
             path: vec![],
             content: Option::None,
             request,
+            patches: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![])),
+        }
+    }
+
+    pub(crate) fn with_content(&self, content: Option<Value>) -> Traverser {
+        Traverser {
+            path: self.path.to_owned(),
+            content,
+            request: self.request.to_owned(),
+            patches: self.patches.to_owned(),
+            errors: self.errors.to_owned(),
         }
     }
 
@@ -35,13 +66,11 @@ impl Traverser {
     /// This expands the path supplied such that any flatmap path elements are exploded into all
     /// combinations possible.
     /// The new path is relative and does not include the parent's original path.
-    #[allow(dead_code)]
     pub(crate) fn stream(&self, path: Vec<PathElement>) -> TraverserStream {
         // The root of our stream. We don't need the parent path as everything is relative to content.
         let mut stream = iter(vec![Traverser {
             path: vec![],
-            content: self.content.to_owned(),
-            request: self.request.to_owned(),
+            ..self.to_owned()
         }])
         .boxed();
 
@@ -73,7 +102,7 @@ impl Traverser {
                                     Traverser {
                                         path: array_path,
                                         content: Some(item),
-                                        request: context.request.to_owned(),
+                                        ..context.to_owned()
                                     }
                                 })
                                 .boxed()
@@ -84,6 +113,7 @@ impl Traverser {
                                 path: new_path,
                                 content: Some(child),
                                 request: context.request,
+                                ..context
                             }])
                             .boxed()
                         }
@@ -159,7 +189,7 @@ fn select_inline_fragment(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use futures::StreamExt;
     use serde_json::json;
@@ -187,6 +217,8 @@ mod tests {
             path: vec![],
             content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
             request: Arc::new(stub_request()),
+            patches: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![])),
         }
     }
 
@@ -200,7 +232,9 @@ mod tests {
             vec![Traverser {
                 path: vec![Key("obj".into())],
                 content: Some(json!({"arr":[{"prop1":1},{"prop1":2}]})),
-                request: Arc::new(stub_request())
+                request: Arc::new(stub_request()),
+                patches: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![])),
             }]
         )
     }
@@ -215,7 +249,9 @@ mod tests {
             vec![Traverser {
                 path: vec![Key("obj".into()), Key("arr".into())],
                 content: Some(json!([{"prop1":1},{"prop1":2}])),
-                request: Arc::new(stub_request())
+                request: Arc::new(stub_request()),
+                patches: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![])),
             }]
         )
     }
@@ -241,7 +277,9 @@ mod tests {
                         Key("prop1".into())
                     ],
                     content: Some(Number(1.into())),
-                    request: Arc::new(stub_request())
+                    request: Arc::new(stub_request()),
+                    patches: Arc::new(Mutex::new(vec![])),
+                    errors: Arc::new(Mutex::new(vec![])),
                 },
                 Traverser {
                     path: vec![
@@ -251,7 +289,9 @@ mod tests {
                         Key("prop1".into())
                     ],
                     content: Some(Number(2.into())),
-                    request: Arc::new(stub_request())
+                    request: Arc::new(stub_request()),
+                    patches: Arc::new(Mutex::new(vec![])),
+                    errors: Arc::new(Mutex::new(vec![])),
                 }
             ]
         )
@@ -338,6 +378,8 @@ mod tests {
             path: vec![],
             content,
             request: Arc::new(stub_request()),
+            patches: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![])),
         };
 
         traverser.select(Some(selection_set))
