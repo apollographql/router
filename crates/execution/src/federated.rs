@@ -16,7 +16,7 @@ use crate::{
     ServiceRegistry,
 };
 
-type TraversalResponseFuture = Pin<Box<dyn Future<Output = Traverser> + Send>>;
+type TraversalResponse = Pin<Box<dyn Future<Output = Traverser> + Send>>;
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
 /// subgraphs.
@@ -59,7 +59,7 @@ impl FederatedGraph {
         Ok(query_plan)
     }
 
-    fn visit(self, traverser: Traverser, node: PlanNode) -> TraversalResponseFuture {
+    fn visit(self, traverser: Traverser, node: PlanNode) -> TraversalResponse {
         match node {
             PlanNode::Sequence { nodes } => self.visit_sequence(traverser, nodes),
             PlanNode::Parallel { nodes } => self.visit_parallel(traverser, nodes),
@@ -68,7 +68,7 @@ impl FederatedGraph {
         }
     }
 
-    fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
+    fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponse {
         log::debug!("Fetch {}", fetch.service_name);
         //TODO variable propagation
         let service_name = fetch.service_name.to_owned();
@@ -115,7 +115,7 @@ impl FederatedGraph {
     }
 
     /// Apply visit plan nodes in order, merging the results after each visit.
-    fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
+    fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponse {
         log::debug!("Sequence");
         let response_traverser = traverser.to_owned();
 
@@ -130,7 +130,7 @@ impl FederatedGraph {
 
     /// Take a stream query plan nodes and visit them in parallel with the current traverser merging
     /// the results as they come back.
-    fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
+    fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponse {
         log::debug!("Parallel");
         let branch_buffer_factor = self.branch_buffer_factor;
         let response_traverser = traverser.to_owned();
@@ -146,7 +146,7 @@ impl FederatedGraph {
 
     /// Take a stream of nodes at a path in the currently fetched data and visit them with
     /// the query plan contained in the flatten node merging the results as the come back.
-    fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
+    fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponse {
         log::debug!("Flatten");
         //TODO we want to make a single request rather than lots of requests
         //Collect the descendants and send them on.
