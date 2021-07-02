@@ -10,68 +10,13 @@ use serde_json::{Map, Value};
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
 use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 
-use crate::json_utils::{deep_merge, JsonUtils};
 use crate::traverser::Traverser;
 use crate::{
-    FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
-    GraphQLResponse, GraphQLResponseStream, ServiceRegistry,
+    FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
+    ServiceRegistry,
 };
 
-type TraversalResponseFuture = Pin<Box<dyn Future<Output = TraversalResponse> + Send>>;
-
-/// Each traversal response contains contains some json content and a path that defines where the content came from.
-/// Unlike the request this does not need to be clonable as we never have to flatmap.
-struct TraversalResponse {
-    traverser: Traverser,
-    #[allow(dead_code)]
-    patches: Vec<GraphQLResponseStream>,
-    #[allow(dead_code)]
-    errors: Vec<GraphQLError>,
-}
-
-impl TraversalResponse {
-    fn to_primary(&self) -> GraphQLResponse {
-        GraphQLResponse::Primary(GraphQLPrimaryResponse {
-            data: match self.traverser.content.to_owned() {
-                Some(Value::Object(obj)) => obj,
-                _ => Map::new(),
-            },
-            has_next: None,
-            errors: None,
-            extensions: None,
-        })
-    }
-
-    fn merge(mut self, mut response: TraversalResponse) -> TraversalResponse {
-        match (
-            &mut self
-                .traverser
-                .content
-                .get_at_path_mut(&response.traverser.path),
-            response.traverser.content,
-        ) {
-            (Some(a), Some(Value::Object(b)))
-                if { b.contains_key("_entities") && b.len() == 1 } =>
-            {
-                if let Some(Value::Array(array)) = b.get("_entities") {
-                    for value in array {
-                        deep_merge(a, &value);
-                    }
-                }
-            }
-            (Some(a), Some(b)) => {
-                deep_merge(a, &b);
-            }
-            (None, Some(b)) => self.traverser.content = Some(b),
-            (_, None) => (),
-        };
-
-        //TODO map patches and errors with the correct path
-        self.errors.append(&mut response.errors);
-        self.patches.append(&mut response.patches);
-        self
-    }
-}
+type TraversalResponseFuture = Pin<Box<dyn Future<Output = Traverser> + Send>>;
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
 /// subgraphs.
@@ -148,12 +93,10 @@ impl FederatedGraph {
                         extensions: None,
                     })
                     .into_future()
-                    .map(move |(primary, rest)| match primary {
-                        Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
-                            traverser: traverser.with_content(Some(Value::Object(primary.data))),
-                            patches: vec![rest],
-                            errors: primary.errors.unwrap_or_default(),
-                        },
+                    .map(move |(primary, _rest)| match primary {
+                        Some(Ok(GraphQLResponse::Primary(primary))) => {
+                            traverser.with_content(Some(Value::Object(primary.data)))
+                        }
                         Some(Ok(GraphQLResponse::Patch(_))) => {
                             panic!("Should not have had patch response as primary!")
                         }
@@ -174,12 +117,12 @@ impl FederatedGraph {
     /// Apply visit plan nodes in order, merging the results after each visit.
     fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
         log::debug!("Sequence");
-        let response_traverser = traverser;
+        let response_traverser = traverser.to_owned();
 
         iter(nodes)
-            .fold(response_traverser.to_response(), move |acc, next| {
+            .fold(response_traverser, move |acc, next| {
                 self.to_owned()
-                    .visit(acc.traverser.to_owned(), next)
+                    .visit(acc.to_owned(), next)
                     .map(move |next| acc.merge(next))
             })
             .boxed()
@@ -190,13 +133,14 @@ impl FederatedGraph {
     fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
         log::debug!("Parallel");
         let branch_buffer_factor = self.branch_buffer_factor;
-        let response_traverser = traverser.clone();
+        let response_traverser = traverser.to_owned();
         iter(nodes)
             .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
             .buffer_unordered(branch_buffer_factor)
-            .fold(response_traverser.to_response(), |acc, next| async move {
-                acc.merge(next)
-            })
+            .fold(
+                response_traverser,
+                |acc, next| async move { acc.merge(next) },
+            )
             .boxed()
     }
 
@@ -212,33 +156,8 @@ impl FederatedGraph {
         descendants
             .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
             .buffer_unordered(branch_buffer_factor)
-            .fold(traverser.to_response(), |acc, next| async move {
-                acc.merge(next)
-            })
+            .fold(traverser, |acc, next| async move { acc.merge(next) })
             .boxed()
-    }
-}
-
-impl Traverser {
-    fn err(self, err: FetchError) -> TraversalResponse {
-        TraversalResponse {
-            traverser: self.to_owned(),
-            patches: vec![],
-            errors: vec![GraphQLError {
-                message: err.to_string(),
-                locations: vec![],
-                path: self.path,
-                extensions: None,
-            }],
-        }
-    }
-
-    fn to_response(&self) -> TraversalResponse {
-        TraversalResponse {
-            traverser: self.clone(),
-            patches: vec![],
-            errors: vec![],
-        }
     }
 }
 

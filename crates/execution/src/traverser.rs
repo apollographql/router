@@ -3,13 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use futures::stream::{empty, iter};
 use futures::{Stream, StreamExt};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
 
-use crate::json_utils::JsonUtils;
+use crate::json_utils::{deep_merge, JsonUtils};
 use crate::PathElement::Flatmap;
-use crate::{FetchError, GraphQLError, GraphQLRequest, GraphQLResponseStream, Object, PathElement};
+use crate::{
+    FetchError, GraphQLError, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
+    GraphQLResponseStream, Object, PathElement,
+};
 use derivative::Derivative;
 use std::fmt::Formatter;
 
@@ -18,19 +21,17 @@ type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 
 /// Each traverser contains some json content and a path that defines where the content came from.
 #[derive(Derivative, Clone)]
-#[derivative(Debug, PartialEq)]
+#[derivative(Debug)]
 pub(crate) struct Traverser {
-    pub(crate) path: Vec<PathElement>,
-    pub(crate) content: Option<Value>,
-    pub(crate) request: Arc<GraphQLRequest>,
+    path: Vec<PathElement>,
+    content: Option<Value>,
+    request: Arc<GraphQLRequest>,
 
     #[allow(dead_code)]
     #[derivative(Debug(format_with = "Traverser::format_streams"))]
-    #[derivative(PartialEq = "ignore")]
-    pub(crate) patches: Arc<Mutex<Vec<GraphQLResponseStream>>>,
+    patches: Arc<Mutex<Vec<GraphQLResponseStream>>>,
     #[allow(dead_code)]
-    #[derivative(PartialEq = "ignore")]
-    pub(crate) errors: Arc<Mutex<Vec<GraphQLError>>>,
+    errors: Arc<Mutex<Vec<GraphQLError>>>,
 }
 
 impl Traverser {
@@ -54,12 +55,54 @@ impl Traverser {
 
     pub(crate) fn with_content(&self, content: Option<Value>) -> Traverser {
         Traverser {
-            path: self.path.to_owned(),
             content,
-            request: self.request.to_owned(),
-            patches: self.patches.to_owned(),
-            errors: self.errors.to_owned(),
+            ..self.to_owned()
         }
+    }
+
+    pub(crate) fn err(self, err: FetchError) -> Traverser {
+        self.errors.lock().unwrap().push(GraphQLError {
+            message: err.to_string(),
+            locations: vec![],
+            path: self.path.to_owned(),
+            extensions: None,
+        });
+        self
+    }
+
+    pub(crate) fn to_primary(&self) -> GraphQLResponse {
+        GraphQLResponse::Primary(GraphQLPrimaryResponse {
+            data: match self.content.to_owned() {
+                Some(Value::Object(obj)) => obj,
+                _ => Map::new(),
+            },
+            has_next: None,
+            errors: None,
+            extensions: None,
+        })
+    }
+
+    pub(crate) fn merge(mut self, traverser: Traverser) -> Traverser {
+        match (
+            &mut self.content.get_at_path_mut(&traverser.path),
+            traverser.content,
+        ) {
+            (Some(a), Some(Value::Object(b)))
+                if { b.contains_key("_entities") && b.len() == 1 } =>
+            {
+                if let Some(Value::Array(array)) = b.get("_entities") {
+                    for value in array {
+                        deep_merge(a, &value);
+                    }
+                }
+            }
+            (Some(a), Some(b)) => {
+                deep_merge(a, &b);
+            }
+            (None, Some(b)) => self.content = Some(b),
+            (_, None) => (),
+        };
+        self
     }
 
     /// Create a stream of child traversers.
@@ -112,7 +155,6 @@ impl Traverser {
                             iter(vec![Traverser {
                                 path: new_path,
                                 content: Some(child),
-                                request: context.request,
                                 ..context
                             }])
                             .boxed()
@@ -201,7 +243,20 @@ mod tests {
 
     use crate::traverser::Traverser;
     use crate::PathElement::Flatmap;
-    use crate::{FetchError, GraphQLRequest, PathElement};
+    use crate::{FetchError, GraphQLError, GraphQLRequest, PathElement};
+
+    impl PartialEq for Traverser {
+        fn eq(&self, other: &Self) -> bool {
+            self.path.eq(&other.path)
+                && self.request.eq(&other.request)
+                && self.content.eq(&other.content)
+                && self
+                    .errors
+                    .lock()
+                    .unwrap()
+                    .eq(&*other.errors.lock().unwrap())
+        }
+    }
 
     fn stub_request() -> GraphQLRequest {
         GraphQLRequest {
@@ -218,7 +273,16 @@ mod tests {
             content: Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}})),
             request: Arc::new(stub_request()),
             patches: Arc::new(Mutex::new(vec![])),
-            errors: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![fetch_error()])),
+        }
+    }
+
+    fn fetch_error() -> GraphQLError {
+        GraphQLError {
+            path: vec![],
+            extensions: None,
+            locations: vec![],
+            message: "Nooo".into(),
         }
     }
 
@@ -234,7 +298,7 @@ mod tests {
                 content: Some(json!({"arr":[{"prop1":1},{"prop1":2}]})),
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
-                errors: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![fetch_error()])),
             }]
         )
     }
@@ -251,7 +315,7 @@ mod tests {
                 content: Some(json!([{"prop1":1},{"prop1":2}])),
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
-                errors: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![fetch_error()])),
             }]
         )
     }
@@ -279,7 +343,7 @@ mod tests {
                     content: Some(Number(1.into())),
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
-                    errors: Arc::new(Mutex::new(vec![])),
+                    errors: Arc::new(Mutex::new(vec![fetch_error()])),
                 },
                 Traverser {
                     path: vec![
@@ -291,7 +355,7 @@ mod tests {
                     content: Some(Number(2.into())),
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
-                    errors: Arc::new(Mutex::new(vec![])),
+                    errors: Arc::new(Mutex::new(vec![fetch_error()])),
                 }
             ]
         )
