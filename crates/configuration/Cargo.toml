@@ -10,7 +10,7 @@ license-file = "./LICENSE"
 [dependencies]
 serde_yaml = "0.8.17"
 serde = { version = "1.0.126", features = ["derive"] }
-thiserror = "1.0.25"
+thiserror = "1.0.26"
 maplit = "1.0.2"
 [dev-dependencies]
 

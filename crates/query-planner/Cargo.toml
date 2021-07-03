@@ -12,7 +12,7 @@ harmonizer = { git = "https://github.com/apollographql/federation.git", branch =
 serde_json = "1.0.64"
 serde = { version = "1.0.126", features = ["derive"] }
 derive_more = "0.99.14"
-thiserror = "1.0.25"
+thiserror = "1.0.26"
 
 
 [dev-dependencies]
