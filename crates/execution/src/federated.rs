@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use futures::future::ready;
 use futures::lock::Mutex;
-use futures::stream::{empty, iter};
-use futures::{Future, FutureExt, StreamExt, TryFutureExt};
+use futures::stream::{empty, iter, select_all};
+use futures::{Future, FutureExt, Stream, StreamExt, TryFutureExt};
 use serde_json::{Map, Value};
 
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
@@ -13,17 +13,20 @@ use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
-    ServiceRegistry,
+    PathElement, ServiceRegistry,
 };
+use std::collections::HashMap;
 
 type TraversalResponse = Pin<Box<dyn Future<Output = Traverser> + Send>>;
+
+type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
 /// subgraphs.
 #[derive(Clone, Debug)]
 pub struct FederatedGraph {
     query_planner: Arc<Mutex<dyn QueryPlanner>>,
-    subgraph_registry: Arc<dyn ServiceRegistry>,
+    service_registry: Arc<dyn ServiceRegistry>,
     branch_buffer_factor: usize,
 }
 
@@ -44,7 +47,7 @@ impl FederatedGraph {
         FederatedGraph {
             branch_buffer_factor: 1,
             query_planner,
-            subgraph_registry,
+            service_registry: subgraph_registry,
         }
     }
 
@@ -59,105 +62,144 @@ impl FederatedGraph {
         Ok(query_plan)
     }
 
-    fn visit(self, traverser: Traverser, node: PlanNode) -> TraversalResponse {
+    fn visit(self, traversers: TraverserStream, node: PlanNode) -> TraverserStream {
         match node {
-            PlanNode::Sequence { nodes } => self.visit_sequence(traverser, nodes),
-            PlanNode::Parallel { nodes } => self.visit_parallel(traverser, nodes),
-            PlanNode::Fetch(fetch) => self.visit_fetch(traverser, fetch),
-            PlanNode::Flatten(flatten) => self.visit_flatten(traverser, flatten),
+            PlanNode::Sequence { nodes } => self.visit_sequence(traversers, nodes),
+            PlanNode::Parallel { nodes } => self.visit_parallel(traversers, nodes),
+            PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
+                self.visit_fetch_no_select(traversers, fetch)
+            }
+            PlanNode::Fetch(fetch) => self.visit_fetch_select(traversers, fetch),
+            PlanNode::Flatten(flatten) => self.visit_flatten(traversers, flatten.to_owned()),
         }
     }
 
-    fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponse {
+    /// Perform a fetch where all the traversers available so far are collected and send as a batch
+    ///
+    fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> TraverserStream {
         log::debug!("Fetch {}", fetch.service_name);
         //TODO variable propagation
         let service_name = fetch.service_name.to_owned();
-        let service = self.subgraph_registry.get(service_name.clone());
-        match service {
-            Some(fetcher) => {
-                let mut variables = Map::new();
+        let service = self.service_registry.get(service_name.clone());
 
-                match traverser.select(fetch.requires.to_owned()) {
-                    Ok(Some(value)) => {
-                        variables.insert("representations".into(), value);
-                    }
-                    Err(err) => return ready(traverser.err(err)).boxed(),
-                    _ => {}
+        traversers.collect::<Vec<Traverser>>().map(|traversers| {
+            let selections = traversers
+                .iter()
+                .map(|traverser| traverser.select(&fetch.requires))
+                .collect::<Vec<Option<Value>>>();
+        });
+        todo!();
+
+        //
+        // traversers.collect::<Vec<Traverser>>().map(|traversers| {
+        //     match service {
+        //         Some(fetcher) => {
+        //             let mut variables = Map::new();
+        //             let requires = traversers.iter().map(|traverser| { traverser.select(fetch.requires) }).collect::<Vec<Traverser, Option<Value>>>();
+        //
+        //             todo!();
+        //
+        //         }
+        //         None => empty()
+        //             .boxed(),
+        //     }
+        // });
+        todo!();
+    }
+
+    /// Do a basic fetch with no selection.
+    /// Traversers cannot be processed as a batch so we have make multiple queries.
+    fn visit_fetch_no_select(
+        self,
+        traversers: TraverserStream,
+        fetch: FetchNode,
+    ) -> TraverserStream {
+        //TODO variable propagation
+        traversers
+            .map(move |traverser| {
+                let service_name = fetch.service_name.to_owned();
+                let service = self.service_registry.get(service_name.clone());
+                match service {
+                    Some(fetcher) => fetcher
+                        .stream(GraphQLRequest {
+                            query: fetch.operation.to_owned(),
+                            operation_name: None,
+                            variables: None,
+                            extensions: None,
+                        })
+                        .into_future()
+                        .map(move |(primary, _rest)| match primary {
+                            Some(Ok(GraphQLResponse::Primary(primary))) => {
+                                traverser.merge(Some(Value::Object(primary.data)))
+                            }
+                            Some(Ok(GraphQLResponse::Patch(_))) => {
+                                panic!("Should not have had patch response as primary!")
+                            }
+                            Some(Err(err)) => traverser.err(err),
+                            None => traverser.err(FetchError::NoResponseError {
+                                service: service_name,
+                            }),
+                        })
+                        .boxed(),
+                    None => ready(traverser.err(FetchError::UnknownServiceError {
+                        service: service_name,
+                    }))
+                    .boxed(),
                 }
-
-                fetcher
-                    .stream(GraphQLRequest {
-                        query: fetch.operation,
-                        operation_name: None,
-                        variables: Some(variables),
-                        extensions: None,
-                    })
-                    .into_future()
-                    .map(move |(primary, _rest)| match primary {
-                        Some(Ok(GraphQLResponse::Primary(primary))) => {
-                            traverser.with_content(Some(Value::Object(primary.data)))
-                        }
-                        Some(Ok(GraphQLResponse::Patch(_))) => {
-                            panic!("Should not have had patch response as primary!")
-                        }
-                        Some(Err(err)) => traverser.err(err),
-                        None => traverser.err(FetchError::NoResponseError {
-                            service: service_name,
-                        }),
-                    })
-                    .boxed()
-            }
-            None => ready(traverser.err(FetchError::UnknownServiceError {
-                service: service_name,
-            }))
-            .boxed(),
-        }
+                .boxed()
+            })
+            .buffered(1000)
+            .boxed()
     }
 
     /// Apply visit plan nodes in order, merging the results after each visit.
-    fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponse {
+    fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> TraverserStream {
         log::debug!("Sequence");
-        let response_traverser = traverser.to_owned();
 
-        iter(nodes)
-            .fold(response_traverser, move |acc, next| {
-                self.to_owned()
-                    .visit(acc.to_owned(), next)
-                    .map(move |next| acc.merge(next))
+        nodes
+            .iter()
+            .fold(traversers, move |acc, next| {
+                self.to_owned().visit(acc, next.to_owned())
             })
             .boxed()
     }
 
-    /// Take a stream query plan nodes and visit them in parallel with the current traverser merging
-    /// the results as they come back.
-    fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponse {
+    /// Take a stream query plan nodes and visit them in parallel
+    /// This actually has the effect of stalling the pipeline until all traversers are collected.
+    fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> TraverserStream {
         log::debug!("Parallel");
-        let branch_buffer_factor = self.branch_buffer_factor;
-        let response_traverser = traverser.to_owned();
-        iter(nodes)
-            .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
-            .buffer_unordered(branch_buffer_factor)
-            .fold(
-                response_traverser,
-                |acc, next| async move { acc.merge(next) },
-            )
+        traversers
+            .collect::<Vec<Traverser>>()
+            .into_stream()
+            .flat_map(move |traversers| {
+                let owned_s = self.to_owned();
+                let streams = nodes
+                    .iter()
+                    .map(move |node| {
+                        owned_s
+                            .to_owned()
+                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                    })
+                    .collect::<Vec<_>>();
+                select_all(streams).boxed()
+            })
             .boxed()
     }
 
     /// Take a stream of nodes at a path in the currently fetched data and visit them with
     /// the query plan contained in the flatten node merging the results as the come back.
-    fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponse {
+    fn visit_flatten(&self, traversers: TraverserStream, flatten: FlattenNode) -> TraverserStream {
         log::debug!("Flatten");
-        //TODO we want to make a single request rather than lots of requests
-        //Collect the descendants and send them on.
-        let branch_buffer_factor = self.branch_buffer_factor;
-        let descendants = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
-
-        descendants
-            .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
-            .buffer_unordered(branch_buffer_factor)
-            .fold(traverser, |acc, next| async move { acc.merge(next) })
-            .boxed()
+        let path = flatten
+            .to_owned()
+            .path
+            .iter()
+            .map(|a| a.into())
+            .collect::<Vec<PathElement>>();
+        let expanded = traversers
+            .flat_map(move |traverser| traverser.stream_descendants(path.to_owned()))
+            .boxed();
+        self.to_owned().visit(expanded, *flatten.node)
     }
 }
 
@@ -168,8 +210,7 @@ impl GraphQLFetcher for FederatedGraph {
             .plan(request.to_owned())
             .map_ok(move |plan| match plan.node {
                 Some(root) => clone
-                    .visit(Traverser::new(Arc::new(request)), root)
-                    .into_stream()
+                    .visit(iter(vec![Traverser::new(request)]).boxed(), root.to_owned())
                     .flat_map(|response| iter(vec![Ok(response.to_primary())]))
                     .boxed(),
                 None => empty().boxed(),
