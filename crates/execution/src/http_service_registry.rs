@@ -34,6 +34,10 @@ impl ServiceRegistry for HttpServiceRegistry {
     fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)> {
         self.services.get(service.as_str()).map(|a| &**a)
     }
+
+    fn has(&self, service: String) -> bool {
+        self.services.get(service.as_str()).is_some()
+    }
 }
 
 #[cfg(test)]

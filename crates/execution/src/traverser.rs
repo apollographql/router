@@ -11,7 +11,7 @@ use crate::json_utils::{deep_merge, JsonUtils};
 use crate::PathElement::Flatmap;
 use crate::{
     FetchError, GraphQLError, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
-    GraphQLResponseStream, Object, PathElement,
+    GraphQLResponseStream, Object, Path, PathElement,
 };
 use derivative::Derivative;
 use std::fmt::Formatter;
@@ -26,7 +26,7 @@ type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub(crate) struct Traverser {
-    path: Vec<PathElement>,
+    path: Path,
     content: Arc<Mutex<Option<Value>>>,
     request: Arc<GraphQLRequest>,
 
@@ -38,6 +38,10 @@ pub(crate) struct Traverser {
 }
 
 impl Traverser {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     fn format_streams(
         streams: &Arc<Mutex<Vec<GraphQLResponseStream>>>,
         fmt: &mut Formatter,
@@ -48,7 +52,7 @@ impl Traverser {
 
     pub(crate) fn new(request: GraphQLRequest) -> Traverser {
         Traverser {
-            path: vec![],
+            path: Path::empty(),
             content: Arc::new(Mutex::new(Option::None)),
             request: Arc::new(request),
             patches: Arc::new(Mutex::new(vec![])),
@@ -56,16 +60,16 @@ impl Traverser {
         }
     }
 
-    pub fn descendant(&self, path: &[PathElement]) -> Traverser {
+    pub fn descendant(&self, path: &Path) -> Traverser {
         let mut new_path = self.path.clone();
-        new_path.append(&mut path.to_owned());
+        new_path.append(&path);
         Traverser {
             path: new_path,
             ..self.to_owned()
         }
     }
 
-    pub(crate) fn err(self, err: FetchError) -> Traverser {
+    pub(crate) fn add_err(self, err: &FetchError) -> Traverser {
         self.errors.lock().unwrap().push(GraphQLError {
             message: err.to_string(),
             locations: vec![],
@@ -87,7 +91,7 @@ impl Traverser {
         })
     }
 
-    pub(crate) fn merge(mut self, value: Option<Value>) -> Traverser {
+    pub(crate) fn merge(self, value: Option<&Value>) -> Traverser {
         {
             let mut content = self.content.lock().unwrap();
             match (content.get_at_path_mut(&self.path), value) {
@@ -103,7 +107,7 @@ impl Traverser {
                 (Some(a), Some(b)) => {
                     deep_merge(a, &b);
                 }
-                (None, Some(b)) => *content = Some(b),
+                (None, Some(b)) => *content = Some(b.to_owned()),
                 (_, None) => (),
             };
         }
@@ -112,13 +116,14 @@ impl Traverser {
 
     /// Create a stream of child traversers that match the supplied path in the current content \
     /// relative to the current traverser path.
-    pub(crate) fn stream_descendants(&self, path: Vec<PathElement>) -> TraverserStream {
+    pub(crate) fn stream_descendants(&self, path: &Path) -> TraverserStream {
         // The root of our stream. We start at ourself!
         let mut stream = iter(vec![self.to_owned()]).boxed();
 
         // Split the path on array. We only need to flatmap at arrays.
-        let path_split_by_arrays =
-            path.split_inclusive(|path_element| path_element == &PathElement::Flatmap);
+        let path_split_by_arrays = path
+            .to_vec()
+            .split_inclusive(|path_element| path_element == &PathElement::Flatmap);
 
         for path_chunk in path_split_by_arrays {
             // Materialise the path chunk so it can be moved into closures.
@@ -126,7 +131,7 @@ impl Traverser {
             stream = stream
                 .flat_map(move |traverser| {
                     // Fetch the child content and convert it to a stream
-                    let descendant = traverser.descendant(&path_chunk);
+                    let descendant = traverser.descendant(&Path::new(&path_chunk));
                     let content = &descendant.content.lock().unwrap();
                     let content_at_path = content.get_at_path(&descendant.path);
 
@@ -136,7 +141,7 @@ impl Traverser {
                             let parent = descendant.parent();
                             iter(0..array.len())
                                 .map(move |index| {
-                                    parent.descendant(&vec![PathElement::Index(index)])
+                                    parent.descendant(&Path::new(&vec![PathElement::Index(index)]))
                                 })
                                 .boxed()
                         }
@@ -163,10 +168,8 @@ impl Traverser {
     }
 
     fn parent(&self) -> Traverser {
-        let mut path = self.path.to_owned();
-        path.pop();
         Traverser {
-            path,
+            path: self.path.parent(),
             ..self.to_owned()
         }
     }
@@ -178,7 +181,10 @@ fn select_object(content: &Object, selections: &[Selection]) -> Option<Value> {
         match selection {
             Selection::Field(field) => {
                 let value = select_field(content, &field)?;
-                output.insert(field.name.to_owned(), value);
+                output
+                    .entry(field.name.to_owned())
+                    .and_modify(|existing| deep_merge(existing, &value))
+                    .or_insert(value);
             }
             Selection::InlineFragment(fragment) => {
                 if let Value::Object(value) = select_inline_fragment(content, fragment)? {
@@ -218,15 +224,12 @@ mod tests {
 
     use futures::StreamExt;
     use serde_json::json;
-    use serde_json::value::Value::Number;
     use serde_json::Value;
 
     use query_planner::model::SelectionSet;
-    use PathElement::{Index, Key};
 
     use crate::traverser::Traverser;
-    use crate::PathElement::Flatmap;
-    use crate::{FetchError, GraphQLError, GraphQLRequest, PathElement};
+    use crate::{GraphQLError, GraphQLRequest, Path};
     use log::LevelFilter;
 
     impl PartialEq for Traverser {
@@ -257,7 +260,7 @@ mod tests {
 
     fn stub_traverser() -> Traverser {
         Traverser {
-            path: vec![],
+            path: Path::empty(),
             content: Arc::new(Mutex::new(Some(
                 json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}),
             ))),
@@ -269,7 +272,7 @@ mod tests {
 
     fn fetch_error() -> GraphQLError {
         GraphQLError {
-            path: vec![],
+            path: Path::empty(),
             extensions: None,
             locations: vec![],
             message: "Nooo".into(),
@@ -280,11 +283,11 @@ mod tests {
     async fn test_stream_no_array() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(vec![Key("obj".into())])
+                .stream_descendants(&Path::parse("obj".into()))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: vec![Key("obj".into())],
+                path: Path::parse("obj".into()),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -301,15 +304,15 @@ mod tests {
             .try_init();
         assert_eq!(
             stub_traverser()
-                .stream_descendants(vec![Key("obj".into())])
+                .stream_descendants(&Path::parse("obj".into()))
                 .next()
                 .await
                 .unwrap()
-                .stream_descendants(vec![Key("arr".into())])
+                .stream_descendants(&Path::parse("arr".into()))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: vec![Key("obj".into()), Key("arr".into())],
+                path: Path::parse("obj/arr".into()),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -322,11 +325,11 @@ mod tests {
     async fn test_stream_with_array() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(vec![Key("obj".into()), Key("arr".into())])
+                .stream_descendants(&Path::parse("obj/arr".into()))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: vec![Key("obj".into()), Key("arr".into())],
+                path: Path::parse("obj/arr".into()),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -339,34 +342,19 @@ mod tests {
     async fn test_stream_flatmap() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(vec![
-                    Key("obj".into()),
-                    Key("arr".into()),
-                    Flatmap,
-                    Key("prop1".into())
-                ])
+                .stream_descendants(&Path::parse("obj/arr/@/prop1".into()))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![
                 Traverser {
-                    path: vec![
-                        Key("obj".into()),
-                        Key("arr".into()),
-                        Index(0),
-                        Key("prop1".into())
-                    ],
+                    path: Path::parse("obj/arr/0/prop1".into()),
                     content: stub_traverser().content,
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
                     errors: Arc::new(Mutex::new(vec![fetch_error()])),
                 },
                 Traverser {
-                    path: vec![
-                        Key("obj".into()),
-                        Key("arr".into()),
-                        Index(1),
-                        Key("prop1".into())
-                    ],
+                    path: Path::parse("obj/arr/1/prop1".into()),
                     content: stub_traverser().content,
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
@@ -409,7 +397,7 @@ mod tests {
         let result = selection(
             stub_selection(),
             Some(json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}})),
-            vec![],
+            Path::empty(),
         );
         assert_eq!(
             result,
@@ -428,14 +416,14 @@ mod tests {
         let result = selection(
             stub_selection(),
             Some(json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}})),
-            vec![],
+            Path::empty(),
         );
         assert_eq!(result, None);
     }
 
     #[test]
     fn test_selection_no_content() {
-        let result = selection(stub_selection(), None, vec![]);
+        let result = selection(stub_selection(), None, Path::empty());
         assert_eq!(result, None);
     }
 
@@ -447,7 +435,7 @@ mod tests {
               "name": "name"
             }]),
             Some(json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}})),
-            vec![PathElement::Key("job".into())],
+            Path::parse("job".into()),
         );
         assert_eq!(
             result,
@@ -457,11 +445,7 @@ mod tests {
         );
     }
 
-    fn selection(
-        selection_set: Value,
-        content: Option<Value>,
-        path: Vec<PathElement>,
-    ) -> Option<Value> {
+    fn selection(selection_set: Value, content: Option<Value>, path: Path) -> Option<Value> {
         let selection_set = serde_json::from_value::<SelectionSet>(selection_set).unwrap();
 
         let traverser = Traverser {

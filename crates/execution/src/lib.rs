@@ -1,6 +1,6 @@
 //! Constructs an execution stream from q query plan
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::pin::Pin;
 
 use futures::Stream;
@@ -23,9 +23,6 @@ mod traverser;
 
 /// A json object
 pub type Object = Map<String, Value>;
-
-/// A path for an error. This can be composed of strings and numbers
-pub type Path = Vec<PathElement>;
 
 /// Extensions is an untyped map that can be used to pass extra data to requests and from responses.
 pub type Extensions = Option<Object>;
@@ -87,13 +84,63 @@ pub enum PathElement {
     Flatmap,
 }
 
-impl From<&String> for PathElement {
-    fn from(element: &String) -> Self {
-        if element == "@" {
-            PathElement::Flatmap
-        } else {
-            PathElement::Key(element.to_owned())
+/// A path for an error. This can be composed of strings and numbers
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+struct Path {
+    path: Vec<PathElement>,
+}
+
+impl Path {
+    fn new(path: &[PathElement]) -> Path {
+        Path { path: path.into() }
+    }
+    fn parse(path: String) -> Path {
+        Path {
+            path: path
+                .split("/")
+                .map(|e| match (e, e.parse::<usize>()) {
+                    (_, Ok(index)) => PathElement::Index(index),
+                    (s, _) if s == "@" => PathElement::Flatmap,
+                    (s, _) => PathElement::Key(s.to_string()),
+                })
+                .collect(),
         }
+    }
+
+    fn empty() -> Path {
+        Path { path: vec![] }
+    }
+
+    fn parent(&self) -> Path {
+        let mut path = self.path.to_owned();
+        path.pop();
+        Path { path }
+    }
+
+    fn append(&mut self, path: &Path) {
+        self.path.append(&mut path.path.to_owned());
+    }
+
+    fn to_vec(&self) -> &Vec<PathElement> {
+        &self.path
+    }
+}
+
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            self.path
+                .iter()
+                .map(|e| match e {
+                    PathElement::Index(index) => index.to_string(),
+                    PathElement::Key(key) => key.into(),
+                    PathElement::Flatmap => "@".into(),
+                })
+                .collect::<Vec<String>>()
+                .join("/")
+                .as_str(),
+        )
     }
 }
 
@@ -193,6 +240,9 @@ impl GraphQLResponse {
 pub trait ServiceRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
     fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)>;
+
+    /// Get a fetcher for a service.
+    fn has(&self, service: String) -> bool;
 }
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
@@ -302,14 +352,9 @@ mod tests {
                 .cloned()
                 .unwrap(),
                 errors: Some(vec!(GraphQLError {
-                    message: "Name for character with ID 1002 could not be fetched.".to_owned(),
+                    message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: vec!(
-                        PathElement::Key("hero".to_owned()),
-                        PathElement::Key("heroFriends".to_owned()),
-                        PathElement::Index(1),
-                        PathElement::Key("name".to_owned())
-                    ),
+                    path: Path::parse("hero/heroFriends/1/name".into()),
                     extensions: json!({
                         "error-extension": 5,
                     })
@@ -395,22 +440,12 @@ mod tests {
                 .as_object()
                 .cloned()
                 .unwrap(),
-                path: vec!(
-                    PathElement::Key("hero".to_owned()),
-                    PathElement::Key("heroFriends".to_owned()),
-                    PathElement::Index(1),
-                    PathElement::Key("name".to_owned())
-                ),
+                path: Path::parse("hero/heroFriends/1/name".into()),
                 has_next: true,
                 errors: Some(vec!(GraphQLError {
-                    message: "Name for character with ID 1002 could not be fetched.".to_owned(),
+                    message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: vec!(
-                        PathElement::Key("hero".to_owned()),
-                        PathElement::Key("heroFriends".to_owned()),
-                        PathElement::Index(1),
-                        PathElement::Key("name".to_owned())
-                    ),
+                    path: Path::parse("hero/heroFriends/1/name".into()),
                     extensions: json!({
                         "error-extension": 5,
                     })
