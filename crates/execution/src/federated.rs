@@ -86,22 +86,38 @@ impl FederatedGraph {
         Ok(())
     }
 
+    /// Visit a stream of traversers.
+    /// The returned stream will always be identical to the input stream.
+    /// However, the stream will have chained some work.
     fn visit(self, traversers: TraverserStream, node: PlanNode) -> TraverserStream {
-        match node {
-            PlanNode::Sequence { nodes } => self.visit_sequence(traversers, nodes),
-            PlanNode::Parallel { nodes } => self.visit_parallel(traversers, nodes),
-            PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
-                self.visit_fetch_no_select(traversers, fetch)
-            }
-            PlanNode::Fetch(fetch) => self.visit_fetch_select(traversers, fetch),
-            PlanNode::Flatten(flatten) => self.visit_flatten(traversers, flatten.to_owned()),
-        }
+        let collect = traversers.collect::<Vec<Traverser>>();
+        collect
+            .map(|traversers| {
+                let traverser_stream = iter(traversers.to_owned()).boxed();
+
+                match node {
+                    PlanNode::Sequence { nodes } => self.visit_sequence(traverser_stream, nodes),
+                    PlanNode::Parallel { nodes } => self.visit_parallel(traverser_stream, nodes),
+                    PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
+                        self.visit_fetch_no_select(traverser_stream, fetch)
+                    }
+                    PlanNode::Fetch(fetch) => self.visit_fetch_select(traverser_stream, fetch),
+                    PlanNode::Flatten(flatten) => {
+                        self.visit_flatten(traverser_stream, flatten.to_owned())
+                    }
+                }
+                .collect::<Vec<Traverser>>()
+                .map(|_| iter(traversers))
+                .flatten_stream()
+                .boxed()
+            })
+            .flatten_stream()
+            .boxed()
     }
 
     /// Perform a fetch where all the traversers available so far are collected and send as a batch
     ///
     fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> TraverserStream {
-        log::debug!("Fetch {:#?}", fetch.service_name);
         //TODO variable propagation
 
         let t = traversers
@@ -129,7 +145,16 @@ impl FederatedGraph {
                             .collect(),
                     ),
                 );
-                log::debug!("Variables {}", to_string_pretty(&variables).unwrap());
+                log::debug!(
+                    "Fetch {:#?}\nTraversers:\n   {}\nVariables: {}",
+                    fetch.service_name,
+                    traversers
+                        .iter()
+                        .map(|t| t.path().to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    to_string_pretty(&variables).unwrap(),
+                );
 
                 fetcher
                     .stream(GraphQLRequest {
@@ -161,7 +186,9 @@ impl FederatedGraph {
                                             to_string_pretty(result).unwrap(),
                                             traverser.path()
                                         );
-                                        traverser.to_owned().merge(Some(result))
+                                        let r = traverser.to_owned().merge(Some(result));
+                                        log::debug!("{}", to_string_pretty(&r.content()).unwrap(),);
+                                        r
                                     })
                                     .collect::<Vec<Traverser>>(),
                             )
@@ -243,7 +270,6 @@ impl FederatedGraph {
     /// Apply visit plan nodes in order, merging the results after each visit.
     fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> TraverserStream {
         log::debug!("Sequence");
-
         nodes
             .iter()
             .fold(traversers, move |acc, next| {
@@ -256,28 +282,22 @@ impl FederatedGraph {
     /// This actually has the effect of stalling the pipeline until all traversers are collected.
     fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> TraverserStream {
         log::debug!("Parallel");
-        nodes
-            .iter()
-            .fold(traversers, move |acc, next| {
-                self.to_owned().visit(acc, next.to_owned())
+        traversers
+            .collect::<Vec<Traverser>>()
+            .into_stream()
+            .flat_map(move |traversers| {
+                let owned_s = self.to_owned();
+                let streams = nodes
+                    .iter()
+                    .map(move |node| {
+                        owned_s
+                            .to_owned()
+                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                    })
+                    .collect::<Vec<_>>();
+                select_all(streams).boxed()
             })
             .boxed()
-        // traversers
-        //     .collect::<Vec<Traverser>>()
-        //     .into_stream()
-        //     .flat_map(move |traversers| {
-        //         let owned_s = self.to_owned();
-        //         let streams = nodes
-        //             .iter()
-        //             .map(move |node| {
-        //                 owned_s
-        //                     .to_owned()
-        //                     .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
-        //             })
-        //             .collect::<Vec<_>>();
-        //         select_all(streams).boxed()
-        //     })
-        //     .boxed()
     }
 
     /// Take a stream of nodes at a path in the currently fetched data and visit them with
@@ -325,7 +345,6 @@ impl From<QueryPlannerError> for FetchError {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use log::LevelFilter;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -342,7 +361,7 @@ mod tests {
     fn init() {
         let _ = env_logger::builder()
             //.filter_level(LevelFilter::Debug)
-            .filter("execution".into(), LevelFilter::Debug)
+            //.filter("execution".into(), LevelFilter::Debug)
             .is_test(true)
             .try_init();
     }
@@ -365,9 +384,9 @@ mod tests {
         assert_federated_response(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
             hashmap! {
-                "products".to_string()=>5,
-                "reviews".to_string()=>3,
-                "accounts".to_string()=>4
+                "products".to_string()=>2,
+                "reviews".to_string()=>1,
+                "accounts".to_string()=>1
             },
         )
         .await
@@ -382,14 +401,12 @@ mod tests {
         };
         let mut expected = query_node(request.clone());
         let (mut actual, registry) = query_rust(request.clone());
-        log::debug!(
-            "{}",
-            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap()
-        );
-        log::debug!(
-            "{}",
-            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap()
-        );
+
+        let actual = to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap();
+        let expected =
+            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap();
+        log::debug!("{}", actual);
+        log::debug!("{}", expected);
         assert_eq!(registry.totals(), service_requests);
     }
 

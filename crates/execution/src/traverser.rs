@@ -42,6 +42,10 @@ impl Traverser {
         &self.path
     }
 
+    pub(crate) fn content(&self) -> Option<Value> {
+        self.content.lock().unwrap().to_owned()
+    }
+
     fn format_streams(
         streams: &Arc<Mutex<Vec<GraphQLResponseStream>>>,
         fmt: &mut Formatter,
