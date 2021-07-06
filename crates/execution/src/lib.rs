@@ -98,7 +98,7 @@ impl Path {
     fn parse(path: String) -> Path {
         Path {
             path: path
-                .split("/")
+                .split('/')
                 .map(|e| match (e, e.parse::<usize>()) {
                     (_, Ok(index)) => PathElement::Index(index),
                     (s, _) if s == "@" => PathElement::Flatmap,

@@ -38,17 +38,19 @@ pub(crate) struct Traverser {
 }
 
 impl Traverser {
+    #[allow(dead_code)]
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
+    #[allow(dead_code)]
     pub(crate) fn content(&self) -> Option<Value> {
         self.content.lock().unwrap().to_owned()
     }
 
     fn format_streams(
         streams: &Arc<Mutex<Vec<GraphQLResponseStream>>>,
-        fmt: &mut Formatter,
+        fmt: &mut Formatter<'_>,
     ) -> std::fmt::Result {
         let streams = streams.lock().unwrap();
         fmt.write_fmt(format_args!("PatchStream[{}]", streams.len()))
@@ -64,7 +66,7 @@ impl Traverser {
         }
     }
 
-    pub fn descendant(&self, path: &Path) -> Traverser {
+    pub(crate) fn descendant(&self, path: &Path) -> Traverser {
         let mut new_path = self.path.clone();
         new_path.append(&path);
         Traverser {
@@ -73,14 +75,13 @@ impl Traverser {
         }
     }
 
-    pub(crate) fn add_err(self, err: &FetchError) -> Traverser {
+    pub(crate) fn add_err(&self, err: &FetchError) {
         self.errors.lock().unwrap().push(GraphQLError {
             message: err.to_string(),
             locations: vec![],
             path: self.path.to_owned(),
             extensions: None,
         });
-        self
     }
 
     pub(crate) fn to_primary(&self) -> GraphQLResponse {
@@ -145,7 +146,7 @@ impl Traverser {
                             let parent = descendant.parent();
                             iter(0..array.len())
                                 .map(move |index| {
-                                    parent.descendant(&Path::new(&vec![PathElement::Index(index)]))
+                                    parent.descendant(&Path::new(&[PathElement::Index(index)]))
                                 })
                                 .boxed()
                         }
@@ -171,7 +172,7 @@ impl Traverser {
         }
     }
 
-    fn parent(&self) -> Traverser {
+    pub(crate) fn parent(&self) -> Traverser {
         Traverser {
             path: self.path.parent(),
             ..self.to_owned()
