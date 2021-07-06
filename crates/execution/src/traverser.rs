@@ -56,8 +56,8 @@ impl Traverser {
         fmt.write_fmt(format_args!("PatchStream[{}]", streams.len()))
     }
 
-    pub(crate) fn new(request: GraphQLRequest) -> Traverser {
-        Traverser {
+    pub(crate) fn new(request: GraphQLRequest) -> Self {
+        Self {
             path: Path::empty(),
             content: Arc::new(Mutex::new(Option::None)),
             request: Arc::new(request),

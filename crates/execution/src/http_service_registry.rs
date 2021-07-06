@@ -13,8 +13,8 @@ pub struct HttpServiceRegistry {
 
 impl HttpServiceRegistry {
     /// Create a new http service registry from a configuration.
-    pub fn new(configuration: Configuration) -> HttpServiceRegistry {
-        HttpServiceRegistry {
+    pub fn new(configuration: Configuration) -> Self {
+        Self {
             services: configuration
                 .subgraphs
                 .into_iter()

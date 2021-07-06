@@ -17,7 +17,7 @@ pub struct CachingQueryPlanner<T: QueryPlanner> {
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
     fn new(delegate: T) -> CachingQueryPlanner<T> {
-        CachingQueryPlanner {
+        Self {
             delegate,
             cached: HashMap::new(),
         }

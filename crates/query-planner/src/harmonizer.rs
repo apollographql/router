@@ -14,8 +14,8 @@ pub struct HarmonizerQueryPlanner {
 
 impl HarmonizerQueryPlanner {
     /// Create a new harmonizer query planner
-    pub fn new(schema: String) -> HarmonizerQueryPlanner {
-        HarmonizerQueryPlanner { schema }
+    pub fn new(schema: String) -> Self {
+        Self { schema }
     }
 }
 

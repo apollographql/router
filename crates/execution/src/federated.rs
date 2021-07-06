@@ -44,7 +44,7 @@ impl FederatedGraph {
     /// debugging.
     ///
     /// In future we may allow concurrency_factor and chunk_size to be set explicitly to allow
-    /// clients to avoid stalled/ execution at the cost of making more downstream calls.
+    /// clients to avoid stalled execution at the cost of making more downstream calls.
     ///
     /// # Arguments
     ///
@@ -56,8 +56,8 @@ impl FederatedGraph {
     pub fn new(
         query_planner: Arc<Mutex<dyn QueryPlanner>>,
         service_registry: Arc<dyn ServiceRegistry>,
-    ) -> FederatedGraph {
-        FederatedGraph {
+    ) -> Self {
+        Self {
             concurrency_factor: 100000,
             chunk_size: 100000,
             query_planner,
@@ -134,7 +134,7 @@ impl FederatedGraph {
         traversers
             .chunks(self.chunk_size)
             .map(move |traversers| {
-                let traverser_stream = iter(traversers.to_owned()).boxed();
+                let traverser_stream = iter(traversers).boxed();
                 let clone = self.to_owned();
                 match node.to_owned() {
                     PlanNode::Sequence { nodes } => clone.visit_sequence(traverser_stream, nodes),
@@ -447,9 +447,7 @@ fn traversers_with_selections(
 /// ```
 ///
 /// ```
-fn merge_results(service: &String, traversers: &Vec<Traverser>, primary: GraphQLPrimaryResponse) {
-    //TODO change this to handle malformed responses
-    // It should
+fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
     match primary.data.get("_entities") {
         Some(Value::Array(array)) => {
             traversers
