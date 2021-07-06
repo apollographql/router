@@ -1,7 +1,7 @@
 use serde_json::map::Entry;
 use serde_json::Value;
 
-use crate::PathElement;
+use crate::{Path, PathElement};
 
 pub(crate) fn deep_merge(a: &mut Value, b: &Value) {
     match (a, b) {
@@ -32,17 +32,17 @@ pub(crate) trait JsonUtils {
     /// Get a reference to the value at a particular path.
     /// Note that a flatmap path element will return an array if that is the value at that path.
     /// It does not actually do any flatmapping, which is instead handled by Traverser::stream.
-    fn get_at_path(&self, path: &[PathElement]) -> Option<&Value>;
+    fn get_at_path(&self, path: &Path) -> Option<&Value>;
 
     /// Get a reference to the value at a particular path.
     /// Note that a flatmap path element will return an array if that is the value at that path.
     /// It does not actually do any flatmapping, which is instead handled by Traverser::stream.
-    fn get_at_path_mut(&mut self, path: &[PathElement]) -> Option<&mut Value>;
+    fn get_at_path_mut(&mut self, path: &Path) -> Option<&mut Value>;
 }
 impl JsonUtils for Option<Value> {
-    fn get_at_path(&self, path: &[PathElement]) -> Option<&Value> {
+    fn get_at_path(&self, path: &Path) -> Option<&Value> {
         let mut current = self.as_ref();
-        for path_element in path {
+        for path_element in &path.path {
             current = match (path_element, current) {
                 (PathElement::Index(index), Some(Value::Array(array))) => array.get(*index),
                 (PathElement::Key(key), Some(Value::Object(object))) => object.get(key.as_str()),
@@ -53,9 +53,9 @@ impl JsonUtils for Option<Value> {
         current
     }
 
-    fn get_at_path_mut(&mut self, path: &[PathElement]) -> Option<&mut Value> {
+    fn get_at_path_mut(&mut self, path: &Path) -> Option<&mut Value> {
         let mut current = self.as_mut();
-        for path_element in path {
+        for path_element in &path.path {
             current = match (path_element, current) {
                 (PathElement::Index(index), Some(Value::Array(array))) => array.get_mut(*index),
                 (PathElement::Key(key), Some(Value::Object(object))) => {
@@ -74,21 +74,13 @@ mod tests {
     use serde_json::json;
     use serde_json::Value;
 
-    use PathElement::{Index, Key};
-
     use crate::json_utils::{deep_merge, JsonUtils};
-    use crate::PathElement;
-    use crate::PathElement::Flatmap;
+    use crate::Path;
 
     #[test]
     fn test_get_at_path() {
         let mut json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let path = vec![
-            Key("obj".into()),
-            Key("arr".into()),
-            Index(1),
-            Key("prop1".into()),
-        ];
+        let path = Path::parse("obj/arr/1/prop1".into());
         let result = json.get_at_path(&path);
         assert_eq!(result, Some(&Value::Number(2.into())));
         let result_mut = json.get_at_path_mut(&path);
@@ -98,7 +90,7 @@ mod tests {
     #[test]
     fn test_get_at_path_flatmap() {
         let mut json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let path = vec![Key("obj".into()), Key("arr".into()), Flatmap];
+        let path = Path::parse("obj/arr/@".into());
         let result = json.get_at_path(&path);
         assert_eq!(result, Some(&json!([{"prop1":1},{"prop1":2}])));
         let result_mut = json.get_at_path_mut(&path);

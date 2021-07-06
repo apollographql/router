@@ -13,8 +13,8 @@ pub struct HttpServiceRegistry {
 
 impl HttpServiceRegistry {
     /// Create a new http service registry from a configuration.
-    pub fn new(configuration: Configuration) -> HttpServiceRegistry {
-        HttpServiceRegistry {
+    pub fn new(configuration: Configuration) -> Self {
+        Self {
             services: configuration
                 .subgraphs
                 .into_iter()
@@ -33,6 +33,10 @@ impl HttpServiceRegistry {
 impl ServiceRegistry for HttpServiceRegistry {
     fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)> {
         self.services.get(service.as_str()).map(|a| &**a)
+    }
+
+    fn has(&self, service: String) -> bool {
+        self.services.get(service.as_str()).is_some()
     }
 }
 

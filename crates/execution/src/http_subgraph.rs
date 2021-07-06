@@ -23,7 +23,7 @@ pub struct HttpSubgraphFetcher {
 
 impl HttpSubgraphFetcher {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: String, url: String) -> HttpSubgraphFetcher {
+    pub fn new(service: String, url: String) -> Self {
         HttpSubgraphFetcher {
             service,
             url,

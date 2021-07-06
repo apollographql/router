@@ -16,6 +16,11 @@ Rust implementation of federation router.
 ## Development
 We recommend using [asdf](https://github.com/asdf-vm/asdf) to make sure your nodejs and rust versions are correct.
 The versions currently used to compile are specified in [.tool-versions](.tool-versions).
+To set up your toolchain run:
+```shell
+asdf install
+asdf reshim
+```
 
 The `harmonizer` dependency requires building a nodejs project. This should happen automatically, but may take some time.
 
@@ -27,7 +32,10 @@ project is running.
 
 ```shell
 git submodule sync --recursive; git submodule update --recursive --init
-cd submodules/federation-demo; npm install; npm run start-services &; npm run start-gateway &;
+cd submodules/federation-demo; npm install; 
+npm run start-services &;
+# Wait for the services to start 
+npm run start-gateway &;
 ```
 
 ### Strict linting

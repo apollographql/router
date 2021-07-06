@@ -1,108 +1,77 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::future::ready;
 use futures::lock::Mutex;
 use futures::stream::{empty, iter};
-use futures::{Future, FutureExt, StreamExt, TryFutureExt};
+use futures::{Future, FutureExt, Stream, StreamExt};
+use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan, SelectionSet};
+use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 use serde_json::{Map, Value};
 
-use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
-use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
-
-use crate::json_utils::{deep_merge, JsonUtils};
 use crate::traverser::Traverser;
 use crate::{
-    FetchError, GraphQLError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest,
-    GraphQLResponse, GraphQLResponseStream, ServiceRegistry,
+    FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
+    GraphQLResponseStream, Path, ServiceRegistry,
 };
+use futures::future::{join_all, ready};
 
-type TraversalResponseFuture = Pin<Box<dyn Future<Output = TraversalResponse> + Send>>;
-
-/// Each traversal response contains contains some json content and a path that defines where the content came from.
-/// Unlike the request this does not need to be clonable as we never have to flatmap.
-struct TraversalResponse {
-    traverser: Traverser,
-    #[allow(dead_code)]
-    patches: Vec<GraphQLResponseStream>,
-    #[allow(dead_code)]
-    errors: Vec<GraphQLError>,
-}
-
-impl TraversalResponse {
-    fn to_primary(&self) -> GraphQLResponse {
-        GraphQLResponse::Primary(GraphQLPrimaryResponse {
-            data: match self.traverser.content.to_owned() {
-                Some(Value::Object(obj)) => obj,
-                _ => Map::new(),
-            },
-            has_next: None,
-            errors: None,
-            extensions: None,
-        })
-    }
-
-    fn merge(mut self, mut response: TraversalResponse) -> TraversalResponse {
-        match (
-            &mut self
-                .traverser
-                .content
-                .get_at_path_mut(&response.traverser.path),
-            response.traverser.content,
-        ) {
-            (Some(a), Some(Value::Object(b)))
-                if { b.contains_key("_entities") && b.len() == 1 } =>
-            {
-                if let Some(Value::Array(array)) = b.get("_entities") {
-                    for value in array {
-                        deep_merge(a, &value);
-                    }
-                }
-            }
-            (Some(a), Some(b)) => {
-                deep_merge(a, &b);
-            }
-            (None, Some(b)) => self.traverser.content = Some(b),
-            (_, None) => (),
-        };
-
-        //TODO map patches and errors with the correct path
-        self.errors.append(&mut response.errors);
-        self.patches.append(&mut response.patches);
-        self
-    }
-}
+type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
+type DoneFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
-/// subgraphs.
+/// subgraphs. For information on how the algorithm works refer to the README for this crate.
 #[derive(Clone, Debug)]
 pub struct FederatedGraph {
     query_planner: Arc<Mutex<dyn QueryPlanner>>,
-    subgraph_registry: Arc<dyn ServiceRegistry>,
-    branch_buffer_factor: usize,
+    service_registry: Arc<dyn ServiceRegistry>,
+    concurrency_factor: usize,
+    chunk_size: usize,
 }
 
 impl FederatedGraph {
     /// Create a new federated graph fetcher.
-    /// query_planner is behind an arc futures::mutex for the following reasons:
+    /// query_planner is shared between threads and requires a lock for planning:
     /// 1. query planning is potentially expensive, using a mutex will help to prevent denial of
     /// service attacks by serializing request that use new queries.
     /// 2. query planners may be mutable for caching state.
     /// 3. we can clone FederatedGraph for use across threads so we can make use of syntax.
     ///
-    /// Subgraph registry is shared between all threads, but is expected to be Send and Sync and
-    /// therefore can be used without obtaining a lock.
+    /// service_registry is shared between threads, but is send and sync and therefore does not need
+    /// a mutex.
+    ///
+    /// concurrency_factor and chunk_size are not exposed right now. Setting chunk_size to 1 has
+    /// the effect of serializing the execution in a predictable order, which can be useful for
+    /// debugging.
+    ///
+    /// In future we may allow concurrency_factor and chunk_size to be set explicitly to allow
+    /// clients to avoid stalled execution at the cost of making more downstream calls.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_planner`: The query planner to use to for planning.
+    /// * `service_registry`: The registry of service name to fetcher.
+    ///
+    /// returns: FederatedGraph
+    ///
     pub fn new(
         query_planner: Arc<Mutex<dyn QueryPlanner>>,
-        subgraph_registry: Arc<dyn ServiceRegistry>,
-    ) -> FederatedGraph {
-        FederatedGraph {
-            branch_buffer_factor: 1,
+        service_registry: Arc<dyn ServiceRegistry>,
+    ) -> Self {
+        Self {
+            concurrency_factor: 100000,
+            chunk_size: 100000,
             query_planner,
-            subgraph_registry,
+            service_registry,
         }
     }
 
+    /// Create a query plan via the query planner   
+    ///
+    /// # Arguments
+    ///
+    /// * `request`: The request to be planned.
+    ///
+    /// returns: Result<QueryPlan, FetchError>
     async fn plan(self, request: GraphQLRequest) -> Result<QueryPlan, FetchError> {
         let mut query_planner = self.query_planner.lock().await;
         let query_plan = query_planner.get(
@@ -110,139 +79,291 @@ impl FederatedGraph {
             request.operation_name.to_owned(),
             QueryPlanOptions::default(),
         )?;
-        log::debug!("Planning");
+
+        if let Some(root) = &query_plan.node {
+            //Check that all fetches are pointing to known services.
+            self.validate_services(root)?;
+        }
+
         Ok(query_plan)
     }
 
-    fn visit(self, traverser: Traverser, node: PlanNode) -> TraversalResponseFuture {
+    /// Recursively validate a query plan node making sure that all services are known before we go
+    /// for execution.
+    /// This simplifies processing later as we can always guarantee that services are configured for
+    /// the plan.  
+    ///
+    /// # Arguments
+    ///
+    /// * `node`: The query plan node to validate.
+    ///
+    /// returns: Result<(), FetchError>
+    ///
+    fn validate_services(&self, node: &PlanNode) -> Result<(), FetchError> {
         match node {
-            PlanNode::Sequence { nodes } => self.visit_sequence(traverser, nodes),
-            PlanNode::Parallel { nodes } => self.visit_parallel(traverser, nodes),
-            PlanNode::Fetch(fetch) => self.visit_fetch(traverser, fetch),
-            PlanNode::Flatten(flatten) => self.visit_flatten(traverser, flatten),
+            PlanNode::Parallel { nodes } => nodes
+                .iter()
+                .try_for_each(|node| self.validate_services(node))?,
+            PlanNode::Sequence { nodes } => nodes
+                .iter()
+                .try_for_each(|node| self.validate_services(node))?,
+            PlanNode::Flatten(flatten) => self.validate_services(flatten.node.as_ref())?,
+            PlanNode::Fetch(fetch)
+                if { !self.service_registry.has(fetch.service_name.to_owned()) } =>
+            {
+                return Err(FetchError::UnknownServiceError {
+                    service: fetch.service_name.to_owned(),
+                });
+            }
+            PlanNode::Fetch(_) => {}
         }
+        Ok(())
     }
 
-    fn visit_fetch(self, traverser: Traverser, fetch: FetchNode) -> TraversalResponseFuture {
-        log::debug!("Fetch {}", fetch.service_name);
-        //TODO variable propagation
-        let service_name = fetch.service_name.to_owned();
-        let service = self.subgraph_registry.get(service_name.clone());
-        match service {
-            Some(fetcher) => {
-                let mut variables = Map::new();
-
-                match traverser.select(fetch.requires.to_owned()) {
-                    Ok(Some(value)) => {
-                        variables.insert("representations".into(), value);
+    /// Visit a stream of traversers with a plan node.
+    /// Dispatches the visit to the fetch, sequence, parallel, or flatten operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The stream of traversers to process.
+    /// * `node`: The query plan node.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    fn visit(self, traversers: TraverserStream, node: PlanNode) -> DoneFuture {
+        let concurrency_factor = self.concurrency_factor;
+        traversers
+            .chunks(self.chunk_size)
+            .map(move |traversers| {
+                let traverser_stream = iter(traversers).boxed();
+                let clone = self.to_owned();
+                match node.to_owned() {
+                    PlanNode::Sequence { nodes } => clone.visit_sequence(traverser_stream, nodes),
+                    PlanNode::Parallel { nodes } => clone.visit_parallel(traverser_stream, nodes),
+                    PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
+                        clone.visit_fetch_no_select(traverser_stream, fetch)
                     }
-                    Err(err) => return ready(traverser.err(err)).boxed(),
-                    _ => {}
+                    PlanNode::Fetch(fetch) => clone.visit_fetch_select(traverser_stream, fetch),
+                    PlanNode::Flatten(flatten) => clone.visit_flatten(traverser_stream, flatten),
                 }
+                .boxed()
+            })
+            .buffer_unordered(concurrency_factor)
+            .for_each(|_| ready(()))
+            .boxed()
+    }
+
+    /// Fetch where the plan node has a selection.
+    /// Selection fetches are performed in bulk and the results are merged back into the originating
+    /// traverser.
+    ///
+    /// For each traverser we try and obtain data from the content that matches the selection.
+    /// Any traversers that do not match anything are dropped.
+    ///
+    /// The selections are aggregated and sent to the downstream service, the result is merged back
+    /// in with the originating traverser.  
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The stream of traversers to process.
+    /// * `fetch`: The fetch plan node.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    ///
+    fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> DoneFuture {
+        //TODO variable propagation
+
+        traversers
+            .collect::<Vec<Traverser>>()
+            .map(move |traversers| {
+                let service_name = fetch.service_name.to_owned();
+                // We already checked that the service exists during planning
+                let fetcher = self.service_registry.get(service_name.clone()).unwrap();
+                let (traversers, selections) =
+                    traversers_with_selections(&fetch.requires, traversers);
+
+                let mut variables = Map::new();
+                variables.insert(
+                    "representations".into(),
+                    construct_representations(selections),
+                );
 
                 fetcher
                     .stream(GraphQLRequest {
-                        query: fetch.operation,
+                        query: fetch.operation.to_owned(),
                         operation_name: None,
                         variables: Some(variables),
                         extensions: None,
                     })
                     .into_future()
-                    .map(move |(primary, rest)| match primary {
-                        Some(Ok(GraphQLResponse::Primary(primary))) => TraversalResponse {
-                            traverser: Traverser {
-                                path: traverser.path,
-                                content: Some(Value::Object(primary.data)),
-                                request: traverser.request,
-                            },
-                            patches: vec![rest],
-                            errors: primary.errors.unwrap_or_default(),
-                        },
+                    .map(move |(primary, _rest)| match primary {
+                        // If we got results we zip the stream up with the original traverser and merge the results.
+                        Some(Ok(GraphQLResponse::Primary(primary))) => {
+                            merge_results(&service_name, &traversers, primary);
+                        }
                         Some(Ok(GraphQLResponse::Patch(_))) => {
                             panic!("Should not have had patch response as primary!")
                         }
-                        Some(Err(err)) => traverser.err(err),
-                        None => traverser.err(FetchError::NoResponseError {
+                        Some(Err(err)) => {
+                            traversers.iter().for_each(|t| t.add_err(&err));
+                        }
+                        _ => {
+                            traversers.iter().for_each(|t| {
+                                t.add_err(&FetchError::NoResponseError {
+                                    service: service_name.to_owned(),
+                                })
+                            });
+                        }
+                    })
+                    .boxed()
+            })
+            .flatten()
+            .boxed()
+    }
+
+    /// Perform a fetch with no selections.
+    /// Without selections the queries for each traverser must be made independently and cannot be
+    /// batched.
+    ///
+    /// In practice non selection queries are likely to happen only at the top level of a query plan
+    /// and will therefore only have one traverser.
+    ///
+    /// If a non-selection query does happen at a lower level with multiple traversers the requests
+    /// happen in parallel.
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The traversers to process.
+    /// * `fetch`: The fetch node.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    ///
+    fn visit_fetch_no_select(self, traversers: TraverserStream, fetch: FetchNode) -> DoneFuture {
+        //TODO variable propagation
+        let concurrency_factor = self.concurrency_factor;
+        traversers
+            .map(move |traverser| {
+                let service_name = fetch.service_name.to_owned();
+                // We already validated that the service exists during planning
+                let fetcher = self.service_registry.get(service_name.clone()).unwrap();
+                fetcher
+                    .stream(GraphQLRequest {
+                        query: fetch.operation.to_owned(),
+                        operation_name: None,
+                        variables: None,
+                        extensions: None,
+                    })
+                    .into_future()
+                    .map(move |(primary, _rest)| match primary {
+                        Some(Ok(GraphQLResponse::Primary(primary))) => {
+                            traverser.merge(Some(&Value::Object(primary.data)));
+                        }
+                        Some(Ok(GraphQLResponse::Patch(_))) => {
+                            panic!("Should not have had patch response as primary!")
+                        }
+                        Some(Err(err)) => traverser.add_err(&err),
+                        None => traverser.add_err(&FetchError::NoResponseError {
                             service: service_name,
                         }),
                     })
                     .boxed()
-            }
-            None => ready(traverser.err(FetchError::UnknownServiceError {
-                service: service_name,
-            }))
-            .boxed(),
-        }
-    }
-
-    /// Apply visit plan nodes in order, merging the results after each visit.
-    fn visit_sequence(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
-        log::debug!("Sequence");
-        let response_traverser = traverser;
-
-        iter(nodes)
-            .fold(response_traverser.to_response(), move |acc, next| {
-                self.to_owned()
-                    .visit(acc.traverser.to_owned(), next)
-                    .map(move |next| acc.merge(next))
             })
+            .buffered(concurrency_factor)
+            .for_each(|_| ready(()))
             .boxed()
     }
 
-    /// Take a stream query plan nodes and visit them in parallel with the current traverser merging
-    /// the results as they come back.
-    fn visit_parallel(self, traverser: Traverser, nodes: Vec<PlanNode>) -> TraversalResponseFuture {
-        log::debug!("Parallel");
-        let branch_buffer_factor = self.branch_buffer_factor;
-        let response_traverser = traverser.clone();
-        iter(nodes)
-            .map(move |node| self.to_owned().visit(traverser.to_owned(), node))
-            .buffer_unordered(branch_buffer_factor)
-            .fold(response_traverser.to_response(), |acc, next| async move {
-                acc.merge(next)
+    /// Visit a sequence of plan nodes in turn.
+    /// Execution waits for the previous operations to complete before executing the next operation
+    /// in the query plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The stream of traversers to process.
+    /// * `nodes`: The plan nodes in the sequence.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> DoneFuture {
+        traversers
+            .collect::<Vec<Traverser>>()
+            .map(move |traversers| {
+                // We now have a chunk of traversers
+                nodes
+                    .iter()
+                    .fold(ready(()).boxed(), |acc, node| {
+                        let next = self
+                            .to_owned()
+                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .boxed();
+
+                        acc.then(|_| next).boxed()
+                    })
+                    .boxed()
             })
+            .flatten()
             .boxed()
     }
 
-    /// Take a stream of nodes at a path in the currently fetched data and visit them with
-    /// the query plan contained in the flatten node merging the results as the come back.
-    fn visit_flatten(self, traverser: Traverser, flatten: FlattenNode) -> TraversalResponseFuture {
-        log::debug!("Flatten");
-        //TODO we want to make a single request rather than lots of requests
-        //Collect the descendants and send them on.
-        let branch_buffer_factor = self.branch_buffer_factor;
-        let descendants = traverser.stream(flatten.path.iter().map(|a| a.into()).collect());
-
-        descendants
-            .map(move |descendant| self.to_owned().visit(descendant, *flatten.node.clone()))
-            .buffer_unordered(branch_buffer_factor)
-            .fold(traverser.to_response(), |acc, next| async move {
-                acc.merge(next)
+    /// Visit a set of plan nodes in parallel.
+    /// Execution of all child operations happens in parallel, however the parallel operation cannot
+    /// complete until all child operations have completed.
+    ///
+    /// With large chunk sizes there is the potential that a stalled operation will stall the
+    /// entire pipeline.
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The stream of traversers to process.
+    /// * `nodes`: The pan nodes to execute in parallel.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> DoneFuture {
+        traversers
+            .collect::<Vec<Traverser>>()
+            .map(move |traversers| {
+                // We now have a chunk of traversers
+                // For each parallel branch we send clones of those traversers through the pipeline
+                let tasks = nodes
+                    .iter()
+                    .map(move |node| {
+                        self.to_owned()
+                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                    })
+                    .collect::<Vec<_>>();
+                join_all(tasks).map(|_| ())
             })
+            .flatten()
             .boxed()
     }
-}
 
-impl Traverser {
-    fn err(self, err: FetchError) -> TraversalResponse {
-        TraversalResponse {
-            traverser: self.to_owned(),
-            patches: vec![],
-            errors: vec![GraphQLError {
-                message: err.to_string(),
-                locations: vec![],
-                path: self.path,
-                extensions: None,
-            }],
-        }
-    }
-
-    fn to_response(&self) -> TraversalResponse {
-        TraversalResponse {
-            traverser: self.clone(),
-            patches: vec![],
-            errors: vec![],
-        }
+    /// Visit a flatten plan node.
+    /// Given a traverser this will create a stream of traversers that match the path provided in
+    /// the plan.
+    ///
+    /// For instance given:
+    /// ```json
+    /// {
+    ///     'a': {
+    ///         'b':[{'c':1}, {'c':2}]
+    ///     }
+    /// ```  
+    /// a traverser at path `a`
+    /// and a plan path of `b/@/c`
+    /// The traversers generated will be:
+    /// `a/b/0/c' and `a/b/1/c'
+    ///
+    /// # Arguments
+    ///
+    /// * `traversers`: The stream of traversers to process.
+    /// * `flatten`: The flatten plan node.
+    ///
+    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    ///
+    fn visit_flatten(&self, traversers: TraverserStream, flatten: FlattenNode) -> DoneFuture {
+        let path = Path::parse(flatten.path.join("/"));
+        let expanded = traversers
+            .flat_map(move |traverser| traverser.stream_descendants(&path))
+            .boxed();
+        self.to_owned().visit(expanded, *flatten.node)
     }
 }
 
@@ -251,19 +372,19 @@ impl GraphQLFetcher for FederatedGraph {
         let clone = self.to_owned();
         self.to_owned()
             .plan(request.to_owned())
-            .map_ok(move |plan| match plan.node {
-                Some(root) => clone
-                    .visit(Traverser::new(Arc::new(request)), root)
-                    .into_stream()
-                    .flat_map(|response| iter(vec![Ok(response.to_primary())]))
-                    .boxed(),
-                None => empty().boxed(),
-            })
-            .map_err(|err| iter(vec![Err(err)]).boxed())
             .into_stream()
-            .flat_map(|result| match result {
-                Ok(s) => s,
-                Err(e) => e,
+            .flat_map(move |plan| match plan {
+                Ok(QueryPlan { node: Some(root) }) => {
+                    let start = Traverser::new(request.to_owned());
+                    clone
+                        .to_owned()
+                        .visit(iter(vec![start.to_owned()]).boxed(), root)
+                        .map(move |_| iter(vec![Ok(start.to_primary())]))
+                        .flatten_stream()
+                        .boxed()
+                }
+                Ok(_) => empty().boxed(),
+                Err(err) => iter(vec![Err(err)]).boxed(),
             })
             .boxed()
     }
@@ -277,10 +398,77 @@ impl From<QueryPlannerError> for FetchError {
     }
 }
 
+/// Given a vec of selections merge them into an array value.
+///
+/// # Arguments
+///
+/// * `selections`: The selections to merge.
+///
+/// returns: Value
+///
+fn construct_representations(selections: Vec<Value>) -> Value {
+    Value::Array(selections.iter().map(|value| value.to_owned()).collect())
+}
+
+/// Get the list of traversers and corresponding selections for sending to a downstream service.
+/// Any traverser that does not result in a selection will be dropped.
+///
+/// # Arguments
+///
+/// * `fetch`: The fetch node that defines the
+/// * `traversers`: The vec of traversers to process.
+///
+/// returns: (Vec<Traverser>, Vec<Value>)
+///
+fn traversers_with_selections(
+    requires: &Option<SelectionSet>,
+    traversers: Vec<Traverser>,
+) -> (Vec<Traverser>, Vec<Value>) {
+    traversers
+        .iter()
+        .map(|traverser| (traverser.to_owned(), traverser.select(requires)))
+        .filter(|(_, selection)| selection.is_some())
+        .map(|(traverser, selection)| (traverser, selection.unwrap()))
+        .unzip()
+}
+
+/// Merge the results of a selection query with the originating traverser.
+/// Each result is paired with the originating traverser before merging.
+///
+/// # Arguments
+///
+/// * `traversers`: The vec of traversers to merge with.
+/// * `primary`: The response from the downstream server
+///
+/// returns: Vec<Traverser>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
+fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
+    match primary.data.get("_entities") {
+        Some(Value::Array(array)) => {
+            traversers
+                .iter()
+                .zip(array.iter())
+                .for_each(|(traverser, result)| {
+                    traverser.to_owned().merge(Some(result));
+                });
+        }
+        _ => traversers.iter().for_each(|traverser| {
+            traverser.add_err(&FetchError::ServiceError {
+                service: service.into(),
+                reason: "Malformed response".to_string(),
+            });
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use log::LevelFilter;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -296,9 +484,22 @@ mod tests {
 
     fn init() {
         let _ = env_logger::builder()
-            .filter("execution".into(), LevelFilter::Debug)
+            //.filter_level(LevelFilter::Debug)
+            //.filter("execution".into(), LevelFilter::Debug)
             .is_test(true)
             .try_init();
+    }
+
+    #[tokio::test]
+    async fn basic_request() {
+        init();
+        assert_federated_response(
+            r#"{ topProducts { name } }"#,
+            hashmap! {
+                "products".to_string()=>1,
+            },
+        )
+        .await
     }
 
     #[tokio::test]
@@ -307,9 +508,9 @@ mod tests {
         assert_federated_response(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
             hashmap! {
-                "products".to_string()=>5,
-                "reviews".to_string()=>3,
-                "accounts".to_string()=>4
+                "products".to_string()=>2,
+                "reviews".to_string()=>1,
+                "accounts".to_string()=>1
             },
         )
         .await
@@ -324,14 +525,12 @@ mod tests {
         };
         let mut expected = query_node(request.clone());
         let (mut actual, registry) = query_rust(request.clone());
-        log::debug!(
-            "{}",
-            to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap()
-        );
-        log::debug!(
-            "{}",
-            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap()
-        );
+
+        let actual = to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap();
+        let expected =
+            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap();
+        log::debug!("{}", actual);
+        log::debug!("{}", expected);
         assert_eq!(registry.totals(), service_requests);
     }
 
@@ -387,6 +586,10 @@ mod tests {
                 }
             }
             self.delegate.get(service)
+        }
+
+        fn has(&self, service: String) -> bool {
+            self.delegate.has(service)
         }
     }
 }
