@@ -16,7 +16,7 @@ use crate::{
 use futures::future::{join_all, ready};
 
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
-type DoneFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+type EmptyFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Federated graph fetcher creates a query plan and executes the plan against one or more
 /// subgraphs. For information on how the algorithm works refer to the README for this crate.
@@ -72,6 +72,7 @@ impl FederatedGraph {
     /// * `request`: The request to be planned.
     ///
     /// returns: Result<QueryPlan, FetchError>
+    ///
     async fn plan(self, request: GraphQLRequest) -> Result<QueryPlan, FetchError> {
         let mut query_planner = self.query_planner.lock().await;
         let query_plan = query_planner.get(
@@ -128,8 +129,8 @@ impl FederatedGraph {
     /// * `traversers`: The stream of traversers to process.
     /// * `node`: The query plan node.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
-    fn visit(self, traversers: TraverserStream, node: PlanNode) -> DoneFuture {
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
+    fn visit(self, traversers: TraverserStream, node: PlanNode) -> EmptyFuture {
         let concurrency_factor = self.concurrency_factor;
         traversers
             .chunks(self.chunk_size)
@@ -167,9 +168,9 @@ impl FederatedGraph {
     /// * `traversers`: The stream of traversers to process.
     /// * `fetch`: The fetch plan node.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> DoneFuture {
+    fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> EmptyFuture {
         //TODO variable propagation
 
         traversers
@@ -235,9 +236,9 @@ impl FederatedGraph {
     /// * `traversers`: The traversers to process.
     /// * `fetch`: The fetch node.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_fetch_no_select(self, traversers: TraverserStream, fetch: FetchNode) -> DoneFuture {
+    fn visit_fetch_no_select(self, traversers: TraverserStream, fetch: FetchNode) -> EmptyFuture {
         //TODO variable propagation
         let concurrency_factor = self.concurrency_factor;
         traversers
@@ -281,8 +282,8 @@ impl FederatedGraph {
     /// * `traversers`: The stream of traversers to process.
     /// * `nodes`: The plan nodes in the sequence.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
-    fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> DoneFuture {
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
+    fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> EmptyFuture {
         traversers
             .collect::<Vec<Traverser>>()
             .map(move |traversers| {
@@ -315,8 +316,8 @@ impl FederatedGraph {
     /// * `traversers`: The stream of traversers to process.
     /// * `nodes`: The pan nodes to execute in parallel.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
-    fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> DoneFuture {
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
+    fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> EmptyFuture {
         traversers
             .collect::<Vec<Traverser>>()
             .map(move |traversers| {
@@ -356,9 +357,9 @@ impl FederatedGraph {
     /// * `traversers`: The stream of traversers to process.
     /// * `flatten`: The flatten plan node.
     ///
-    /// returns: Pin<Box<dyn Stream<Item=Traverser>+Send>>
+    /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_flatten(&self, traversers: TraverserStream, flatten: FlattenNode) -> DoneFuture {
+    fn visit_flatten(&self, traversers: TraverserStream, flatten: FlattenNode) -> EmptyFuture {
         let path = Path::parse(flatten.path.join("/"));
         let expanded = traversers
             .flat_map(move |traverser| traverser.stream_descendants(&path))
@@ -442,11 +443,6 @@ fn traversers_with_selections(
 ///
 /// returns: Vec<Traverser>
 ///
-/// # Examples
-///
-/// ```
-///
-/// ```
 fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
     match primary.data.get("_entities") {
         Some(Value::Array(array)) => {
@@ -478,6 +474,7 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
 
     use super::*;
+    use crate::json_utils::is_subset;
     use maplit::hashmap;
     use std::collections::hash_map::Entry;
     use std::collections::HashMap;
@@ -526,11 +523,18 @@ mod tests {
         let mut expected = query_node(request.clone());
         let (mut actual, registry) = query_rust(request.clone());
 
-        let actual = to_string_pretty(&actual.next().await.unwrap().unwrap().primary()).unwrap();
-        let expected =
-            to_string_pretty(&expected.next().await.unwrap().unwrap().primary()).unwrap();
-        log::debug!("{}", actual);
-        log::debug!("{}", expected);
+        let actual = actual.next().await.unwrap().unwrap().primary();
+        let expected = expected.next().await.unwrap().unwrap().primary();
+        log::debug!("{}", to_string_pretty(&actual).unwrap());
+        log::debug!("{}", to_string_pretty(&expected).unwrap());
+
+        // The current implementation does not cull extra properties that should not make is to the
+        // output yet, so we check that the nodejs implementation returns a subset of the
+        // output of the rust output.
+        assert!(is_subset(
+            &Value::Object(expected.data),
+            &Value::Object(actual.data)
+        ));
         assert_eq!(registry.totals(), service_requests);
     }
 
