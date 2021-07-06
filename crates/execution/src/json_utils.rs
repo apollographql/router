@@ -28,6 +28,35 @@ pub(crate) fn deep_merge(a: &mut Value, b: &Value) {
     }
 }
 
+#[allow(unused)]
+pub(crate) fn is_subset(subset: &Value, superset: &Value) -> bool {
+    match (subset, superset) {
+        (Value::Object(subset), Value::Object(superset)) => subset.iter().all(|(key, value)| {
+            if let Some(other) = superset.get(key) {
+                is_subset(value, other)
+            } else {
+                false
+            }
+        }),
+        (Value::Array(subset), Value::Array(superset)) => {
+            subset.len() == superset.len()
+                && subset.iter().enumerate().all(|(index, value)| {
+                    if let Some(other) = superset.get(index) {
+                        is_subset(value, other)
+                    } else {
+                        false
+                    }
+                })
+        }
+        (Value::String(subset), Value::String(superset)) => subset == superset,
+        (Value::Number(subset), Value::Number(superset)) => subset == superset,
+        (Value::Bool(subset), Value::Bool(superset)) => subset == superset,
+
+        (Value::Null, Value::Null) => true,
+        (_, _) => false,
+    }
+}
+
 pub(crate) trait JsonUtils {
     /// Get a reference to the value at a particular path.
     /// Note that a flatmap path element will return an array if that is the value at that path.
@@ -74,7 +103,7 @@ mod tests {
     use serde_json::json;
     use serde_json::Value;
 
-    use crate::json_utils::{deep_merge, JsonUtils};
+    use crate::json_utils::{deep_merge, is_subset, JsonUtils};
     use crate::Path;
 
     #[test]
@@ -108,5 +137,37 @@ mod tests {
             json,
             &mut json!({"obj":{"arr":[{"prop1":1, "prop3":3},{"prop2":2, "prop4":4}]}})
         );
+    }
+
+    #[test]
+    fn test_is_subset_eq() {
+        assert!(is_subset(
+            &json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            &json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+        ));
+    }
+
+    #[test]
+    fn test_is_subset_missing_pop() {
+        assert!(is_subset(
+            &json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            &json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}})
+        ));
+    }
+
+    #[test]
+    fn test_is_subset_array_lengths_differ() {
+        assert!(!is_subset(
+            &json!({"obj":{"arr":[{"prop1":1}]}}),
+            &json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}})
+        ));
+    }
+
+    #[test]
+    fn test_is_subset_extra_prop() {
+        assert!(!is_subset(
+            &json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
+            &json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}})
+        ));
     }
 }
