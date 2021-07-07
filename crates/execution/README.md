@@ -32,11 +32,28 @@ All content except the path is shared between all traversers and their descendan
   1. Visiting the query plan with the traverser stream.
   1. When traversal has completed taking the output and creating a response.
   
-For example:
+### Query plan
+A query plan consists of 4 types of operation:
+1. Fetch - Fetch data from a subgraph.
+1. Flatten - Expand a traverser in to a stream of traversers that match a relative path in the current content.
+1. Sequence - Execute plan nodes in sequential order.
+1. Parallel - Execute plan node in parallel.
+
+### Example execution
 ![Federation sequence diagram](./images/sequence.svg)
 1. A query plan is generated from the request.
 1. The initial content is fetched.
 1. The traverser is expanded. A stream of child traversers is generated for a fetch.
 1. Parallel execution takes place. The traversers are duplicated, expanded and then sent to further fetches.
 4. The final result is extracted from the root traverser.
+
+### Structure
+Traversers are *always* streamed.
+A query plan operation *always* takes a stream of traversers and returns an empty future when the step was completed.
+
+For instance a sequence step will:
+1. Take the stream of input traversers and Collect them into a vec. 
+1. Run each child plan node in turn against the stream of input.
+1. Complete the returned future when done.
+
 
