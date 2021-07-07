@@ -84,7 +84,7 @@ pub enum PathElement {
     Flatmap,
 }
 
-/// A path for an error. This can be composed of strings and numbers
+/// A path into the result document. This can be composed of strings and numbers
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 struct Path {
