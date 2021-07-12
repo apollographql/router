@@ -18,11 +18,18 @@ We recommend using [asdf](https://github.com/asdf-vm/asdf) to make sure your nod
 The versions currently used to compile are specified in [.tool-versions](.tool-versions).
 To set up your toolchain run:
 ```shell
+asdf add-plugin rust
+asdf add-plugin nodejs
 asdf install
 asdf reshim
 ```
 
 The `harmonizer` dependency requires building a nodejs project. This should happen automatically, but may take some time.
+
+Set up your git hooks:
+```shell
+git config --local core.hooksPath .githooks/
+```
 
 ### Getting started
 Use `cargo build --all-targets` to build the project.`
