@@ -21,7 +21,7 @@ bytes = "1.0.1"
 derivative = "2.2.0"
 serde_yaml = "0.8.17"
 log = "0.4.14"
-env_logger = "0.8.4"
+env_logger = "0.9.0"
 
 [dev-dependencies]
 httpmock = "0.5.8"
