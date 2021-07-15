@@ -1,6 +1,10 @@
 //! Calls out to nodejs query planner
 //! Object model for query plan
 
+#[cfg(test)]
+use mockall::{automock, predicate::*};
+use thiserror::Error;
+
 /// A caching query planner decorator
 pub mod caching;
 
@@ -9,8 +13,6 @@ pub mod model;
 
 /// A query planner that calls out to the nodejs harmonizer
 pub mod harmonizer;
-
-use thiserror::Error;
 
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Clone)]
@@ -41,9 +43,6 @@ impl QueryPlanOptions {
         QueryPlanOptions {}
     }
 }
-
-#[cfg(test)]
-use mockall::{automock, predicate::*};
 
 /// QueryPlanner can be used to plan queries.
 /// Implementations may cache query plans.

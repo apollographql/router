@@ -13,17 +13,17 @@ pub struct HttpServiceRegistry {
 
 impl HttpServiceRegistry {
     /// Create a new http service registry from a configuration.
-    pub fn new(configuration: Configuration) -> Self {
+    pub fn new(configuration: &Configuration) -> Self {
         Self {
             services: configuration
                 .subgraphs
-                .into_iter()
+                .iter()
                 .map(|(name, subgraph)| {
                     let fetcher: Box<dyn GraphQLFetcher> = Box::new(HttpSubgraphFetcher::new(
                         name.to_owned(),
-                        subgraph.routing_url,
+                        subgraph.routing_url.to_owned(),
                     ));
-                    (name, fetcher)
+                    (name.to_string(), fetcher)
                 })
                 .collect(),
         }
@@ -52,7 +52,7 @@ mod tests {
         let config =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let registry = HttpServiceRegistry::new(config);
+        let registry = HttpServiceRegistry::new(&config);
         assert!(registry.get("products".into()).is_some())
     }
 }

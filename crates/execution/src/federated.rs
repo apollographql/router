@@ -1,19 +1,20 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::future::{join_all, ready};
 use futures::lock::Mutex;
 use futures::stream::{empty, iter};
 use futures::{Future, FutureExt, Stream, StreamExt};
+use serde_json::{Map, Value};
+
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan, SelectionSet};
 use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
-use serde_json::{Map, Value};
 
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
     GraphQLResponseStream, Path, ServiceRegistry,
 };
-use futures::future::{join_all, ready};
 
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 type EmptyFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -31,10 +32,8 @@ pub struct FederatedGraph {
 impl FederatedGraph {
     /// Create a new federated graph fetcher.
     /// query_planner is shared between threads and requires a lock for planning:
-    /// 1. query planning is potentially expensive, using a mutex will help to prevent denial of
-    /// service attacks by serializing request that use new queries.
-    /// 2. query planners may be mutable for caching state.
-    /// 3. we can clone FederatedGraph for use across threads so we can make use of syntax.
+    /// 1. query planners may be mutable for caching state.
+    /// 2. we can clone FederatedGraph for use across threads so we can make use of syntax.
     ///
     /// service_registry is shared between threads, but is send and sync and therefore does not need
     /// a mutex.
@@ -464,7 +463,11 @@ fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimar
 
 #[cfg(test)]
 mod tests {
+    use std::collections::hash_map::Entry;
+    use std::collections::HashMap;
+
     use futures::StreamExt;
+    use maplit::hashmap;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -472,12 +475,9 @@ mod tests {
 
     use crate::http_service_registry::HttpServiceRegistry;
     use crate::http_subgraph::HttpSubgraphFetcher;
+    use crate::json_utils::is_subset;
 
     use super::*;
-    use crate::json_utils::is_subset;
-    use maplit::hashmap;
-    use std::collections::hash_map::Entry;
-    use std::collections::HashMap;
 
     fn init() {
         let _ = env_logger::builder()
@@ -553,7 +553,7 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
-            config,
+            &config,
         )));
         let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), registry.to_owned());
         (federated.stream(request), registry)

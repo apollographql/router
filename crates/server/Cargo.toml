@@ -8,3 +8,23 @@ license-file = "./LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hyper = { version = "0.14.10", features = ["full"] }
+tokio = { version = "1.8.1", features = ["full"] }
+query-planner = { path = "../query-planner" }
+execution = { path = "../execution" }
+configuration = { path = "../configuration" }
+futures = { version = "0.3.15", features = ["thread-pool"]}
+typed-builder = "0.9.0"
+derive_more = "0.99.16"
+log = "0.4.14"
+env_logger = "0.8.4"
+notify = "4.0.17"
+thiserror = "1.0.26"
+serde_json = "1.0.64"
+derivative = "2.2.0"
+
+[dev-dependencies]
+insta = "1.7.1"
+mockall = "0.10.1"
+serde_yaml = "0.8.17"
+reqwest = "0.11.4"

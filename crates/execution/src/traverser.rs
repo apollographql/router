@@ -1,6 +1,8 @@
+use std::fmt::Formatter;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use derivative::Derivative;
 use futures::stream::{empty, iter};
 use futures::{Stream, StreamExt};
 use serde_json::{Map, Value};
@@ -13,8 +15,6 @@ use crate::{
     FetchError, GraphQLError, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
     GraphQLResponseStream, Object, Path, PathElement,
 };
-use derivative::Derivative;
-use std::fmt::Formatter;
 
 #[allow(dead_code)]
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
@@ -228,6 +228,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use futures::StreamExt;
+
     use serde_json::json;
     use serde_json::Value;
 
@@ -235,7 +236,6 @@ mod tests {
 
     use crate::traverser::Traverser;
     use crate::{GraphQLError, GraphQLRequest, Path};
-    use log::LevelFilter;
 
     impl PartialEq for Traverser {
         fn eq(&self, other: &Self) -> bool {
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_from_obj() {
         let _ = env_logger::builder()
-            .filter("execution".into(), LevelFilter::Debug)
+            //.filter("execution".into(), LevelFilter::Debug)
             .is_test(true)
             .try_init();
         assert_eq!(

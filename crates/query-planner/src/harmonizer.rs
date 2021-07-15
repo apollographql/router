@@ -1,9 +1,10 @@
-/// Simple query planner that does no caching.
-use crate::model::QueryPlan;
-use crate::{QueryPlanOptions, QueryPlannerError};
 use harmonizer::plan::{plan, OperationalContext, PlanningErrors};
 use serde_json::de::from_str;
 use serde_json::Error;
+
+/// Simple query planner that does no caching.
+use crate::model::QueryPlan;
+use crate::{QueryPlanOptions, QueryPlannerError};
 
 /// A query planner that calls out to the nodejs harmonizer query planner.
 /// No caching is performed. To cache wrap in a `CachingQueryPlanner`.
@@ -62,10 +63,11 @@ impl From<serde_json::Error> for QueryPlannerError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::model::FetchNode;
     use crate::model::PlanNode::Fetch;
     use crate::QueryPlanner;
+
+    use super::*;
 
     #[test]
     fn test_plan() {
