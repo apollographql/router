@@ -259,7 +259,6 @@ pub enum GraphQLResponse {
 
 impl GraphQLResponse {
     /// Return as a primary response. Panics if not the right type, so should only be used in testing.
-    #[allow(dead_code)]
     pub fn primary(self) -> GraphQLPrimaryResponse {
         if let GraphQLResponse::Primary(primary) = self {
             primary
@@ -269,7 +268,6 @@ impl GraphQLResponse {
     }
 
     /// Return as a patch response. Panics if not the right type, so should only be used in testing.
-    #[allow(dead_code)]
     pub fn patch(self) -> GraphQLPatchResponse {
         if let GraphQLResponse::Patch(patch) = self {
             patch

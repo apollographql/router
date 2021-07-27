@@ -35,7 +35,7 @@ type SchemaStream = Pin<Box<dyn Stream<Item = Schema> + Send>>;
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum FederatedServerError {
     /// Something went wrong when trying to shutdown the http server.
-    #[error("Failed to stop http")]
+    #[error("Failed to stop HTTP Server")]
     HttpServerLifecycleError,
 
     /// Configuration was not supplied.
@@ -278,11 +278,8 @@ impl FederatedServerHandle {
     /// returns: Result<(), FederatedServerError>
     pub async fn shutdown(mut self) -> Result<(), FederatedServerError> {
         self.maybe_close_state_receiver();
-        match self.shutdown_sender.send(()) {
-            Ok(_) => {}
-            Err(_) => {
-                error!("Failed to send shutdown event")
-            }
+        if self.shutdown_sender.send(()).is_err() {
+            error!("Failed to send shutdown event")
         }
         self.result.await
     }
@@ -366,14 +363,9 @@ mod tests {
     use execution::{GraphQLFetcher, GraphQLRequest, GraphQLResponseStream};
 
     use super::*;
-    use log::LevelFilter;
 
     fn init() -> FederatedServerHandle {
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Debug)
-            //.filter("execution".into(), LevelFilter::Debug)
-            //.is_test(true)
-            .try_init();
+        let _ = env_logger::builder().is_test(true).try_init();
 
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))

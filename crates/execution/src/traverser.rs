@@ -303,10 +303,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_from_obj() {
-        let _ = env_logger::builder()
-            //.filter("execution".into(), LevelFilter::Debug)
-            .is_test(true)
-            .try_init();
         assert_eq!(
             stub_traverser()
                 .stream_descendants(&Path::parse("obj".into()))

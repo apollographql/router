@@ -17,6 +17,7 @@ use crate::FederatedServerError::{NoConfiguration, NoSchema};
 use crate::{Event, FederatedServerError, Schema, State};
 use futures::channel::mpsc;
 use futures::channel::mpsc::Sender;
+use query_planner::caching::WithCaching;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 enum PrivateState {
@@ -117,11 +118,11 @@ where
                 ) => {
                     debug!("Reloading schema");
                     let new_graph = <StateMachine<S>>::create_graph(
-                        &configuration.read().unwrap(),
-                        &schema.read().unwrap(),
+                        &configuration.read().unwrap(), //unwrap-lock
+                        &schema.read().unwrap(),        //unwrap-lock
                     );
-                    let _ = std::mem::replace(&mut *schema.write().unwrap(), new_schema);
-                    let _ = std::mem::replace(&mut *graph.write().unwrap(), new_graph);
+                    let _ = std::mem::replace(&mut *schema.write().unwrap(), new_schema); //unwrap-lock
+                    let _ = std::mem::replace(&mut *graph.write().unwrap(), new_graph); //unwrap-lock
                     Running(configuration, schema, graph, server_handle)
                 }
 
@@ -132,8 +133,9 @@ where
                 ) => {
                     debug!("Reloading configuration");
                     let old_config =
-                        std::mem::replace(&mut *configuration.write().unwrap(), new_configuration);
+                        std::mem::replace(&mut *configuration.write().unwrap(), new_configuration); //unwrap-lock
                     let server_handle = if old_config.listen != configuration.read().unwrap().listen
+                    //unwrap-lock
                     {
                         debug!("Restarting http");
                         match server_handle.shutdown().await {
@@ -188,9 +190,7 @@ where
     fn create_graph(configuration: &Configuration, schema: &str) -> FederatedGraph {
         let service_registry = HttpServiceRegistry::new(configuration);
         FederatedGraph::new(
-            Arc::new(futures::lock::Mutex::new(HarmonizerQueryPlanner::new(
-                schema.to_owned(),
-            ))),
+            HarmonizerQueryPlanner::new(schema.to_owned()).with_caching(),
             Arc::new(service_registry),
         )
     }
@@ -235,11 +235,7 @@ mod tests {
     use std::sync::Mutex;
 
     fn init() {
-        let _ = env_logger::builder()
-            //.filter_level(LevelFilter::Debug)
-            //.filter("execution".into(), LevelFilter::Debug)
-            .is_test(true)
-            .try_init();
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
     #[tokio::test]
@@ -401,7 +397,7 @@ mod tests {
                 HttpServerHandle {
                     shutdown_sender,
                     server_future: ready(Ok(())).boxed(),
-                    listen_address: configuration.read().unwrap().listen,
+                    listen_address: configuration.read().unwrap().listen, //unwrap-lock
                 }
             },
         );

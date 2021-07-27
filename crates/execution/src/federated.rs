@@ -52,14 +52,14 @@ impl FederatedGraph {
     ///
     /// returns: FederatedGraph
     ///
-    pub fn new(
-        query_planner: Arc<Mutex<dyn QueryPlanner>>,
-        service_registry: Arc<dyn ServiceRegistry>,
-    ) -> Self {
+    pub fn new<T>(query_planner: T, service_registry: Arc<dyn ServiceRegistry>) -> Self
+    where
+        T: QueryPlanner + 'static,
+    {
         Self {
             concurrency_factor: 100000,
             chunk_size: 100000,
-            query_planner,
+            query_planner: Arc::new(Mutex::new(query_planner)),
             service_registry,
         }
     }
@@ -555,7 +555,7 @@ mod tests {
         let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
             &config,
         )));
-        let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), registry.to_owned());
+        let federated = FederatedGraph::new(planner, registry.to_owned());
         (federated.stream(request), registry)
     }
 

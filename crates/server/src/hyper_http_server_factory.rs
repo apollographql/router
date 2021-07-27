@@ -16,6 +16,7 @@ use execution::{FetchError, GraphQLFetcher};
 
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
+use log::error;
 
 /// A basic http server using hyper.
 /// Uses streaming as primary method of response.
@@ -39,7 +40,7 @@ impl HttpServerFactory for HyperHttpServerFactory {
         F: GraphQLFetcher + 'static,
     {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listen_address = configuration.read().unwrap().listen;
+        let listen_address = configuration.read().unwrap().listen; //unwrap-lock
 
         let server =
             Server::bind(&listen_address).serve(make_service_fn(move |_conn| {
@@ -99,6 +100,7 @@ async fn handle_graphql_request<F>(
     F: GraphQLFetcher,
 {
     let (_header, body) = request.into_parts();
+    // TODO Hardening. to_bytes does not reject huge requests.
     match hyper::body::to_bytes(body).await {
         Ok(bytes) => {
             let graphql_request = serde_json::from_slice(&bytes);
@@ -122,13 +124,14 @@ async fn handle_graphql_request<F>(
                 }
                 Err(err) => {
                     *response.status_mut() = StatusCode::BAD_REQUEST;
-                    *response.body_mut() = Body::from(err.to_string());
+                    *response.body_mut() = Body::from(format!("Request was malformed: {}", err));
                 }
             }
         }
         Err(err) => {
+            error!("Could not read request: {}", err);
             *response.status_mut() = StatusCode::BAD_REQUEST;
-            *response.body_mut() = Body::from(err.to_string());
+            *response.body_mut() = Body::from("Could not read request.");
         }
     }
 }
@@ -156,14 +159,16 @@ mod tests {
     use std::str::FromStr;
 
     use futures::StreamExt;
-    use log::LevelFilter;
     #[cfg(test)]
     use mockall::{mock, predicate::*};
     use reqwest::redirect::Policy;
     use reqwest::Client;
     use serde_json::json;
 
-    use execution::{FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponseStream};
+    use execution::{
+        FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
+        GraphQLResponseStream,
+    };
 
     use super::*;
 
@@ -175,12 +180,8 @@ mod tests {
         }
     }
 
-    fn init() -> (Arc<RwLock<MockMyGraphQLFetcher>>, HttpServerHandle, Client) {
-        let _ = env_logger::builder()
-            .filter_level(LevelFilter::Info)
-            //.filter("execution".into(), LevelFilter::Debug)
-            .is_test(true)
-            .try_init();
+    fn init(listen_address: &str) -> (Arc<RwLock<MockMyGraphQLFetcher>>, HttpServerHandle, Client) {
+        let _ = env_logger::builder().is_test(true).try_init();
         let fetcher = MockMyGraphQLFetcher::new();
         let server_factory = HyperHttpServerFactory::new();
         let fetcher = Arc::new(RwLock::new(fetcher));
@@ -188,7 +189,7 @@ mod tests {
             fetcher.to_owned(),
             Arc::new(RwLock::new(
                 Configuration::builder()
-                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .listen(SocketAddr::from_str(listen_address).unwrap())
                     .subgraphs(HashMap::new())
                     .build(),
             )),
@@ -202,7 +203,8 @@ mod tests {
 
     #[tokio::test]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        let (_fetcher, server, client) = init();
+        // Use IPv6 just for fun.
+        let (_fetcher, server, client) = init("[::1]:0");
 
         for url in vec![
             format!("http://{}/", server.listen_address),
@@ -225,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_request() -> Result<(), FederatedServerError> {
-        let (_fetcher, server, client) = init();
+        let (_fetcher, server, client) = init("127.0.0.1:0");
 
         let response = client
             .post(format!("http://{}/graphql", server.listen_address))
@@ -238,8 +240,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn response() -> Result<(), FederatedServerError> {
+        let expected_response = GraphQLPrimaryResponse {
+            data: json!(
+            {
+              "response": "yay",
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+            has_next: None,
+            errors: None,
+            extensions: None,
+        };
+        let example_response = expected_response.clone();
+        let (fetcher, server, client) = init("127.0.0.1:0");
+        {
+            fetcher
+                .write()
+                .unwrap()
+                .expect_stream()
+                .times(1)
+                .return_once(move |_| {
+                    futures::stream::iter(vec![Ok(GraphQLResponse::Primary(example_response))])
+                        .boxed()
+                });
+        }
+        let response = client
+            .post(format!("http://{}/graphql", server.listen_address))
+            .body(
+                json!(
+                {
+                  "query": "query",
+                })
+                .to_string(),
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.json::<GraphQLPrimaryResponse>().await.unwrap(),
+            expected_response
+        );
+        server.shutdown().await
+    }
+
+    #[tokio::test]
     async fn response_failure() -> Result<(), FederatedServerError> {
-        let (fetcher, server, client) = init();
+        let (fetcher, server, client) = init("127.0.0.1:0");
         {
             fetcher
                 .write()
