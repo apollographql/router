@@ -1,10 +1,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use futures::future::{join_all, ready};
 use futures::lock::Mutex;
-use futures::stream::{empty, iter};
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::prelude::*;
 use serde_json::{Map, Value};
 
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan, SelectionSet};
@@ -134,7 +132,7 @@ impl FederatedGraph {
         traversers
             .chunks(self.chunk_size)
             .map(move |traversers| {
-                let traverser_stream = iter(traversers).boxed();
+                let traverser_stream = stream::iter(traversers).boxed();
                 let clone = self.to_owned();
                 match node.to_owned() {
                     PlanNode::Sequence { nodes } => clone.visit_sequence(traverser_stream, nodes),
@@ -148,7 +146,7 @@ impl FederatedGraph {
                 .boxed()
             })
             .buffer_unordered(concurrency_factor)
-            .for_each(|_| ready(()))
+            .for_each(|_| future::ready(()))
             .boxed()
     }
 
@@ -268,7 +266,7 @@ impl FederatedGraph {
                     .boxed()
             })
             .buffered(concurrency_factor)
-            .for_each(|_| ready(()))
+            .for_each(|_| future::ready(()))
             .boxed()
     }
 
@@ -289,10 +287,10 @@ impl FederatedGraph {
                 // We now have a chunk of traversers
                 nodes
                     .iter()
-                    .fold(ready(()).boxed(), |acc, node| {
+                    .fold(future::ready(()).boxed(), |acc, node| {
                         let next = self
                             .to_owned()
-                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
                             .boxed();
 
                         acc.then(|_| next).boxed()
@@ -326,10 +324,10 @@ impl FederatedGraph {
                     .iter()
                     .map(move |node| {
                         self.to_owned()
-                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
                     })
                     .collect::<Vec<_>>();
-                join_all(tasks).map(|_| ())
+                future::join_all(tasks).map(|_| ())
             })
             .flatten()
             .boxed()
@@ -378,13 +376,13 @@ impl GraphQLFetcher for FederatedGraph {
                     let start = Traverser::new(request.to_owned());
                     clone
                         .to_owned()
-                        .visit(iter(vec![start.to_owned()]).boxed(), root)
-                        .map(move |_| iter(vec![Ok(start.to_primary())]))
+                        .visit(stream::iter(vec![start.to_owned()]).boxed(), root)
+                        .map(move |_| stream::iter(vec![Ok(start.to_primary())]))
                         .flatten_stream()
                         .boxed()
                 }
-                Ok(_) => empty().boxed(),
-                Err(err) => iter(vec![Err(err)]).boxed(),
+                Ok(_) => stream::empty().boxed(),
+                Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
             .boxed()
     }
@@ -466,7 +464,7 @@ mod tests {
     use std::collections::hash_map::Entry;
     use std::collections::HashMap;
 
-    use futures::StreamExt;
+    use futures::prelude::*;
     use maplit::hashmap;
     use serde_json::to_string_pretty;
 

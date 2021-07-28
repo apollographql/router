@@ -3,7 +3,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::pin::Pin;
 
-use futures::Stream;
+use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;

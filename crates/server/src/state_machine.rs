@@ -1,12 +1,13 @@
 use std::sync::{Arc, RwLock};
 
-use futures::StreamExt;
-use futures::{SinkExt, Stream};
+use futures::channel::mpsc;
+use futures::prelude::*;
 use log::{debug, error};
 
 use configuration::Configuration;
 use execution::federated::FederatedGraph;
 use execution::http_service_registry::HttpServiceRegistry;
+use query_planner::caching::WithCaching;
 use query_planner::harmonizer::HarmonizerQueryPlanner;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -15,9 +16,6 @@ use crate::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use crate::Event::{UpdateConfiguration, UpdateSchema};
 use crate::FederatedServerError::{NoConfiguration, NoSchema};
 use crate::{Event, FederatedServerError, Schema, State};
-use futures::channel::mpsc;
-use futures::channel::mpsc::Sender;
-use query_planner::caching::WithCaching;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 enum PrivateState {
@@ -179,7 +177,7 @@ where
     }
 
     async fn notify_state_listener(
-        state_listener: &mut Option<Sender<State>>,
+        state_listener: &mut Option<mpsc::Sender<State>>,
         new_public_state: State,
     ) {
         if let Some(state_listener) = state_listener {
@@ -222,17 +220,14 @@ mod tests {
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::Mutex;
 
-    use futures::channel::oneshot::Receiver;
-    use futures::future::ready;
-    use futures::stream::iter;
-    use futures::{FutureExt, StreamExt};
+    use futures::channel::oneshot;
+    use futures::prelude::*;
 
     use crate::http_server_factory::MockHttpServerFactory;
 
     use super::*;
-    use futures::channel::oneshot;
-    use std::sync::Mutex;
 
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -376,7 +371,9 @@ mod tests {
     ) -> Result<(), FederatedServerError> {
         let (state_listener, state_reciever) = mpsc::channel(100);
         let state_machine = StateMachine::new(server_factory, Some(state_listener));
-        let result = state_machine.process_events(iter(events).boxed()).await;
+        let result = state_machine
+            .process_events(stream::iter(events).boxed())
+            .await;
         let states = state_reciever.collect::<Vec<State>>().await;
         assert_eq!(states, expected_states);
         result
@@ -384,7 +381,7 @@ mod tests {
 
     fn expect_graceful_shutdown(
         server_factory: &mut MockHttpServerFactory,
-    ) -> Arc<Mutex<Vec<Receiver<()>>>> {
+    ) -> Arc<Mutex<Vec<oneshot::Receiver<()>>>> {
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
         server_factory.expect_create().returning(
@@ -396,7 +393,7 @@ mod tests {
                     .push(shutdown_receiver);
                 HttpServerHandle {
                     shutdown_sender,
-                    server_future: ready(Ok(())).boxed(),
+                    server_future: future::ready(Ok(())).boxed(),
                     listen_address: configuration.read().unwrap().listen, //unwrap-lock
                 }
             },

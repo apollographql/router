@@ -1,14 +1,16 @@
 //! Starts a server that will handle http graphql requests.
+use std::net::SocketAddr;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
-use futures::future::ready;
-use futures::stream::{iter, pending, select_all};
-use futures::{Future, FutureExt, Stream, StreamExt, TryFutureExt};
+use futures::channel::{mpsc, oneshot};
+use futures::prelude::*;
 use log::error;
 use thiserror::Error;
+use tokio::task::spawn;
 use typed_builder::TypedBuilder;
 
 use configuration::Configuration;
@@ -17,12 +19,7 @@ use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 use crate::hyper_http_server_factory::HyperHttpServerFactory;
 use crate::state_machine::StateMachine;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
-use futures::channel::mpsc::channel;
-use futures::channel::oneshot::Receiver;
-use futures::channel::{mpsc, oneshot};
-use std::net::SocketAddr;
-use std::task::{Context, Poll};
-use tokio::task::spawn;
+
 mod http_server_factory;
 mod hyper_http_server_factory;
 mod state_machine;
@@ -64,10 +61,10 @@ impl SchemaType {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            SchemaType::Instance(instance) => iter(vec![UpdateSchema(instance)]).boxed(),
+            SchemaType::Instance(instance) => stream::iter(vec![UpdateSchema(instance)]).boxed(),
             SchemaType::Stream(stream) => stream.map(UpdateSchema).boxed(),
         }
-        .chain(iter(vec![NoMoreSchema]))
+        .chain(stream::iter(vec![NoMoreSchema]))
     }
 }
 
@@ -92,11 +89,11 @@ impl ConfigurationType {
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             ConfigurationType::Instance(instance) => {
-                iter(vec![UpdateConfiguration(instance)]).boxed()
+                stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
             ConfigurationType::Stream(stream) => stream.map(UpdateConfiguration).boxed(),
         }
-        .chain(iter(vec![NoMoreConfiguration]))
+        .chain(stream::iter(vec![NoMoreConfiguration]))
     }
 }
 
@@ -123,7 +120,7 @@ impl ShutdownType {
     /// Convert this shutdown hook into a future. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ShutdownType::None => pending::<Event>().boxed(),
+            ShutdownType::None => stream::pending::<Event>().boxed(),
             ShutdownType::Custom(future) => future.map(|_| Shutdown).into_stream().boxed(),
             ShutdownType::CtrlC => async {
                 tokio::signal::ctrl_c()
@@ -257,7 +254,7 @@ impl FederatedServerHandle {
                     None
                 }
             })
-            .filter(|socket| ready(socket != &None))
+            .filter(|socket| future::ready(socket != &None))
             .map(|s| s.unwrap())
             .next()
             .boxed()
@@ -267,7 +264,7 @@ impl FederatedServerHandle {
     /// Return a receiver of lifecycle events for the server. This method may only be called once.
     ///
     /// returns: mspc::Receiver<State>
-    fn state(&mut self) -> mpsc::Receiver<State> {
+    pub fn state(&mut self) -> mpsc::Receiver<State> {
         self.state_receiver.take().expect(
             "State listener has already been taken. 'ready' or 'state' may be called once only.",
         )
@@ -312,7 +309,7 @@ impl FederatedServer {
     /// returns: FederatedServerHandle
     ///
     pub fn serve(self) -> FederatedServerHandle {
-        let (state_listener, state_receiver) = channel::<State>(1);
+        let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = HyperHttpServerFactory::new();
         let state_machine = StateMachine::new(server_factory, Some(state_listener));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -339,16 +336,19 @@ impl FederatedServer {
     /// Create the unified event stream.
     /// This merges all contributing streams and sets up shutdown handling.
     /// When a shutdown message is received no more events are emitted.
-    fn generate_event_stream(self, shutdown_receiver: Receiver<()>) -> impl Stream<Item = Event> {
+    fn generate_event_stream(
+        self,
+        shutdown_receiver: oneshot::Receiver<()>,
+    ) -> impl Stream<Item = Event> {
         // Chain is required so that the final shutdown message is sent.
-        let messages = select_all(vec![
+        let messages = stream::select_all(vec![
             self.shutdown.into_stream().boxed(),
             self.configuration.into_stream().boxed(),
             self.schema.into_stream().boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
-        .take_while(|msg| ready(msg != &Shutdown))
-        .chain(iter(vec![Shutdown]))
+        .take_while(|msg| future::ready(msg != &Shutdown))
+        .chain(stream::iter(vec![Shutdown]))
         .boxed();
         messages
     }
@@ -356,7 +356,7 @@ impl FederatedServer {
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
+    use futures::prelude::*;
     use serde_json::to_string_pretty;
 
     use execution::http_subgraph::HttpSubgraphFetcher;

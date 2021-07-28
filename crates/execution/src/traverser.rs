@@ -3,8 +3,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use derivative::Derivative;
-use futures::stream::{empty, iter};
-use futures::{Stream, StreamExt};
+use futures::prelude::*;
 use serde_json::{Map, Value};
 
 use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
@@ -123,7 +122,7 @@ impl Traverser {
     /// relative to the current traverser path.
     pub(crate) fn stream_descendants(&self, path: &Path) -> TraverserStream {
         // The root of our stream. We start at ourself!
-        let mut stream = iter(vec![self.to_owned()]).boxed();
+        let mut stream = stream::iter(vec![self.to_owned()]).boxed();
 
         // Split the path on array. We only need to flatmap at arrays.
         let path_split_by_arrays = path
@@ -144,7 +143,7 @@ impl Traverser {
                         // This was an array and we wanted a flatmap
                         Some(Value::Array(array)) if Some(&Flatmap) == path_chunk.last() => {
                             let parent = descendant.parent();
-                            iter(0..array.len())
+                            stream::iter(0..array.len())
                                 .map(move |index| {
                                     parent.descendant(&Path::new(&[PathElement::Index(index)]))
                                 })
@@ -152,10 +151,10 @@ impl Traverser {
                         }
                         // No flatmap requested, just return the element.
                         Some(_child) if Some(&Flatmap) != path_chunk.last() => {
-                            iter(vec![descendant.to_owned()]).boxed()
+                            stream::iter(vec![descendant.to_owned()]).boxed()
                         }
                         // Either there was nothing or there was a flatmap requested on a non array.
-                        None | Some(_) => empty().boxed(),
+                        None | Some(_) => stream::empty().boxed(),
                     }
                 })
                 .boxed();
@@ -227,8 +226,7 @@ fn select_inline_fragment(content: &Object, fragment: &InlineFragment) -> Option
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use futures::StreamExt;
-
+    use futures::prelude::*;
     use serde_json::json;
     use serde_json::Value;
 

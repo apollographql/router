@@ -1,8 +1,7 @@
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::stream::iter;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::prelude::*;
 
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
@@ -46,7 +45,7 @@ impl HttpSubgraphFetcher {
             // Flatten the stream
             .flat_map(|result| match result {
                 Ok(s) => s,
-                Err(err) => iter(vec![Err(err)]).boxed(),
+                Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
             .map_err(move |err| FetchError::ServiceError {
                 service: service.to_owned(),

@@ -2,21 +2,19 @@ use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 
 use futures::channel::oneshot;
-use futures::future::FutureExt;
-use futures::StreamExt;
-use futures::TryStreamExt;
+use futures::prelude::*;
 use hyper::body::Bytes;
 use hyper::header::{HOST, LOCATION};
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
+use log::error;
 
 use configuration::Configuration;
 use execution::{FetchError, GraphQLFetcher};
 
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use log::error;
 
 /// A basic http server using hyper.
 /// Uses streaming as primary method of response.
@@ -158,7 +156,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use futures::StreamExt;
+    use futures::prelude::*;
     #[cfg(test)]
     use mockall::{mock, predicate::*};
     use reqwest::redirect::Policy;

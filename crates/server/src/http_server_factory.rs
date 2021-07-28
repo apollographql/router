@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
-use futures::channel::oneshot::Sender;
-use futures::Future;
+use futures::channel::oneshot;
+use futures::prelude::*;
 use log::error;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -30,7 +30,7 @@ pub(crate) trait HttpServerFactory {
 /// and sending huge requests. There is potential work needed for hardening.
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
-    pub(crate) shutdown_sender: Sender<()>,
+    pub(crate) shutdown_sender: oneshot::Sender<()>,
 
     /// Future to wait on for graceful shutdown
     pub(crate) server_future:
@@ -58,7 +58,7 @@ impl HttpServerHandle {
 mod tests {
     use std::str::FromStr;
 
-    use futures::{FutureExt, TryFutureExt};
+    use futures::prelude::*;
 
     use super::*;
 
