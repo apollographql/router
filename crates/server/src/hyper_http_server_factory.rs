@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::body::Bytes;
-use hyper::header::{HOST, LOCATION};
+use hyper::header::{ACCEPT, HOST, LOCATION};
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
@@ -77,13 +77,22 @@ where
 
     match (request.method(), request.uri().path()) {
         (&Method::POST, "/graphql") => handle_graphql_request(request, graph, &mut response).await,
-        (&Method::GET, "/") | (&Method::GET, "/graphql") => {
+        (&Method::GET, "/") | (&Method::GET, "/graphql")
+            if request
+                .headers()
+                .get_all(ACCEPT)
+                .iter()
+                .any(|header| match header.to_str() {
+                    Ok(value) => value.contains("text/html"),
+                    Err(_) => false,
+                }) =>
+        {
             handle_redirect_to_studio(request, &mut response)
         }
 
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;
-            *response.body_mut() = Body::from("");
+            *response.body_mut() = Body::from("Not found");
         }
     };
 
@@ -206,7 +215,12 @@ mod tests {
             format!("http://{}/", server.listen_address),
             format!("http://{}/graphql", server.listen_address),
         ] {
-            let response = client.get(url).send().await.unwrap();
+            let response = client
+                .get(url)
+                .header(ACCEPT, "text/html")
+                .send()
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
             assert_eq!(
                 response.headers().get(LOCATION).unwrap().to_str().unwrap(),
