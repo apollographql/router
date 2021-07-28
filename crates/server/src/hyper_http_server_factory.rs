@@ -109,13 +109,12 @@ async fn handle_graphql_request<F>(
                             .read()
                             .unwrap()
                             .stream(graphql_request)
-                            .map_ok(|chunk| match serde_json::to_string(&chunk) {
-                                Ok(bytes) => Ok(Bytes::from(bytes)),
-                                Err(_err) => Err(FetchError::MalformedResponseError),
-                            })
                             .map(|res| match res {
-                                Ok(Ok(ok)) => Ok(ok),
-                                Ok(Err(err)) | Err(err) => Err(err),
+                                Ok(chunk) => match serde_json::to_string(&chunk) {
+                                    Ok(bytes) => Ok(Bytes::from(bytes)),
+                                    Err(_) => Err(FetchError::MalformedResponseError),
+                                },
+                                Err(err) => Err(err),
                             })
                             .boxed(),
                     )

@@ -44,11 +44,8 @@ pub(crate) struct HttpServerHandle {
 
 impl HttpServerHandle {
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
-        match self.shutdown_sender.send(()) {
-            Ok(_) => {}
-            Err(_) => {
-                error!("Failed to notify http thread of shutdown")
-            }
+        if let Err(_err) = self.shutdown_sender.send(()) {
+            error!("Failed to notify http thread of shutdown")
         };
         self.server_future.await
     }

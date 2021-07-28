@@ -19,13 +19,16 @@ use crate::{Event, FederatedServerError, Schema, State};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 enum PrivateState {
-    Startup(Option<Configuration>, Option<Schema>),
-    Running(
-        Arc<RwLock<Configuration>>,
-        Arc<RwLock<Schema>>,
-        Arc<RwLock<FederatedGraph>>,
-        HttpServerHandle,
-    ),
+    Startup {
+        configuration: Option<Configuration>,
+        schema: Option<Schema>,
+    },
+    Running {
+        configuration: Arc<RwLock<Configuration>>,
+        schema: Arc<RwLock<Schema>>,
+        graph: Arc<RwLock<FederatedGraph>>,
+        server_handle: HttpServerHandle,
+    },
     Stopped,
     Errored(FederatedServerError),
 }
@@ -47,10 +50,10 @@ where
 impl From<&PrivateState> for State {
     fn from(private_state: &PrivateState) -> Self {
         match private_state {
-            Startup(_, _) => State::Startup,
-            Running(_, _, _, server_handler) => State::Running(server_handler.listen_address),
+            Startup { .. } => State::Startup,
+            Running { server_handle, .. } => State::Running(server_handle.listen_address),
             Stopped => State::Stopped,
-            Errored(_) => State::Errored,
+            Errored { .. } => State::Errored,
         }
     }
 }
@@ -71,7 +74,10 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
         debug!("Starting");
-        let mut state = Startup(None, None);
+        let mut state = Startup {
+            configuration: None,
+            schema: None,
+        };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
         <StateMachine<S>>::notify_state_listener(&mut state_listener, initial_state).await;
@@ -79,29 +85,35 @@ where
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
                 // Startup: Handle configuration updates, maybe transition to running.
-                (Startup(configuration, _schema), UpdateSchema(new_schema)) => self
-                    .maybe_transition_to_running(Startup(
-                        configuration.to_owned(),
-                        Some(new_schema),
-                    )),
+                (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
+                    .maybe_transition_to_running(Startup {
+                        configuration,
+                        schema: Some(new_schema),
+                    }),
                 // Startup: Handle schema updates, maybe transition to running.
-                (Startup(_configuration, schema), UpdateConfiguration(new_configuration)) => self
-                    .maybe_transition_to_running(Startup(
-                        Some(new_configuration),
-                        schema.to_owned(),
-                    )),
+                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => self
+                    .maybe_transition_to_running(Startup {
+                        configuration: Some(new_configuration),
+                        schema,
+                    }),
 
                 // Startup: Missing configuration.
-                (Startup(None, _schema), NoMoreConfiguration) => Errored(NoConfiguration),
+                (
+                    Startup {
+                        configuration: None,
+                        ..
+                    },
+                    NoMoreConfiguration,
+                ) => Errored(NoConfiguration),
 
                 // Startup: Missing schema.
-                (Startup(_configuration, None), NoMoreSchema) => Errored(NoSchema),
+                (Startup { schema: None, .. }, NoMoreSchema) => Errored(NoSchema),
 
                 // Startup: Go straight for shutdown.
-                (Startup(_, _), Shutdown) => Stopped,
+                (Startup { .. }, Shutdown) => Stopped,
 
                 // Running: Handle shutdown.
-                (Running(_configuration, _schema, _graph, server_handle), Shutdown) => {
+                (Running { server_handle, .. }, Shutdown) => {
                     debug!("Shutting down");
                     match server_handle.shutdown().await {
                         Ok(_) => Stopped,
@@ -111,7 +123,12 @@ where
 
                 // Running: Handle schema updates
                 (
-                    Running(configuration, schema, graph, server_handle),
+                    Running {
+                        configuration,
+                        schema,
+                        graph,
+                        server_handle,
+                    },
                     UpdateSchema(new_schema),
                 ) => {
                     debug!("Reloading schema");
@@ -119,28 +136,36 @@ where
                         &configuration.read().unwrap(), //unwrap-lock
                         &schema.read().unwrap(),        //unwrap-lock
                     );
-                    let _ = std::mem::replace(&mut *schema.write().unwrap(), new_schema); //unwrap-lock
-                    let _ = std::mem::replace(&mut *graph.write().unwrap(), new_graph); //unwrap-lock
-                    Running(configuration, schema, graph, server_handle)
+                    *schema.write().unwrap() = new_schema; //unwrap-lock
+                    *graph.write().unwrap() = new_graph; //unwrap-lock
+                    Running {
+                        configuration,
+                        schema,
+                        graph,
+                        server_handle,
+                    }
                 }
 
                 // Running: Handle configuration updates
                 (
-                    Running(configuration, schema, graph, server_handle),
+                    Running {
+                        configuration,
+                        schema,
+                        graph,
+                        server_handle,
+                    },
                     UpdateConfiguration(new_configuration),
                 ) => {
                     debug!("Reloading configuration");
-                    let old_config =
-                        std::mem::replace(&mut *configuration.write().unwrap(), new_configuration); //unwrap-lock
-                    let server_handle = if old_config.listen != configuration.read().unwrap().listen
+
+                    *configuration.write().unwrap() = new_configuration; //unwrap-lock
+                    let server_handle = if server_handle.listen_address
+                        != configuration.read().unwrap().listen
                     //unwrap-lock
                     {
                         debug!("Restarting http");
-                        match server_handle.shutdown().await {
-                            Ok(_) => {}
-                            Err(_) => {
-                                error!("Failed to notify shutdown")
-                            }
+                        if let Err(_err) = server_handle.shutdown().await {
+                            error!("Failed to notify shutdown")
                         }
                         let new_handle = self
                             .http_server_factory
@@ -151,7 +176,12 @@ where
                         server_handle
                     };
 
-                    Running(configuration, schema, graph, server_handle)
+                    Running {
+                        configuration,
+                        schema,
+                        graph,
+                        server_handle,
+                    }
                 }
 
                 // Anything else we don't care about
@@ -194,7 +224,11 @@ where
     }
 
     fn maybe_transition_to_running(&self, state: PrivateState) -> PrivateState {
-        if let Startup(Some(configuration), Some(schema)) = state {
+        if let Startup {
+            configuration: Some(configuration),
+            schema: Some(schema),
+        } = state
+        {
             debug!("Starting http");
 
             let graph = Arc::new(RwLock::new(<StateMachine<S>>::create_graph(
@@ -204,11 +238,16 @@ where
             let configuration = Arc::new(RwLock::new(configuration));
             let schema = Arc::new(RwLock::new(schema));
 
-            let handle = self
+            let server_handle = self
                 .http_server_factory
                 .create(graph.to_owned(), configuration.to_owned());
-            debug!("Started on {}", handle.listen_address);
-            Running(configuration, schema, graph, handle)
+            debug!("Started on {}", server_handle.listen_address);
+            Running {
+                configuration,
+                schema,
+                graph,
+                server_handle,
+            }
         } else {
             state
         }

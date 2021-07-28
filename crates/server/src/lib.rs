@@ -318,11 +318,10 @@ impl FederatedServer {
                 .process_events(self.generate_event_stream(shutdown_receiver))
                 .await
         })
-        .map_err(|_| FederatedServerError::HttpServerLifecycleError)
         .map(|r| match r {
             Ok(Ok(ok)) => Ok(ok),
             Ok(Err(err)) => Err(err),
-            Err(err) => Err(err),
+            Err(_err) => Err(FederatedServerError::HttpServerLifecycleError),
         })
         .boxed();
 

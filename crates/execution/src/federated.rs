@@ -13,6 +13,7 @@ use crate::{
     FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
     GraphQLResponseStream, Path, ServiceRegistry,
 };
+use futures::{FutureExt, StreamExt};
 
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 type EmptyFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -478,11 +479,7 @@ mod tests {
     use super::*;
 
     fn init() {
-        let _ = env_logger::builder()
-            //.filter_level(LevelFilter::Debug)
-            //.filter("execution".into(), LevelFilter::Debug)
-            .is_test(true)
-            .try_init();
+        let _ = env_logger::builder().try_init();
     }
 
     #[tokio::test]

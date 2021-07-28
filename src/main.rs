@@ -11,7 +11,7 @@ async fn main() -> Result<(), FederatedServerError> {
     // TODO Actually implement this properly. Command line should allow setting of log level, config location and schema location. Make sure to have sensible defaults.
     let _ = env_logger::builder()
         .filter_level(LevelFilter::Debug)
-        .try_init();
+        .init();
 
     let configuration =
         serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
