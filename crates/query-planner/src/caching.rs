@@ -54,8 +54,9 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::MockQueryPlanner;
+
+    use super::*;
 
     #[test]
     fn test_plan() {

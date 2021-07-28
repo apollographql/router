@@ -3,7 +3,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::pin::Pin;
 
-use futures::Stream;
+use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -35,7 +35,7 @@ pub type GraphQLResponseStream =
     Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>> + Send>>;
 
 /// Error types for QueryPlanner
-#[derive(Error, Debug, Eq, PartialEq)]
+#[derive(Error, Debug, Eq, PartialEq, Clone)]
 pub enum FetchError {
     /// An error when fetching from a service.
     #[error("Service '{service}' fetch failed: {reason}")]
@@ -67,6 +67,10 @@ pub enum FetchError {
         /// The service that was unknown.
         service: String,
     },
+
+    /// An error when serializing the response.
+    #[error("Response serialization error")]
+    MalformedResponseError,
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -87,7 +91,7 @@ pub enum PathElement {
 /// A path into the result document. This can be composed of strings and numbers
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
-struct Path {
+pub struct Path {
     path: Vec<PathElement>,
 }
 
@@ -149,13 +153,20 @@ impl Display for Path {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQLRequest {
-    query: String,
+    /// The graphql query.
+    pub query: String,
+
+    /// The optional graphql operation.
     #[serde(skip_serializing_if = "Option::is_none")]
-    operation_name: Option<String>,
+    pub operation_name: Option<String>,
+
+    /// The optional variables in the form of a json object.
     #[serde(skip_serializing_if = "Option::is_none")]
-    variables: Option<Object>,
+    pub variables: Option<Object>,
+
+    /// Graphql extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
-    extensions: Extensions,
+    pub extensions: Extensions,
 }
 
 /// A graphql primary response.
@@ -163,13 +174,20 @@ pub struct GraphQLRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQLPrimaryResponse {
-    data: Object,
+    /// The response data.
+    pub data: Object,
+
+    /// The optional indicator that there may be more data in the form of a patch response.
     #[serde(skip_serializing_if = "Option::is_none")]
-    has_next: Option<bool>,
+    pub has_next: Option<bool>,
+
+    /// The optional graphql errors encountered.
     #[serde(skip_serializing_if = "Option::is_none")]
-    errors: Errors,
+    pub errors: Errors,
+
+    /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
-    extensions: Extensions,
+    pub extensions: Extensions,
 }
 
 /// A graphql patch response .
@@ -177,37 +195,60 @@ pub struct GraphQLPrimaryResponse {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQLPatchResponse {
-    label: String,
-    data: Object,
-    path: Path,
-    has_next: bool,
+    /// The label that was passed to the defer or stream directive for this patch.
+    pub label: String,
+
+    /// The data to merge into the response.
+    pub data: Object,
+
+    /// The path that the data should be merged at.
+    pub path: Path,
+
+    /// An indicator if there is potentially more data to fetch.
+    pub has_next: bool,
+
+    /// The optional errors encountered for this patch.
     #[serde(skip_serializing_if = "Option::is_none")]
-    errors: Errors,
+    pub errors: Errors,
+
+    /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
-    extensions: Extensions,
+    pub extensions: Extensions,
 }
 
 /// A GraphQL error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQLError {
-    message: String,
-    locations: Vec<Location>,
-    path: Path,
-    extensions: Extensions,
+    /// The error message.
+    pub message: String,
+
+    /// The locations of the error from the originating request.
+    pub locations: Vec<Location>,
+
+    /// The path of the error.
+    pub path: Path,
+
+    /// The optional graphql extensions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Extensions,
 }
 
-/// A location in a file in a graphql error.
+/// A location in the request that triggered a graphql error.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {
-    line: i32,
-    column: i32,
+    /// The line number.
+    pub line: i32,
+
+    /// The column number.
+    pub column: i32,
 }
 
 /// A GraphQL response.
 /// A response stream will typically be composed of a single primary and zero or more patches.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum GraphQLResponse {
     /// The first item in a stream of responses will always be a primary response.
     Primary(GraphQLPrimaryResponse),
@@ -217,8 +258,8 @@ pub enum GraphQLResponse {
 }
 
 impl GraphQLResponse {
-    #[allow(dead_code)]
-    fn primary(self) -> GraphQLPrimaryResponse {
+    /// Return as a primary response. Panics if not the right type, so should only be used in testing.
+    pub fn primary(self) -> GraphQLPrimaryResponse {
         if let GraphQLResponse::Primary(primary) = self {
             primary
         } else {
@@ -226,8 +267,8 @@ impl GraphQLResponse {
         }
     }
 
-    #[allow(dead_code)]
-    fn patch(self) -> GraphQLPatchResponse {
+    /// Return as a patch response. Panics if not the right type, so should only be used in testing.
+    pub fn patch(self) -> GraphQLPatchResponse {
         if let GraphQLResponse::Patch(patch) = self {
             patch
         } else {

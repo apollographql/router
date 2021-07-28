@@ -45,7 +45,7 @@ A query plan consists of 4 types of operation:
 1. The initial content is fetched.
 1. The traverser is expanded. A stream of child traversers is generated for a fetch.
 1. Parallel execution takes place. The traversers are duplicated, expanded and then sent to further fetches.
-4. The final result is extracted from the root traverser.
+1. The final result is extracted from the root traverser.
 
 ### Structure
 Traversers are *always* streamed.

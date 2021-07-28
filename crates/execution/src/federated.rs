@@ -2,18 +2,18 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::lock::Mutex;
-use futures::stream::{empty, iter};
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::prelude::*;
+use serde_json::{Map, Value};
+
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan, SelectionSet};
 use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
-use serde_json::{Map, Value};
 
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
     GraphQLResponseStream, Path, ServiceRegistry,
 };
-use futures::future::{join_all, ready};
+use futures::{FutureExt, StreamExt};
 
 type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 type EmptyFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -31,10 +31,8 @@ pub struct FederatedGraph {
 impl FederatedGraph {
     /// Create a new federated graph fetcher.
     /// query_planner is shared between threads and requires a lock for planning:
-    /// 1. query planning is potentially expensive, using a mutex will help to prevent denial of
-    /// service attacks by serializing request that use new queries.
-    /// 2. query planners may be mutable for caching state.
-    /// 3. we can clone FederatedGraph for use across threads so we can make use of syntax.
+    /// 1. query planners may be mutable for caching state.
+    /// 2. we can clone FederatedGraph for use across threads so we can make use of syntax.
     ///
     /// service_registry is shared between threads, but is send and sync and therefore does not need
     /// a mutex.
@@ -53,14 +51,14 @@ impl FederatedGraph {
     ///
     /// returns: FederatedGraph
     ///
-    pub fn new(
-        query_planner: Arc<Mutex<dyn QueryPlanner>>,
-        service_registry: Arc<dyn ServiceRegistry>,
-    ) -> Self {
+    pub fn new<T>(query_planner: T, service_registry: Arc<dyn ServiceRegistry>) -> Self
+    where
+        T: QueryPlanner + 'static,
+    {
         Self {
             concurrency_factor: 100000,
             chunk_size: 100000,
-            query_planner,
+            query_planner: Arc::new(Mutex::new(query_planner)),
             service_registry,
         }
     }
@@ -135,7 +133,7 @@ impl FederatedGraph {
         traversers
             .chunks(self.chunk_size)
             .map(move |traversers| {
-                let traverser_stream = iter(traversers).boxed();
+                let traverser_stream = stream::iter(traversers).boxed();
                 let clone = self.to_owned();
                 match node.to_owned() {
                     PlanNode::Sequence { nodes } => clone.visit_sequence(traverser_stream, nodes),
@@ -149,7 +147,7 @@ impl FederatedGraph {
                 .boxed()
             })
             .buffer_unordered(concurrency_factor)
-            .for_each(|_| ready(()))
+            .for_each(|_| future::ready(()))
             .boxed()
     }
 
@@ -269,7 +267,7 @@ impl FederatedGraph {
                     .boxed()
             })
             .buffered(concurrency_factor)
-            .for_each(|_| ready(()))
+            .for_each(|_| future::ready(()))
             .boxed()
     }
 
@@ -290,10 +288,10 @@ impl FederatedGraph {
                 // We now have a chunk of traversers
                 nodes
                     .iter()
-                    .fold(ready(()).boxed(), |acc, node| {
+                    .fold(future::ready(()).boxed(), |acc, node| {
                         let next = self
                             .to_owned()
-                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
                             .boxed();
 
                         acc.then(|_| next).boxed()
@@ -327,10 +325,10 @@ impl FederatedGraph {
                     .iter()
                     .map(move |node| {
                         self.to_owned()
-                            .visit(iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
                     })
                     .collect::<Vec<_>>();
-                join_all(tasks).map(|_| ())
+                future::join_all(tasks).map(|_| ())
             })
             .flatten()
             .boxed()
@@ -379,13 +377,13 @@ impl GraphQLFetcher for FederatedGraph {
                     let start = Traverser::new(request.to_owned());
                     clone
                         .to_owned()
-                        .visit(iter(vec![start.to_owned()]).boxed(), root)
-                        .map(move |_| iter(vec![Ok(start.to_primary())]))
+                        .visit(stream::iter(vec![start.to_owned()]).boxed(), root)
+                        .map(move |_| stream::iter(vec![Ok(start.to_primary())]))
                         .flatten_stream()
                         .boxed()
                 }
-                Ok(_) => empty().boxed(),
-                Err(err) => iter(vec![Err(err)]).boxed(),
+                Ok(_) => stream::empty().boxed(),
+                Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
             .boxed()
     }
@@ -464,7 +462,11 @@ fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimar
 
 #[cfg(test)]
 mod tests {
-    use futures::StreamExt;
+    use std::collections::hash_map::Entry;
+    use std::collections::HashMap;
+
+    use futures::prelude::*;
+    use maplit::hashmap;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -472,19 +474,12 @@ mod tests {
 
     use crate::http_service_registry::HttpServiceRegistry;
     use crate::http_subgraph::HttpSubgraphFetcher;
+    use crate::json_utils::is_subset;
 
     use super::*;
-    use crate::json_utils::is_subset;
-    use maplit::hashmap;
-    use std::collections::hash_map::Entry;
-    use std::collections::HashMap;
 
     fn init() {
-        let _ = env_logger::builder()
-            //.filter_level(LevelFilter::Debug)
-            //.filter("execution".into(), LevelFilter::Debug)
-            .is_test(true)
-            .try_init();
+        let _ = env_logger::builder().try_init();
     }
 
     #[tokio::test]
@@ -553,9 +548,9 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
-            config,
+            &config,
         )));
-        let federated = FederatedGraph::new(Arc::new(Mutex::new(planner)), registry.to_owned());
+        let federated = FederatedGraph::new(planner, registry.to_owned());
         (federated.stream(request), registry)
     }
 

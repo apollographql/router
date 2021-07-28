@@ -1,4 +1,4 @@
-listen: "127.0.0.1:4001"
+listen: "127.0.0.1:4100"
 subgraphs:
   accounts:
     routing_url: http://localhost:4001/graphql
