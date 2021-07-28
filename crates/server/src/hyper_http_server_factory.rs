@@ -201,8 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        // Use IPv6 just for fun.
-        let (_fetcher, server, client) = init("[::1]:0");
+        let (_fetcher, server, client) = init("127.0.0.1:0");
 
         for url in vec![
             format!("http://{}/", server.listen_address),
