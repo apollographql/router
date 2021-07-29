@@ -9,7 +9,7 @@ license-file = "./LICENSE"
 
 [dependencies]
 harmonizer = { git = "https://github.com/apollographql/federation.git", branch = "query-planer-js-bridge"}
-serde_json = "1.0.65"
+serde_json = "1.0.66"
 serde = { version = "1.0.126", features = ["derive"] }
 derive_more = "0.99.16"
 thiserror = "1.0.26"
