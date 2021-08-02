@@ -8,7 +8,6 @@ use hyper::header::{ACCEPT, HOST, LOCATION};
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
-use log::error;
 
 use configuration::Configuration;
 use execution::{FetchError, GraphQLFetcher};
@@ -135,7 +134,7 @@ async fn handle_graphql_request<F>(
             }
         }
         Err(err) => {
-            error!("Could not read request: {}", err);
+            log::error!("Could not read request: {}", err);
             *response.status_mut() = StatusCode::BAD_REQUEST;
             *response.body_mut() = Body::from("Could not read request.");
         }

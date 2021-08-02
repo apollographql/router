@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 
 use futures::channel::oneshot;
 use futures::prelude::*;
-use log::error;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 
@@ -45,7 +44,7 @@ pub(crate) struct HttpServerHandle {
 impl HttpServerHandle {
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
         if let Err(_err) = self.shutdown_sender.send(()) {
-            error!("Failed to notify http thread of shutdown")
+            log::error!("Failed to notify http thread of shutdown")
         };
         self.server_future.await
     }

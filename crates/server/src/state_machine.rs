@@ -1,8 +1,8 @@
 use std::sync::{Arc, RwLock};
 
+use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
-use log::{debug, error};
 
 use configuration::Configuration;
 use execution::federated::FederatedGraph;
@@ -18,6 +18,8 @@ use crate::FederatedServerError::{NoConfiguration, NoSchema};
 use crate::{Event, FederatedServerError, Schema, State};
 
 /// This state maintains private information that is not exposed to the user via state listener.
+#[derive(Derivative)]
+#[derivative(Debug)]
 enum PrivateState {
     Startup {
         configuration: Option<Configuration>,
@@ -26,7 +28,9 @@ enum PrivateState {
     Running {
         configuration: Arc<RwLock<Configuration>>,
         schema: Arc<RwLock<Schema>>,
+        #[derivative(Debug = "ignore")]
         graph: Arc<RwLock<FederatedGraph>>,
+        #[derivative(Debug = "ignore")]
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -73,7 +77,7 @@ where
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
-        debug!("Starting");
+        log::debug!("Starting");
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -114,7 +118,7 @@ where
 
                 // Running: Handle shutdown.
                 (Running { server_handle, .. }, Shutdown) => {
-                    debug!("Shutting down");
+                    log::debug!("Shutting down");
                     match server_handle.shutdown().await {
                         Ok(_) => Stopped,
                         Err(err) => Errored(err),
@@ -131,7 +135,7 @@ where
                     },
                     UpdateSchema(new_schema),
                 ) => {
-                    debug!("Reloading schema");
+                    log::debug!("Reloading schema");
                     let new_graph = <StateMachine<S>>::create_graph(
                         &configuration.read().unwrap(), //unwrap-lock
                         &schema.read().unwrap(),        //unwrap-lock
@@ -156,21 +160,21 @@ where
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
-                    debug!("Reloading configuration");
+                    log::debug!("Reloading configuration");
 
                     *configuration.write().unwrap() = new_configuration; //unwrap-lock
                     let server_handle = if server_handle.listen_address
                         != configuration.read().unwrap().listen
                     //unwrap-lock
                     {
-                        debug!("Restarting http");
+                        log::debug!("Restarting http");
                         if let Err(_err) = server_handle.shutdown().await {
-                            error!("Failed to notify shutdown")
+                            log::error!("Failed to notify shutdown")
                         }
                         let new_handle = self
                             .http_server_factory
                             .create(graph.to_owned(), configuration.to_owned());
-                        debug!("Restarted on {}", new_handle.listen_address);
+                        log::debug!("Restarted on {}", new_handle.listen_address);
                         new_handle
                     } else {
                         server_handle
@@ -185,17 +189,29 @@ where
                 }
 
                 // Anything else we don't care about
-                (state, _message) => state,
+                (state, message) => {
+                    log::debug!("Ignoring message transition {:?}", message);
+                    state
+                }
             };
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
                 <StateMachine<S>>::notify_state_listener(&mut state_listener, new_public_state)
-                    .await
+                    .await;
             }
+            log::debug!("Transitioned to state {:?}", &new_state);
             state = new_state;
+
+            // If we've errored then exit even if there are potentially more messages
+            if matches!(&state, Errored(_)) {
+                break;
+            }
+            if let Errored(_) = &state {
+                break;
+            }
         }
-        debug!("Stopped");
+        log::debug!("Stopped");
 
         match state {
             Stopped => Ok(()),
@@ -229,7 +245,7 @@ where
             schema: Some(schema),
         } = state
         {
-            debug!("Starting http");
+            log::debug!("Starting http");
 
             let graph = Arc::new(RwLock::new(<StateMachine<S>>::create_graph(
                 &configuration,
@@ -241,7 +257,7 @@ where
             let server_handle = self
                 .http_server_factory
                 .create(graph.to_owned(), configuration.to_owned());
-            debug!("Started on {}", server_handle.listen_address);
+            log::debug!("Started on {}", server_handle.listen_address);
             Running {
                 configuration,
                 schema,
@@ -268,13 +284,13 @@ mod tests {
 
     use super::*;
 
+    #[ctor::ctor]
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
     #[tokio::test]
     async fn no_configuration() {
-        init();
         let server_factory = MockHttpServerFactory::new();
         assert_eq!(
             Err(NoConfiguration),
@@ -289,7 +305,6 @@ mod tests {
 
     #[tokio::test]
     async fn no_schema() {
-        init();
         let server_factory = MockHttpServerFactory::new();
         assert_eq!(
             Err(NoSchema),
@@ -304,7 +319,6 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_during_startup() {
-        init();
         let server_factory = MockHttpServerFactory::new();
         assert_eq!(
             Ok(()),
@@ -319,8 +333,6 @@ mod tests {
 
     #[tokio::test]
     async fn startup_shutdown() {
-        init();
-
         let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
         assert_eq!(
@@ -345,8 +357,6 @@ mod tests {
 
     #[tokio::test]
     async fn startup_reload_schema() {
-        init();
-
         let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
         assert_eq!(
@@ -372,8 +382,6 @@ mod tests {
 
     #[tokio::test]
     async fn startup_reload_configuration() {
-        init();
-
         let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
         assert_eq!(

@@ -1,60 +1,27 @@
-# Router
-Rust implementation of federation router.
+# Apollo Federation Router
+Rust implementation of Federated GraphQL router.
 
-## Libs
-* Configuration - Config model and loading.
-* Query planner - Query plan model and a caching wrapper for calling out to the nodejs query planner.
-* Execution - Converts a query plan to a stream.
-* Server - Handles requests, 
-  obtains a query plan from the query planner, 
-  obtains an execution pipeline, 
-  returns the results
-  
-## Binaries
-* Main - Starts a server. 
+## Usage
+Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql` to be supplied.
+These are either located in the default directory (OS dependent) or explicitly specified via flag.
 
-## Development
-We recommend using [asdf](https://github.com/asdf-vm/asdf) to make sure your nodejs and rust versions are correct.
-The versions currently used to compile are specified in [.tool-versions](.tool-versions).
-To set up your toolchain run:
-```shell
-asdf add-plugin rust
-asdf add-plugin nodejs
-asdf install
-asdf reshim
+The router will draw its configuration from an OS dependent directory that can be viewed via the help command.
+```
+OPTIONS:
+    -c, --config <configuration-path>    Configuration location relative to the project directory [env:
+                                         CONFIGURATION_PATH=]  [default: configuration.yaml]
+    -p, --project_dir <project-dir>      Directory where configuration files are located (OS dependent). [env:
+                                         PROJECT_DIR=]  [default: /home/bryn/.config/federation]
+    -s, --schema <schema-path>           Schema location relative to the project directory [env: SCHEMA_PATH=]
+                                         [default: supergraph.graphql]
 ```
 
-The `harmonizer` dependency requires building a nodejs project. This should happen automatically, but may take some time.
-
-Set up your git hooks:
-```shell
-git config --local core.hooksPath .githooks/
+To use configuration from another directory use the `-p` option.
+```
+router -p examples/supergraphdemo
 ```
 
-### Getting started
-Use `cargo build --all-targets` to build the project.`
-
-Some tests run against the existing nodejs implementation of the router. This requires that the `federation-demo`
-project is running.
-
-```shell
-git submodule sync --recursive; git submodule update --recursive --init
-cd submodules/federation-demo; npm install; 
-npm run start-services &;
-# Wait for the services to start 
-npm run start-gateway &;
-```
-
-### Strict linting
-While developing locally doc warnings and other lint checks are disabled. 
-This limits the noise generated while exploration is taking place.
-
-When you are ready to create a PR, run a build with strict checking enabled.
-Use `scripts/ci-build.sh` to perform such a build.
+This CLI is not meant to be a long term thing, as users will likely use Rover to start the server in future.
 
 ## Project maintainers
 Apollo Graph, Inc. <opensource@apollographql.com>
-
-
-
-
