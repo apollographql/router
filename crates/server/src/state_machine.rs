@@ -164,7 +164,7 @@ where
 
                     *configuration.write().unwrap() = new_configuration; //unwrap-lock
                     let server_handle = if server_handle.listen_address
-                        != configuration.read().unwrap().listen
+                        != configuration.read().unwrap().server.listen
                     //unwrap-lock
                     {
                         log::debug!("Restarting http");
@@ -393,7 +393,11 @@ mod tests {
                     UpdateSchema("".to_string()),
                     UpdateConfiguration(
                         Configuration::builder()
-                            .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
+                            .server(
+                                configuration::Server::builder()
+                                    .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
+                                    .build()
+                            )
                             .subgraphs(HashMap::new())
                             .build()
                     ),
@@ -441,7 +445,7 @@ mod tests {
                 HttpServerHandle {
                     shutdown_sender,
                     server_future: future::ready(Ok(())).boxed(),
-                    listen_address: configuration.read().unwrap().listen, //unwrap-lock
+                    listen_address: configuration.read().unwrap().server.listen, //unwrap-lock
                 }
             },
         );

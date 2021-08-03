@@ -4,16 +4,21 @@ use std::sync::{Arc, RwLock};
 use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::body::Bytes;
-use hyper::header::{ACCEPT, HOST, LOCATION};
+use hyper::header::{
+    ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE, HOST,
+    LOCATION, ORIGIN,
+};
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
 
 use configuration::Configuration;
-use execution::{FetchError, GraphQLFetcher};
+use execution::{FetchError, GraphQLFetcher, GraphQLRequest};
 
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
+use hyper::http::header::ACCESS_CONTROL_ALLOW_METHODS;
+use hyper::http::HeaderValue;
 
 /// A basic http server using hyper.
 /// Uses streaming as primary method of response.
@@ -37,15 +42,17 @@ impl HttpServerFactory for HyperHttpServerFactory {
         F: GraphQLFetcher + 'static,
     {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listen_address = configuration.read().unwrap().listen; //unwrap-lock
+        let listen_address = configuration.read().unwrap().server.listen; //unwrap-lock
 
-        let server =
-            Server::bind(&listen_address).serve(make_service_fn(move |_conn| {
-                let graph = graph.to_owned();
-                async move {
-                    Ok::<_, Infallible>(service_fn(move |req| serve_req(req, graph.to_owned())))
-                }
-            }));
+        let server = Server::bind(&listen_address).serve(make_service_fn(move |_conn| {
+            let graph = graph.to_owned();
+            let configuration = configuration.to_owned();
+            async move {
+                Ok::<_, Infallible>(service_fn(move |req| {
+                    serve_req(req, graph.clone(), configuration.clone())
+                }))
+            }
+        }));
         let listen_address = server.local_addr().to_owned();
         let server_future = tokio::spawn(server.with_graceful_shutdown(async {
             shutdown_receiver.await.ok();
@@ -68,14 +75,14 @@ impl HttpServerFactory for HyperHttpServerFactory {
 async fn serve_req<F>(
     request: Request<Body>,
     graph: Arc<RwLock<F>>,
+    configuration: Arc<RwLock<Configuration>>,
 ) -> Result<Response<Body>, hyper::Error>
 where
     F: GraphQLFetcher,
 {
     let mut response = Response::new(Body::empty());
-
+    add_access_control_header(&configuration, &request, &mut response);
     match (request.method(), request.uri().path()) {
-        (&Method::POST, "/graphql") => handle_graphql_request(request, graph, &mut response).await,
         (&Method::GET, "/") | (&Method::GET, "/graphql")
             if request
                 .headers()
@@ -88,6 +95,10 @@ where
         {
             handle_redirect_to_studio(request, &mut response)
         }
+        (&Method::OPTIONS, "/") | (&Method::OPTIONS, "/graphql") => {
+            handle_cors_preflight(&configuration, &mut response);
+        }
+        (_, "/") | (_, "/graphql") => handle_graphql_request(request, graph, &mut response).await,
 
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;
@@ -96,6 +107,61 @@ where
     };
 
     Ok(response)
+}
+
+fn add_access_control_header(
+    configuration: &Arc<RwLock<Configuration>>,
+    request: &Request<Body>,
+    response: &mut Response<Body>,
+) {
+    let configuration = configuration.read().unwrap(); //unwrap-lock
+
+    // If the host name matches one of the hosts specified in the config then return the hostname
+    // in the cors header.
+    if let Some(cors) = &configuration.server.cors {
+        let headers = response.headers_mut();
+        for cors_origin in &cors.origins {
+            for header_origin in request.headers().get_all(ORIGIN) {
+                if let Ok(orign) = header_origin.to_str() {
+                    if orign == cors_origin {
+                        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, header_origin.to_owned());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn handle_cors_preflight(
+    configuration: &Arc<RwLock<Configuration>>,
+    response: &mut Response<Body>,
+) {
+    let configuration = configuration.read().unwrap(); //unwrap-lock
+    if let Some(cors) = &configuration.server.cors {
+        *response.status_mut() = StatusCode::NO_CONTENT;
+        let headers = response.headers_mut();
+        for method in &cors.methods {
+            match &method.parse() {
+                Ok(header_value) => {
+                    headers.append(
+                        ACCESS_CONTROL_ALLOW_METHODS,
+                        HeaderValue::from(header_value),
+                    );
+                }
+                Err(err) => {
+                    log::error!(
+                        "Failed to set {} header. {}",
+                        ACCESS_CONTROL_ALLOW_METHODS,
+                        err
+                    );
+                }
+            }
+        }
+        headers.insert(
+            ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from(CONTENT_TYPE),
+        );
+    }
 }
 
 async fn handle_graphql_request<F>(
@@ -109,13 +175,13 @@ async fn handle_graphql_request<F>(
     // TODO Hardening. to_bytes does not reject huge requests.
     match hyper::body::to_bytes(body).await {
         Ok(bytes) => {
-            let graphql_request = serde_json::from_slice(&bytes);
+            let graphql_request = serde_json::from_slice::<GraphQLRequest>(&bytes);
             match graphql_request {
                 Ok(graphql_request) => {
                     *response.body_mut() = Body::wrap_stream(
                         graph
                             .read()
-                            .unwrap()
+                            .unwrap() //unwrap-lock
                             .stream(graphql_request)
                             .map(|res| match res {
                                 Ok(chunk) => match serde_json::to_string(&chunk) {
@@ -143,16 +209,22 @@ async fn handle_graphql_request<F>(
 
 fn handle_redirect_to_studio(request: Request<Body>, response: &mut Response<Body>) {
     *response.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+    if let Some(header_value) = request
+        .headers()
+        .get(HOST)
+        .and_then(|x| x.to_str().ok())
+        .and_then(|x| {
+            format!(
+                "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                x
+            )
+            .parse()
+            .ok()
+        })
+    {
+        response.headers_mut().insert(LOCATION, header_value);
+    }
 
-    response.headers_mut().insert(
-        LOCATION,
-        format!(
-            "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-            request.headers().get(HOST).unwrap().to_str().unwrap()
-        )
-        .parse()
-        .unwrap(),
-    );
     *response.body_mut() = Body::from("");
 }
 
@@ -176,6 +248,18 @@ mod tests {
     };
 
     use super::*;
+    use configuration::Cors;
+
+    macro_rules! assert_header {
+        ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
+            assert_eq!(
+                // the unwraps should probably be replace by expect too
+                $response.headers().get_all($header).iter().map(|v|v.to_str().unwrap().to_string()).collect::<Vec<String>>(),
+                $expected
+                $(, $msg)*
+            );
+        };
+    }
 
     mock! {
         #[derive(Debug)]
@@ -194,7 +278,14 @@ mod tests {
             fetcher.to_owned(),
             Arc::new(RwLock::new(
                 Configuration::builder()
-                    .listen(SocketAddr::from_str(listen_address).unwrap())
+                    .server(
+                        configuration::Server::builder()
+                            .listen(SocketAddr::from_str(listen_address).unwrap())
+                            .cors(Some(
+                                Cors::builder().origins(vec!["studio".to_string()]).build(),
+                            ))
+                            .build(),
+                    )
                     .subgraphs(HashMap::new())
                     .build(),
             )),
@@ -221,13 +312,15 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-            assert_eq!(
-                response.headers().get(LOCATION).unwrap().to_str().unwrap(),
-                format!(
+            assert_header!(
+                &response,
+                LOCATION,
+                vec![format!(
                     "https://studio.apollographql.com/sandbox?endpoint=http://{}",
                     server.listen_address
                 )
-                .to_string()
+                .to_string()],
+                "Incorrect redirect url"
             );
         }
 
@@ -335,6 +428,46 @@ mod tests {
             format!("{:?}", response.source().unwrap()),
             "hyper::Error(IncompleteMessage)"
         );
+        server.shutdown().await
+    }
+
+    #[tokio::test]
+    async fn cors_preflight() -> Result<(), FederatedServerError> {
+        let (_fetcher, server, client) = init("127.0.0.1:0");
+
+        for url in vec![
+            format!("http://{}/", server.listen_address),
+            format!("http://{}/graphql", server.listen_address),
+        ] {
+            let response = client
+                .request(Method::OPTIONS, &url)
+                .header(ACCEPT, "text/html")
+                .header(ORIGIN, "studio")
+                .send()
+                .await
+                .unwrap();
+
+            assert_header!(
+                &response,
+                ACCESS_CONTROL_ALLOW_ORIGIN,
+                vec!["studio"],
+                "Incorrect access control allow origin header"
+            );
+            assert_header!(
+                &response,
+                ACCESS_CONTROL_ALLOW_HEADERS,
+                vec!["content-type"],
+                "Incorrect access control allow header header"
+            );
+            assert_header!(
+                &response,
+                ACCESS_CONTROL_ALLOW_METHODS,
+                vec!["GET", "POST", "OPTIONS"],
+                "Incorrect access control allow methods header"
+            );
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        }
+
         server.shutdown().await
     }
 }

@@ -1,4 +1,8 @@
-listen: "127.0.0.1:4100"
+server:
+  listen: 127.0.0.1:4100
+  cors:
+    origins:
+      - https://studio.apollographql.com
 subgraphs:
   accounts:
     routing_url: http://localhost:4001/graphql
