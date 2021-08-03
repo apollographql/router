@@ -1,6 +1,3 @@
-use std::convert::Infallible;
-use std::sync::{Arc, RwLock};
-
 use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::body::Bytes;
@@ -11,6 +8,9 @@ use hyper::header::{
 use hyper::server::Server;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode};
+use parking_lot::RwLock;
+use std::convert::Infallible;
+use std::sync::Arc;
 
 use configuration::Configuration;
 use execution::{FetchError, GraphQLFetcher, GraphQLRequest};
@@ -42,7 +42,7 @@ impl HttpServerFactory for HyperHttpServerFactory {
         F: GraphQLFetcher + 'static,
     {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listen_address = configuration.read().unwrap().server.listen; //unwrap-lock
+        let listen_address = configuration.read().server.listen;
 
         let server = Server::bind(&listen_address).serve(make_service_fn(move |_conn| {
             let graph = graph.to_owned();
@@ -114,7 +114,7 @@ fn add_access_control_header(
     request: &Request<Body>,
     response: &mut Response<Body>,
 ) {
-    let configuration = configuration.read().unwrap(); //unwrap-lock
+    let configuration = configuration.read();
 
     // If the host name matches one of the hosts specified in the config then return the hostname
     // in the cors header.
@@ -136,7 +136,7 @@ fn handle_cors_preflight(
     configuration: &Arc<RwLock<Configuration>>,
     response: &mut Response<Body>,
 ) {
-    let configuration = configuration.read().unwrap(); //unwrap-lock
+    let configuration = configuration.read();
     if let Some(cors) = &configuration.server.cors {
         *response.status_mut() = StatusCode::NO_CONTENT;
         let headers = response.headers_mut();
@@ -181,7 +181,6 @@ async fn handle_graphql_request<F>(
                     *response.body_mut() = Body::wrap_stream(
                         graph
                             .read()
-                            .unwrap() //unwrap-lock
                             .stream(graphql_request)
                             .map(|res| match res {
                                 Ok(chunk) => match serde_json::to_string(&chunk) {
@@ -360,7 +359,6 @@ mod tests {
         {
             fetcher
                 .write()
-                .unwrap()
                 .expect_stream()
                 .times(1)
                 .return_once(move |_| {
@@ -392,18 +390,13 @@ mod tests {
     async fn response_failure() -> Result<(), FederatedServerError> {
         let (fetcher, server, client) = init("127.0.0.1:0");
         {
-            fetcher
-                .write()
-                .unwrap()
-                .expect_stream()
-                .times(1)
-                .return_once(|_| {
-                    futures::stream::iter(vec![Err(FetchError::ServiceError {
-                        service: "Mock service".to_string(),
-                        reason: "Mock error".to_string(),
-                    })])
-                    .boxed()
-                });
+            fetcher.write().expect_stream().times(1).return_once(|_| {
+                futures::stream::iter(vec![Err(FetchError::ServiceError {
+                    service: "Mock service".to_string(),
+                    reason: "Mock error".to_string(),
+                })])
+                .boxed()
+            });
         }
         let response = client
             .post(format!("http://{}/graphql", server.listen_address))

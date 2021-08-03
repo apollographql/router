@@ -557,26 +557,26 @@ mod tests {
 
     #[derive(Debug)]
     struct CountingServiceRegistry {
-        counts: Arc<std::sync::Mutex<HashMap<String, usize>>>,
+        counts: Arc<parking_lot::Mutex<HashMap<String, usize>>>,
         delegate: HttpServiceRegistry,
     }
 
     impl CountingServiceRegistry {
         fn new(delegate: HttpServiceRegistry) -> CountingServiceRegistry {
             CountingServiceRegistry {
-                counts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+                counts: Arc::new(parking_lot::Mutex::new(HashMap::new())),
                 delegate,
             }
         }
 
         fn totals(&self) -> HashMap<String, usize> {
-            self.counts.lock().unwrap().clone()
+            self.counts.lock().clone()
         }
     }
 
     impl ServiceRegistry for CountingServiceRegistry {
         fn get(&self, service: String) -> Option<&dyn GraphQLFetcher> {
-            let mut counts = self.counts.lock().unwrap();
+            let mut counts = self.counts.lock();
             match counts.entry(service.to_owned()) {
                 Entry::Occupied(mut e) => {
                     *e.get_mut() += 1;

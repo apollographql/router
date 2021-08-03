@@ -1,10 +1,10 @@
-use std::fmt::Formatter;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-
 use derivative::Derivative;
 use futures::prelude::*;
+use parking_lot::Mutex;
 use serde_json::{Map, Value};
+use std::fmt::Formatter;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use query_planner::model::{Field, InlineFragment, Selection, SelectionSet};
 
@@ -44,14 +44,14 @@ impl Traverser {
 
     #[allow(dead_code)]
     pub(crate) fn content(&self) -> Option<Value> {
-        self.content.lock().unwrap().to_owned()
+        self.content.lock().to_owned()
     }
 
     fn format_streams(
         streams: &Arc<Mutex<Vec<GraphQLResponseStream>>>,
         fmt: &mut Formatter<'_>,
     ) -> std::fmt::Result {
-        let streams = streams.lock().unwrap();
+        let streams = streams.lock();
         fmt.write_fmt(format_args!("PatchStream[{}]", streams.len()))
     }
 
@@ -75,7 +75,7 @@ impl Traverser {
     }
 
     pub(crate) fn add_err(&self, err: &FetchError) {
-        self.errors.lock().unwrap().push(GraphQLError {
+        self.errors.lock().push(GraphQLError {
             message: err.to_string(),
             locations: vec![],
             path: self.path.to_owned(),
@@ -85,7 +85,7 @@ impl Traverser {
 
     pub(crate) fn to_primary(&self) -> GraphQLResponse {
         GraphQLResponse::Primary(GraphQLPrimaryResponse {
-            data: match self.content.lock().unwrap().to_owned() {
+            data: match self.content.lock().to_owned() {
                 Some(Value::Object(obj)) => obj,
                 _ => Map::new(),
             },
@@ -97,7 +97,7 @@ impl Traverser {
 
     pub(crate) fn merge(self, value: Option<&Value>) -> Traverser {
         {
-            let mut content = self.content.lock().unwrap();
+            let mut content = self.content.lock();
             match (content.get_at_path_mut(&self.path), value) {
                 (Some(a), Some(Value::Object(b)))
                     if { b.contains_key("_entities") && b.len() == 1 } =>
@@ -136,7 +136,7 @@ impl Traverser {
                 .flat_map(move |traverser| {
                     // Fetch the child content and convert it to a stream
                     let descendant = traverser.descendant(&Path::new(&path_chunk));
-                    let content = &descendant.content.lock().unwrap();
+                    let content = &descendant.content.lock();
                     let content_at_path = content.get_at_path(&descendant.path);
 
                     match content_at_path {
@@ -164,7 +164,7 @@ impl Traverser {
 
     /// Takes a selection set and extracts a json value from the current content for sending to downstream requests.
     pub(crate) fn select(&self, selection: &Option<SelectionSet>) -> Option<Value> {
-        let content = self.content.lock().unwrap();
+        let content = self.content.lock();
         match (content.get_at_path(&self.path), selection) {
             (Some(Value::Object(content)), Some(requires)) => select_object(&content, &requires),
             (_, _) => None,
@@ -224,7 +224,8 @@ fn select_inline_fragment(content: &Object, fragment: &InlineFragment) -> Option
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
 
     use futures::prelude::*;
     use serde_json::json;
@@ -239,16 +240,8 @@ mod tests {
         fn eq(&self, other: &Self) -> bool {
             self.path.eq(&other.path)
                 && self.request.eq(&other.request)
-                && self
-                    .content
-                    .lock()
-                    .unwrap()
-                    .eq(&other.content.lock().unwrap())
-                && self
-                    .errors
-                    .lock()
-                    .unwrap()
-                    .eq(&*other.errors.lock().unwrap())
+                && self.content.lock().eq(&other.content.lock())
+                && self.errors.lock().eq(&*other.errors.lock())
         }
     }
 

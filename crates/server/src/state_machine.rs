@@ -1,8 +1,8 @@
-use std::sync::{Arc, RwLock};
-
 use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 use configuration::Configuration;
 use execution::federated::FederatedGraph;
@@ -136,12 +136,10 @@ where
                     UpdateSchema(new_schema),
                 ) => {
                     log::debug!("Reloading schema");
-                    let new_graph = <StateMachine<S>>::create_graph(
-                        &configuration.read().unwrap(), //unwrap-lock
-                        &schema.read().unwrap(),        //unwrap-lock
-                    );
-                    *schema.write().unwrap() = new_schema; //unwrap-lock
-                    *graph.write().unwrap() = new_graph; //unwrap-lock
+                    let new_graph =
+                        <StateMachine<S>>::create_graph(&configuration.read(), &schema.read());
+                    *schema.write() = new_schema;
+                    *graph.write() = new_graph;
                     Running {
                         configuration,
                         schema,
@@ -162,23 +160,21 @@ where
                 ) => {
                     log::debug!("Reloading configuration");
 
-                    *configuration.write().unwrap() = new_configuration; //unwrap-lock
-                    let server_handle = if server_handle.listen_address
-                        != configuration.read().unwrap().server.listen
-                    //unwrap-lock
-                    {
-                        log::debug!("Restarting http");
-                        if let Err(_err) = server_handle.shutdown().await {
-                            log::error!("Failed to notify shutdown")
-                        }
-                        let new_handle = self
-                            .http_server_factory
-                            .create(graph.to_owned(), configuration.to_owned());
-                        log::debug!("Restarted on {}", new_handle.listen_address);
-                        new_handle
-                    } else {
-                        server_handle
-                    };
+                    *configuration.write() = new_configuration;
+                    let server_handle =
+                        if server_handle.listen_address != configuration.read().server.listen {
+                            log::debug!("Restarting http");
+                            if let Err(_err) = server_handle.shutdown().await {
+                                log::error!("Failed to notify shutdown")
+                            }
+                            let new_handle = self
+                                .http_server_factory
+                                .create(graph.to_owned(), configuration.to_owned());
+                            log::debug!("Restarted on {}", new_handle.listen_address);
+                            new_handle
+                        } else {
+                            server_handle
+                        };
 
                     Running {
                         configuration,
@@ -272,10 +268,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::Mutex;
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::str::FromStr;
-    use std::sync::Mutex;
 
     use futures::channel::oneshot;
     use futures::prelude::*;
@@ -352,7 +348,7 @@ mod tests {
             )
             .await
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
     #[tokio::test]
@@ -377,7 +373,7 @@ mod tests {
             )
             .await
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
     #[tokio::test]
@@ -412,7 +408,7 @@ mod tests {
             )
             .await
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 
     async fn execute(
@@ -438,14 +434,11 @@ mod tests {
         server_factory.expect_create().returning(
             move |_: Arc<RwLock<FederatedGraph>>, configuration: Arc<RwLock<Configuration>>| {
                 let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-                shutdown_receivers_clone
-                    .lock()
-                    .unwrap()
-                    .push(shutdown_receiver);
+                shutdown_receivers_clone.lock().push(shutdown_receiver);
                 HttpServerHandle {
                     shutdown_sender,
                     server_future: future::ready(Ok(())).boxed(),
-                    listen_address: configuration.read().unwrap().server.listen, //unwrap-lock
+                    listen_address: configuration.read().server.listen,
                 }
             },
         );

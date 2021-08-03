@@ -1,11 +1,11 @@
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::{Arc, RwLock};
-
 use futures::channel::oneshot;
 use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
+use parking_lot::RwLock;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use configuration::Configuration;
 use execution::GraphQLFetcher;
