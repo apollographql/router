@@ -645,6 +645,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn basic_mutation() {
+        init();
+        assert_federated_response!(
+            r#"mutation {
+              createProduct(upc:"8", name:"Bob") {
+                upc
+                name
+                reviews {
+                  body
+                }
+              }
+              createReview(upc: "8", id:"100", body: "Bif"){
+                id
+                body
+              }
+            }"#,
+            hashmap! {
+                "products".to_string()=>1,
+                "reviews".to_string()=>2,
+            },
+        );
+    }
+
+    #[tokio::test]
     async fn variables() {
         init();
         assert_federated_response!(

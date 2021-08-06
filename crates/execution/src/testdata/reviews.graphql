@@ -1,3 +1,7 @@
+extend type Mutation {
+  createReview(upc: ID!, id: ID!, body: String): Review
+}
+
 extend type Product @key(fields: "upc") {
   upc: String! @external
   reviews: [Review]

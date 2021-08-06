@@ -1,3 +1,7 @@
+extend type Mutation {
+  createProduct(upc: ID!, name: String): Product
+}
+
 type Product @key(fields: "upc") {
   upc: String!
   name: String
