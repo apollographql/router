@@ -613,6 +613,7 @@ dependencies = [
  "serde_yaml",
  "thiserror",
  "tokio",
+ "typed-builder",
 ]
 
 [[package]]

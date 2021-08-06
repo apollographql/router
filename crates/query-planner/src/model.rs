@@ -36,6 +36,19 @@ pub enum PlanNode {
     Flatten(FlattenNode),
 }
 
+impl PlanNode {
+    /// Retrieves all the variable usages of all plans.
+    pub fn variable_usages<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+        match self {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                Box::new(nodes.iter().map(|x| x.variable_usages()).flatten())
+            }
+            Self::Fetch(fetch) => Box::new(fetch.variable_usages.iter().map(|x| x.as_str())),
+            Self::Flatten(flatten) => Box::new(flatten.node.variable_usages()),
+        }
+    }
+}
+
 /// A fetch node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

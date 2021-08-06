@@ -10,12 +10,12 @@ commands:
       - run: sudo npm install -g npm
       - run:
           name: Build federation-demo
-          working_directory: submodules/federation-demo
+          working_directory: dockerfiles/federation-demo/federation-demo
           command: npm install;
       - run:
           name: Start federation-demo services
-          working_directory: submodules/federation-demo
-          command: npm run start-services
+          working_directory: dockerfiles/federation-demo/federation-demo
+          command: npm run start
           background: true
       - run:
           name: Wait for accounts
@@ -29,11 +29,6 @@ commands:
       - run:
           name: Wait for inventory
           command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4004
-      - run:
-          name: Start federation-demo gateway
-          working_directory: submodules/federation-demo
-          command: npm run start-gateway
-          background: true
       - run:
           name: Wait for gateway
           command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4000

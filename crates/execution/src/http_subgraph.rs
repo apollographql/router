@@ -144,12 +144,11 @@ mod tests {
         });
         let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
         let collect = fetcher
-            .stream(GraphQLRequest {
-                query: r#"{allProducts{variation {id}id}}"#.into(),
-                extensions: None,
-                operation_name: None,
-                variables: None,
-            })
+            .stream(
+                GraphQLRequest::builder()
+                    .query(r#"{allProducts{variation {id}id}}"#)
+                    .build(),
+            )
             .collect::<Vec<Result<GraphQLResponse, FetchError>>>()
             .await;
 

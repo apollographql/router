@@ -2,11 +2,13 @@
 
 use std::fmt::{Debug, Display, Formatter};
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
+use typed_builder::TypedBuilder;
 
 /// Federated graph fetcher.
 pub mod federated;
@@ -71,6 +73,27 @@ pub enum FetchError {
     /// An error when serializing the response.
     #[error("Response serialization error")]
     MalformedResponseError,
+
+    /// Field not found in response.
+    #[error("Field '{field}' was not found in response")]
+    FieldNotFound {
+        /// The field that is not found.
+        field: String,
+    },
+
+    /// The content is missing.
+    #[error("Missing content at {path}")]
+    MissingContent {
+        /// Path to the content.
+        path: Path,
+    },
+
+    /// The variable is missing.
+    #[error("Required variable '{name}' was not provided")]
+    MissingVariable {
+        /// Name of the variable.
+        name: String,
+    },
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -150,22 +173,26 @@ impl Display for Path {
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, TypedBuilder)]
 #[serde(rename_all = "camelCase")]
+#[builder(field_defaults(setter(into)))]
 pub struct GraphQLRequest {
     /// The graphql query.
     pub query: String,
 
     /// The optional graphql operation.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[builder(default)]
     pub operation_name: Option<String>,
 
     /// The optional variables in the form of a json object.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variables: Option<Object>,
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    #[builder(default)]
+    pub variables: Arc<Object>,
 
     /// Graphql extensions.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[builder(default)]
     pub extensions: Extensions,
 }
 
@@ -316,12 +343,14 @@ mod tests {
         );
         assert_eq!(
             result.unwrap(),
-            GraphQLRequest {
-                query: "query aTest($arg1: String!) { test(who: $arg1) }".to_owned(),
-                operation_name: Some("aTest".to_owned()),
-                variables: json!({ "arg1": "me" }).as_object().cloned(),
-                extensions: json!({"extension": 1}).as_object().cloned()
-            },
+            GraphQLRequest::builder()
+                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
+                .operation_name(Some("aTest".to_owned()))
+                .variables(Arc::new(
+                    json!({ "arg1": "me" }).as_object().unwrap().clone()
+                ))
+                .extensions(json!({"extension": 1}).as_object().cloned())
+                .build()
         );
     }
 

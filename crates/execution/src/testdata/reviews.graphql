@@ -1,6 +1,7 @@
 extend type Product @key(fields: "upc") {
   upc: String! @external
   reviews: [Review]
+  reviewsForAuthor(authorID: ID!): [Review]
 }
 
 type Review @key(fields: "id") {

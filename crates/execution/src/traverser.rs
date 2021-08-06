@@ -55,13 +55,13 @@ impl Traverser {
         fmt.write_fmt(format_args!("PatchStream[{}]", streams.len()))
     }
 
-    pub(crate) fn new(request: GraphQLRequest) -> Self {
+    pub(crate) fn new(request: Arc<GraphQLRequest>) -> Self {
         Self {
             path: Path::empty(),
-            content: Arc::new(Mutex::new(Option::None)),
-            request: Arc::new(request),
-            patches: Arc::new(Mutex::new(vec![])),
-            errors: Arc::new(Mutex::new(vec![])),
+            content: Default::default(),
+            request,
+            patches: Default::default(),
+            errors: Default::default(),
         }
     }
 
@@ -163,11 +163,17 @@ impl Traverser {
     }
 
     /// Takes a selection set and extracts a json value from the current content for sending to downstream requests.
-    pub(crate) fn select(&self, selection: &Option<SelectionSet>) -> Option<Value> {
+    pub(crate) fn select(
+        &self,
+        selection: &Option<SelectionSet>,
+    ) -> Result<Option<Value>, FetchError> {
         let content = self.content.lock();
         match (content.get_at_path(&self.path), selection) {
             (Some(Value::Object(content)), Some(requires)) => select_object(&content, &requires),
-            (_, _) => None,
+            (None, Some(_)) => Err(FetchError::MissingContent {
+                path: self.path.clone(),
+            }),
+            _ => Ok(None),
         }
     }
 
@@ -179,46 +185,59 @@ impl Traverser {
     }
 }
 
-fn select_object(content: &Object, selections: &[Selection]) -> Option<Value> {
+fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Value>, FetchError> {
     let mut output = Object::new();
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                let value = select_field(content, &field)?;
-                output
-                    .entry(field.name.to_owned())
-                    .and_modify(|existing| deep_merge(existing, &value))
-                    .or_insert(value);
+                if let Some(value) = select_field(content, &field)? {
+                    output
+                        .entry(field.name.to_owned())
+                        .and_modify(|existing| deep_merge(existing, &value))
+                        .or_insert(value);
+                }
             }
             Selection::InlineFragment(fragment) => {
-                if let Value::Object(value) = select_inline_fragment(content, fragment)? {
+                if let Some(Value::Object(value)) = select_inline_fragment(content, fragment)? {
                     output.append(&mut value.to_owned())
                 }
             }
         };
     }
-    Some(Value::Object(output))
+    if output.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Value::Object(output)))
 }
 
-fn select_field(content: &Object, field: &Field) -> Option<Value> {
-    match (&field.selections, content.get(&field.name)) {
-        (Some(selections), Some(Value::Object(child))) => select_object(&child, selections),
-        (None, Some(value)) => Some(value.to_owned()),
-        _ => None,
+fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchError> {
+    match (content.get(&field.name), &field.selections) {
+        (Some(Value::Object(child)), Some(selections)) => select_object(&child, selections),
+        (Some(value), None) => Ok(Some(value.to_owned())),
+        (None, _) => Err(FetchError::FieldNotFound {
+            field: field.name.to_owned(),
+        }),
+        _ => Ok(None),
     }
 }
 
-fn select_inline_fragment(content: &Object, fragment: &InlineFragment) -> Option<Value> {
+fn select_inline_fragment(
+    content: &Object,
+    fragment: &InlineFragment,
+) -> Result<Option<Value>, FetchError> {
     match (&fragment.type_condition, &content.get("__typename")) {
         (Some(condition), Some(Value::String(typename))) => {
             if condition == typename {
                 select_object(content, &fragment.selections)
             } else {
-                None
+                Ok(None)
             }
         }
         (None, _) => select_object(content, &fragment.selections),
-        (_, _) => None,
+        (_, None) => Err(FetchError::FieldNotFound {
+            field: "__typename".to_string(),
+        }),
+        (_, _) => Ok(None),
     }
 }
 
@@ -234,7 +253,7 @@ mod tests {
     use query_planner::model::SelectionSet;
 
     use crate::traverser::Traverser;
-    use crate::{GraphQLError, GraphQLRequest, Path};
+    use crate::{FetchError, GraphQLError, GraphQLRequest, Path};
 
     impl PartialEq for Traverser {
         fn eq(&self, other: &Self) -> bool {
@@ -246,12 +265,7 @@ mod tests {
     }
 
     fn stub_request() -> GraphQLRequest {
-        GraphQLRequest {
-            query: "".to_string(),
-            operation_name: None,
-            variables: None,
-            extensions: None,
-        }
+        GraphQLRequest::builder().query("").build()
     }
 
     fn stub_traverser() -> Traverser {
@@ -360,6 +374,11 @@ mod tests {
         json!([
           {
             "kind": "InlineFragment",
+            "typeCondition": "OtherStuffToIgnore",
+            "selections": [],
+          },
+          {
+            "kind": "InlineFragment",
             "typeCondition": "User",
             "selections": [
               {
@@ -380,7 +399,7 @@ mod tests {
                   }]
               }
             ]
-          }
+          },
         ])
     }
 
@@ -393,13 +412,13 @@ mod tests {
         );
         assert_eq!(
             result,
-            Some(json!({
+            Ok(Some(json!({
                 "__typename": "User",
                 "id": 2,
                 "job": {
                     "name": "astronaut"
                 }
-            }))
+            })))
         );
     }
 
@@ -410,13 +429,23 @@ mod tests {
             Some(json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}})),
             Path::empty(),
         );
-        assert_eq!(result, None);
+        assert_eq!(
+            result,
+            Err(FetchError::FieldNotFound {
+                field: "id".to_string()
+            }),
+        );
     }
 
     #[test]
     fn test_selection_no_content() {
         let result = selection(stub_selection(), None, Path::empty());
-        assert_eq!(result, None);
+        assert_eq!(
+            result,
+            Err(FetchError::MissingContent {
+                path: Path::empty()
+            })
+        );
     }
 
     #[test]
@@ -431,13 +460,17 @@ mod tests {
         );
         assert_eq!(
             result,
-            Some(json!({
+            Ok(Some(json!({
                 "name": "astronaut"
-            }))
+            })))
         );
     }
 
-    fn selection(selection_set: Value, content: Option<Value>, path: Path) -> Option<Value> {
+    fn selection(
+        selection_set: Value,
+        content: Option<Value>,
+        path: Path,
+    ) -> Result<Option<Value>, FetchError> {
         let selection_set = serde_json::from_value::<SelectionSet>(selection_set).unwrap();
 
         let traverser = Traverser {

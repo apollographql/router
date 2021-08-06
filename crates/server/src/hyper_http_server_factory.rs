@@ -252,8 +252,12 @@ mod tests {
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
             assert_eq!(
-                // the unwraps should probably be replace by expect too
-                $response.headers().get_all($header).iter().map(|v|v.to_str().unwrap().to_string()).collect::<Vec<String>>(),
+                $response
+                    .headers()
+                    .get_all($header)
+                    .iter()
+                    .map(|v|v.to_str().unwrap().to_string())
+                    .collect::<Vec<_>>(),
                 $expected
                 $(, $msg)*
             );
@@ -377,12 +381,15 @@ mod tests {
             )
             .send()
             .await
-            .unwrap();
+            .unwrap()
+            .error_for_status()
+            .expect("unexpected response");
 
         assert_eq!(
             response.json::<GraphQLPrimaryResponse>().await.unwrap(),
-            expected_response
+            expected_response,
         );
+
         server.shutdown().await
     }
 

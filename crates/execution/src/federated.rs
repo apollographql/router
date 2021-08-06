@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -71,7 +72,7 @@ impl FederatedGraph {
     ///
     /// returns: Result<QueryPlan, FetchError>
     ///
-    async fn plan(self, request: GraphQLRequest) -> Result<QueryPlan, FetchError> {
+    async fn plan(self, request: Arc<GraphQLRequest>) -> Result<QueryPlan, FetchError> {
         let mut query_planner = self.query_planner.lock().await;
         let query_plan = query_planner.get(
             request.query.to_owned(),
@@ -126,23 +127,54 @@ impl FederatedGraph {
     ///
     /// * `traversers`: The stream of traversers to process.
     /// * `node`: The query plan node.
+    /// * `request`: The GraphQL original request.
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
-    fn visit(self, traversers: TraverserStream, node: PlanNode) -> EmptyFuture {
+    fn visit(
+        self,
+        traversers: TraverserStream,
+        node: PlanNode,
+        request: Arc<GraphQLRequest>,
+    ) -> EmptyFuture {
         let concurrency_factor = self.concurrency_factor;
+
+        let variables = match node {
+            PlanNode::Fetch(ref fetch) if fetch.requires.is_none() => Arc::new(
+                fetch
+                    .variable_usages
+                    .iter()
+                    .filter_map(|key| {
+                        request
+                            .variables
+                            .get(key)
+                            .map(|value| (key.to_owned(), value.to_owned()))
+                    })
+                    .collect::<Map<_, _>>(),
+            ),
+            _ => Default::default(),
+        };
+
         traversers
             .chunks(self.chunk_size)
             .map(move |traversers| {
                 let traverser_stream = stream::iter(traversers).boxed();
                 let clone = self.to_owned();
                 match node.to_owned() {
-                    PlanNode::Sequence { nodes } => clone.visit_sequence(traverser_stream, nodes),
-                    PlanNode::Parallel { nodes } => clone.visit_parallel(traverser_stream, nodes),
-                    PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
-                        clone.visit_fetch_no_select(traverser_stream, fetch)
+                    PlanNode::Sequence { nodes } => {
+                        clone.visit_sequence(traverser_stream, nodes, request.clone())
                     }
-                    PlanNode::Fetch(fetch) => clone.visit_fetch_select(traverser_stream, fetch),
-                    PlanNode::Flatten(flatten) => clone.visit_flatten(traverser_stream, flatten),
+                    PlanNode::Parallel { nodes } => {
+                        clone.visit_parallel(traverser_stream, nodes, request.clone())
+                    }
+                    PlanNode::Fetch(fetch) if fetch.requires.is_none() => {
+                        clone.visit_fetch_no_select(traverser_stream, fetch, variables.clone())
+                    }
+                    PlanNode::Fetch(fetch) => {
+                        clone.visit_fetch_select(traverser_stream, fetch, request.clone())
+                    }
+                    PlanNode::Flatten(flatten) => {
+                        clone.visit_flatten(traverser_stream, flatten, request.clone())
+                    }
                 }
                 .boxed()
             })
@@ -168,9 +200,12 @@ impl FederatedGraph {
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_fetch_select(self, traversers: TraverserStream, fetch: FetchNode) -> EmptyFuture {
-        //TODO variable propagation
-
+    fn visit_fetch_select(
+        self,
+        traversers: TraverserStream,
+        fetch: FetchNode,
+        request: Arc<GraphQLRequest>,
+    ) -> EmptyFuture {
         traversers
             .collect::<Vec<Traverser>>()
             .map(move |traversers| {
@@ -180,19 +215,25 @@ impl FederatedGraph {
                 let (traversers, selections) =
                     traversers_with_selections(&fetch.requires, traversers);
 
-                let mut variables = Map::new();
+                let mut variables = Map::with_capacity(1 + fetch.variable_usages.len());
+                variables.extend(fetch.variable_usages.iter().filter_map(|key| {
+                    request
+                        .variables
+                        .get(key)
+                        .map(|value| (key.to_owned(), value.to_owned()))
+                }));
                 variables.insert(
                     "representations".into(),
                     construct_representations(selections),
                 );
 
                 fetcher
-                    .stream(GraphQLRequest {
-                        query: fetch.operation.to_owned(),
-                        operation_name: None,
-                        variables: Some(variables),
-                        extensions: None,
-                    })
+                    .stream(
+                        GraphQLRequest::builder()
+                            .query(fetch.operation)
+                            .variables(variables)
+                            .build(),
+                    )
                     .into_future()
                     .map(move |(primary, _rest)| match primary {
                         // If we got results we zip the stream up with the original traverser and merge the results.
@@ -236,21 +277,26 @@ impl FederatedGraph {
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_fetch_no_select(self, traversers: TraverserStream, fetch: FetchNode) -> EmptyFuture {
-        //TODO variable propagation
+    fn visit_fetch_no_select(
+        self,
+        traversers: TraverserStream,
+        fetch: FetchNode,
+        variables: Arc<Map<String, Value>>,
+    ) -> EmptyFuture {
         let concurrency_factor = self.concurrency_factor;
         traversers
             .map(move |traverser| {
                 let service_name = fetch.service_name.to_owned();
                 // We already validated that the service exists during planning
                 let fetcher = self.service_registry.get(service_name.clone()).unwrap();
+
                 fetcher
-                    .stream(GraphQLRequest {
-                        query: fetch.operation.to_owned(),
-                        operation_name: None,
-                        variables: None,
-                        extensions: None,
-                    })
+                    .stream(
+                        GraphQLRequest::builder()
+                            .query(fetch.operation.clone())
+                            .variables(variables.clone())
+                            .build(),
+                    )
                     .into_future()
                     .map(move |(primary, _rest)| match primary {
                         Some(Ok(GraphQLResponse::Primary(primary))) => {
@@ -281,7 +327,12 @@ impl FederatedGraph {
     /// * `nodes`: The plan nodes in the sequence.
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
-    fn visit_sequence(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> EmptyFuture {
+    fn visit_sequence(
+        self,
+        traversers: TraverserStream,
+        nodes: Vec<PlanNode>,
+        request: Arc<GraphQLRequest>,
+    ) -> EmptyFuture {
         traversers
             .collect::<Vec<Traverser>>()
             .map(move |traversers| {
@@ -291,7 +342,11 @@ impl FederatedGraph {
                     .fold(future::ready(()).boxed(), |acc, node| {
                         let next = self
                             .to_owned()
-                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
+                            .visit(
+                                stream::iter(traversers.to_owned()).boxed(),
+                                node.to_owned(),
+                                request.clone(),
+                            )
                             .boxed();
 
                         acc.then(|_| next).boxed()
@@ -315,7 +370,12 @@ impl FederatedGraph {
     /// * `nodes`: The pan nodes to execute in parallel.
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
-    fn visit_parallel(self, traversers: TraverserStream, nodes: Vec<PlanNode>) -> EmptyFuture {
+    fn visit_parallel(
+        self,
+        traversers: TraverserStream,
+        nodes: Vec<PlanNode>,
+        request: Arc<GraphQLRequest>,
+    ) -> EmptyFuture {
         traversers
             .collect::<Vec<Traverser>>()
             .map(move |traversers| {
@@ -324,8 +384,11 @@ impl FederatedGraph {
                 let tasks = nodes
                     .iter()
                     .map(move |node| {
-                        self.to_owned()
-                            .visit(stream::iter(traversers.to_owned()).boxed(), node.to_owned())
+                        self.to_owned().visit(
+                            stream::iter(traversers.to_owned()).boxed(),
+                            node.to_owned(),
+                            request.clone(),
+                        )
                     })
                     .collect::<Vec<_>>();
                 future::join_all(tasks).map(|_| ())
@@ -344,7 +407,7 @@ impl FederatedGraph {
     ///     'a': {
     ///         'b':[{'c':1}, {'c':2}]
     ///     }
-    /// ```  
+    /// ```
     /// a traverser at path `a`
     /// and a plan path of `b/@/c`
     /// The traversers generated will be:
@@ -357,27 +420,36 @@ impl FederatedGraph {
     ///
     /// returns Pin<Box<dyn Future<Output = ()> + Send>>
     ///
-    fn visit_flatten(&self, traversers: TraverserStream, flatten: FlattenNode) -> EmptyFuture {
+    fn visit_flatten(
+        &self,
+        traversers: TraverserStream,
+        flatten: FlattenNode,
+        request: Arc<GraphQLRequest>,
+    ) -> EmptyFuture {
         let path = Path::parse(flatten.path.join("/"));
         let expanded = traversers
             .flat_map(move |traverser| traverser.stream_descendants(&path))
             .boxed();
-        self.to_owned().visit(expanded, *flatten.node)
+        self.to_owned().visit(expanded, *flatten.node, request)
     }
 }
 
 impl GraphQLFetcher for FederatedGraph {
     fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
-        let clone = self.to_owned();
-        self.to_owned()
-            .plan(request.to_owned())
-            .into_stream()
-            .flat_map(move |plan| match plan {
+        let request = Arc::new(request);
+        let clone = self.clone();
+
+        self.clone()
+            .plan(request.clone())
+            .map(move |plan| match plan {
                 Ok(QueryPlan { node: Some(root) }) => {
-                    let start = Traverser::new(request.to_owned());
+                    if let Some(errors) = validate_request_variables(request.clone(), &root) {
+                        return stream::iter(errors.into_iter().map(Err)).boxed();
+                    }
+
+                    let start = Traverser::new(request.clone());
                     clone
-                        .to_owned()
-                        .visit(stream::iter(vec![start.to_owned()]).boxed(), root)
+                        .visit(stream::iter(vec![start.to_owned()]).boxed(), root, request)
                         .map(move |_| stream::iter(vec![Ok(start.to_primary())]))
                         .flatten_stream()
                         .boxed()
@@ -385,6 +457,8 @@ impl GraphQLFetcher for FederatedGraph {
                 Ok(_) => stream::empty().boxed(),
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
+            .into_stream()
+            .flatten()
             .boxed()
     }
 }
@@ -426,8 +500,14 @@ fn traversers_with_selections(
     traversers
         .iter()
         .map(|traverser| (traverser.to_owned(), traverser.select(requires)))
-        .filter(|(_, selection)| selection.is_some())
-        .map(|(traverser, selection)| (traverser, selection.unwrap()))
+        .filter_map(|(traverser, selection)| match selection {
+            Ok(Some(x)) => Some((traverser, x)),
+            Ok(None) => None,
+            Err(err) => {
+                traverser.add_err(&err);
+                None
+            }
+        })
         .unzip()
 }
 
@@ -460,6 +540,31 @@ fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimar
     }
 }
 
+fn validate_request_variables(
+    request: Arc<GraphQLRequest>,
+    plan: &PlanNode,
+) -> Option<Vec<FetchError>> {
+    let required = plan.variable_usages().collect::<HashSet<_>>();
+    let provided = request
+        .variables
+        .keys()
+        .map(|x| x.as_str())
+        .collect::<HashSet<_>>();
+    let mut missing = required.difference(&provided).peekable();
+
+    if missing.peek().is_some() {
+        Some(
+            missing
+                .map(|x| FetchError::MissingVariable {
+                    name: x.to_string(),
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::hash_map::Entry;
@@ -483,55 +588,124 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
+    macro_rules! assert_federated_response {
+        ($query:expr, $service_requests:expr $(,)?) => {
+            let request = GraphQLRequest::builder()
+                .query($query)
+                .variables(Arc::new(
+                    vec![
+                        ("topProductsFirst".to_string(), 2.into()),
+                        ("reviewsForAuthorAuthorId".to_string(), 1.into()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ))
+                .build();
+            let mut expected = query_node(request.clone());
+            let (mut actual, registry) = query_rust(request.clone());
+
+            let actual = actual.next().await.unwrap().unwrap().primary();
+            let expected = expected.next().await.unwrap().unwrap().primary();
+            log::debug!("{}", to_string_pretty(&actual).unwrap());
+            log::debug!("{}", to_string_pretty(&expected).unwrap());
+
+            // The current implementation does not cull extra properties that should not make is to the
+            // output yet, so we check that the nodejs implementation returns a subset of the
+            // output of the rust output.
+            assert!(is_subset(
+                &Value::Object(expected.data),
+                &Value::Object(actual.data)
+            ));
+            assert_eq!(registry.totals(), $service_requests);
+        };
+    }
+
     #[tokio::test]
     async fn basic_request() {
         init();
-        assert_federated_response(
+        assert_federated_response!(
             r#"{ topProducts { name } }"#,
             hashmap! {
                 "products".to_string()=>1,
             },
-        )
-        .await
+        );
     }
 
     #[tokio::test]
     async fn basic_composition() {
         init();
-        assert_federated_response(
+        assert_federated_response!(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
             hashmap! {
                 "products".to_string()=>2,
                 "reviews".to_string()=>1,
                 "accounts".to_string()=>1
             },
-        )
-        .await
+        );
     }
 
-    async fn assert_federated_response(request: &str, service_requests: HashMap<String, usize>) {
-        let request = GraphQLRequest {
-            query: request.into(),
-            operation_name: None,
-            variables: None,
-            extensions: None,
-        };
-        let mut expected = query_node(request.clone());
-        let (mut actual, registry) = query_rust(request.clone());
+    #[tokio::test]
+    async fn variables() {
+        init();
+        assert_federated_response!(
+            r#"
+            query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {
+                topProducts(first: $topProductsFirst) {
+                    name
+                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {
+                        body
+                        author {
+                            id
+                            name
+                        }
+                    }
+                }
+            }
+            "#,
+            hashmap! {
+                "products".to_string()=>1,
+                "reviews".to_string()=>1,
+                "accounts".to_string()=>1,
+            },
+        );
+    }
 
-        let actual = actual.next().await.unwrap().unwrap().primary();
-        let expected = expected.next().await.unwrap().unwrap().primary();
-        log::debug!("{}", to_string_pretty(&actual).unwrap());
-        log::debug!("{}", to_string_pretty(&expected).unwrap());
-
-        // The current implementation does not cull extra properties that should not make is to the
-        // output yet, so we check that the nodejs implementation returns a subset of the
-        // output of the rust output.
-        assert!(is_subset(
-            &Value::Object(expected.data),
-            &Value::Object(actual.data)
-        ));
-        assert_eq!(registry.totals(), service_requests);
+    #[tokio::test]
+    async fn missing_variables() {
+        init();
+        let request = GraphQLRequest::builder()
+            .query(
+                r#"
+                query ExampleQuery($missingVariable: Int, $yetAnotherMissingVariable: ID!) {
+                    topProducts(first: $missingVariable) {
+                        name
+                        reviewsForAuthor(authorID: $yetAnotherMissingVariable) {
+                            body
+                        }
+                    }
+                }
+                "#,
+            )
+            .build();
+        let (response, _) = query_rust(request.clone());
+        let data = response
+            .map(|x| x.err().expect("only errors"))
+            .collect::<Vec<_>>()
+            .await;
+        let expected = vec![
+            FetchError::MissingVariable {
+                name: "yetAnotherMissingVariable".to_string(),
+            },
+            FetchError::MissingVariable {
+                name: "missingVariable".to_string(),
+            },
+        ];
+        assert_eq!(
+            data.iter()
+                .skip_while(|x| expected.contains(x))
+                .collect::<Vec<_>>(),
+            Vec::<&FetchError>::new(),
+        );
     }
 
     fn query_node(request: GraphQLRequest) -> GraphQLResponseStream {
