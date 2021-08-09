@@ -27,10 +27,10 @@ mod traverser;
 pub type Object = Map<String, Value>;
 
 /// Extensions is an untyped map that can be used to pass extra data to requests and from responses.
-pub type Extensions = Option<Object>;
+pub type Extensions = Object;
 
 /// A list of graphql errors.
-pub type Errors = Option<Vec<GraphQLError>>;
+pub type Errors = Vec<GraphQLError>;
 
 /// A graph response stream consists of one primary response and any number of patch responses.
 pub type GraphQLResponseStream =
@@ -191,7 +191,7 @@ pub struct GraphQLRequest {
     pub variables: Arc<Object>,
 
     /// Graphql extensions.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
     #[builder(default)]
     pub extensions: Extensions,
 }
@@ -205,15 +205,15 @@ pub struct GraphQLPrimaryResponse {
     pub data: Object,
 
     /// The optional indicator that there may be more data in the form of a patch response.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_next: Option<bool>,
+    #[serde(skip_serializing_if = "bool::to_owned", default)]
+    pub has_next: bool,
 
     /// The optional graphql errors encountered.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub errors: Errors,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Extensions,
 }
 
@@ -235,11 +235,11 @@ pub struct GraphQLPatchResponse {
     pub has_next: bool,
 
     /// The optional errors encountered for this patch.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub errors: Errors,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Extensions,
 }
 
@@ -257,7 +257,7 @@ pub struct GraphQLError {
     pub path: Path,
 
     /// The optional graphql extensions.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Extensions,
 }
 
@@ -349,7 +349,7 @@ mod tests {
                 .variables(Arc::new(
                     json!({ "arg1": "me" }).as_object().unwrap().clone()
                 ))
-                .extensions(json!({"extension": 1}).as_object().cloned())
+                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
     }
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(
             result.unwrap(),
             GraphQLPrimaryResponse {
-                has_next: None,
+                has_next: Default::default(),
                 data: json!({
                   "hero": {
                     "name": "R2-D2",
@@ -421,7 +421,7 @@ mod tests {
                 .as_object()
                 .cloned()
                 .unwrap(),
-                errors: Some(vec!(GraphQLError {
+                errors: vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Path::parse("hero/heroFriends/1/name".into()),
@@ -430,12 +430,14 @@ mod tests {
                     })
                     .as_object()
                     .cloned()
-                })),
+                    .unwrap()
+                }),
                 extensions: json!({
                     "response-extension": 3,
                 })
                 .as_object()
                 .cloned()
+                .unwrap()
             }
         );
     }
@@ -512,7 +514,7 @@ mod tests {
                 .unwrap(),
                 path: Path::parse("hero/heroFriends/1/name".into()),
                 has_next: true,
-                errors: Some(vec!(GraphQLError {
+                errors: vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Path::parse("hero/heroFriends/1/name".into()),
@@ -521,12 +523,14 @@ mod tests {
                     })
                     .as_object()
                     .cloned()
-                })),
+                    .unwrap()
+                }),
                 extensions: json!({
                     "response-extension": 3,
                 })
                 .as_object()
                 .cloned()
+                .unwrap()
             }
         );
     }

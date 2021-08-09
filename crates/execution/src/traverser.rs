@@ -77,9 +77,9 @@ impl Traverser {
     pub(crate) fn add_err(&self, err: &FetchError) {
         self.errors.lock().push(GraphQLError {
             message: err.to_string(),
-            locations: vec![],
+            locations: Default::default(),
             path: self.path.to_owned(),
-            extensions: None,
+            extensions: Default::default(),
         });
     }
 
@@ -89,9 +89,9 @@ impl Traverser {
                 Some(Value::Object(obj)) => obj,
                 _ => Map::new(),
             },
-            has_next: None,
-            errors: None,
-            extensions: None,
+            has_next: Default::default(),
+            errors: Default::default(),
+            extensions: Default::default(),
         })
     }
 
@@ -283,8 +283,8 @@ mod tests {
     fn fetch_error() -> GraphQLError {
         GraphQLError {
             path: Path::empty(),
-            extensions: None,
-            locations: vec![],
+            extensions: Default::default(),
+            locations: Default::default(),
             message: "Nooo".into(),
         }
     }

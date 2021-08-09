@@ -354,9 +354,9 @@ mod tests {
             .as_object()
             .cloned()
             .unwrap(),
-            has_next: None,
-            errors: None,
-            extensions: None,
+            has_next: Default::default(),
+            errors: Default::default(),
+            extensions: Default::default(),
         };
         let example_response = expected_response.clone();
         let (fetcher, server, client) = init("127.0.0.1:0");

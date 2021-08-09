@@ -128,9 +128,9 @@ mod tests {
             .as_object()
             .unwrap()
             .to_owned(),
-            has_next: None,
-            errors: None,
-            extensions: None,
+            has_next: Default::default(),
+            errors: Default::default(),
+            extensions: Default::default(),
         };
 
         let server = MockServer::start();
