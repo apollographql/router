@@ -527,7 +527,7 @@ mod tests {
         let request = GraphQLRequest::builder().query(request).build();
         let mut expected = query(socket, request.clone());
 
-        let expected = expected.next().await.unwrap().unwrap().primary();
+        let expected = expected.next().await.unwrap().primary();
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }

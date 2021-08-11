@@ -25,15 +25,15 @@ type TraverserStream = Pin<Box<dyn Stream<Item = Traverser> + Send>>;
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub(crate) struct Traverser {
-    path: Path,
-    content: Arc<Mutex<Option<Value>>>,
-    request: Arc<GraphQLRequest>,
+    pub(crate) path: Path,
+    pub(crate) content: Arc<Mutex<Option<Value>>>,
+    pub(crate) request: Arc<GraphQLRequest>,
 
     #[allow(dead_code)]
     #[derivative(Debug(format_with = "Traverser::format_streams"))]
-    patches: Arc<Mutex<Vec<GraphQLResponseStream>>>,
+    pub(crate) patches: Arc<Mutex<Vec<GraphQLResponseStream>>>,
     #[allow(dead_code)]
-    errors: Arc<Mutex<Vec<GraphQLError>>>,
+    pub(crate) errors: Arc<Mutex<Vec<GraphQLError>>>,
 }
 
 impl Traverser {
@@ -74,13 +74,21 @@ impl Traverser {
         }
     }
 
-    pub(crate) fn add_err(&self, err: &FetchError) {
-        self.errors.lock().push(GraphQLError {
-            message: err.to_string(),
-            locations: Default::default(),
-            path: self.path.to_owned(),
-            extensions: Default::default(),
-        });
+    pub(crate) fn add_graphql_error(&self, mut graphql_error: GraphQLError) {
+        // Prepend the traverser path.
+        graphql_error.path.splice(0..0, self.path.to_owned().path);
+        self.errors.lock().push(graphql_error);
+    }
+
+    pub(crate) fn add_error(&self, err: &FetchError) {
+        let graphql_error = err.to_graphql_error(Some(self.path.to_owned()));
+        self.errors.lock().push(graphql_error);
+    }
+
+    pub(crate) fn add_errors(&self, errors: &[FetchError]) {
+        for err in errors {
+            self.add_error(err);
+        }
     }
 
     pub(crate) fn to_primary(&self) -> GraphQLResponse {
@@ -90,24 +98,15 @@ impl Traverser {
                 _ => Map::new(),
             },
             has_next: Default::default(),
-            errors: Default::default(),
+            errors: self.errors.lock().to_owned(),
             extensions: Default::default(),
         })
     }
 
-    pub(crate) fn merge(self, value: Option<&Value>) -> Traverser {
+    pub(crate) fn merge(&self, value: Option<&Value>) {
         {
             let mut content = self.content.lock();
             match (content.get_at_path_mut(&self.path), value) {
-                (Some(a), Some(Value::Object(b)))
-                    if { b.contains_key("_entities") && b.len() == 1 } =>
-                {
-                    if let Some(Value::Array(array)) = b.get("_entities") {
-                        for value in array {
-                            deep_merge(a, &value);
-                        }
-                    }
-                }
                 (Some(a), Some(b)) => {
                     deep_merge(a, &b);
                 }
@@ -115,7 +114,6 @@ impl Traverser {
                 (_, None) => (),
             };
         }
-        self
     }
 
     /// Create a stream of child traversers that match the supplied path in the current content \
@@ -125,9 +123,8 @@ impl Traverser {
         let mut stream = stream::iter(vec![self.to_owned()]).boxed();
 
         // Split the path on array. We only need to flatmap at arrays.
-        let path_split_by_arrays = path
-            .to_vec()
-            .split_inclusive(|path_element| path_element == &PathElement::Flatmap);
+        let path_split_by_arrays =
+            path.split_inclusive(|path_element| path_element == &PathElement::Flatmap);
 
         for path_chunk in path_split_by_arrays {
             // Materialise the path chunk so it can be moved into closures.
@@ -170,7 +167,7 @@ impl Traverser {
         let content = self.content.lock();
         match (content.get_at_path(&self.path), selection) {
             (Some(Value::Object(content)), Some(requires)) => select_object(&content, &requires),
-            (None, Some(_)) => Err(FetchError::MissingContent {
+            (None, Some(_)) => Err(FetchError::ExecutionMissingContent {
                 path: self.path.clone(),
             }),
             _ => Ok(None),
@@ -182,6 +179,10 @@ impl Traverser {
             path: self.path.parent(),
             ..self.to_owned()
         }
+    }
+
+    pub(crate) fn has_errors(&self) -> bool {
+        !self.errors.lock().is_empty()
     }
 }
 
@@ -214,7 +215,7 @@ fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchE
     match (content.get(&field.name), &field.selections) {
         (Some(Value::Object(child)), Some(selections)) => select_object(&child, selections),
         (Some(value), None) => Ok(Some(value.to_owned())),
-        (None, _) => Err(FetchError::FieldNotFound {
+        (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
         }),
         _ => Ok(None),
@@ -234,7 +235,7 @@ fn select_inline_fragment(
             }
         }
         (None, _) => select_object(content, &fragment.selections),
-        (_, None) => Err(FetchError::FieldNotFound {
+        (_, None) => Err(FetchError::ExecutionFieldNotFound {
             field: "__typename".to_string(),
         }),
         (_, _) => Ok(None),
@@ -290,14 +291,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_merge() {
+        let traverser = Traverser {
+            path: Path::parse("obj"),
+            content: Arc::new(Mutex::new(Some(
+                json!({"obj":{"arr":[{"prop1":1},{"prop2":2}]}}),
+            ))),
+            request: Arc::new(stub_request()),
+            patches: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![fetch_error()])),
+        };
+        traverser.merge(Some(&json!({"arr":[{"prop3":3}]})));
+        assert_eq!(
+            traverser,
+            Traverser {
+                path: Path::parse("obj"),
+                content: Arc::new(Mutex::new(Some(
+                    json!({"obj":{"arr":[{"prop1":1, "prop3":3},{"prop2":2}]}})
+                ))),
+                request: Arc::new(stub_request()),
+                patches: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![fetch_error()])),
+            }
+        )
+    }
+
+    #[tokio::test]
+    async fn test_merge_left() {
+        let traverser = Traverser {
+            path: Path::empty(),
+            content: Arc::new(Mutex::new(None)),
+            request: Arc::new(stub_request()),
+            patches: Arc::new(Mutex::new(vec![])),
+            errors: Arc::new(Mutex::new(vec![fetch_error()])),
+        };
+        traverser.merge(Some(&json!({"arr":[{"prop3":3}]})));
+
+        assert_eq!(
+            traverser,
+            Traverser {
+                path: Path::empty(),
+                content: Arc::new(Mutex::new(Some(json!({"arr":[{"prop3":3}]})))),
+                request: Arc::new(stub_request()),
+                patches: Arc::new(Mutex::new(vec![])),
+                errors: Arc::new(Mutex::new(vec![fetch_error()])),
+            }
+        )
+    }
+
+    #[tokio::test]
     async fn test_stream_no_array() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(&Path::parse("obj".into()))
+                .stream_descendants(&Path::parse("obj"))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: Path::parse("obj".into()),
+                path: Path::parse("obj"),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -310,15 +360,15 @@ mod tests {
     async fn test_stream_from_obj() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(&Path::parse("obj".into()))
+                .stream_descendants(&Path::parse("obj"))
                 .next()
                 .await
                 .unwrap()
-                .stream_descendants(&Path::parse("arr".into()))
+                .stream_descendants(&Path::parse("arr"))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: Path::parse("obj/arr".into()),
+                path: Path::parse("obj/arr"),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -331,11 +381,11 @@ mod tests {
     async fn test_stream_with_array() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(&Path::parse("obj/arr".into()))
+                .stream_descendants(&Path::parse("obj/arr"))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![Traverser {
-                path: Path::parse("obj/arr".into()),
+                path: Path::parse("obj/arr"),
                 content: stub_traverser().content,
                 request: Arc::new(stub_request()),
                 patches: Arc::new(Mutex::new(vec![])),
@@ -348,19 +398,19 @@ mod tests {
     async fn test_stream_flatmap() {
         assert_eq!(
             stub_traverser()
-                .stream_descendants(&Path::parse("obj/arr/@/prop1".into()))
+                .stream_descendants(&Path::parse("obj/arr/@/prop1"))
                 .collect::<Vec<Traverser>>()
                 .await,
             vec![
                 Traverser {
-                    path: Path::parse("obj/arr/0/prop1".into()),
+                    path: Path::parse("obj/arr/0/prop1"),
                     content: stub_traverser().content,
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
                     errors: Arc::new(Mutex::new(vec![fetch_error()])),
                 },
                 Traverser {
-                    path: Path::parse("obj/arr/1/prop1".into()),
+                    path: Path::parse("obj/arr/1/prop1"),
                     content: stub_traverser().content,
                     request: Arc::new(stub_request()),
                     patches: Arc::new(Mutex::new(vec![])),
@@ -431,7 +481,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            Err(FetchError::FieldNotFound {
+            Err(FetchError::ExecutionFieldNotFound {
                 field: "id".to_string()
             }),
         );
@@ -442,7 +492,7 @@ mod tests {
         let result = selection(stub_selection(), None, Path::empty());
         assert_eq!(
             result,
-            Err(FetchError::MissingContent {
+            Err(FetchError::ExecutionMissingContent {
                 path: Path::empty()
             })
         );
@@ -456,7 +506,7 @@ mod tests {
               "name": "name"
             }]),
             Some(json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}})),
-            Path::parse("job".into()),
+            Path::parse("job"),
         );
         assert_eq!(
             result,

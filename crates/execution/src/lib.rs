@@ -7,6 +7,7 @@ use std::sync::Arc;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::ops::{Deref, DerefMut};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
 
@@ -33,15 +34,65 @@ pub type Extensions = Object;
 pub type Errors = Vec<GraphQLError>;
 
 /// A graph response stream consists of one primary response and any number of patch responses.
-pub type GraphQLResponseStream =
-    Pin<Box<dyn Stream<Item = Result<GraphQLResponse, FetchError>> + Send>>;
+pub type GraphQLResponseStream = Pin<Box<dyn Stream<Item = GraphQLResponse> + Send>>;
 
-/// Error types for QueryPlanner
-#[derive(Error, Debug, Eq, PartialEq, Clone)]
+/// Error types for execution. Note that these are not actually returned to the client, but are
+/// instead converted to Json for GraphQLError
+#[derive(Error, Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum FetchError {
+    /// The query plan referenced a service that has not been configured.
+    #[error("Query references unknown service '{service}'")]
+    ValidationUnknownServiceError {
+        /// The service that was unknown.
+        service: String,
+    },
+
+    /// The variable is missing.
+    #[error("Query requires variable '{name}', but it was not provided")]
+    ValidationMissingVariable {
+        /// Name of the variable.
+        name: String,
+    },
+
+    /// The request could not be planned.
+    #[error("Query could not be planned")]
+    ValidationPlanningError {
+        /// The failure reason.
+        reason: String,
+    },
+
+    /// An error when serializing the response.
+    #[error("Response was malformed")]
+    MalformedResponse {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
     /// An error when fetching from a service.
-    #[error("Service '{service}' fetch failed: {reason}")]
-    ServiceError {
+    #[error("Service '{service}' returned no response")]
+    SubrequestNoResponse {
+        /// The service that returned no response.
+        service: String,
+    },
+
+    /// An error when serializing a subquery response.
+    #[error("Service '{service}' response was malformed")]
+    SubrequestMalformedResponse {
+        /// The service that responded with the malformed response.
+        service: String,
+
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// An http error when fetching from a service.
+    /// Note that this relates to a transport error and not a GraphQL error.
+    #[error("Http fetch failed from: '{service}'")]
+    SubrequestHttpError {
+        /// The http error code.
+        status: Option<u16>,
+
         /// The service failed.
         service: String,
 
@@ -49,51 +100,68 @@ pub enum FetchError {
         reason: String,
     },
 
-    /// An error when fetching from a service.
-    #[error("Unknown service '{service}'")]
-    UnknownServiceError {
-        /// The service that was unknown.
-        service: String,
-    },
-
-    /// The response was malformed
-    #[error("The request had errors: {reason}")]
-    RequestError {
-        /// The failure reason
-        reason: String,
-    },
-
-    /// An error when fetching from a service.
-    #[error("Service '{service}' returned no response")]
-    NoResponseError {
-        /// The service that was unknown.
-        service: String,
-    },
-
-    /// An error when serializing the response.
-    #[error("Response serialization error")]
-    MalformedResponseError,
-
     /// Field not found in response.
-    #[error("Field '{field}' was not found in response")]
-    FieldNotFound {
+    #[error("Subquery requires field '{field}' but it was not found in the current response")]
+    ExecutionFieldNotFound {
         /// The field that is not found.
         field: String,
     },
 
     /// The content is missing.
-    #[error("Missing content at {path}")]
-    MissingContent {
+    #[error("Missing content at '{path}'")]
+    ExecutionMissingContent {
         /// Path to the content.
         path: Path,
     },
+}
 
-    /// The variable is missing.
-    #[error("Required variable '{name}' was not provided")]
-    MissingVariable {
-        /// Name of the variable.
-        name: String,
-    },
+impl FetchError {
+    /// Convert the fetch error to a GraphQL error.
+    pub fn to_graphql_error(&self, path: Option<Path>) -> GraphQLError {
+        GraphQLError {
+            message: self.to_string(),
+            locations: Default::default(),
+            path: path.unwrap_or_default(),
+            extensions: serde_json::to_value(self)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .to_owned(),
+        }
+    }
+
+    /// Convert the error to an appropriate response.
+    pub fn to_response(&self, primary: bool) -> GraphQLResponse {
+        if primary {
+            self.to_primary()
+        } else {
+            self.to_patch()
+        }
+    }
+
+    /// Convert the fetch error to a primary graphql response.
+    pub fn to_primary(&self) -> GraphQLResponse {
+        GraphQLResponse::Primary(GraphQLPrimaryResponse {
+            data: Default::default(),
+            has_next: false,
+            errors: vec![self.to_graphql_error(None)],
+            extensions: Default::default(),
+        })
+    }
+
+    /// Convert the fetch error to a patch graphql response.
+    pub fn to_patch(&self) -> GraphQLResponse {
+        // Note that most of the values here will be overwritten when merged into the final response
+        // by the traverser. e.g. label, and path.
+        GraphQLResponse::Patch(GraphQLPatchResponse {
+            label: Default::default(),
+            data: Default::default(),
+            path: Default::default(),
+            has_next: false,
+            errors: vec![self.to_graphql_error(None)],
+            extensions: Default::default(),
+        })
+    }
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -112,19 +180,34 @@ pub enum PathElement {
 }
 
 /// A path into the result document. This can be composed of strings and numbers
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Path {
     path: Vec<PathElement>,
+}
+
+impl Deref for Path {
+    type Target = Vec<PathElement>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl DerefMut for Path {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.path
+    }
 }
 
 impl Path {
     fn new(path: &[PathElement]) -> Path {
         Path { path: path.into() }
     }
-    fn parse(path: String) -> Path {
+    fn parse(path: impl Into<String>) -> Path {
         Path {
             path: path
+                .into()
                 .split('/')
                 .map(|e| match (e, e.parse::<usize>()) {
                     (_, Ok(index)) => PathElement::Index(index),
@@ -136,7 +219,9 @@ impl Path {
     }
 
     fn empty() -> Path {
-        Path { path: vec![] }
+        Path {
+            path: Default::default(),
+        }
     }
 
     fn parent(&self) -> Path {
@@ -147,10 +232,6 @@ impl Path {
 
     fn append(&mut self, path: &Path) {
         self.path.append(&mut path.path.to_owned());
-    }
-
-    fn to_vec(&self) -> &Vec<PathElement> {
-        &self.path
     }
 }
 
@@ -307,10 +388,10 @@ impl GraphQLResponse {
 /// Maintains a map of services to fetchers.
 pub trait ServiceRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
-    fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)>;
+    fn get(&self, service: &str) -> Option<&(dyn GraphQLFetcher)>;
 
     /// Get a fetcher for a service.
-    fn has(&self, service: String) -> bool;
+    fn has(&self, service: &str) -> bool;
 }
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
@@ -424,7 +505,7 @@ mod tests {
                 errors: vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: Path::parse("hero/heroFriends/1/name".into()),
+                    path: Path::parse("hero/heroFriends/1/name"),
                     extensions: json!({
                         "error-extension": 5,
                     })
@@ -512,12 +593,12 @@ mod tests {
                 .as_object()
                 .cloned()
                 .unwrap(),
-                path: Path::parse("hero/heroFriends/1/name".into()),
+                path: Path::parse("hero/heroFriends/1/name"),
                 has_next: true,
                 errors: vec!(GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: Path::parse("hero/heroFriends/1/name".into()),
+                    path: Path::parse("hero/heroFriends/1/name"),
                     extensions: json!({
                         "error-extension": 5,
                     })

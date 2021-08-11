@@ -12,7 +12,7 @@ use query_planner::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 use crate::traverser::Traverser;
 use crate::{
     FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
-    GraphQLResponseStream, Path, ServiceRegistry,
+    GraphQLResponseStream, Path, PathElement, ServiceRegistry,
 };
 use futures::{FutureExt, StreamExt};
 
@@ -80,44 +80,7 @@ impl FederatedGraph {
             QueryPlanOptions::default(),
         )?;
 
-        if let Some(root) = &query_plan.node {
-            //Check that all fetches are pointing to known services.
-            self.validate_services(root)?;
-        }
-
         Ok(query_plan)
-    }
-
-    /// Recursively validate a query plan node making sure that all services are known before we go
-    /// for execution.
-    /// This simplifies processing later as we can always guarantee that services are configured for
-    /// the plan.  
-    ///
-    /// # Arguments
-    ///
-    /// * `node`: The query plan node to validate.
-    ///
-    /// returns: Result<(), FetchError>
-    ///
-    fn validate_services(&self, node: &PlanNode) -> Result<(), FetchError> {
-        match node {
-            PlanNode::Parallel { nodes } => nodes
-                .iter()
-                .try_for_each(|node| self.validate_services(node))?,
-            PlanNode::Sequence { nodes } => nodes
-                .iter()
-                .try_for_each(|node| self.validate_services(node))?,
-            PlanNode::Flatten(flatten) => self.validate_services(flatten.node.as_ref())?,
-            PlanNode::Fetch(fetch)
-                if { !self.service_registry.has(fetch.service_name.to_owned()) } =>
-            {
-                return Err(FetchError::UnknownServiceError {
-                    service: fetch.service_name.to_owned(),
-                });
-            }
-            PlanNode::Fetch(_) => {}
-        }
-        Ok(())
     }
 
     /// Visit a stream of traversers with a plan node.
@@ -211,7 +174,7 @@ impl FederatedGraph {
             .map(move |traversers| {
                 let service_name = fetch.service_name.to_owned();
                 // We already checked that the service exists during planning
-                let fetcher = self.service_registry.get(service_name.clone()).unwrap();
+                let fetcher = self.service_registry.get(&service_name).unwrap();
                 let (traversers, selections) =
                     traversers_with_selections(&fetch.requires, traversers);
 
@@ -237,18 +200,20 @@ impl FederatedGraph {
                     .into_future()
                     .map(move |(primary, _rest)| match primary {
                         // If we got results we zip the stream up with the original traverser and merge the results.
-                        Some(Ok(GraphQLResponse::Primary(primary))) => {
-                            merge_results(&service_name, &traversers, primary);
+                        Some(GraphQLResponse::Primary(primary)) => {
+                            merge_response(&traversers, primary);
                         }
-                        Some(Ok(GraphQLResponse::Patch(_))) => {
-                            panic!("Should not have had patch response as primary!")
-                        }
-                        Some(Err(err)) => {
-                            traversers.iter().for_each(|t| t.add_err(&err));
+                        Some(GraphQLResponse::Patch(_)) => {
+                            traversers.iter().for_each(|t| {
+                                t.add_error(&FetchError::SubrequestMalformedResponse {
+                                    service: service_name.to_owned(),
+                                    reason: "Subrequest sent patch response as primary".to_string(),
+                                })
+                            });
                         }
                         _ => {
                             traversers.iter().for_each(|t| {
-                                t.add_err(&FetchError::NoResponseError {
+                                t.add_error(&FetchError::SubrequestNoResponse {
                                     service: service_name.to_owned(),
                                 })
                             });
@@ -288,7 +253,7 @@ impl FederatedGraph {
             .map(move |traverser| {
                 let service_name = fetch.service_name.to_owned();
                 // We already validated that the service exists during planning
-                let fetcher = self.service_registry.get(service_name.clone()).unwrap();
+                let fetcher = self.service_registry.get(&service_name).unwrap();
 
                 fetcher
                     .stream(
@@ -299,14 +264,13 @@ impl FederatedGraph {
                     )
                     .into_future()
                     .map(move |(primary, _rest)| match primary {
-                        Some(Ok(GraphQLResponse::Primary(primary))) => {
+                        Some(GraphQLResponse::Primary(primary)) => {
                             traverser.merge(Some(&Value::Object(primary.data)));
                         }
-                        Some(Ok(GraphQLResponse::Patch(_))) => {
+                        Some(GraphQLResponse::Patch(_)) => {
                             panic!("Should not have had patch response as primary!")
                         }
-                        Some(Err(err)) => traverser.add_err(&err),
-                        None => traverser.add_err(&FetchError::NoResponseError {
+                        None => traverser.add_error(&FetchError::SubrequestNoResponse {
                             service: service_name,
                         }),
                     })
@@ -443,19 +407,31 @@ impl GraphQLFetcher for FederatedGraph {
             .plan(request.clone())
             .map(move |plan| match plan {
                 Ok(QueryPlan { node: Some(root) }) => {
-                    if let Some(errors) = validate_request_variables(request.clone(), &root) {
-                        return stream::iter(errors.into_iter().map(Err)).boxed();
+                    let start = Traverser::new(request.clone());
+
+                    start.add_errors(&validate_services_against_plan(
+                        clone.service_registry.to_owned(),
+                        &root,
+                    ));
+                    start.add_errors(&validate_request_variables_against_plan(
+                        request.to_owned(),
+                        &root,
+                    ));
+
+                    // If we have any errors so far then let's abort the query
+                    // Planning/validation/variables are candidates to abort.
+                    if start.has_errors() {
+                        return stream::iter(vec![start.to_primary()]).boxed();
                     }
 
-                    let start = Traverser::new(request.clone());
                     clone
                         .visit(stream::iter(vec![start.to_owned()]).boxed(), root, request)
-                        .map(move |_| stream::iter(vec![Ok(start.to_primary())]))
+                        .map(move |_| stream::iter(vec![start.to_primary()]))
                         .flatten_stream()
                         .boxed()
                 }
                 Ok(_) => stream::empty().boxed(),
-                Err(err) => stream::iter(vec![Err(err)]).boxed(),
+                Err(err) => stream::iter(vec![err.to_primary()]).boxed(),
             })
             .into_stream()
             .flatten()
@@ -465,7 +441,7 @@ impl GraphQLFetcher for FederatedGraph {
 
 impl From<QueryPlannerError> for FetchError {
     fn from(err: QueryPlannerError) -> Self {
-        FetchError::RequestError {
+        FetchError::ValidationPlanningError {
             reason: err.to_string(),
         }
     }
@@ -504,7 +480,7 @@ fn traversers_with_selections(
             Ok(Some(x)) => Some((traverser, x)),
             Ok(None) => None,
             Err(err) => {
-                traverser.add_err(&err);
+                traverser.add_error(&err);
                 None
             }
         })
@@ -521,48 +497,70 @@ fn traversers_with_selections(
 ///
 /// returns: Vec<Traverser>
 ///
-fn merge_results(service: &str, traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
-    match primary.data.get("_entities") {
-        Some(Value::Array(array)) => {
-            traversers
-                .iter()
-                .zip(array.iter())
-                .for_each(|(traverser, result)| {
-                    traverser.to_owned().merge(Some(result));
-                });
-        }
-        _ => traversers.iter().for_each(|traverser| {
-            traverser.add_err(&FetchError::ServiceError {
-                service: service.into(),
-                reason: "Malformed response".to_string(),
+fn merge_response(traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
+    if let Some(Value::Array(array)) = primary.data.get("_entities") {
+        traversers
+            .iter()
+            .zip(array.iter())
+            .for_each(|(traverser, result)| {
+                traverser.to_owned().merge(Some(result));
             });
-        }),
+    }
+    //We may have some errors that relate to entities. Find them and add them to the appropriate
+    //traverser
+    for mut err in primary.errors {
+        if err.path[0].eq(&PathElement::Key("_entities".to_string())) {
+            if let PathElement::Index(index) = err.path[1] {
+                err.path.splice(0..2, vec![]);
+                traversers[index].add_graphql_error(err);
+            }
+        } else {
+            log::error!("Subquery had errors that did not map to entities.");
+        }
     }
 }
 
-fn validate_request_variables(
+/// Recursively validate a query plan node making sure that all services are known before we go
+/// for execution.
+/// This simplifies processing later as we can always guarantee that services are configured for
+/// the plan.  
+///
+/// # Arguments
+///
+/// * `plan`: The root query plan node to validate.
+///
+/// returns: Result<(), FetchError>
+///
+fn validate_services_against_plan(
+    service_registry: Arc<dyn ServiceRegistry>,
+    plan: &PlanNode,
+) -> Vec<FetchError> {
+    plan.service_usage()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter(|service| !service_registry.has(service))
+        .map(|service| FetchError::ValidationUnknownServiceError {
+            service: service.to_string(),
+        })
+        .collect::<Vec<_>>()
+}
+
+fn validate_request_variables_against_plan(
     request: Arc<GraphQLRequest>,
     plan: &PlanNode,
-) -> Option<Vec<FetchError>> {
-    let required = plan.variable_usages().collect::<HashSet<_>>();
+) -> Vec<FetchError> {
+    let required = plan.variable_usage().collect::<HashSet<_>>();
     let provided = request
         .variables
         .keys()
         .map(|x| x.as_str())
         .collect::<HashSet<_>>();
-    let mut missing = required.difference(&provided).peekable();
-
-    if missing.peek().is_some() {
-        Some(
-            missing
-                .map(|x| FetchError::MissingVariable {
-                    name: x.to_string(),
-                })
-                .collect::<Vec<_>>(),
-        )
-    } else {
-        None
-    }
+    required
+        .difference(&provided)
+        .map(|x| FetchError::ValidationMissingVariable {
+            name: x.to_string(),
+        })
+        .collect::<Vec<_>>()
 }
 
 #[cfg(test)]
@@ -572,6 +570,7 @@ mod tests {
 
     use futures::prelude::*;
     use maplit::hashmap;
+    use serde_json::json;
     use serde_json::to_string_pretty;
 
     use configuration::Configuration;
@@ -604,8 +603,8 @@ mod tests {
             let mut expected = query_node(request.clone());
             let (mut actual, registry) = query_rust(request.clone());
 
-            let actual = actual.next().await.unwrap().unwrap().primary();
-            let expected = expected.next().await.unwrap().unwrap().primary();
+            let actual = actual.next().await.unwrap().primary();
+            let expected = expected.next().await.unwrap().primary();
             log::debug!("{}", to_string_pretty(&actual).unwrap());
             log::debug!("{}", to_string_pretty(&expected).unwrap());
 
@@ -621,8 +620,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_merge_response() {
+        let traverser = Traverser::new(Arc::new(GraphQLRequest::builder().query("").build()));
+        traverser.merge(Some(&json!({"arr":[{}, {}]})));
+
+        let children = traverser
+            .stream_descendants(&Path::parse("arr/@"))
+            .collect::<Vec<_>>()
+            .await;
+        merge_response(
+            &children,
+            GraphQLPrimaryResponse {
+                data: json!({
+                    "_entities": [
+                        {"prop1": "val1"},
+                        {"prop1": "val2"},
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .to_owned(),
+                has_next: false,
+                errors: vec![FetchError::MalformedResponse {
+                    reason: "Something".to_string(),
+                }
+                .to_graphql_error(Some(Path::parse("_entities/1")))],
+                extensions: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            traverser.to_primary().primary(),
+            GraphQLPrimaryResponse {
+                data: json!({
+                    "arr": [
+                        {"prop1": "val1"},
+                        {"prop1": "val2"},
+                    ],
+                })
+                .as_object()
+                .unwrap()
+                .to_owned(),
+                has_next: false,
+                errors: vec![FetchError::MalformedResponse {
+                    reason: "Something".to_string(),
+                }
+                .to_graphql_error(Some(Path::parse("arr/1")))],
+                extensions: Default::default(),
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn basic_request() {
-        init();
         assert_federated_response!(
             r#"{ topProducts { name } }"#,
             hashmap! {
@@ -633,20 +683,18 @@ mod tests {
 
     #[tokio::test]
     async fn basic_composition() {
-        init();
         assert_federated_response!(
             r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
             hashmap! {
                 "products".to_string()=>2,
                 "reviews".to_string()=>1,
-                "accounts".to_string()=>1
+                "accounts".to_string()=>1,
             },
         );
     }
 
     #[tokio::test]
     async fn basic_mutation() {
-        init();
         assert_federated_response!(
             r#"mutation {
               createProduct(upc:"8", name:"Bob") {
@@ -696,7 +744,6 @@ mod tests {
 
     #[tokio::test]
     async fn missing_variables() {
-        init();
         let request = GraphQLRequest::builder()
             .query(
                 r#"
@@ -713,23 +760,20 @@ mod tests {
             .build();
         let (response, _) = query_rust(request.clone());
         let data = response
-            .map(|x| x.err().expect("only errors"))
+            .flat_map(|x| stream::iter(x.primary().errors))
             .collect::<Vec<_>>()
             .await;
         let expected = vec![
-            FetchError::MissingVariable {
+            FetchError::ValidationMissingVariable {
                 name: "yetAnotherMissingVariable".to_string(),
-            },
-            FetchError::MissingVariable {
+            }
+            .to_graphql_error(None),
+            FetchError::ValidationMissingVariable {
                 name: "missingVariable".to_string(),
-            },
+            }
+            .to_graphql_error(None),
         ];
-        assert_eq!(
-            data.iter()
-                .skip_while(|x| expected.contains(x))
-                .collect::<Vec<_>>(),
-            Vec::<&FetchError>::new(),
-        );
+        assert!(data.iter().all(|x| expected.contains(x)));
     }
 
     fn query_node(request: GraphQLRequest) -> GraphQLResponseStream {
@@ -773,7 +817,7 @@ mod tests {
     }
 
     impl ServiceRegistry for CountingServiceRegistry {
-        fn get(&self, service: String) -> Option<&dyn GraphQLFetcher> {
+        fn get(&self, service: &str) -> Option<&dyn GraphQLFetcher> {
             let mut counts = self.counts.lock();
             match counts.entry(service.to_owned()) {
                 Entry::Occupied(mut e) => {
@@ -786,7 +830,7 @@ mod tests {
             self.delegate.get(service)
         }
 
-        fn has(&self, service: String) -> bool {
+        fn has(&self, service: &str) -> bool {
             self.delegate.has(service)
         }
     }

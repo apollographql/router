@@ -31,12 +31,12 @@ impl HttpServiceRegistry {
 }
 
 impl ServiceRegistry for HttpServiceRegistry {
-    fn get(&self, service: String) -> Option<&(dyn GraphQLFetcher)> {
-        self.services.get(service.as_str()).map(|a| &**a)
+    fn get(&self, service: &str) -> Option<&(dyn GraphQLFetcher)> {
+        self.services.get(service).map(|a| &**a)
     }
 
-    fn has(&self, service: String) -> bool {
-        self.services.get(service.as_str()).is_some()
+    fn has(&self, service: &str) -> bool {
+        self.services.get(service).is_some()
     }
 }
 
@@ -53,6 +53,6 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let registry = HttpServiceRegistry::new(&config);
-        assert!(registry.get("products".into()).is_some())
+        assert!(registry.get("products").is_some())
     }
 }

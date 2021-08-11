@@ -37,14 +37,29 @@ pub enum PlanNode {
 }
 
 impl PlanNode {
-    /// Retrieves all the variable usages of all plans.
-    pub fn variable_usages<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+    /// Retrieves all the variables used across all plan nodes.
+    ///
+    /// Note that duplicates are not filtered.
+    pub fn variable_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
         match self {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
-                Box::new(nodes.iter().map(|x| x.variable_usages()).flatten())
+                Box::new(nodes.iter().flat_map(|x| x.variable_usage()))
             }
             Self::Fetch(fetch) => Box::new(fetch.variable_usages.iter().map(|x| x.as_str())),
-            Self::Flatten(flatten) => Box::new(flatten.node.variable_usages()),
+            Self::Flatten(flatten) => Box::new(flatten.node.variable_usage()),
+        }
+    }
+
+    /// Retrieves all the services used across all plan nodes.
+    ///
+    /// Note that duplicates are not filtered.
+    pub fn service_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+        match self {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
+                Box::new(nodes.iter().flat_map(|x| x.service_usage()))
+            }
+            Self::Fetch(fetch) => Box::new(vec![fetch.service_name.as_str()].into_iter()),
+            Self::Flatten(flatten) => Box::new(flatten.node.service_usage()),
         }
     }
 }
@@ -158,7 +173,7 @@ mod tests {
                                             "topProducts".to_owned(), "@".to_owned()],
                                         node: Box::new(PlanNode::Fetch(FetchNode {
                                             service_name: "books".to_owned(),
-                                            variable_usages: vec![],
+                                            variable_usages: vec!["test_variable".into()],
                                             requires: Some(vec![
                                                 Selection::InlineFragment(InlineFragment {
                                                     type_condition: Some("Book".to_owned()),
@@ -282,6 +297,32 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<QueryPlan>(qp_json_string().as_str()).unwrap(),
             query_plan()
+        );
+    }
+
+    #[test]
+    fn service_usage() {
+        assert_eq!(
+            serde_json::from_str::<QueryPlan>(qp_json_string().as_str())
+                .unwrap()
+                .node
+                .unwrap()
+                .service_usage()
+                .collect::<Vec<_>>(),
+            vec!["product", "books", "product", "books", "product"]
+        );
+    }
+
+    #[test]
+    fn variable_usage() {
+        assert_eq!(
+            serde_json::from_str::<QueryPlan>(qp_json_string().as_str())
+                .unwrap()
+                .node
+                .unwrap()
+                .variable_usage()
+                .collect::<Vec<_>>(),
+            vec!["test_variable"]
         );
     }
 

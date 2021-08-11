@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_get_at_path() {
         let mut json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let path = Path::parse("obj/arr/1/prop1".into());
+        let path = Path::parse("obj/arr/1/prop1");
         let result = json.get_at_path(&path);
         assert_eq!(result, Some(&Value::Number(2.into())));
         let result_mut = json.get_at_path_mut(&path);
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn test_get_at_path_flatmap() {
         let mut json = Some(json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
-        let path = Path::parse("obj/arr/@".into());
+        let path = Path::parse("obj/arr/@");
         let result = json.get_at_path(&path);
         assert_eq!(result, Some(&json!([{"prop1":1},{"prop1":2}])));
         let result_mut = json.get_at_path_mut(&path);

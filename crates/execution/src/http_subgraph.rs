@@ -47,7 +47,8 @@ impl HttpSubgraphFetcher {
                 Ok(s) => s,
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
-            .map_err(move |err| FetchError::ServiceError {
+            .map_err(move |err: reqwest::Error| FetchError::SubrequestHttpError {
+                status: err.status().map(|status| status.into()),
                 service: service.to_owned(),
                 reason: err.to_string(),
             })
@@ -65,29 +66,31 @@ impl HttpSubgraphFetcher {
                 match result {
                     Ok(bytes) if { index == 0 } => to_primary(service, &bytes),
                     Ok(bytes) => to_patch(service, &bytes),
-                    Err(err) => Err(err),
+                    Err(err) => err.to_response(index == 0),
                 }
             });
         response_stream.boxed()
     }
 }
 
-fn to_patch(service: String, bytes: &Bytes) -> Result<GraphQLResponse, FetchError> {
+fn to_patch(service: impl Into<String>, bytes: &Bytes) -> GraphQLResponse {
     serde_json::from_slice::<GraphQLPatchResponse>(&bytes)
         .map(GraphQLResponse::Patch)
-        .map_err(move |err| FetchError::ServiceError {
-            service,
+        .map_err(move |err| FetchError::SubrequestMalformedResponse {
+            service: service.into(),
             reason: err.to_string(),
         })
+        .unwrap_or_else(|err| err.to_patch())
 }
 
-fn to_primary(service: String, bytes: &Bytes) -> Result<GraphQLResponse, FetchError> {
+fn to_primary(service: impl Into<String>, bytes: &Bytes) -> GraphQLResponse {
     serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes)
         .map(GraphQLResponse::Primary)
-        .map_err(move |err| FetchError::ServiceError {
-            service,
+        .map_err(move |err| FetchError::SubrequestMalformedResponse {
+            service: service.into(),
             reason: err.to_string(),
         })
+        .unwrap_or_else(|err| err.to_primary())
 }
 
 impl GraphQLFetcher for HttpSubgraphFetcher {
@@ -149,13 +152,10 @@ mod tests {
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )
-            .collect::<Vec<Result<GraphQLResponse, FetchError>>>()
+            .collect::<Vec<_>>()
             .await;
 
-        assert_eq!(
-            collect[0].as_ref().unwrap(),
-            &GraphQLResponse::Primary(response)
-        );
+        assert_eq!(collect[0], GraphQLResponse::Primary(response));
         mock.assert();
         Ok(())
     }

@@ -13,10 +13,11 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use configuration::Configuration;
-use execution::{FetchError, GraphQLFetcher, GraphQLRequest};
+use execution::{GraphQLFetcher, GraphQLRequest};
 
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
+use execution::FetchError::MalformedResponse;
 use hyper::http::header::ACCESS_CONTROL_ALLOW_METHODS;
 use hyper::http::HeaderValue;
 
@@ -182,12 +183,20 @@ async fn handle_graphql_request<F>(
                         graph
                             .read()
                             .stream(graphql_request)
-                            .map(|res| match res {
-                                Ok(chunk) => match serde_json::to_string(&chunk) {
-                                    Ok(bytes) => Ok(Bytes::from(bytes)),
-                                    Err(_) => Err(FetchError::MalformedResponseError),
-                                },
-                                Err(err) => Err(err),
+                            .enumerate()
+                            .map(|(index, res)| match serde_json::to_string(&res) {
+                                Ok(bytes) => Ok(Bytes::from(bytes)),
+                                Err(err) => {
+                                    // We didn't manage to serialise the response!
+                                    // Do our best to send some sort of error back.
+                                    serde_json::to_string(
+                                        &MalformedResponse {
+                                            reason: err.to_string(),
+                                        }
+                                        .to_response(index == 0),
+                                    )
+                                    .map(Bytes::from)
+                                }
                             })
                             .boxed(),
                     )
@@ -230,7 +239,6 @@ fn handle_redirect_to_studio(request: Request<Body>, response: &mut Response<Bod
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::error::Error;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
@@ -366,8 +374,7 @@ mod tests {
                 .expect_stream()
                 .times(1)
                 .return_once(move |_| {
-                    futures::stream::iter(vec![Ok(GraphQLResponse::Primary(example_response))])
-                        .boxed()
+                    futures::stream::iter(vec![GraphQLResponse::Primary(example_response)]).boxed()
                 });
         }
         let response = client
@@ -398,10 +405,12 @@ mod tests {
         let (fetcher, server, client) = init("127.0.0.1:0");
         {
             fetcher.write().expect_stream().times(1).return_once(|_| {
-                futures::stream::iter(vec![Err(FetchError::ServiceError {
+                futures::stream::iter(vec![FetchError::SubrequestHttpError {
+                    status: Some(401),
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
-                })])
+                }
+                .to_primary()])
                 .boxed()
             });
         }
@@ -416,17 +425,21 @@ mod tests {
             )
             .send()
             .await
-            .err()
+            .ok()
+            .unwrap()
+            .json::<GraphQLPrimaryResponse>()
+            .await
             .unwrap();
 
-        // Why are we even testing this?
-        // Basically for chunked encoding the only option to send errors back to the client are
-        // via a trailer header, but even then, we can't send back an alternate error code.
-        // Our only real option is to make sure that this code path doesn't happen and use graphql errors.
-        // However, we don't want to bring down the server, so we don't panic.
         assert_eq!(
-            format!("{:?}", response.source().unwrap()),
-            "hyper::Error(IncompleteMessage)"
+            response,
+            FetchError::SubrequestHttpError {
+                status: Some(401),
+                service: "Mock service".to_string(),
+                reason: "Mock error".to_string(),
+            }
+            .to_primary()
+            .primary()
         );
         server.shutdown().await
     }

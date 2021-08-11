@@ -31,7 +31,7 @@
                       ]
                     }
                   ],
-                  "variableUsages": [],
+                  "variableUsages": ["test_variable"],
                   "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}"
                 }
               },
