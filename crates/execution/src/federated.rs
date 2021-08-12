@@ -250,7 +250,7 @@ impl FederatedGraph {
     ) -> EmptyFuture {
         let concurrency_factor = self.concurrency_factor;
         traversers
-            .map(move |traverser| {
+            .map(move |mut traverser| {
                 let service_name = fetch.service_name.to_owned();
                 // We already validated that the service exists during planning
                 let fetcher = self.service_registry.get(&service_name).unwrap();
@@ -621,7 +621,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_response() {
-        let traverser = Traverser::new(Arc::new(GraphQLRequest::builder().query("").build()));
+        let mut traverser = Traverser::new(Arc::new(GraphQLRequest::builder().query("").build()));
         traverser.merge(Some(&json!({"arr":[{}, {}]})));
 
         let children = traverser

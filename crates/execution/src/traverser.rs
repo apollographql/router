@@ -104,7 +104,7 @@ impl Traverser {
         })
     }
 
-    pub(crate) fn merge(&self, value: Option<&Value>) {
+    pub(crate) fn merge(&mut self, value: Option<&Value>) {
         {
             let mut content = self.content.lock();
             match (content.get_at_path_mut(&self.path), value) {
@@ -293,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge() {
-        let traverser = Traverser {
+        let mut traverser = Traverser {
             path: Path::parse("obj"),
             content: Arc::new(Mutex::new(Some(
                 json!({"obj":{"arr":[{"prop1":1},{"prop2":2}]}}),
@@ -319,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_left() {
-        let traverser = Traverser {
+        let mut traverser = Traverser {
             path: Path::empty(),
             content: Arc::new(Mutex::new(None)),
             request: Arc::new(stub_request()),
