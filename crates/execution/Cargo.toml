@@ -16,7 +16,7 @@ serde = { version = "1.0.127", features = ["derive", "rc"] }
 derive_more = "0.99.16"
 thiserror = "1.0.26"
 reqwest = { version = "0.11.4", features = ["json", "stream"] }
-tokio = { version = "1.9.0", features = ["full"] }
+tokio = { version = "1.10.0", features = ["full"] }
 bytes = "1.0.1"
 derivative = "2.2.0"
 serde_yaml = "0.8.17"
