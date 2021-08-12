@@ -512,7 +512,7 @@ fn merge_response(traversers: &[Traverser], primary: GraphQLPrimaryResponse) {
         if err.path[0].eq(&PathElement::Key("_entities".to_string())) {
             if let PathElement::Index(index) = err.path[1] {
                 err.path.splice(0..2, vec![]);
-                traversers[index].add_graphql_error(err);
+                traversers[index].add_graphql_error(&err);
             }
         } else {
             log::error!("Subquery had errors that did not map to entities.");
