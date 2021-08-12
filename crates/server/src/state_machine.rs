@@ -203,9 +203,6 @@ where
             if matches!(&state, Errored(_)) {
                 break;
             }
-            if let Errored(_) = &state {
-                break;
-            }
         }
         log::debug!("Stopped");
 
