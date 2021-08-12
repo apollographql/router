@@ -74,19 +74,19 @@ impl Traverser {
         }
     }
 
-    pub(crate) fn add_graphql_error(&self, graphql_error: &GraphQLError) {
+    pub(crate) fn add_graphql_error(&mut self, graphql_error: &GraphQLError) {
         // Prepend the traverser path.
         let mut graphql_error = graphql_error.to_owned();
         graphql_error.path.splice(0..0, self.path.to_owned().path);
         self.errors.lock().push(graphql_error);
     }
 
-    pub(crate) fn add_error(&self, err: &FetchError) {
+    pub(crate) fn add_error(&mut self, err: &FetchError) {
         let graphql_error = err.to_graphql_error(Some(self.path.to_owned()));
         self.errors.lock().push(graphql_error);
     }
 
-    pub(crate) fn add_errors(&self, errors: &[FetchError]) {
+    pub(crate) fn add_errors(&mut self, errors: &[FetchError]) {
         for err in errors {
             self.add_error(err);
         }
