@@ -11,6 +11,9 @@ use std::ops::{Deref, DerefMut};
 use thiserror::Error;
 use typed_builder::TypedBuilder;
 
+#[cfg(feature = "mocks")]
+use mockall::{automock, predicate::*};
+
 /// Federated graph fetcher.
 pub mod federated;
 
@@ -395,8 +398,10 @@ pub trait ServiceRegistry: Send + Sync + Debug {
 }
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
+///
 /// The goal of this trait is to hide the implementation details of retching a stream of graphql responses.
 /// We can then create multiple implementations that can be plugged into federation.
+#[cfg_attr(feature = "mocks", automock)]
 pub trait GraphQLFetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]

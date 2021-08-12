@@ -1,6 +1,6 @@
 use futures::channel::oneshot;
 use futures::prelude::*;
-#[cfg(test)]
+#[cfg(feature = "mocks")]
 use mockall::{automock, predicate::*};
 use parking_lot::RwLock;
 use std::net::SocketAddr;
@@ -12,7 +12,11 @@ use execution::GraphQLFetcher;
 
 use crate::FederatedServerError;
 
-#[cfg_attr(test, automock)]
+/// Factory for creating the http server component.
+///
+/// This trait enables us to test that `StateMachine` correctly recreates the http server when
+/// necessary e.g. when listen address changes.
+#[cfg_attr(feature = "mocks", automock)]
 pub(crate) trait HttpServerFactory {
     fn create<F>(
         &self,

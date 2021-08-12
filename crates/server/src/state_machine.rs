@@ -5,22 +5,24 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 use configuration::Configuration;
-use execution::federated::FederatedGraph;
-use execution::http_service_registry::HttpServiceRegistry;
-use query_planner::caching::WithCaching;
-use query_planner::harmonizer::HarmonizerQueryPlanner;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
+use crate::graph_factory::GraphFactory;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use crate::Event::{UpdateConfiguration, UpdateSchema};
 use crate::FederatedServerError::{NoConfiguration, NoSchema};
 use crate::{Event, FederatedServerError, Schema, State};
+use execution::GraphQLFetcher;
+use std::marker::PhantomData;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(Derivative)]
 #[derivative(Debug)]
-enum PrivateState {
+enum PrivateState<F>
+where
+    F: GraphQLFetcher,
+{
     Startup {
         configuration: Option<Configuration>,
         schema: Option<Schema>,
@@ -29,7 +31,7 @@ enum PrivateState {
         configuration: Arc<RwLock<Configuration>>,
         schema: Arc<RwLock<Schema>>,
         #[derivative(Debug = "ignore")]
-        graph: Arc<RwLock<FederatedGraph>>,
+        graph: Arc<RwLock<F>>,
         #[derivative(Debug = "ignore")]
         server_handle: HttpServerHandle,
     },
@@ -43,16 +45,23 @@ enum PrivateState {
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S>
+pub(crate) struct StateMachine<S, F, FA>
 where
     S: HttpServerFactory,
+    F: GraphQLFetcher + 'static,
+    FA: GraphFactory<F>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
+    graph_factory: FA,
+    phantom: PhantomData<F>,
 }
 
-impl From<&PrivateState> for State {
-    fn from(private_state: &PrivateState) -> Self {
+impl<F> From<&PrivateState<F>> for State
+where
+    F: GraphQLFetcher,
+{
+    fn from(private_state: &PrivateState<F>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running { server_handle, .. } => State::Running(server_handle.listen_address),
@@ -62,14 +71,22 @@ impl From<&PrivateState> for State {
     }
 }
 
-impl<S> StateMachine<S>
+impl<S, F, FA> StateMachine<S, F, FA>
 where
     S: HttpServerFactory,
+    F: GraphQLFetcher,
+    FA: GraphFactory<F>,
 {
-    pub(crate) fn new(http_server_factory: S, state_listener: Option<mpsc::Sender<State>>) -> Self {
+    pub(crate) fn new(
+        http_server_factory: S,
+        state_listener: Option<mpsc::Sender<State>>,
+        graph_factory: FA,
+    ) -> Self {
         Self {
             http_server_factory,
             state_listener,
+            graph_factory,
+            phantom: Default::default(),
         }
     }
 
@@ -84,7 +101,7 @@ where
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S>>::notify_state_listener(&mut state_listener, initial_state).await;
+        <StateMachine<S, F, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -136,8 +153,9 @@ where
                     UpdateSchema(new_schema),
                 ) => {
                     log::debug!("Reloading schema");
-                    let new_graph =
-                        <StateMachine<S>>::create_graph(&configuration.read(), &schema.read());
+                    let new_graph = self
+                        .graph_factory
+                        .create(&configuration.read(), &schema.read());
                     *schema.write() = new_schema;
                     *graph.write() = new_graph;
                     Running {
@@ -193,8 +211,11 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S>>::notify_state_listener(&mut state_listener, new_public_state)
-                    .await;
+                <StateMachine<S, F, FA>>::notify_state_listener(
+                    &mut state_listener,
+                    new_public_state,
+                )
+                .await;
             }
             log::debug!("Transitioned to state {:?}", &new_state);
             state = new_state;
@@ -224,15 +245,7 @@ where
         }
     }
 
-    fn create_graph(configuration: &Configuration, schema: &str) -> FederatedGraph {
-        let service_registry = HttpServiceRegistry::new(configuration);
-        FederatedGraph::new(
-            HarmonizerQueryPlanner::new(schema.to_owned()).with_caching(),
-            Arc::new(service_registry),
-        )
-    }
-
-    fn maybe_transition_to_running(&self, state: PrivateState) -> PrivateState {
+    fn maybe_transition_to_running(&self, state: PrivateState<F>) -> PrivateState<F> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -240,10 +253,9 @@ where
         {
             log::debug!("Starting http");
 
-            let graph = Arc::new(RwLock::new(<StateMachine<S>>::create_graph(
-                &configuration,
-                &schema,
-            )));
+            let graph = Arc::new(RwLock::new(
+                self.graph_factory.create(&configuration, &schema),
+            ));
             let configuration = Arc::new(RwLock::new(configuration));
             let schema = Arc::new(RwLock::new(schema));
 
@@ -273,7 +285,9 @@ mod tests {
     use futures::channel::oneshot;
     use futures::prelude::*;
 
+    use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
+    use execution::MockGraphQLFetcher;
 
     use super::*;
 
@@ -284,11 +298,13 @@ mod tests {
 
     #[tokio::test]
     async fn no_configuration() {
-        let server_factory = MockHttpServerFactory::new();
+        let graph_factory = create_mock_graph_factory(0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_eq!(
             Err(NoConfiguration),
             execute(
                 server_factory,
+                graph_factory,
                 vec![NoMoreConfiguration],
                 vec![State::Startup, State::Errored]
             )
@@ -298,11 +314,13 @@ mod tests {
 
     #[tokio::test]
     async fn no_schema() {
-        let server_factory = MockHttpServerFactory::new();
+        let graph_factory = create_mock_graph_factory(0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_eq!(
             Err(NoSchema),
             execute(
                 server_factory,
+                graph_factory,
                 vec![NoMoreSchema],
                 vec![State::Startup, State::Errored]
             )
@@ -312,11 +330,13 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_during_startup() {
-        let server_factory = MockHttpServerFactory::new();
+        let graph_factory = create_mock_graph_factory(0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_eq!(
             Ok(()),
             execute(
                 server_factory,
+                graph_factory,
                 vec![Shutdown],
                 vec![State::Startup, State::Stopped]
             )
@@ -326,12 +346,14 @@ mod tests {
 
     #[tokio::test]
     async fn startup_shutdown() {
-        let mut server_factory = MockHttpServerFactory::new();
-        let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
+        let graph_factory = create_mock_graph_factory(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
         assert_eq!(
             Ok(()),
             execute(
                 server_factory,
+                graph_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
                     UpdateSchema("".to_string()),
@@ -350,12 +372,14 @@ mod tests {
 
     #[tokio::test]
     async fn startup_reload_schema() {
-        let mut server_factory = MockHttpServerFactory::new();
-        let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
+        let graph_factory = create_mock_graph_factory(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
         assert_eq!(
             Ok(()),
             execute(
                 server_factory,
+                graph_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
                     UpdateSchema("".to_string()),
@@ -375,12 +399,14 @@ mod tests {
 
     #[tokio::test]
     async fn startup_reload_configuration() {
-        let mut server_factory = MockHttpServerFactory::new();
-        let shutdown_receivers = expect_graceful_shutdown(&mut server_factory);
+        let graph_factory = create_mock_graph_factory(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
         assert_eq!(
             Ok(()),
             execute(
                 server_factory,
+                graph_factory,
                 vec![
                     UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
                     UpdateSchema("".to_string()),
@@ -410,11 +436,12 @@ mod tests {
 
     async fn execute(
         server_factory: MockHttpServerFactory,
+        graph_factory: MockGraphFactory<MockGraphQLFetcher>,
         events: Vec<Event>,
         expected_states: Vec<State>,
     ) -> Result<(), FederatedServerError> {
         let (state_listener, state_reciever) = mpsc::channel(100);
-        let state_machine = StateMachine::new(server_factory, Some(state_listener));
+        let state_machine = StateMachine::new(server_factory, Some(state_listener), graph_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())
             .await;
@@ -423,22 +450,41 @@ mod tests {
         result
     }
 
-    fn expect_graceful_shutdown(
-        server_factory: &mut MockHttpServerFactory,
-    ) -> Arc<Mutex<Vec<oneshot::Receiver<()>>>> {
+    fn create_mock_server_factory(
+        expect_times_called: usize,
+    ) -> (
+        MockHttpServerFactory,
+        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
+    ) {
+        let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
-        server_factory.expect_create().returning(
-            move |_: Arc<RwLock<FederatedGraph>>, configuration: Arc<RwLock<Configuration>>| {
-                let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-                shutdown_receivers_clone.lock().push(shutdown_receiver);
-                HttpServerHandle {
-                    shutdown_sender,
-                    server_future: future::ready(Ok(())).boxed(),
-                    listen_address: configuration.read().server.listen,
-                }
-            },
-        );
-        shutdown_receivers
+        server_factory
+            .expect_create()
+            .times(expect_times_called)
+            .returning(
+                move |_: Arc<RwLock<MockGraphQLFetcher>>,
+                      configuration: Arc<RwLock<Configuration>>| {
+                    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+                    shutdown_receivers_clone.lock().push(shutdown_receiver);
+                    HttpServerHandle {
+                        shutdown_sender,
+                        server_future: future::ready(Ok(())).boxed(),
+                        listen_address: configuration.read().server.listen,
+                    }
+                },
+            );
+        (server_factory, shutdown_receivers)
+    }
+
+    fn create_mock_graph_factory(
+        expect_times_called: usize,
+    ) -> MockGraphFactory<MockGraphQLFetcher> {
+        let mut graph_factory = MockGraphFactory::new();
+        graph_factory
+            .expect_create()
+            .times(expect_times_called)
+            .returning(|_, _| MockGraphQLFetcher::new());
+        graph_factory
     }
 }

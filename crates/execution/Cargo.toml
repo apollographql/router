@@ -24,8 +24,12 @@ log = "0.4.14"
 env_logger = "0.9.0"
 parking_lot = "0.11.1"
 typed-builder = "0.9.0"
+mockall = {version = "0.10.1", optional = true}
 
 [dev-dependencies]
 httpmock = "0.6.1"
 maplit = "1.0.2"
 ctor = "0.1.20"
+
+[features]
+mocks = ["mockall"]

@@ -17,6 +17,7 @@ use typed_builder::TypedBuilder;
 use configuration::Configuration;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
+use crate::graph_factory::FederatedGraphFactory;
 use crate::hyper_http_server_factory::HyperHttpServerFactory;
 use crate::state_machine::StateMachine;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -25,6 +26,7 @@ use std::fs::{read, read_to_string};
 use std::path::{Path, PathBuf};
 
 mod files;
+mod graph_factory;
 mod http_server_factory;
 mod hyper_http_server_factory;
 mod state_machine;
@@ -443,7 +445,11 @@ impl FederatedServer {
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = HyperHttpServerFactory::new();
-        let state_machine = StateMachine::new(server_factory, Some(state_listener));
+        let state_machine = StateMachine::new(
+            server_factory,
+            Some(state_listener),
+            FederatedGraphFactory::default(),
+        );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async {
             state_machine
