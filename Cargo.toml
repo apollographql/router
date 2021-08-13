@@ -7,7 +7,7 @@ license-file = "./LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-members = [".", "crates/*"]
+members = [".", "crates/*", "xtask"]
 
 [dependencies]
 server = { path = "crates/server" }

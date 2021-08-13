@@ -546,6 +546,7 @@ mod tests {
         .stream(request)
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn config_by_file_watching() {
         init();
@@ -630,6 +631,7 @@ mod tests {
         assert_eq!(stream.next().await.unwrap(), NoMoreConfiguration);
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn schema_by_file_watching() {
         init();

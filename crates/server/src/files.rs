@@ -58,6 +58,7 @@ pub(crate) mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
