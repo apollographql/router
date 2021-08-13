@@ -539,11 +539,8 @@ mod tests {
     }
 
     fn query(socket: &SocketAddr, request: GraphQLRequest) -> GraphQLResponseStream {
-        HttpSubgraphFetcher::new(
-            "federated".into(),
-            format!("http://{}/graphql", socket).into(),
-        )
-        .stream(request)
+        HttpSubgraphFetcher::new("federated".into(), format!("http://{}/graphql", socket))
+            .stream(request)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -600,7 +597,7 @@ mod tests {
     async fn config_by_file_missing() {
         init();
         let mut stream = ConfigurationKind::File {
-            path: PathBuf::from(temp_dir().join("does_not_exit")),
+            path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
         }
@@ -658,7 +655,7 @@ mod tests {
     async fn schema_by_file_missing() {
         init();
         let mut stream = SchemaKind::File {
-            path: PathBuf::from(temp_dir().join("does_not_exit")),
+            path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
         }

@@ -148,7 +148,7 @@ mod tests {
 
     use super::*;
 
-    const TYPENAME_FIELD_NAME: &'static str = "__typename";
+    const TYPENAME_FIELD_NAME: &str = "__typename";
 
     fn qp_json_string() -> String {
         include_str!("testdata/query_plan.json").to_owned()

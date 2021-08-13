@@ -1,82 +1,224 @@
-version: '2.1'
+version: 2.1
+
+# These "CircleCI Orbs" are reusable bits of configuration that can be shared
+# across projects.  See https://circleci.com/orbs/ for more information.
+orbs:
+  # Rust steps which are used below (like `rust/install`, `rust/test`) are
+  # defined in this orb. For reference, the orb can be found here:
+  # https://github.com/CircleCI-Public/rust-orb
+  rust: circleci/rust@1.5.0
 
 commands:
-  setup_env:
+  common_test_steps:
+    description: Commands to run on each platform before tests start
+    steps:
+      - run:
+          name: npm clean-install
+          working_directory: dockerfiles/federation-demo/federation-demo
+          command: npm clean-install
+      - run:
+          name: start federation-demo (background)
+          working_directory: dockerfiles/federation-demo/federation-demo
+          command: npm start
+          background: true
+      - run:
+          name: wait for federation demo to start
+          command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
+
+
+executors:
+  rust_linux: &rust_linux_executor
+    docker:
+      - image: cimg/base:stable
+  rust_macos: &rust_macos_executor
+    macos:
+      xcode: 11.4
+  rust_windows: &rust_windows_executor
+    machine:
+      image: 'windows-server-2019-vs2019:stable'
+    resource_class: windows.xlarge
+    shell: powershell.exe -ExecutionPolicy Bypass
+
+jobs:
+  build_test_lint:
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    environment:
+      # Note: This is a no-op at the second, but bear with me on this.  If this
+      # comment is not removed by 2021-06-30 remove it along with the next line.
+      # renovate: datasource=github-tags depName=nodejs/node versioning=node
+      NODE_VERSION: 14.16.1
+      NPM_VERSION: 7.10.0
     steps:
       - checkout
       - run:
           name: Initialize submodules
-          command: git submodule sync --recursive; git submodule update --recursive --init
-      - run: sudo npm install -g npm
-      - run:
-          name: Build federation-demo
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm install;
-      - run:
-          name: Start federation-demo services
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm run start
-          background: true
-      - run:
-          name: Wait for accounts
-          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4001
-      - run:
-          name: Wait for reviews
-          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4002
-      - run:
-          name: Wait for products
-          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4003
-      - run:
-          name: Wait for inventory
-          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4004
-      - run:
-          name: Wait for gateway
-          command: timeout 22 bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/$0/$1; do sleep 1; done' localhost 4000
-      - run: sudo apt-get update
-      - run: sudo apt-get install libssl-dev
-      - run: cargo --version
-
-  build:
-    parameters:
-      cache_version:
-        default: v1
-        description: Cache version to use - increment this to build a fresh cache.
-        type: string
-    steps:
-      - restore_cache:
-          keys:
-            - 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
-      - run:
-          name: Tests
-          command: cargo test --all
-      - run:
-          name: Format lint
-          command: cargo fmt -- --check
-      - run:
-          name: Clippy lint
-          command: cargo clippy --all --no-default-features -- -D warnings
-      - run:
-          name: Strict build
-          command: cargo build --all-targets
-          environment:
-            RUSTFLAGS: -D warnings -D missing_docs -D future_incompatible -D missing_debug_implementations -D nonstandard_style -D future_incompatible -D unreachable_pub -D rust_2018_idioms
-      - run: cargo rustdoc
-      - save_cache:
-          key: 'cargo-<<parameters.cache_version>>-{{ checksum "Cargo.lock" }}'
-          paths:
-            - ~/.cargo
-
-jobs:
-  build_test_lint:
-    docker:
-      - image: cimg/rust:1.53.0-node
-    steps:
-      - setup_env
-      - build
+          command: git submodule update --recursive --init
+      - when:
+          condition:
+            equal: [ *rust_macos_executor, << parameters.platform >> ]
+          steps:
+            - rust/install:
+                version: stable
+            - restore_cache:
+                keys:
+                  - rust-target-v1-macos-{{ checksum "Cargo.lock" }}
+            # Installing this with the curl nvm command was proving difficult,
+            # so I've opted to just install the .pkg.  Should be the same net
+            # result, even if liked the opportunity for symmetry with Linux.
+            - run:
+                name: Installing Node.js with a .pkg.
+                command: |
+                  curl "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.pkg" > "$HOME/Downloads/node.pkg" && sudo installer -store -pkg "$HOME/Downloads/node.pkg" -target "/"
+            - run:
+                name: Install specific version of npm
+                command: |
+                  sudo npm install --global npm@${NPM_VERSION}
+            - run:
+                name: Assert Node.js version
+                command: test "$(node --version)" = "v${NODE_VERSION}"
+            - run:
+                name: Assert npm version
+                command: test "$(npm --version)" = "${NPM_VERSION}"
+            - common_test_steps
+            - rust/test:
+                # This is prefixed in the orb with 'cargo-'
+                cache_version: v2-macos
+                package: --workspace
+            - rust/format:
+                with_cache: false # Only the first needs to restore cache.
+            - rust/clippy:
+                with_cache: false # Only the first needs to restore cache.
+            - run: cargo rustdoc
+            - save_cache:
+                key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
+                paths:
+                  - target/
+      - when:
+          condition:
+            equal: [ *rust_linux_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  sudo apt-get update
+                  sudo apt-get install -y libssl-dev
+            - rust/install:
+                version: stable
+            - restore_cache:
+                keys:
+                  - rust-target-v1-linux-{{ checksum "Cargo.lock" }}
+            - run:
+                name: Install nvm
+                command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+            - run: echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
+            - run:
+                name: Install desired Node.js version
+                command: |
+                  nvm install $NODE_VERSION
+                  nvm alias default $NODE_VERSION
+                  npm install --global npm@${NPM_VERSION}
+            - run:
+                name: Assert Node.js version
+                command: test "$(node --version)" = "v${NODE_VERSION}"
+            - run:
+                name: Assert npm version
+                command: test "$(npm --version)" = "${NPM_VERSION}"
+            - common_test_steps
+            - rust/test:
+                # This is prefixed in the orb with 'cargo-'
+                cache_version: v2-linux
+                package: --workspace
+            - rust/format:
+                with_cache: false # Only the first needs to restore cache.
+            - rust/clippy:
+                with_cache: false # Only the first needs to restore cache.
+            - run: cargo rustdoc
+            - save_cache:
+                key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
+                paths:
+                  - target/
+      - when:
+          condition:
+            equal: [ *rust_windows_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install rustup
+                environment:
+                  # Override auto-detection of RAM for Rustc install.
+                  # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
+                  RUSTUP_UNPACK_RAM: "21474836480"
+                command: |
+                  $installer_dir = "$Env:TEMP"
+                  echo "Downloading rustup"
+                  (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
+                  echo "Installing rustup"
+                  & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
+                  exit $LASTEXITCODE
+            - run:
+                name: Special case for Windows because of ssh-agent
+                command: |
+                  Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
+                  [net]
+                  git-fetch-with-cli = true
+                  "@
+            - restore_cache:
+                keys:
+                  - rust-target-v1-windows-{{ checksum "Cargo.lock" }}
+            - run:
+                name: Install desired Node.js version with nvm
+                command: |
+                  nvm install ${Env:NODE_VERSION}
+                  nvm on
+            - run:
+                # https://github.com/coreybutler/nvm-windows/issues/300
+                # Have to move the command out of the way because it can't
+                # overwrite itself otherwise.   This is madness, but apparently
+                # accepted.  Other things I tried: using yarn to install npm,
+                # using http://npm.im/npm-windows-upgrade and even shouting.
+                name: Install specific version of npm in a crazy Windows way
+                command: |
+                  $node_dir = (get-item (get-command npm).source).directory.fullname
+                  foreach ($cmd in @("npm", "npx")) {
+                    foreach ($ext in @(".ps1", ".cmd", "")) {
+                      if (Test-Path "$node_dir/$cmd$ext") {
+                        rename-item -path (join-path -path $node_dir -childpath "$cmd$ext") "${cmd}-orig${ext}"
+                      }
+                    }
+                  }
+                  npm-orig install --global "npm@${Env:NPM_VERSION}"
+            - run:
+                name: Assert Node.js version
+                command: |
+                  if ((node --version) -Ne "v${Env:NODE_VERSION}") { exit 1 }
+            - run:
+                name: Assert npm version
+                command: |
+                  if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+            - common_test_steps
+            - rust/test:
+                # This is prefixed in the orb with 'cargo-'
+                cache_version: v2-windows
+                package: --workspace
+            - rust/format:
+                with_cache: false # Only the first needs to restore cache.
+            - rust/clippy:
+                with_cache: false # Only the first needs to restore cache.
+            - run: cargo rustdoc
+            - save_cache:
+                key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
+                paths:
+                  - target/
 
 workflows:
   build:
     jobs:
-      - build_test_lint
-
-
+      - build_test_lint:
+          matrix:
+            parameters:
+              platform:
+                - rust_macos
+                - rust_windows
+                - rust_linux
