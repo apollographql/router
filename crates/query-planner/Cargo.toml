@@ -16,5 +16,5 @@ thiserror = "1.0.26"
 
 
 [dev-dependencies]
-insta = "1.7.1"
+insta = "1.7.2"
 mockall = "0.10.2"

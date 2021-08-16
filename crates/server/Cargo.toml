@@ -27,7 +27,7 @@ parking_lot = "0.11.1"
 mockall = {version = "0.10.1", optional = true}
 
 [dev-dependencies]
-insta = "1.7.1"
+insta = "1.7.2"
 reqwest = "0.11.4"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
 ctor = "0.1.20"
