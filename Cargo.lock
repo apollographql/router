@@ -1022,8 +1022,8 @@ dependencies = [
 
 [[package]]
 name = "harmonizer"
-version = "0.3.1"
-source = "git+https://github.com/apollographql/federation.git?branch=query-planer-js-bridge#345078033c8a012c643503e0617aab32a0e91ca4"
+version = "0.28.0"
+source = "git+https://github.com/apollographql/federation.git?branch=query-planer-js-bridge#b0b30e8b7155bb52fd75754f082b11654f49aa66"
 dependencies = [
  "anyhow",
  "deno_core",
