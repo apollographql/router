@@ -16,3 +16,4 @@ crates/*/Cargo.lock
 
 # IDE
 .idea
+*.iml
