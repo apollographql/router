@@ -41,9 +41,6 @@ pub enum Command {
     /// Prepare Router for a release.
     Prep(commands::Prep),
 
-    /// Install build dependencies.
-    InstallBuildDependencies(commands::InstallBuildDependencies),
-
     /// Package build.
     Package(commands::Package),
 }
@@ -55,7 +52,6 @@ impl Xtask {
             Command::Lint(command) => command.run(self.verbose),
             Command::Test(command) => command.run(self.verbose),
             Command::Prep(command) => command.run(self.verbose),
-            Command::InstallBuildDependencies(command) => command.run(),
             Command::Package(command) => command.run(),
         }?;
         eprintln!("{}", Green.bold().paint("Success!"));

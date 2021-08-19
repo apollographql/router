@@ -1,13 +1,13 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use camino::Utf8PathBuf;
 use std::path::Path;
 use structopt::StructOpt;
 
 use crate::target::{Target, POSSIBLE_TARGETS};
-use crate::utils::{PKG_PROJECT_ROOT, RELEASE_BIN, TARGET_DIR};
+use crate::utils::{PKG_PROJECT_ROOT, PKG_VERSION, RELEASE_BIN, TARGET_DIR};
 
 const INCLUDE: &[&str] = &["README.md", "LICENSE"];
 
@@ -33,16 +33,32 @@ impl Package {
             .join("release")
             .join(RELEASE_BIN);
 
+        ensure!(
+            release_path.exists(),
+            "Could not find binary at: {}",
+            release_path
+        );
+
         #[cfg(target_os = "macos")]
         self.macos.run(&release_path)?;
 
-        crate::info!("Creating tarball...");
-        if let Some(path) = self.output.parent() {
-            let _ = std::fs::create_dir_all(path);
-        }
+        let output_path = if !self.output.exists() {
+            if let Some(path) = self.output.parent() {
+                let _ = std::fs::create_dir_all(path);
+            }
+            self.output.to_owned()
+        } else if self.output.is_dir() {
+            self.output.join(format!(
+                "{}-{}-{}.tar.gz",
+                RELEASE_BIN, *PKG_VERSION, self.target
+            ))
+        } else {
+            self.output.to_owned()
+        };
+        crate::info!("Creating tarball: {}", output_path);
         let mut file = flate2::write::GzEncoder::new(
             std::io::BufWriter::new(
-                std::fs::File::create(&self.output).context("could not create TGZ file")?,
+                std::fs::File::create(&output_path).context("could not create TGZ file")?,
             ),
             flate2::Compression::default(),
         );
