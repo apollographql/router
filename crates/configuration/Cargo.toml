@@ -9,7 +9,7 @@ license-file = "./LICENSE"
 
 [dependencies]
 serde_yaml = "0.8.19"
-serde = { version = "1.0.128", features = ["derive"] }
+serde = { version = "1.0.129", features = ["derive"] }
 thiserror = "1.0.26"
 maplit = "1.0.2"
 typed-builder = "0.9.0"

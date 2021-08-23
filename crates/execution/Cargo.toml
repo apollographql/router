@@ -12,7 +12,7 @@ query-planner = { path = "../query-planner" }
 configuration = { path = "../configuration" }
 futures = "0.3.16"
 serde_json = "1.0.66"
-serde = { version = "1.0.128", features = ["derive", "rc"] }
+serde = { version = "1.0.129", features = ["derive", "rc"] }
 derive_more = "0.99.16"
 thiserror = "1.0.26"
 reqwest = { version = "0.11.4", features = ["json", "stream"] }
