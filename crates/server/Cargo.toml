@@ -9,7 +9,7 @@ license-file = "./LICENSE"
 
 [dependencies]
 hyper = { version = "0.14.11", features = ["full"] }
-tokio = { version = "1.10.0", features = ["full"] }
+tokio = { version = "1.10.1", features = ["full"] }
 query-planner = { path = "../query-planner" }
 execution = { path = "../execution" }
 configuration = { path = "../configuration" }
