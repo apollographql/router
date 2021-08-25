@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "configuration"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "maplit",
  "serde",
@@ -689,7 +689,7 @@ checksum = "f7531096570974c3a9dcf9e4b8e1cede1ec26cf5046219fb3b9d897503b9be59"
 
 [[package]]
 name = "execution"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "bytes",
  "configuration",
@@ -1924,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "query-planner"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "derive_more",
  "harmonizer",
@@ -2066,7 +2066,7 @@ dependencies = [
 
 [[package]]
 name = "router"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "configuration",
  "directories",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "configuration",
  "ctor",
@@ -2957,7 +2957,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 dependencies = [
  "ansi_term 0.12.1",
  "anyhow",

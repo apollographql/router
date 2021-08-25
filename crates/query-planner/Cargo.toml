@@ -1,6 +1,6 @@
 [package]
 name = "query-planner"
-version = "0.1.0"
+version = "0.1.0-prealpha.1"
 authors = ["Apollo Graph, Inc. <opensource@apollographql.com>"]
 edition = "2018"
 license-file = "./LICENSE"

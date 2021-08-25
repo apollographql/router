@@ -397,16 +397,16 @@ workflows:
       - build_release:
           matrix:
             parameters:
-              platform: [rust_macos]
+              platform: [rust_macos, rust_windows, rust_linux]
           filters:
             branches:
               ignore: /.*/
             tags:
-              only : /^v/
+              only : /v.*/
       - publish_github_release:
           requires: [build_release]
           filters:
             branches:
               ignore: /.*/
             tags:
-              only : /^v/
+              only : /v.*/
