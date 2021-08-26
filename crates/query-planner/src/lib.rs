@@ -37,9 +37,9 @@ pub enum QueryPlannerError {
 pub struct QueryPlanOptions {}
 
 /// Query planning options.
-impl QueryPlanOptions {
+impl Default for QueryPlanOptions {
     /// Default query planning options.
-    pub fn default() -> QueryPlanOptions {
+    fn default() -> QueryPlanOptions {
         QueryPlanOptions {}
     }
 }
@@ -47,14 +47,22 @@ impl QueryPlanOptions {
 /// QueryPlanner can be used to plan queries.
 /// Implementations may cache query plans.
 #[cfg_attr(test, automock)]
-pub trait QueryPlanner: Send {
+pub trait QueryPlanner: Send + Sync {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
     fn get(
-        &mut self,
+        &self,
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<model::QueryPlan, QueryPlannerError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use static_assertions::*;
+
+    assert_obj_safe!(QueryPlanner);
 }

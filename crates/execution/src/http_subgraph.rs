@@ -3,10 +3,7 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures::prelude::*;
 
-use crate::{
-    FetchError, GraphQLFetcher, GraphQLPatchResponse, GraphQLPrimaryResponse, GraphQLRequest,
-    GraphQLResponse, GraphQLResponseStream,
-};
+use crate::{FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream};
 
 type BytesStream =
     Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, FetchError>> + std::marker::Send>>;
@@ -48,7 +45,6 @@ impl HttpSubgraphFetcher {
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
             .map_err(move |err: reqwest::Error| FetchError::SubrequestHttpError {
-                status: err.status().map(|status| status.into()),
                 service: service.to_owned(),
                 reason: err.to_string(),
             })
@@ -64,8 +60,7 @@ impl HttpSubgraphFetcher {
             .map(move |(index, result)| {
                 let service = service.to_owned();
                 match result {
-                    Ok(bytes) if { index == 0 } => to_primary(service, &bytes),
-                    Ok(bytes) => to_patch(service, &bytes),
+                    Ok(bytes) => to_response(service, &bytes, index == 0),
                     Err(err) => err.to_response(index == 0),
                 }
             });
@@ -73,24 +68,13 @@ impl HttpSubgraphFetcher {
     }
 }
 
-fn to_patch(service: impl Into<String>, bytes: &Bytes) -> GraphQLResponse {
-    serde_json::from_slice::<GraphQLPatchResponse>(&bytes)
-        .map(GraphQLResponse::Patch)
+fn to_response(service: impl Into<String>, bytes: &Bytes, primary: bool) -> GraphQLResponse {
+    serde_json::from_slice::<GraphQLResponse>(&bytes)
         .map_err(move |err| FetchError::SubrequestMalformedResponse {
             service: service.into(),
             reason: err.to_string(),
         })
-        .unwrap_or_else(|err| err.to_patch())
-}
-
-fn to_primary(service: impl Into<String>, bytes: &Bytes) -> GraphQLResponse {
-    serde_json::from_slice::<GraphQLPrimaryResponse>(&bytes)
-        .map(GraphQLResponse::Primary)
-        .map_err(move |err| FetchError::SubrequestMalformedResponse {
-            service: service.into(),
-            reason: err.to_string(),
-        })
-        .unwrap_or_else(|err| err.to_primary())
+        .unwrap_or_else(|err| err.to_response(primary))
 }
 
 impl GraphQLFetcher for HttpSubgraphFetcher {
@@ -111,8 +95,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
-        let response = GraphQLPrimaryResponse {
-            data: json!({
+        let response = GraphQLResponse::builder()
+            .data(json!({
               "allProducts": [
                 {
                   "variation": {
@@ -127,14 +111,8 @@ mod tests {
                   "id": "apollo-studio"
                 }
               ]
-            })
-            .as_object()
-            .unwrap()
-            .to_owned(),
-            has_next: Default::default(),
-            errors: Default::default(),
-            extensions: Default::default(),
-        };
+            }))
+            .build();
 
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -155,7 +133,7 @@ mod tests {
             .collect::<Vec<_>>()
             .await;
 
-        assert_eq!(collect[0], GraphQLResponse::Primary(response));
+        assert_eq!(collect[0], response);
         mock.assert();
         Ok(())
     }

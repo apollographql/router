@@ -1,17 +1,19 @@
-use std::collections::HashMap;
-
-/// Caching query planner that caches responses from a delegate.
 use crate::model::QueryPlan;
 use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
+use parking_lot::Mutex;
+use std::collections::HashMap;
 
-/// A query planner decorator that caches results.
+/// A query planner wrapper that caches results.
+///
 /// There is no eviction strategy, query plans will be retained forever.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached: HashMap<
-        (String, Option<String>, crate::QueryPlanOptions),
-        Result<QueryPlan, QueryPlannerError>,
+    cached: Mutex<
+        HashMap<
+            (String, Option<String>, crate::QueryPlanOptions),
+            Result<QueryPlan, QueryPlannerError>,
+        >,
     >,
 }
 
@@ -19,22 +21,22 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
     fn new(delegate: T) -> CachingQueryPlanner<T> {
         Self {
             delegate,
-            cached: HashMap::new(),
+            cached: Default::default(),
         }
     }
 }
 
 impl<T: QueryPlanner> crate::QueryPlanner for CachingQueryPlanner<T> {
     fn get(
-        &mut self,
+        &self,
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<QueryPlan, QueryPlannerError> {
-        let delegate = &mut self.delegate;
         self.cached
+            .lock()
             .entry((query.clone(), operation.clone(), options.clone()))
-            .or_insert_with(|| delegate.get(query, operation, options))
+            .or_insert_with(|| self.delegate.get(query, operation, options))
             .clone()
     }
 }
@@ -68,7 +70,7 @@ mod tests {
                 parse_errors: "".into(),
             }));
 
-        let mut planner = delegate.with_caching();
+        let planner = delegate.with_caching();
 
         for _ in 0..5 {
             assert!(planner

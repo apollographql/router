@@ -3,6 +3,7 @@
 //!
 //! QueryPlans are a set of operations that describe how a federated query is processed.
 
+use apollo_json_ext::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// The root query plan container
@@ -73,13 +74,13 @@ pub struct FetchNode {
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub requires: Option<SelectionSet>,
+    pub requires: Option<Vec<Selection>>,
 
     /// The variables that are used for the subgraph fetch.
     pub variable_usages: Vec<String>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub operation: GraphQLQuery,
+    pub operation: String,
 }
 
 /// A flatten node.
@@ -87,7 +88,7 @@ pub struct FetchNode {
 #[serde(rename_all = "camelCase")]
 pub struct FlattenNode {
     /// The path when result should be merged.
-    pub path: ResponsePath,
+    pub path: Path,
 
     /// The child execution plan.
     pub node: Box<PlanNode>,
@@ -118,7 +119,7 @@ pub struct Field {
 
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub selections: Option<SelectionSet>,
+    pub selections: Option<Vec<Selection>>,
 }
 
 /// An inline fragment.
@@ -130,17 +131,8 @@ pub struct InlineFragment {
     pub type_condition: Option<String>,
 
     /// The selections from the fragment.
-    pub selections: SelectionSet,
+    pub selections: Vec<Selection>,
 }
-
-/// A selection set is a list of data required for a fetch.
-pub type SelectionSet = Vec<Selection>;
-
-/// A string representing a graphql query.
-pub type GraphQLQuery = String;
-
-///A path where a the response is merged in to the result.
-pub type ResponsePath = Vec<String>;
 
 #[cfg(test)]
 mod tests {
@@ -169,8 +161,7 @@ mod tests {
                             PlanNode::Sequence {
                                 nodes: vec![
                                     PlanNode::Flatten(FlattenNode {
-                                        path: vec![
-                                            "topProducts".to_owned(), "@".to_owned()],
+                                        path: Path::from("topProducts/@"),
                                         node: Box::new(PlanNode::Fetch(FetchNode {
                                             service_name: "books".to_owned(),
                                             variable_usages: vec!["test_variable".into()],
@@ -193,9 +184,7 @@ mod tests {
                                         })),
                                     }),
                                     PlanNode::Flatten(FlattenNode {
-                                        path: vec![
-                                            "topProducts".to_owned(),
-                                            "@".to_owned()],
+                                        path: Path::from("topProducts/@"),
                                         node: Box::new(PlanNode::Fetch(FetchNode {
                                             service_name: "product".to_owned(),
                                             variable_usages: vec![],
@@ -231,7 +220,7 @@ mod tests {
                             PlanNode::Sequence {
                                 nodes: vec![
                                     PlanNode::Flatten(FlattenNode {
-                                        path: vec!["product".to_owned()],
+                                        path: Path::from("product"),
                                         node: Box::new(PlanNode::Fetch(FetchNode {
                                             service_name: "books".to_owned(),
                                             variable_usages: vec![],
@@ -254,7 +243,7 @@ mod tests {
                                         })),
                                     }),
                                     PlanNode::Flatten(FlattenNode {
-                                        path: vec!["product".to_owned()],
+                                        path: Path::from("product"),
                                         node: Box::new(PlanNode::Fetch(FetchNode {
                                             service_name: "product".to_owned(),
                                             variable_usages: vec![],

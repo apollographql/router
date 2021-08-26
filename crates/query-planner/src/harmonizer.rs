@@ -22,7 +22,7 @@ impl HarmonizerQueryPlanner {
 
 impl crate::QueryPlanner for HarmonizerQueryPlanner {
     fn get(
-        &mut self,
+        &self,
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
@@ -71,8 +71,7 @@ mod tests {
 
     #[test]
     fn test_plan() {
-        let mut planner =
-            HarmonizerQueryPlanner::new(include_str!("testdata/schema.graphql").into());
+        let planner = HarmonizerQueryPlanner::new(include_str!("testdata/schema.graphql").into());
         let result = planner.get(
             include_str!("testdata/query.graphql").into(),
             None,
@@ -93,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_plan_error() {
-        let mut planner = HarmonizerQueryPlanner::new("".to_string());
+        let planner = HarmonizerQueryPlanner::new("".to_string());
         let result = planner.get("".into(), None, QueryPlanOptions::default());
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",

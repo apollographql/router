@@ -27,7 +27,7 @@ impl GraphFactory<FederatedGraph> for FederatedGraphFactory {
     fn create(&self, configuration: &Configuration, schema: &str) -> FederatedGraph {
         let service_registry = HttpServiceRegistry::new(configuration);
         FederatedGraph::new(
-            HarmonizerQueryPlanner::new(schema.to_owned()).with_caching(),
+            Box::new(HarmonizerQueryPlanner::new(schema.to_owned()).with_caching()),
             Arc::new(service_registry),
         )
     }

@@ -1,14 +1,22 @@
-use std::collections::HashMap;
-
-use configuration::Configuration;
-
 use crate::http_subgraph::HttpSubgraphFetcher;
 use crate::{GraphQLFetcher, ServiceRegistry};
+use configuration::Configuration;
+use std::collections::HashMap;
+use std::fmt;
 
 /// Service registry that uses http to connect to subgraphs.
-#[derive(Debug)]
 pub struct HttpServiceRegistry {
     services: HashMap<String, Box<dyn GraphQLFetcher>>,
+}
+
+impl fmt::Debug for HttpServiceRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut debug = f.debug_tuple("HttpServiceRegistry");
+        for name in self.services.keys() {
+            debug.field(name);
+        }
+        debug.finish()
+    }
 }
 
 impl HttpServiceRegistry {

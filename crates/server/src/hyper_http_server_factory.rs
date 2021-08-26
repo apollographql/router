@@ -250,8 +250,7 @@ mod tests {
     use serde_json::json;
 
     use execution::{
-        FetchError, GraphQLFetcher, GraphQLPrimaryResponse, GraphQLRequest, GraphQLResponse,
-        GraphQLResponseStream,
+        FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
     };
 
     use super::*;
@@ -354,18 +353,9 @@ mod tests {
 
     #[tokio::test]
     async fn response() -> Result<(), FederatedServerError> {
-        let expected_response = GraphQLPrimaryResponse {
-            data: json!(
-            {
-              "response": "yay",
-            })
-            .as_object()
-            .cloned()
-            .unwrap(),
-            has_next: Default::default(),
-            errors: Default::default(),
-            extensions: Default::default(),
-        };
+        let expected_response = GraphQLResponse::builder()
+            .data(json!({"response": "yay"}))
+            .build();
         let example_response = expected_response.clone();
         let (fetcher, server, client) = init("127.0.0.1:0");
         {
@@ -373,9 +363,7 @@ mod tests {
                 .write()
                 .expect_stream()
                 .times(1)
-                .return_once(move |_| {
-                    futures::stream::iter(vec![GraphQLResponse::Primary(example_response)]).boxed()
-                });
+                .return_once(move |_| futures::stream::iter(vec![example_response]).boxed());
         }
         let response = client
             .post(format!("http://{}/graphql", server.listen_address))
@@ -393,7 +381,7 @@ mod tests {
             .expect("unexpected response");
 
         assert_eq!(
-            response.json::<GraphQLPrimaryResponse>().await.unwrap(),
+            response.json::<GraphQLResponse>().await.unwrap(),
             expected_response,
         );
 
@@ -406,11 +394,10 @@ mod tests {
         {
             fetcher.write().expect_stream().times(1).return_once(|_| {
                 futures::stream::iter(vec![FetchError::SubrequestHttpError {
-                    status: Some(401),
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
-                .to_primary()])
+                .to_response(true)])
                 .boxed()
             });
         }
@@ -427,19 +414,17 @@ mod tests {
             .await
             .ok()
             .unwrap()
-            .json::<GraphQLPrimaryResponse>()
+            .json::<GraphQLResponse>()
             .await
             .unwrap();
 
         assert_eq!(
             response,
             FetchError::SubrequestHttpError {
-                status: Some(401),
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
-            .to_primary()
-            .primary()
+            .to_response(true)
         );
         server.shutdown().await
     }
