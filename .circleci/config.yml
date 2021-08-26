@@ -195,6 +195,7 @@ jobs:
       - rust/format:
           with_cache: false # Only the first needs to restore cache.
       - rust/clippy:
+          flags: --workspace --tests -- -D warnings
           with_cache: false # Only the first needs to restore cache.
 
   build_release:

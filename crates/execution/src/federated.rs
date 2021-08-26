@@ -172,7 +172,7 @@ async fn execute(
         PlanNode::Fetch(info) => {
             match fetch_node(
                 response.clone(),
-                &current_dir,
+                current_dir,
                 info,
                 request.clone(),
                 service_registry.clone(),
@@ -329,7 +329,7 @@ async fn fetch_node<'a>(
                 })
             }
             Some(GraphQLResponse { data, .. }) => {
-                response.lock().await.insert_data(&current_dir, data)?;
+                response.lock().await.insert_data(current_dir, data)?;
                 Ok(())
             }
             None => Err(FetchError::SubrequestNoResponse {

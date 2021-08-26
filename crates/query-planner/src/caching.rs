@@ -3,18 +3,15 @@ use crate::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
+type CacheKey = (String, Option<String>, crate::QueryPlanOptions);
+
 /// A query planner wrapper that caches results.
 ///
 /// There is no eviction strategy, query plans will be retained forever.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached: Mutex<
-        HashMap<
-            (String, Option<String>, crate::QueryPlanOptions),
-            Result<QueryPlan, QueryPlannerError>,
-        >,
-    >,
+    cached: Mutex<HashMap<CacheKey, Result<QueryPlan, QueryPlannerError>>>,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {

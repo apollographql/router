@@ -69,7 +69,7 @@ impl HttpSubgraphFetcher {
 }
 
 fn to_response(service: impl Into<String>, bytes: &Bytes, primary: bool) -> GraphQLResponse {
-    serde_json::from_slice::<GraphQLResponse>(&bytes)
+    serde_json::from_slice::<GraphQLResponse>(bytes)
         .map_err(move |err| FetchError::SubrequestMalformedResponse {
             service: service.into(),
             reason: err.to_string(),

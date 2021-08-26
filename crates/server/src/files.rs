@@ -46,7 +46,6 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use futures::prelude::*;
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
 

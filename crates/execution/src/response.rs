@@ -57,7 +57,7 @@ impl GraphQLResponse {
     pub fn select(&self, path: &Path, selections: &[Selection]) -> Result<Value, FetchError> {
         let values =
             self.data
-                .get_at_path(&path)
+                .get_at_path(path)
                 .map_err(|err| FetchError::ExecutionPathNotFound {
                     reason: err.to_string(),
                 })?;
@@ -67,7 +67,7 @@ impl GraphQLResponse {
                 .into_iter()
                 .flat_map(|value| match (value, selections) {
                     (Value::Object(content), requires) => {
-                        select_object(&content, &requires).transpose()
+                        select_object(content, requires).transpose()
                     }
                     (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
                         reason: "not an object".to_string(),
@@ -80,7 +80,7 @@ impl GraphQLResponse {
     pub fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
         let nodes =
             self.data
-                .get_at_path_mut(&path)
+                .get_at_path_mut(path)
                 .map_err(|err| FetchError::ExecutionPathNotFound {
                     reason: err.to_string(),
                 })?;
@@ -98,7 +98,7 @@ fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Va
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                if let Some(value) = select_field(content, &field)? {
+                if let Some(value) = select_field(content, field)? {
                     output
                         .entry(field.name.to_owned())
                         .and_modify(|existing| existing.deep_merge(&value))
@@ -120,7 +120,7 @@ fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Va
 
 fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchError> {
     match (content.get(&field.name), &field.selections) {
-        (Some(Value::Object(child)), Some(selections)) => select_object(&child, selections),
+        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections),
         (Some(value), None) => Ok(Some(value.to_owned())),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
