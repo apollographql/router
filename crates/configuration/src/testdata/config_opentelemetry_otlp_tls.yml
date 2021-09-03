@@ -1,0 +1,16 @@
+server:
+  listen: 1.2.3.4:5
+subgraphs:
+  example:
+    routing_url: foo
+opentelemetry:
+  otlp:
+    tracing:
+      exporter:
+        tls_config:
+          ca:
+            env: SECRET_STUFF
+          cert:
+            file: /foo
+          key:
+            file: /bar

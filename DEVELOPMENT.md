@@ -69,6 +69,9 @@ requires that the `federation-demo` project is running:
     npm run start
     ```
 
+Go to https://studio.apollographql.com/sandbox/explorer to make queries and
+http://localhost:16686/ to reach Jaeger.
+
 ### Strict linting
 
 While developing locally doc warnings and other lint checks are disabled.

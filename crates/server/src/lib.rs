@@ -1,7 +1,9 @@
 //! Starts a server that will handle http graphql requests.
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use derivative::Derivative;
 use derive_more::Display;
@@ -9,12 +11,13 @@ use derive_more::From;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use log::error;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 use typed_builder::TypedBuilder;
 
-use configuration::Configuration;
+use configuration::{Configuration, OpenTelemetry};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 use crate::graph_factory::FederatedGraphFactory;
@@ -22,6 +25,7 @@ use crate::hyper_http_server_factory::HyperHttpServerFactory;
 use crate::state_machine::StateMachine;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use futures::FutureExt;
+use once_cell::sync::OnceCell;
 use std::fs::{read, read_to_string};
 use std::path::{Path, PathBuf};
 
@@ -32,11 +36,12 @@ mod hyper_http_server_factory;
 mod state_machine;
 
 type Schema = String;
-
 type SchemaStream = Pin<Box<dyn Stream<Item = Schema> + Send>>;
 
+pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+
 /// Error types for FederatedServer
-#[derive(Error, Debug, PartialEq, Clone)]
+#[derive(Error, Debug)]
 pub enum FederatedServerError {
     /// Something went wrong when trying to start the server.
     #[error("Failed to start server")]
@@ -53,6 +58,15 @@ pub enum FederatedServerError {
     /// Schema was not supplied.
     #[error("Schema was not supplied")]
     NoSchema,
+
+    #[error("Could not deserialize configuration: {0}")]
+    DeserializeConfigError(serde_yaml::Error),
+
+    #[error("Could not read configuration: {0}")]
+    ReadConfigError(std::io::Error),
+
+    #[error("Could not read schema: {0}")]
+    ReadSchemaError(std::io::Error),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -107,13 +121,12 @@ impl SchemaKind {
                     stream::empty().boxed()
                 } else {
                     //The schema file exists try and load it
-                    let schema = ConfigurationKind::read_schema(&path);
-                    match schema {
-                        Some(schema) => {
+                    match ConfigurationKind::read_schema(&path) {
+                        Ok(schema) => {
                             if watch {
                                 files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(ConfigurationKind::read_schema(&path))
+                                        future::ready(ConfigurationKind::read_schema(&path).ok())
                                     })
                                     .map(UpdateSchema)
                                     .boxed()
@@ -121,7 +134,10 @@ impl SchemaKind {
                                 stream::once(future::ready(UpdateSchema(schema))).boxed()
                             }
                         }
-                        None => stream::empty().boxed(),
+                        Err(err) => {
+                            log::error!("Failed to read schema: {}", err);
+                            stream::empty().boxed()
+                        }
                     }
                 }
             }
@@ -179,14 +195,12 @@ impl ConfigurationKind {
                     );
                     stream::empty().boxed()
                 } else {
-                    // The config file exists try and load it
-                    let configuration = ConfigurationKind::read_config(&path);
-                    match configuration {
-                        Some(configuration) => {
+                    match ConfigurationKind::read_config(&path) {
+                        Ok(configuration) => {
                             if watch {
                                 files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(ConfigurationKind::read_config(&path))
+                                        future::ready(ConfigurationKind::read_config(&path).ok())
                                     })
                                     .map(UpdateConfiguration)
                                     .boxed()
@@ -195,40 +209,92 @@ impl ConfigurationKind {
                                     .boxed()
                             }
                         }
-                        None => stream::empty().boxed(),
+                        Err(err) => {
+                            log::error!("Failed to read configuration: {}", err);
+                            stream::empty().boxed()
+                        }
                     }
                 }
             }
         }
+        .map(|event| match event {
+            UpdateConfiguration(mut config) => {
+                match try_initialize_subscriber(&config) {
+                    Ok(subscriber) => {
+                        config.subscriber = subscriber;
+                    }
+                    Err(err) => {
+                        log::error!("Could not initialize tracing subscriber: {}", err,)
+                    }
+                };
+                UpdateConfiguration(config)
+            }
+            _ => event,
+        })
         .chain(stream::iter(vec![NoMoreConfiguration]))
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Option<Configuration> {
-        match read(&path) {
-            Ok(bytes) => match serde_yaml::from_slice::<Configuration>(&bytes) {
-                Ok(configuration) => Some(configuration),
-                Err(err) => {
-                    log::error!("Invalid configuration: {}", err);
-                    None
-                }
-            },
-            Err(err) => {
-                log::error!("Failed to read configuration: {}", err);
-                None
-            }
-        }
+    fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
+        let bytes = read(&path).map_err(FederatedServerError::ReadConfigError)?;
+        let config = serde_yaml::from_slice::<Configuration>(&bytes)
+            .map_err(FederatedServerError::DeserializeConfigError)?;
+
+        Ok(config)
     }
 
-    fn read_schema(path: &Path) -> Option<Schema> {
-        match read_to_string(&path) {
-            Ok(string) => Some(string),
-            Err(err) => {
-                log::error!("Failed to read schema: {}", err);
-                None
-            }
-        }
+    fn read_schema(path: &Path) -> Result<Schema, FederatedServerError> {
+        read_to_string(&path).map_err(FederatedServerError::ReadSchemaError)
     }
+}
+
+fn try_initialize_subscriber(
+    config: &Configuration,
+) -> Result<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>, Box<dyn std::error::Error>>
+{
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::new(
+            GLOBAL_ENV_FILTER
+                .get()
+                .map(|x| x.as_str())
+                .unwrap_or("info"),
+        ))
+        .finish();
+
+    #[allow(clippy::single_match)]
+    match config.opentelemetry.as_ref() {
+        Some(OpenTelemetry::Jaeger(config)) => {
+            let default_config = Default::default();
+            let config = config.as_ref().unwrap_or(&default_config);
+            let mut pipeline =
+                opentelemetry_jaeger::new_pipeline().with_service_name(&config.service_name);
+            if let Some(url) = config.collector_endpoint.as_ref() {
+                pipeline = pipeline.with_collector_endpoint(url.as_str());
+            }
+            if let Some(username) = config.username.as_ref() {
+                pipeline = pipeline.with_collector_username(username);
+            }
+            if let Some(password) = config.password.as_ref() {
+                pipeline = pipeline.with_collector_password(password);
+            }
+            let tracer = pipeline.install_batch(opentelemetry::runtime::Tokio)?;
+            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            return Ok(Some(Arc::new(subscriber.with(telemetry))));
+        }
+        #[cfg(feature = "otlp")]
+        Some(OpenTelemetry::Otlp(configuration::otlp::Otlp::Tracing(tracing))) => {
+            let tracer = if let Some(tracing) = tracing.as_ref() {
+                tracing.tracer()?
+            } else {
+                configuration::otlp::Tracing::tracer_from_env()?
+            };
+            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            return Ok(Some(Arc::new(subscriber.with(telemetry))));
+        }
+        None => {}
+    }
+
+    Ok(None)
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -323,7 +389,7 @@ pub struct FederatedServer {
 }
 
 /// Messages that are broadcast across the app.
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug)]
 enum Event {
     /// The configuration was updated.
     UpdateConfiguration(Configuration),
@@ -343,7 +409,7 @@ enum Event {
 
 /// Public state that the client can be notified with via state listener
 /// This is useful for waiting until the server is actually serving requests.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum State {
     /// The server is starting up.
     Startup,
@@ -359,14 +425,9 @@ pub enum State {
 }
 
 /// A handle that allows the client to await for various server events.
-#[derive(Derivative)]
-#[derivative(Debug)]
 pub struct FederatedServerHandle {
-    #[derivative(Debug = "ignore")]
     result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
-    #[derivative(Debug = "ignore")]
     shutdown_sender: oneshot::Sender<()>,
-    #[derivative(Debug = "ignore")]
     state_receiver: Option<mpsc::Receiver<State>>,
 }
 
@@ -484,7 +545,7 @@ impl FederatedServer {
             self.schema.into_stream().boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
-        .take_while(|msg| future::ready(msg != &Shutdown))
+        .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
         .chain(stream::iter(vec![Shutdown]))
         .boxed();
         messages
@@ -549,7 +610,6 @@ mod tests {
         init();
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
-        let configuration = serde_yaml::from_slice::<Configuration>(contents.as_bytes()).unwrap();
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationKind::File {
             path,
@@ -560,17 +620,17 @@ mod tests {
         .boxed();
 
         // First update is guaranteed
-        assert_eq!(
+        assert!(matches!(
             stream.next().await.unwrap(),
-            UpdateConfiguration(configuration.to_owned())
-        );
+            UpdateConfiguration(_)
+        ));
 
         // Modify the file and try again
         write_and_flush(&mut file, contents).await;
-        assert_eq!(
+        assert!(matches!(
             stream.next().await.unwrap(),
-            UpdateConfiguration(configuration)
-        );
+            UpdateConfiguration(_)
+        ));
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":").await;
@@ -590,7 +650,7 @@ mod tests {
         .into_stream();
 
         // First update fails because the file is invalid.
-        assert_eq!(stream.next().await.unwrap(), NoMoreConfiguration);
+        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
     #[tokio::test]
@@ -604,7 +664,7 @@ mod tests {
         .into_stream();
 
         // First update fails because the file is invalid.
-        assert_eq!(stream.next().await.unwrap(), NoMoreConfiguration);
+        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
     #[tokio::test]
@@ -612,7 +672,6 @@ mod tests {
         init();
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
-        let configuration = serde_yaml::from_slice::<Configuration>(contents.as_bytes()).unwrap();
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationKind::File {
@@ -621,11 +680,11 @@ mod tests {
             delay: None,
         }
         .into_stream();
-        assert_eq!(
+        assert!(matches!(
             stream.next().await.unwrap(),
-            UpdateConfiguration(configuration)
-        );
-        assert_eq!(stream.next().await.unwrap(), NoMoreConfiguration);
+            UpdateConfiguration(_)
+        ));
+        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -644,11 +703,11 @@ mod tests {
         .boxed();
 
         // First update is guaranteed
-        assert_eq!(stream.next().await.unwrap(), UpdateSchema(schema.into()));
+        assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
 
         // Modify the file and try again
         write_and_flush(&mut file, schema).await;
-        assert_eq!(stream.next().await.unwrap(), UpdateSchema(schema.into()));
+        assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
     }
 
     #[tokio::test]
@@ -662,7 +721,7 @@ mod tests {
         .into_stream();
 
         // First update fails because the file is invalid.
-        assert_eq!(stream.next().await.unwrap(), NoMoreSchema);
+        assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
 
     #[tokio::test]
@@ -678,7 +737,7 @@ mod tests {
             delay: None,
         }
         .into_stream();
-        assert_eq!(stream.next().await.unwrap(), UpdateSchema(schema.into()));
-        assert_eq!(stream.next().await.unwrap(), NoMoreSchema);
+        assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
+        assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
 }

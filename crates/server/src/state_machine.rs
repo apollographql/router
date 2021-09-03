@@ -278,7 +278,6 @@ where
 #[cfg(test)]
 mod tests {
     use parking_lot::Mutex;
-    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
@@ -300,48 +299,48 @@ mod tests {
     async fn no_configuration() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert_eq!(
-            Err(NoConfiguration),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![NoMoreConfiguration],
                 vec![State::Startup, State::Errored]
             )
-            .await
-        );
+            .await,
+            Err(NoConfiguration),
+        ));
     }
 
     #[tokio::test]
     async fn no_schema() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert_eq!(
-            Err(NoSchema),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![NoMoreSchema],
                 vec![State::Startup, State::Errored]
             )
-            .await
-        );
+            .await,
+            Err(NoSchema),
+        ));
     }
 
     #[tokio::test]
     async fn shutdown_during_startup() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert_eq!(
-            Ok(()),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![Shutdown],
                 vec![State::Startup, State::Stopped]
             )
-            .await
-        );
+            .await,
+            Ok(()),
+        ));
     }
 
     #[tokio::test]
@@ -349,13 +348,16 @@ mod tests {
         let graph_factory = create_mock_graph_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
-        assert_eq!(
-            Ok(()),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .subgraphs(Default::default())
+                            .build()
+                    ),
                     UpdateSchema("".to_string()),
                     Shutdown
                 ],
@@ -365,8 +367,9 @@ mod tests {
                     State::Stopped
                 ]
             )
-            .await
-        );
+            .await,
+            Ok(()),
+        ));
         assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
@@ -375,13 +378,16 @@ mod tests {
         let graph_factory = create_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
-        assert_eq!(
-            Ok(()),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .subgraphs(Default::default())
+                            .build()
+                    ),
                     UpdateSchema("".to_string()),
                     UpdateSchema("".to_string()),
                     Shutdown
@@ -392,8 +398,9 @@ mod tests {
                     State::Stopped
                 ]
             )
-            .await
-        );
+            .await,
+            Ok(()),
+        ));
         assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
@@ -402,13 +409,16 @@ mod tests {
         let graph_factory = create_mock_graph_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
-        assert_eq!(
-            Ok(()),
+        assert!(matches!(
             execute(
                 server_factory,
                 graph_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().subgraphs(HashMap::new()).build()),
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .subgraphs(Default::default())
+                            .build()
+                    ),
                     UpdateSchema("".to_string()),
                     UpdateConfiguration(
                         Configuration::builder()
@@ -417,7 +427,7 @@ mod tests {
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
-                            .subgraphs(HashMap::new())
+                            .subgraphs(Default::default())
                             .build()
                     ),
                     Shutdown
@@ -429,8 +439,9 @@ mod tests {
                     State::Stopped
                 ]
             )
-            .await
-        );
+            .await,
+            Ok(()),
+        ));
         assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 

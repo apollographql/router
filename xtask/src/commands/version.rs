@@ -10,12 +10,6 @@ pub(crate) struct RouterVersion {
     inner: Version,
 }
 
-impl RouterVersion {
-    pub(crate) fn new(version: Version) -> RouterVersion {
-        RouterVersion { inner: version }
-    }
-}
-
 impl FromStr for RouterVersion {
     type Err = anyhow::Error;
 

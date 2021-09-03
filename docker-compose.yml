@@ -10,3 +10,11 @@ services:
       - 4003:4003
       - 4004:4004
     command: npm run start
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 16686:16686
+      - 14268:14268

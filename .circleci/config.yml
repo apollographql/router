@@ -43,6 +43,8 @@ jobs:
           condition:
             equal: [ *rust_macos_executor, << parameters.platform >> ]
           steps:
+            - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+            - run: brew install cmake
             - rust/install:
                 version: stable
             - restore_cache:
@@ -81,7 +83,7 @@ jobs:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
-                  sudo apt-get install -y libssl-dev
+                  sudo apt-get install -y libssl-dev cmake
             - rust/install:
                 version: stable
             - restore_cache:
@@ -115,6 +117,16 @@ jobs:
           condition:
             equal: [ *rust_windows_executor, << parameters.platform >> ]
           steps:
+#            - run:
+#                # TODO compiling grpcio on Windows is still not working
+#                #      using boringssl gives an error message
+#                #      using openssl hangs indefinitely
+#                name: Install grpcio build dependencies
+#                command: |
+#                  choco install activeperl -y
+#                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+#                  choco install yasm -y
+#                  choco install openssl -y
             - run:
                 name: Install rustup
                 environment:
@@ -176,27 +188,28 @@ jobs:
                 key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
+            # TODO: normally xtask can run the federation by itself and it
+            #       works on GitHub Actions on Windows. Unfortunately it
+            #       doesn't work here on CircleCI on Windows only.
+            - run:
+                name: npm clean-install
+                working_directory: dockerfiles/federation-demo/federation-demo
+                command: npm clean-install
+            - run:
+                name: start federation-demo (background)
+                working_directory: dockerfiles/federation-demo/federation-demo
+                command: npm start
+                background: true
+            - run:
+                name: wait for federation demo to start
+                command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
 
       - run:
-          name: npm clean-install
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm clean-install
+          command: >
+            cargo xtask test --verbose
       - run:
-          name: start federation-demo (background)
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm start
-          background: true
-      - run:
-          name: wait for federation demo to start
-          command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
-      - rust/test:
-          with_cache: false # Only the first needs to restore cache.
-          package: --workspace
-      - rust/format:
-          with_cache: false # Only the first needs to restore cache.
-      - rust/clippy:
-          flags: --workspace --tests -- -D warnings
-          with_cache: false # Only the first needs to restore cache.
+          command: >
+            cargo xtask lint --verbose
 
   build_release:
     parameters:
@@ -222,6 +235,8 @@ jobs:
           condition:
             equal: [ *rust_macos_executor, << parameters.platform >> ]
           steps:
+            - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+            - run: brew install cmake
             - rust/install:
                 version: stable
             # Installing this with the curl nvm command was proving difficult,

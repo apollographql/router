@@ -4,12 +4,15 @@ use crate::{
 };
 use apollo_json_ext::prelude::*;
 use async_recursion::async_recursion;
+use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
 use query_planner::model::{FetchNode, FlattenNode, PlanNode, QueryPlan};
 use query_planner::QueryPlanner;
 use std::collections::HashSet;
 use std::sync::Arc;
+use tracing::Instrument;
+use tracing_futures::WithSubscriber;
 
 /// Recursively validate a query plan node making sure that all services are known before we go
 /// for execution.
@@ -61,7 +64,10 @@ fn validate_request_variables_against_plan(
         .collect::<Vec<_>>()
 }
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct FederatedGraph {
+    #[derivative(Debug = "ignore")]
     query_planner: Box<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
 }
@@ -81,6 +87,11 @@ impl FederatedGraph {
 
 impl GraphQLFetcher for FederatedGraph {
     fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
+        let span = tracing::info_span!("federated_query");
+        let _guard = span.enter();
+
+        log::trace!("Request received:\n{:#?}", request);
+
         let plan = match self.query_planner.get(
             request.query.to_owned(),
             request.operation_name.to_owned(),
@@ -112,24 +123,28 @@ impl GraphQLFetcher for FederatedGraph {
             .boxed();
         }
 
-        stream::once(async move {
-            let response = Arc::new(Mutex::new(GraphQLResponse::builder().build()));
-            let root = Path::empty();
+        stream::once(
+            async move {
+                let response = Arc::new(Mutex::new(GraphQLResponse::builder().build()));
+                let root = Path::empty();
 
-            execute(
-                response.clone(),
-                &root,
-                &plan,
-                request,
-                service_registry.clone(),
-            )
-            .await;
+                execute(
+                    response.clone(),
+                    &root,
+                    &plan,
+                    request,
+                    service_registry.clone(),
+                )
+                .await;
 
-            // TODO: this is not great but there is no other way
-            Arc::try_unwrap(response)
-                .expect("todo: how to prove?")
-                .into_inner()
-        })
+                // TODO: this is not great but there is no other way
+                Arc::try_unwrap(response)
+                    .expect("todo: how to prove?")
+                    .into_inner()
+            }
+            .in_current_span()
+            .with_current_subscriber(),
+        )
         .boxed()
     }
 }
@@ -142,6 +157,9 @@ async fn execute(
     request: Arc<GraphQLRequest>,
     service_registry: Arc<dyn ServiceRegistry>,
 ) {
+    let span = tracing::info_span!("execution");
+    let _guard = span.enter();
+
     log::trace!("Executing plan:\n{:#?}", plan);
 
     match plan {

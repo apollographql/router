@@ -23,7 +23,8 @@ impl FederationDemoRunner {
     }
 
     pub(crate) fn start_background(&self) -> Result<BackgroundTask> {
-        self.npm.exec(&["install"], &self.path, None)?;
+        self.npm
+            .exec(&["install", "--no-progress"], &self.path, None)?;
         let task = self
             .npm
             .exec_background(&["run", "start"], &self.path, None)?;

@@ -1,6 +1,5 @@
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use camino::Utf8PathBuf;
-use semver::{BuildMetadata, Prerelease, Version};
 
 use crate::commands::version::RouterVersion;
 use crate::target::Target;
@@ -11,6 +10,14 @@ use crate::Result;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
+
+pub const FEATURE_SETS: &[&[&str]] = &[
+    &[],
+    &["otlp-http"],
+    &["otlp-tonic"],
+    &["otlp-tonic", "tls"],
+    &["otlp-grpcio"],
+];
 
 pub(crate) struct CargoRunner {
     cargo_package_directory: Utf8PathBuf,
@@ -36,10 +43,6 @@ impl CargoRunner {
         self.cargo_package_directory = cargo_package_directory;
     }
 
-    pub(crate) fn env(&mut self, key: String, value: String) -> Option<String> {
-        self.env.insert(key, value)
-    }
-
     pub(crate) fn build(
         &mut self,
         target: &Target,
@@ -49,45 +52,12 @@ impl CargoRunner {
         if let Some(version) = version {
             let git_runner = GitRunner::new(self.runner.verbose)?;
             let repo_path = git_runner.checkout_router_version(version.to_string().as_str())?;
-            let versioned_schema_url = format!(
-            "https://github.com/apollographql/router/releases/download/{0}/router-{0}-schema.graphql",
-            &version);
-            let max_version_not_supporting_env_var = RouterVersion::new(Version {
-                major: 0,
-                minor: 2,
-                patch: 0,
-                pre: Prerelease::new("beta.0")?,
-                build: BuildMetadata::EMPTY,
-            });
-            self.set_path(repo_path.clone());
+            self.set_path(repo_path);
             self.git_runner = Some(git_runner);
-
-            if version > &max_version_not_supporting_env_var {
-                self.env(
-                    "APOLLO_GRAPHQL_SCHEMA_URL".to_string(),
-                    versioned_schema_url,
-                );
-            } else {
-                utils::info(&format!(
-                    "downloading schema from {}",
-                    &versioned_schema_url
-                ));
-                let schema_response =
-                    reqwest::blocking::get(versioned_schema_url)?.error_for_status()?;
-                let schema_text = schema_response.text()?;
-                if !schema_text.contains("subgraph") {
-                    anyhow!("This schema doesn't seem to contain any references to `subgraph`s. It's probably the wrong schema.");
-                }
-                let schema_dir = repo_path
-                    .join("crates")
-                    .join("router-client")
-                    .join(".schema");
-                let _ = self.cargo_exec_with_target(target, vec!["build"], vec![], release);
-                fs::write(schema_dir.join("schema.graphql"), schema_text)?;
-            }
         }
 
-        self.cargo_exec_with_target(target, vec!["build"], vec![], release)?;
+        let args = vec!["build"];
+        self.cargo_exec_with_target(target, args, vec![], release)?;
         let bin_path = self.get_bin_path(target, release)?;
         utils::info(&format!("successfully compiled to `{}`", &bin_path));
         Ok(bin_path)
@@ -95,17 +65,27 @@ impl CargoRunner {
 
     pub(crate) fn lint(&mut self) -> Result<()> {
         self.cargo_exec_without_target(vec!["fmt", "--all"], vec!["--check"])?;
-        self.cargo_exec_without_target(vec!["clippy", "--all"], vec!["-D", "warnings"])?;
+        let args = vec!["clippy", "--all"];
+        self.cargo_exec_without_target(args, vec!["-D", "warnings"])?;
         Ok(())
     }
 
     pub(crate) fn test(&mut self, target: &Target) -> Result<()> {
-        self.cargo_exec_with_target(
-            target,
-            vec!["test", "--workspace", "--locked"],
-            vec!["--nocapture"],
-            false,
-        )?;
+        let args = vec!["test", "--workspace", "--locked", "--no-default-features"];
+
+        for features in FEATURE_SETS {
+            if cfg!(windows) && features.contains(&"otlp-grpcio") {
+                // TODO: I couldn't make it build on Windows but it is supposed to build.
+                continue;
+            }
+
+            let mut args = args.clone();
+            for feature in features.iter() {
+                args.extend(&["--features", feature]);
+            }
+
+            self.cargo_exec_with_target(target, args, vec![], false)?;
+        }
 
         Ok(())
     }

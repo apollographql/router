@@ -1,6 +1,7 @@
 //! Constructs an execution stream from q query plan
 
 use apollo_json_ext::prelude::*;
+use derivative::Derivative;
 use futures::prelude::*;
 #[cfg(feature = "mocks")]
 use mockall::{automock, predicate::*};
@@ -28,9 +29,10 @@ pub type GraphQLResponseStream = Pin<Box<dyn Stream<Item = GraphQLResponse> + Se
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, TypedBuilder)]
+#[derive(Clone, Derivative, Serialize, Deserialize, TypedBuilder)]
 #[serde(rename_all = "camelCase")]
 #[builder(field_defaults(setter(into)))]
+#[derivative(Debug, PartialEq)]
 pub struct GraphQLRequest {
     /// The graphql query.
     pub query: String,

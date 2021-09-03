@@ -64,7 +64,7 @@ impl Target {
                         )
                     })?;
 
-                env.insert("OPENSSL_DIR".to_string(), openssl_path.to_string());
+                env.insert("OPENSSL_ROOT_DIR".to_string(), openssl_path.to_string());
                 env.insert("OPENSSL_STATIC".to_string(), "1".to_string());
 
                 Some(env)

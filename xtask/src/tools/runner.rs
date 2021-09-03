@@ -120,11 +120,11 @@ impl Drop for BackgroundTask {
             }
         }
 
-        if self.child.try_wait().ok().flatten().is_some() {
+        if self.child.try_wait().ok().flatten().is_none() {
             // still alive? kill it with fire
             let _ = self.child.kill();
         }
 
-        let _ = self.child.try_wait();
+        let _ = self.child.wait();
     }
 }

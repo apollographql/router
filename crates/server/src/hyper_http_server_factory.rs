@@ -99,8 +99,17 @@ where
         (&Method::OPTIONS, "/") | (&Method::OPTIONS, "/graphql") => {
             handle_cors_preflight(&configuration, &mut response);
         }
-        (_, "/") | (_, "/graphql") => handle_graphql_request(request, graph, &mut response).await,
+        (_, "/") | (_, "/graphql") => {
+            let dispatch = {
+                let lock = configuration.read();
+                lock.subscriber
+                    .clone()
+                    .map(tracing::Dispatch::new)
+                    .unwrap_or_default()
+            };
 
+            handle_graphql_request(request, &dispatch, graph, &mut response).await
+        }
         _ => {
             *response.status_mut() = StatusCode::NOT_FOUND;
             *response.body_mut() = Body::from("Not found");
@@ -167,6 +176,7 @@ fn handle_cors_preflight(
 
 async fn handle_graphql_request<F>(
     request: Request<Body>,
+    dispatch: &tracing::Dispatch,
     graph: Arc<RwLock<F>>,
     response: &mut Response<Body>,
 ) where
@@ -179,10 +189,12 @@ async fn handle_graphql_request<F>(
             let graphql_request = serde_json::from_slice::<GraphQLRequest>(&bytes);
             match graphql_request {
                 Ok(graphql_request) => {
+                    let stream = tracing::dispatcher::with_default(dispatch, || {
+                        graph.read().stream(graphql_request)
+                    });
+
                     *response.body_mut() = Body::wrap_stream(
-                        graph
-                            .read()
-                            .stream(graphql_request)
+                        stream
                             .enumerate()
                             .map(|(index, res)| match serde_json::to_string(&res) {
                                 Ok(bytes) => Ok(Bytes::from(bytes)),
@@ -199,7 +211,7 @@ async fn handle_graphql_request<F>(
                                 }
                             })
                             .boxed(),
-                    )
+                    );
                 }
                 Err(err) => {
                     *response.status_mut() = StatusCode::BAD_REQUEST;
@@ -238,7 +250,6 @@ fn handle_redirect_to_studio(request: Request<Body>, response: &mut Response<Bod
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
@@ -296,7 +307,7 @@ mod tests {
                             ))
                             .build(),
                     )
-                    .subgraphs(HashMap::new())
+                    .subgraphs(Default::default())
                     .build(),
             )),
         );

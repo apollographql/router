@@ -9,14 +9,26 @@ license-file = "./LICENSE"
 [workspace]
 members = [".", "crates/*", "xtask"]
 
+[features]
+default = ["otlp-tonic"]
+otlp-tonic = ["configuration/otlp-tonic", "server/otlp"]
+otlp-grpcio = ["configuration/otlp-grpcio", "server/otlp"]
+otlp-http = ["configuration/otlp-http", "server/otlp"]
+tls = ["configuration/tls"]
+
 [dependencies]
-server = { path = "crates/server" }
-query-planner = { path = "crates/query-planner" }
-execution = { path = "crates/execution" }
+anyhow = "1.0.43"
 configuration = { path = "crates/configuration" }
-tokio = { version = "1.11.0", features = ["full"] }
+directories = "3.0.2"
+execution = { path = "crates/execution" }
 futures = { version = "0.3.15", features = ["thread-pool"]}
 log = "0.4.14"
-env_logger = "0.9.0"
+query-planner = { path = "crates/query-planner" }
+server = { path = "crates/server" }
 structopt = "0.3.22"
-directories = "3.0.2"
+tokio = { version = "1.11.0", features = ["full"] }
+tracing-subscriber = "0.2.20"
+
+[patch.crates-io]
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "414b3f459" }
+opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "414b3f459" }

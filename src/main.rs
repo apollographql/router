@@ -1,24 +1,24 @@
 //! Main entry point for CLI command to start server.
 
-use log::LevelFilter;
-
-use server::{ConfigurationKind, FederatedServerError, SchemaKind, ShutdownKind};
-use server::{FederatedServer, State};
-
+use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use futures::prelude::*;
+use server::{ConfigurationKind, FederatedServerError, SchemaKind, ShutdownKind};
+use server::{FederatedServer, State};
 use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
+use std::fmt;
 use std::path::PathBuf;
 use structopt::StructOpt;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 
 /// Options for the router
 #[derive(StructOpt, Debug)]
 #[structopt(name = "router", about = "Apollo federation router")]
 struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
-    #[structopt(short, long, default_value = "info")]
-    log_level: LevelFilter,
+    #[structopt(long = "log", default_value = "info", alias = "loglevel")]
+    env_filter: String,
 
     /// Reload configuration and schema files automatically.
     #[structopt(short, long)]
@@ -40,7 +40,6 @@ struct Opt {
 
     /// Schema location relative to the project directory.
     #[structopt(
-        short,
         long = "schema",
         parse(from_os_str),
         default_value = "supergraph.graphql",
@@ -73,8 +72,8 @@ impl From<&OsStr> for ProjectDir {
     }
 }
 
-impl Display for ProjectDir {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ProjectDir {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.path {
             None => {
                 write!(f, "Unknown, -p option must be used.")
@@ -87,16 +86,26 @@ impl Display for ProjectDir {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), FederatedServerError> {
+async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    let _ = env_logger::builder().filter_level(opt.log_level).try_init();
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?)
+        .finish()
+        .init();
+
+    server::GLOBAL_ENV_FILTER
+        .set(opt.env_filter.clone())
+        .unwrap();
 
     let base_directory = match opt.project_dir.path {
         Some(project_dir) => project_dir,
         None => {
-            log::error!("Unable to determine project directory. It must be explicitly set by passing in the '-p' flag");
-            return Err(FederatedServerError::StartupError);
+            log::error!(
+                "Unable to determine project directory. \
+                It must be explicitly set by passing in the '-p' flag",
+            );
+            return Err(FederatedServerError::StartupError.into());
         }
     };
 
@@ -141,7 +150,8 @@ async fn main() -> Result<(), FederatedServerError> {
 
     if let Err(err) = server_handle.await {
         log::error!("{}", err);
-        return Err(err);
+        return Err(err.into());
     }
+
     Ok(())
 }
