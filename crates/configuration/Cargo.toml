@@ -18,7 +18,7 @@ opentelemetry = { version = "0.16.0", features = ["serialize"] }
 opentelemetry-otlp = { version = "0.9.0", default-features = false, features = ["serialize"], optional = true }
 serde = { version = "1.0.130", features = ["derive"] }
 serde_yaml = "0.8.19"
-thiserror = "1.0.28"
+thiserror = "1.0.29"
 tonic = { version = "0.5.2", optional = true }
 tracing = "0.1.26"
 typed-builder = "0.9.0"
