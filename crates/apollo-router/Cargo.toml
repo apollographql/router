@@ -49,7 +49,7 @@ url = { version = "2.2.2", features = ["serde"] }
 
 [dev-dependencies]
 apollo-router-core = { path = "../apollo-router-core", features = ["mockall"] }
-ctor = "0.1.20"
+ctor = "0.1.21"
 env_logger = "0.9.0"
 httpmock = "0.6.2"
 insta = "1.8.0"
