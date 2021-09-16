@@ -24,7 +24,7 @@ derivative = "2.2.0"
 derive_more = "0.99.16"
 directories = "3.0.2"
 displaydoc = "0.2"
-futures = { version = "0.3.15", features = ["thread-pool"]}
+futures = { version = "0.3.17", features = ["thread-pool"]}
 hotwatch = "0.4.5"
 hyper = { version = "0.14.12", features = ["full"] }
 log = "0.4.14"
