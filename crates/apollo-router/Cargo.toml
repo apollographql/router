@@ -35,7 +35,7 @@ opentelemetry-otlp = { version = "0.9.0", default-features = false, features = [
 parking_lot = "0.11.2"
 reqwest = { version = "0.11.4", features = ["json", "stream"] }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
-serde_json = "1.0.67"
+serde_json = "1.0.68"
 serde_yaml = "0.8.21"
 structopt = "0.3.23"
 thiserror = "1.0.29"
