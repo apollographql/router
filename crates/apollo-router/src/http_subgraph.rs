@@ -23,7 +23,10 @@ impl HttpSubgraphFetcher {
         HttpSubgraphFetcher {
             service,
             url,
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .tcp_keepalive(Some(std::time::Duration::from_secs(5)))
+                .build()
+                .unwrap(),
         }
     }
 
