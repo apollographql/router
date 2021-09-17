@@ -15,18 +15,18 @@
       "separateMinorPatch": true,
       "matchManagers": [ "cargo" ],
       "minor": {
-        "groupName": "cargo pre-1.0 updates",
+        "groupName": "cargo pre-1.0 packages",
         "groupSlug": "cargo-all-pre-1.0",
       },
       "patch": {
-        "groupName": "cargo pre-1.0 updates",
+        "groupName": "cargo pre-1.0 packages",
         "groupSlug": "cargo-all-pre-1.0",
       }
     },
     {
       "matchCurrentVersion": ">= 1.0.0",
       "matchManagers": [ "cargo", "npm" ],
-      "groupName": "all minor-patch updates (>= 1.0)",
+      "groupName": "all minor-patch packages >= 1.0",
       "groupSlug": "all-minor-patch-gte-1.0",
     },
   ]
