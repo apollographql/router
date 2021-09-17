@@ -14,21 +14,19 @@
       "separateMinorPatch": true,
       "matchManagers": [ "cargo" ],
       "minor": {
-        "groupName": "all pre-1.0 minor updates",
-        "groupSlug": "all-pre-1.0-minor",
+        "groupName": "cargo: all pre-1.0 minor updates",
+        "groupSlug": "cargo-all-pre-1.0-minor",
       },
       "patch": {
-        "groupName": "all pre-1.0 patch updates",
-        "groupSlug": "all-pre-1.0-patch",
+        "groupName": "cargo: all pre-1.0 patch updates",
+        "groupSlug": "cargo-all-pre-1.0-patch",
       }
     },
     {
       "matchCurrentVersion": ">= 1.0.0",
-      "matchManagers": [ "cargo" ],
-      "minor": {
-        "groupName": "all minor-patch updates (>= 1.0)",
-        "groupSlug": "all-minor-patch-gte-1.0",
-      }
+      "matchManagers": [ "cargo", "npm" ],
+      "groupName": "all minor-patch updates (>= 1.0)",
+      "groupSlug": "all-minor-patch-gte-1.0",
     },
   ]
 }
