@@ -3,19 +3,32 @@
     "config:base"
   ],
   "packageRules": [
+    // Bunch up all non-major npm dependencies into a single PR.  In the common case
+    // where the upgrades apply cleanly, this causes less noise and is resolved faster
+    // than starting a bunch of upgrades in parallel for what may turn out to be
+    // a suite of related packages all released at once.
+    //
+    // Since too much in the Rust ecosystem is pre-1.0, we make an exception here.
     {
-      // Bunch up all non-major npm dependencies into a single PR.  In the common case
-      // where the upgrades apply cleanly, this causes less noise and is resolved faster
-      // than starting a bunch of upgrades in parallel for what may turn out to be
-      // a suite of related packages all released at once.
-      "groupName": "all non-major dependencies",
-      "groupSlug": "all-minor-patch",
-      "matchUpdateTypes": ["minor", "patch"],
-      
-      // Since too much in the Rust ecosystem is pre-1.0, we make an exception here.
-      "matchCurrentVersion": "!/^0/",
-      "matchManagers": [ "cargo", "npm" ],
-      "automerge": true
-    }
+      "matchCurrentVersion": "< 1.0.0",
+      "separateMinorPatch": true,
+      "matchManagers": [ "cargo" ],
+      "minor": {
+        "groupName": "all pre-1.0 minor updates",
+        "groupSlug": "all-pre-1.0-minor",
+      },
+      "patch": {
+        "groupName": "all pre-1.0 patch updates",
+        "groupSlug": "all-pre-1.0-patch",
+      }
+    },
+    {
+      "matchCurrentVersion": ">= 1.0.0",
+      "matchManagers": [ "cargo" ],
+      "minor": {
+        "groupName": "all minor-patch updates (>= 1.0)",
+        "groupSlug": "all-minor-patch-gte-1.0",
+      }
+    },
   ]
 }
