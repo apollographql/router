@@ -26,8 +26,9 @@
     {
       "matchCurrentVersion": ">= 1.0.0",
       "matchManagers": [ "cargo", "npm" ],
-      "groupName": "all minor-patch packages >= 1.0",
-      "groupSlug": "all-minor-patch-gte-1.0",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "all non-major packages >= 1.0",
+      "groupSlug": "all-non-major-gte-1.0",
     },
   ]
 }
