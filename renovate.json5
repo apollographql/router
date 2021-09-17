@@ -15,11 +15,11 @@
       "separateMinorPatch": true,
       "matchManagers": [ "cargo" ],
       "minor": {
-        "groupName": "cargo: pre-1.0 updates",
+        "groupName": "cargo pre-1.0 updates",
         "groupSlug": "cargo-all-pre-1.0",
       },
       "patch": {
-        "groupName": "cargo: pre-1.0 updates",
+        "groupName": "cargo pre-1.0 updates",
         "groupSlug": "cargo-all-pre-1.0",
       }
     },
