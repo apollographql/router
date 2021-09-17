@@ -1,6 +1,7 @@
 {
   "extends": [
-    "config:base"
+    "config:base",
+    ":semanticCommits",
   ],
   "packageRules": [
     // Bunch up all non-major npm dependencies into a single PR.  In the common case
@@ -14,12 +15,12 @@
       "separateMinorPatch": true,
       "matchManagers": [ "cargo" ],
       "minor": {
-        "groupName": "cargo: all pre-1.0 minor updates",
-        "groupSlug": "cargo-all-pre-1.0-minor",
+        "groupName": "cargo: pre-1.0 updates",
+        "groupSlug": "cargo-all-pre-1.0",
       },
       "patch": {
-        "groupName": "cargo: all pre-1.0 patch updates",
-        "groupSlug": "cargo-all-pre-1.0-patch",
+        "groupName": "cargo: pre-1.0 updates",
+        "groupSlug": "cargo-all-pre-1.0",
       }
     },
     {
