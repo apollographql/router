@@ -341,8 +341,12 @@ async fn fetch_node<'a>(
                     service: service_name.to_owned(),
                 })
             }
-            Some(GraphQLResponse { data, .. }) => {
-                response.lock().await.insert_data(current_dir, data)?;
+            Some(GraphQLResponse {
+                data, mut errors, ..
+            }) => {
+                let mut response = response.lock().await;
+                response.append_errors(&mut errors);
+                response.insert_data(current_dir, data)?;
                 Ok(())
             }
             None => Err(FetchError::SubrequestNoResponse {

@@ -84,7 +84,7 @@ impl FetchError {
         GraphQLError {
             message: self.to_string(),
             locations: Default::default(),
-            path: path.unwrap_or_default(),
+            path,
             extensions: serde_json::to_value(self)
                 .unwrap()
                 .as_object()
@@ -107,7 +107,7 @@ impl FetchError {
 }
 
 /// {message}
-#[derive(Error, Display, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Error, Display, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphQLError {
     /// The error message.
@@ -117,7 +117,7 @@ pub struct GraphQLError {
     pub locations: Vec<Location>,
 
     /// The path of the error.
-    pub path: Path,
+    pub path: Option<Path>,
 
     /// The optional graphql extensions.
     #[serde(default, skip_serializing_if = "Object::is_empty")]

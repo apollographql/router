@@ -137,7 +137,7 @@ mod tests {
                 .errors(vec![GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: Path::from("hero/heroFriends/1/name"),
+                    path: Some(Path::from("hero/heroFriends/1/name")),
                     extensions: json!({
                         "error-extension": 5,
                     })
@@ -229,7 +229,7 @@ mod tests {
                 .errors(vec![GraphQLError {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
-                    path: Path::from("hero/heroFriends/1/name"),
+                    path: Some(Path::from("hero/heroFriends/1/name")),
                     extensions: json!({
                         "error-extension": 5,
                     })

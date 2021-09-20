@@ -49,7 +49,7 @@ fn skip_data_if(value: &Value) -> bool {
 
 impl GraphQLResponse {
     pub fn is_primary(&self) -> bool {
-        self.has_next.is_none()
+        self.path.is_none()
     }
 
     pub fn select(&self, path: &Path, selections: &[Selection]) -> Result<Value, FetchError> {
@@ -88,6 +88,11 @@ impl GraphQLResponse {
         }
 
         Ok(())
+    }
+
+    /// append_errors default the errors `path` with the one provided.
+    pub fn append_errors(&mut self, errors: &mut Vec<GraphQLError>) {
+        self.errors.append(errors)
     }
 }
 
@@ -244,5 +249,36 @@ mod tests {
                 },
             }),
         );
+    }
+
+    #[test]
+    fn test_append_errors_path_fallback_and_override() {
+        let expected_errors = vec![
+            GraphQLError {
+                message: "Something terrible happened!".to_string(),
+                path: Some(Path::from("here")),
+                ..Default::default()
+            },
+            GraphQLError {
+                message: "I mean for real".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        let mut errors_to_append = vec![
+            GraphQLError {
+                message: "Something terrible happened!".to_string(),
+                path: Some(Path::from("here")),
+                ..Default::default()
+            },
+            GraphQLError {
+                message: "I mean for real".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        let mut response = GraphQLResponse::builder().build();
+        response.append_errors(&mut errors_to_append);
+        assert_eq!(response.errors, expected_errors);
     }
 }
