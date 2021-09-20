@@ -21,6 +21,7 @@
       "patch": {
         "groupName": "cargo pre-1.0 packages",
         "groupSlug": "cargo-all-pre-1.0",
+        "automerge": true,
       }
     },
     {
