@@ -6,6 +6,10 @@ expression: config
 server:
   listen: "1.2.3.4:5"
   cors:
+    allow_credentials: ~
+    allow_headers:
+      - Content-Type
+    expose_headers: ~
     origins:
       - foo
       - bar

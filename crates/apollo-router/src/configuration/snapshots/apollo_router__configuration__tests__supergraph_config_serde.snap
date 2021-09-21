@@ -6,6 +6,10 @@ expression: config
 server:
   listen: "127.0.0.1:4001"
   cors:
+    allow_credentials: ~
+    allow_headers:
+      - Content-Type
+    expose_headers: ~
     origins:
       - studio.apollographql.com
     methods:

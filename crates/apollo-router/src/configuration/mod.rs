@@ -92,6 +92,23 @@ pub struct Server {
 #[derive(Debug, Deserialize, Serialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct Cors {
+    /// Set to true to add the `Access-Control-Allow-Credentials` header.
+    #[serde(default)]
+    #[builder(default)]
+    pub allow_credentials: Option<bool>,
+
+    /// The headers to allow.
+    /// Defaults to the required request header for Apollo Studio
+    #[serde(default = "default_cors_headers")]
+    #[builder(default_code = "default_cors_headers()")]
+    pub allow_headers: Vec<String>,
+
+    #[serde(default)]
+    #[builder(default)]
+    /// Which response headers should be made available to scripts running in the browser,
+    /// in response to a cross-origin request.
+    pub expose_headers: Option<Vec<String>>,
+
     /// The origin(s) to allow requests from.
     /// Use `https://studio.apollographql.com/` to allow Apollo Studio to function.
     pub origins: Vec<String>,
@@ -102,6 +119,10 @@ pub struct Cors {
     pub methods: Vec<String>,
 }
 
+fn default_cors_headers() -> Vec<String> {
+    vec!["Content-Type".into()]
+}
+
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
@@ -109,6 +130,17 @@ fn default_cors_methods() -> Vec<String> {
 impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
+    }
+}
+
+impl Cors {
+    pub fn into_warp_middleware(&self) -> warp::cors::Builder {
+        warp::cors()
+            .allow_credentials(self.allow_credentials.unwrap_or_default())
+            .allow_headers(self.allow_headers.iter().map(std::string::String::as_str))
+            .expose_headers(self.allow_headers.iter().map(std::string::String::as_str))
+            .allow_methods(self.methods.iter().map(std::string::String::as_str))
+            .allow_origins(self.origins.iter().map(std::string::String::as_str))
     }
 }
 

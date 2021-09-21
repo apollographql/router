@@ -6,12 +6,12 @@ mod graph_factory;
 mod http_server_factory;
 pub mod http_service_registry;
 pub mod http_subgraph;
-mod hyper_http_server_factory;
 mod state_machine;
+mod warp_http_server_factory;
 
 use crate::graph_factory::FederatedGraphFactory;
-use crate::hyper_http_server_factory::HyperHttpServerFactory;
 use crate::state_machine::StateMachine;
+use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use configuration::{Configuration, OpenTelemetry};
 use derivative::Derivative;
@@ -502,7 +502,7 @@ impl FederatedServer {
     ///
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
-        let server_factory = HyperHttpServerFactory::new();
+        let server_factory = WarpHttpServerFactory::new();
         let state_machine = StateMachine::new(
             server_factory,
             Some(state_listener),
