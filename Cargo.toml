@@ -5,6 +5,3 @@ members = ["crates/apollo-router", "crates/apollo-router-core", "xtask"]
 [patch.crates-io]
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "414b3f459" }
 opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "414b3f459" }
-
-[profile.release]
-debug = true
