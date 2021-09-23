@@ -4,8 +4,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use structopt::StructOpt;
-
-use crate::utils::{PKG_PROJECT_NAME, PKG_PROJECT_ROOT, PKG_VERSION, RELEASE_BIN};
+use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
 
@@ -45,14 +44,14 @@ impl PackageMacos {
         let release_path = release_path.as_ref();
         let temp = tempfile::tempdir().context("could not create temporary directory")?;
 
-        crate::info!("Temporary directory created at: {}", temp.path().display());
+        eprintln!("Temporary directory created at: {}", temp.path().display());
 
         let keychain_name = temp.path().file_name().unwrap().to_str().unwrap();
 
         let entitlements = PKG_PROJECT_ROOT.join(ENTITLEMENTS);
         ensure!(entitlements.exists(), "could not find entitlements file");
 
-        crate::info!("Creating keychain...");
+        eprintln!("Creating keychain...");
         ensure!(
             Command::new("security")
                 .args(&["create-keychain", "-p"])
@@ -64,7 +63,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Removing relock timeout on keychain...");
+        eprintln!("Removing relock timeout on keychain...");
         ensure!(
             Command::new("security")
                 .arg("set-keychain-settings")
@@ -75,7 +74,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Decoding certificate bundle...");
+        eprintln!("Decoding certificate bundle...");
         let certificate_path = temp.path().join("certificate.p12");
         std::fs::write(
             &certificate_path,
@@ -84,7 +83,7 @@ impl PackageMacos {
         )
         .context("could not write decoded certificate to file")?;
 
-        crate::info!("Importing codesigning certificate to build keychain...");
+        eprintln!("Importing codesigning certificate to build keychain...");
         ensure!(
             Command::new("security")
                 .arg("import")
@@ -101,7 +100,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Adding the codesign tool to the security partition-list...");
+        eprintln!("Adding the codesign tool to the security partition-list...");
         ensure!(
             Command::new("security")
                 .args(&[
@@ -119,7 +118,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Setting default keychain...");
+        eprintln!("Setting default keychain...");
         ensure!(
             Command::new("security")
                 .args(&["default-keychain", "-d", "user", "-s"])
@@ -130,7 +129,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Unlocking keychain...");
+        eprintln!("Unlocking keychain...");
         ensure!(
             Command::new("security")
                 .args(&["unlock-keychain", "-p"])
@@ -142,7 +141,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Verifying keychain is set up correctly...");
+        eprintln!("Verifying keychain is set up correctly...");
         let output = Command::new("security")
             .args(&["find-identity", "-v", "-p", "codesigning"])
             .stderr(Stdio::inherit())
@@ -155,7 +154,7 @@ impl PackageMacos {
             "no valid identities found",
         );
 
-        crate::info!("Signing code (step 1)...");
+        eprintln!("Signing code (step 1)...");
         ensure!(
             Command::new("codesign")
                 .arg("--sign")
@@ -171,7 +170,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Signing code (step 2)...");
+        eprintln!("Signing code (step 2)...");
         ensure!(
             Command::new("codesign")
                 .args(&["-vvv", "--deep", "--strict"])
@@ -182,7 +181,7 @@ impl PackageMacos {
             "command exited with error",
         );
 
-        crate::info!("Zipping dist...");
+        eprintln!("Zipping dist...");
         let dist_zip = temp
             .path()
             .join(format!("{}-{}.zip", PKG_PROJECT_NAME, *PKG_VERSION));
@@ -193,7 +192,7 @@ impl PackageMacos {
             .compression_method(zip::CompressionMethod::Stored)
             .unix_permissions(0o755);
         let path = Path::new("dist").join(RELEASE_BIN);
-        crate::info!("Adding {} as {}...", release_path.display(), path.display());
+        eprintln!("Adding {} as {}...", release_path.display(), path.display());
         zip.start_file(path.to_str().unwrap(), options)?;
         std::io::copy(
             &mut std::io::BufReader::new(
@@ -203,7 +202,7 @@ impl PackageMacos {
         )?;
         zip.finish()?;
 
-        crate::info!("Beginning notarization process...");
+        eprintln!("Beginning notarization process...");
         let output = Command::new("xcrun")
             .args(&["altool", "--notarize-app", "--primary-bundle-id"])
             .arg(&self.primary_bundle_id)
@@ -231,13 +230,13 @@ impl PackageMacos {
             .unwrap()
             .as_str()
             .unwrap();
-        crate::info!("Success message: {}", success_message);
-        crate::info!("Request UUID: {}", request_uuid);
+        eprintln!("Success message: {}", success_message);
+        eprintln!("Request UUID: {}", request_uuid);
 
         let start_time = std::time::Instant::now();
         let duration = std::time::Duration::from_secs(60 * 5);
         let result = loop {
-            crate::info!("Checking notarization status...");
+            eprintln!("Checking notarization status...");
             let output = Command::new("xcrun")
                 .args(&["altool", "--notarization-info"])
                 .arg(request_uuid)
@@ -253,7 +252,7 @@ impl PackageMacos {
             let status = if !output.status.success() {
                 // NOTE: if the exit status is failure we need to keep trying otherwise the
                 //       process becomes a bit flaky
-                crate::info!("command exited with error");
+                eprintln!("command exited with error");
                 None
             } else {
                 let json: serde_json::Value = serde_json::from_slice(&output.stdout)
@@ -274,7 +273,7 @@ impl PackageMacos {
             std::thread::sleep(std::time::Duration::from_secs(5));
         };
         match result.as_deref() {
-            Some("success") => crate::info!("Notarization successful"),
+            Some("success") => eprintln!("Notarization successful"),
             Some("in progress") => bail!("Notarization timeout"),
             Some(other) => bail!("Notarization failed: {}", other),
             None => bail!("Notarization failed without status message"),

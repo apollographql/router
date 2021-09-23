@@ -45,6 +45,8 @@ jobs:
             equal: [ *rust_macos_executor, << parameters.platform >> ]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+            - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
+            - run: test -e "$OPENSSL_ROOT_DIR"
             - run: brew install cmake
             - rust/install:
                 version: stable
@@ -207,10 +209,10 @@ jobs:
 
       - run:
           command: >
-            cargo xtask test --verbose
+            cargo xtask test
       - run:
           command: >
-            cargo xtask lint --verbose
+            cargo xtask lint
 
   build_release:
     parameters:
@@ -237,6 +239,8 @@ jobs:
             equal: [ *rust_macos_executor, << parameters.platform >> ]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+            - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
+            - run: test -e "$OPENSSL_ROOT_DIR"
             - run: brew install cmake
             - rust/install:
                 version: stable
@@ -259,13 +263,13 @@ jobs:
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - run:
                 command: >
-                  cargo xtask dist --verbose
+                  cargo xtask dist
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
-                  cargo xtask package --verbose
+                  cargo xtask package
                   --apple-team-id ${APPLE_TEAM_ID}
                   --apple-username ${APPLE_USERNAME}
                   --cert-bundle-base64 ${MACOS_CERT_BUNDLE_BASE64}
@@ -303,13 +307,13 @@ jobs:
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - run:
                 command: >
-                  cargo xtask dist --verbose
+                  cargo xtask dist
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
-                  cargo xtask package --verbose --output artifacts/
+                  cargo xtask package --output artifacts/
       - when:
           condition:
             equal: [ *rust_windows_executor, << parameters.platform >> ]
@@ -366,13 +370,13 @@ jobs:
                   if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
             - run:
                 command: >
-                  cargo xtask dist --verbose
+                  cargo xtask dist
             - run:
                 command: >
                   mkdir -p artifacts
             - run:
                 command: >
-                  cargo xtask package --verbose --output artifacts
+                  cargo xtask package --output artifacts
       - persist_to_workspace:
           root: artifacts
           paths:

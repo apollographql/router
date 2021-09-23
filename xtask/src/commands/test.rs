@@ -1,25 +1,24 @@
 use anyhow::Result;
 use structopt::StructOpt;
+use xtask::*;
 
-use crate::target::{Target, POSSIBLE_TARGETS};
-use crate::tools::{CargoRunner, FederationDemoRunner};
-use crate::utils;
+const FEATURE_SETS: &[&[&str]] = &[
+    &[],
+    &["otlp-http"],
+    &["otlp-tonic"],
+    &["otlp-tonic", "tls"],
+    &["otlp-grpcio"],
+];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
-    // The target to build Router for
-    #[structopt(long = "target", default_value, possible_values = &POSSIBLE_TARGETS)]
-    target: Target,
-
     /// Do not start federation demo.
     #[structopt(long)]
     no_demo: bool,
 }
 
 impl Test {
-    pub fn run(&self, verbose: bool) -> Result<()> {
-        let mut cargo_runner = CargoRunner::new(verbose)?;
-
+    pub fn run(&self) -> Result<()> {
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
             .ok()
@@ -27,18 +26,29 @@ impl Test {
             .is_empty()
             && cfg!(windows)
         {
-            utils::info("Not running federation-demo because it makes the step hang on Circle CI.");
+            eprintln!("Not running federation-demo because it makes the step hang on Circle CI.");
             Box::new(())
         } else if self.no_demo {
-            utils::info("Not running federation-demo as requested.");
+            eprintln!("Not running federation-demo as requested.");
             Box::new(())
         } else {
-            let demo = FederationDemoRunner::new(verbose)?;
+            let demo = FederationDemoRunner::new()?;
             let guard = demo.start_background()?;
             Box::new((demo, guard))
         };
 
-        cargo_runner.test(&self.target)?;
+        for features in FEATURE_SETS {
+            if cfg!(windows) && features.contains(&"otlp-grpcio") {
+                // TODO: I couldn't make it build on Windows but it is supposed to build.
+                continue;
+            }
+
+            eprintln!("Running tests with features: {}", features.join(", "));
+            cargo!(
+                ["test", "--workspace", "--locked", "--no-default-features"],
+                features.iter().flat_map(|feature| ["--features", feature]),
+            );
+        }
 
         Ok(())
     }
