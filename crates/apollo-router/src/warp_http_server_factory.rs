@@ -7,9 +7,10 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use parking_lot::RwLock;
 use std::sync::Arc;
+use tracing::Dispatch;
 use warp::hyper::Response;
 use warp::{
-    http::{header::HeaderValue, StatusCode, Uri},
+    http::{StatusCode, Uri},
     hyper::Body,
     Filter,
 };
@@ -47,7 +48,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             .map(|cors_configuration| cors_configuration.into_warp_middleware())
             .unwrap_or_else(warp::cors);
 
-        let routes = redirect_to_studio()
+        let routes = run_get_query_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
             .or(perform_graphql_request(graph, configuration))
             .with(cors);
 
@@ -69,30 +70,93 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-fn redirect_to_studio() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
+fn run_get_query_or_redirect<F>(
+    graph: Arc<RwLock<F>>,
+    configuration: Arc<RwLock<Configuration>>,
+) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
+where
+    F: GraphQLFetcher + 'static,
+{
+    let tracing_subscriber = configuration.read().subscriber.clone();
+
     warp::get()
-        .and(warp::path::end().or(warp::path("graphql")))
-        .and(warp::header::value("Host"))
-        .map(|_, host: HeaderValue| {
-            host.to_str()
-                .map(|h| -> Box<dyn Reply> {
-                    Box::new(warp::redirect::temporary(
-                        format!(
-                            "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                            h
-                        )
-                        .parse::<Uri>()
-                        .unwrap(),
-                    ))
-                })
-                .unwrap_or_else(|_| {
+        .and(warp::path::end().or(warp::path("graphql")).unify())
+        .and(warp::header::optional::<String>("accept"))
+        .and(warp::header::optional::<String>("Host"))
+        .and(warp::body::bytes())
+        .map(
+            move |accept: Option<String>, host: Option<String>, body: Bytes| {
+                let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
+                    // Try to edirect to Studio
+                    if let Ok(uri) = format!(
+                        "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                        host.unwrap_or_default()
+                    )
+                    .parse::<Uri>()
+                    {
+                        Box::new(warp::redirect::temporary(uri))
+                    } else {
+                        Box::new(warp::reply::with_status(
+                            "Invalid host to redirect to",
+                            StatusCode::BAD_REQUEST,
+                        ))
+                    }
+                } else if let Ok(request) = serde_json::from_slice(&body) {
+                    // Run GraphQL request
+                    Box::new(Response::new(Body::wrap_stream(run_request(
+                        Arc::clone(&graph),
+                        tracing_subscriber
+                            .clone()
+                            .map(tracing::Dispatch::new)
+                            .unwrap_or_default(),
+                        request,
+                    ))))
+                } else {
                     Box::new(warp::reply::with_status(
-                        "Invalid request Host header",
+                        "Invalid GraphQL request",
                         StatusCode::BAD_REQUEST,
                     ))
-                })
-        })
+                };
+
+                reply
+            },
+        )
         .boxed()
+}
+
+fn prefers_html(accept_header: String) -> bool {
+    accept_header
+        .split(',')
+        .find(|a| ["text/html", "application/json"].contains(&a.trim()))
+        == Some("text/html")
+}
+
+fn run_request<F>(
+    graph: Arc<RwLock<F>>,
+    dispatcher: Dispatch,
+    request: GraphQLRequest,
+) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+where
+    F: GraphQLFetcher + 'static,
+{
+    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.read().stream(request));
+
+    stream
+        .enumerate()
+        .map(|(index, res)| match serde_json::to_string(&res) {
+            Ok(bytes) => Ok(Bytes::from(bytes)),
+            Err(err) => {
+                // We didn't manage to serialise the response!
+                // Do our best to send some sort of error back.
+                serde_json::to_string(
+                    &FetchError::MalformedResponse {
+                        reason: err.to_string(),
+                    }
+                    .to_response(index == 0),
+                )
+                .map(Bytes::from)
+            }
+        })
 }
 
 fn perform_graphql_request<F>(
@@ -102,39 +166,19 @@ fn perform_graphql_request<F>(
 where
     F: GraphQLFetcher + 'static,
 {
+    let tracing_subscriber = configuration.read().subscriber.clone();
     warp::post()
-        .and(warp::path::end().or(warp::path("graphql")))
+        .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
-        .map(move |_, graphql_request: GraphQLRequest| {
-            let default_tracing_dispatcher = {
-                let lock = configuration.read();
-                lock.subscriber
+        .map(move |request: GraphQLRequest| {
+            Response::new(Body::wrap_stream(run_request(
+                Arc::clone(&graph),
+                tracing_subscriber
                     .clone()
                     .map(tracing::Dispatch::new)
-                    .unwrap_or_default()
-            };
-            let stream = tracing::dispatcher::with_default(&default_tracing_dispatcher, || {
-                graph.read().stream(graphql_request)
-            });
-            Response::new(Body::wrap_stream(
-                stream
-                    .enumerate()
-                    .map(|(index, res)| match serde_json::to_string(&res) {
-                        Ok(bytes) => Ok(Bytes::from(bytes)),
-                        Err(err) => {
-                            // We didn't manage to serialise the response!
-                            // Do our best to send some sort of error back.
-                            serde_json::to_string(
-                                &FetchError::MalformedResponse {
-                                    reason: err.to_string(),
-                                }
-                                .to_response(index == 0),
-                            )
-                            .map(Bytes::from)
-                        }
-                    })
-                    .boxed(),
-            ))
+                    .unwrap_or_default(),
+                request,
+            )))
         })
 }
 
@@ -242,13 +286,19 @@ mod tests {
             format!("http://{}/", server.listen_address),
             format!("http://{}/graphql", server.listen_address),
         ] {
+            // Regular studio redirect
             let response = client
-                .get(url)
+                .get(url.as_str())
                 .header(ACCEPT, "text/html")
                 .send()
                 .await
                 .unwrap();
-            assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+            assert_eq!(
+                response.status(),
+                StatusCode::TEMPORARY_REDIRECT,
+                "{}",
+                response.text().await.unwrap()
+            );
             assert_header!(
                 &response,
                 LOCATION,
@@ -258,6 +308,82 @@ mod tests {
                 )
                 .to_string()],
                 "Incorrect redirect url"
+            );
+
+            // Studio redirect because prefers html
+            let response = client
+                .get(url.as_str())
+                .header(ACCEPT, "text/html,application/json")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::TEMPORARY_REDIRECT,
+                "{}",
+                response.text().await.unwrap()
+            );
+            assert_header!(
+                &response,
+                LOCATION,
+                vec![format!(
+                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                    server.listen_address
+                )
+                .to_string()],
+                "Incorrect redirect url"
+            );
+
+            // Studio redirect because prefers html
+            let response = client
+                .get(url.as_str())
+                .header(ACCEPT, "text/html,application/json")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::TEMPORARY_REDIRECT,
+                "{}",
+                response.text().await.unwrap()
+            );
+            assert_header!(
+                &response,
+                LOCATION,
+                vec![format!(
+                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                    server.listen_address
+                )
+                .to_string()],
+                "Incorrect redirect url"
+            );
+
+            // application/json, but the query body is empty
+            let response = client
+                .get(url.as_str())
+                .header(ACCEPT, "application/json")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{}",
+                response.text().await.unwrap()
+            );
+
+            // One more test, to make sure we parse the accept header in the correct order
+            let response = client
+                .get(url.as_str())
+                .header(ACCEPT, "application/json,text/html")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{}",
+                response.text().await.unwrap()
             );
         }
 
@@ -289,11 +415,37 @@ mod tests {
             fetcher
                 .write()
                 .expect_stream()
-                .times(1)
-                .return_once(move |_| futures::stream::iter(vec![example_response]).boxed());
+                .times(2)
+                .returning(move |_| {
+                    let actual_response = example_response.clone();
+                    futures::stream::iter(vec![actual_response]).boxed()
+                });
         }
+        let url = format!("http://{}/graphql", server.listen_address);
+        // Post query
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address))
+            .post(url.as_str())
+            .body(
+                json!(
+                {
+                  "query": "query",
+                })
+                .to_string(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect("unexpected response");
+
+        assert_eq!(
+            response.json::<GraphQLResponse>().await.unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let response = client
+            .get(url.as_str())
             .body(
                 json!(
                 {
