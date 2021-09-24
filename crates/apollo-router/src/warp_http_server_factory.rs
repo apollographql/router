@@ -8,6 +8,7 @@ use futures::prelude::*;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tracing::Dispatch;
+use warp::host::Authority;
 use warp::hyper::Response;
 use warp::{
     http::{StatusCode, Uri},
@@ -82,25 +83,12 @@ where
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
-        .and(warp::header::optional::<String>("Host"))
+        .and(warp::host::optional())
         .and(warp::body::bytes())
         .map(
-            move |accept: Option<String>, host: Option<String>, body: Bytes| {
+            move |accept: Option<String>, host: Option<Authority>, body: Bytes| {
                 let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                    // Try to edirect to Studio
-                    if let Ok(uri) = format!(
-                        "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                        host.unwrap_or_default()
-                    )
-                    .parse::<Uri>()
-                    {
-                        Box::new(warp::redirect::temporary(uri))
-                    } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid host to redirect to",
-                            StatusCode::BAD_REQUEST,
-                        ))
-                    }
+                    redirect_to_studio(host)
                 } else if let Ok(request) = serde_json::from_slice(&body) {
                     // Run GraphQL request
                     Box::new(Response::new(Body::wrap_stream(run_request(
@@ -124,11 +112,29 @@ where
         .boxed()
 }
 
-fn prefers_html(accept_header: String) -> bool {
-    accept_header
-        .split(',')
-        .find(|a| ["text/html", "application/json"].contains(&a.trim()))
-        == Some("text/html")
+fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
+    // Try to redirect to Studio
+    if host.is_some() {
+        if let Ok(uri) = format!(
+            "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+            // we made sure host.is_some() above
+            host.unwrap()
+        )
+        .parse::<Uri>()
+        {
+            Box::new(warp::redirect::temporary(uri))
+        } else {
+            Box::new(warp::reply::with_status(
+                "Invalid host to redirect to",
+                StatusCode::BAD_REQUEST,
+            ))
+        }
+    } else {
+        Box::new(warp::reply::with_status(
+            "Invalid host to redirect to",
+            StatusCode::BAD_REQUEST,
+        ))
+    }
 }
 
 fn run_request<F>(
@@ -180,6 +186,14 @@ where
                 request,
             )))
         })
+}
+
+fn prefers_html(accept_header: String) -> bool {
+    accept_header
+        .split(',')
+        .map(|a| a.trim())
+        .find(|a| ["text/html", "application/json"].contains(a))
+        == Some("text/html")
 }
 
 #[cfg(test)]
@@ -305,56 +319,7 @@ mod tests {
                 vec![format!(
                     "https://studio.apollographql.com/sandbox?endpoint=http://{}",
                     server.listen_address
-                )
-                .to_string()],
-                "Incorrect redirect url"
-            );
-
-            // Studio redirect because prefers html
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "text/html,application/json")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::TEMPORARY_REDIRECT,
-                "{}",
-                response.text().await.unwrap()
-            );
-            assert_header!(
-                &response,
-                LOCATION,
-                vec![format!(
-                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                    server.listen_address
-                )
-                .to_string()],
-                "Incorrect redirect url"
-            );
-
-            // Studio redirect because prefers html
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "text/html,application/json")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::TEMPORARY_REDIRECT,
-                "{}",
-                response.text().await.unwrap()
-            );
-            assert_header!(
-                &response,
-                LOCATION,
-                vec![format!(
-                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                    server.listen_address
-                )
-                .to_string()],
+                )],
                 "Incorrect redirect url"
             );
 
@@ -369,21 +334,7 @@ mod tests {
                 response.status(),
                 StatusCode::BAD_REQUEST,
                 "{}",
-                response.text().await.unwrap()
-            );
-
-            // One more test, to make sure we parse the accept header in the correct order
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "application/json,text/html")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::BAD_REQUEST,
-                "{}",
-                response.text().await.unwrap()
+                response.text().await.unwrap(),
             );
         }
 
@@ -425,18 +376,12 @@ mod tests {
         // Post query
         let response = client
             .post(url.as_str())
-            .body(
-                json!(
-                {
-                  "query": "query",
-                })
-                .to_string(),
-            )
+            .body(json!({ "query": "query" }).to_string())
             .send()
             .await
             .unwrap()
             .error_for_status()
-            .expect("unexpected response");
+            .unwrap();
 
         assert_eq!(
             response.json::<GraphQLResponse>().await.unwrap(),
@@ -446,18 +391,12 @@ mod tests {
         // Get query
         let response = client
             .get(url.as_str())
-            .body(
-                json!(
-                {
-                  "query": "query",
-                })
-                .to_string(),
-            )
+            .body(json!({ "query": "query" }).to_string())
             .send()
             .await
             .unwrap()
             .error_for_status()
-            .expect("unexpected response");
+            .unwrap();
 
         assert_eq!(
             response.json::<GraphQLResponse>().await.unwrap(),
@@ -549,5 +488,17 @@ mod tests {
         }
 
         server.shutdown().await
+    }
+
+    #[test]
+    fn test_prefers_html() {
+        use super::prefers_html;
+        ["text/html,application/json", " text/html,application/json"]
+            .iter()
+            .for_each(|accepts| assert!(prefers_html(accepts.to_string())));
+
+        ["application/json", "application/json,text/html"]
+            .iter()
+            .for_each(|accepts| assert!(!prefers_html(accepts.to_string())));
     }
 }
