@@ -15,12 +15,12 @@ displaydoc = "0.2"
 futures = "0.3.17"
 harmonizer = { git = "https://github.com/apollographql/federation.git", rev = "841c3eb1857df5f6b08a03666c706743ea559e1e" }
 log = "0.4.14"
-mockall = { version = "0.10.1", optional = true }
+mockall = { version = "0.10.2", optional = true }
 parking_lot = "0.11.2"
 serde = { version = "1.0.130", features = ["derive", "rc"] }
 serde_json = "1.0.68"
 thiserror = "1.0.29"
-tracing = "0.1.26"
+tracing = "0.1.28"
 tracing-futures = "0.2.5"
 typed-builder = "0.9.1"
 
