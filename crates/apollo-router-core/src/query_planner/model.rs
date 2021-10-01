@@ -3,10 +3,10 @@
 //!
 //! QueryPlans are a set of operations that describe how a federated query is processed.
 
-use crate::*;
+use crate::prelude::graphql::*;
 use serde::{Deserialize, Serialize};
 
-/// The root query plan container
+/// The root query plan container.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub struct QueryPlan {

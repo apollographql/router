@@ -5,7 +5,7 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, Schema, State};
 use crate::configuration::Configuration;
-use apollo_router_core::GraphQLFetcher;
+use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -19,7 +19,7 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 #[derivative(Debug)]
 enum PrivateState<F>
 where
-    F: GraphQLFetcher,
+    F: graphql::Fetcher,
 {
     Startup {
         configuration: Option<Configuration>,
@@ -46,7 +46,7 @@ where
 pub(crate) struct StateMachine<S, F, FA>
 where
     S: HttpServerFactory,
-    F: GraphQLFetcher + 'static,
+    F: graphql::Fetcher + 'static,
     FA: GraphFactory<F>,
 {
     http_server_factory: S,
@@ -57,7 +57,7 @@ where
 
 impl<F> From<&PrivateState<F>> for State
 where
-    F: GraphQLFetcher,
+    F: graphql::Fetcher,
 {
     fn from(private_state: &PrivateState<F>) -> Self {
         match private_state {
@@ -72,7 +72,7 @@ where
 impl<S, F, FA> StateMachine<S, F, FA>
 where
     S: HttpServerFactory,
-    F: GraphQLFetcher,
+    F: graphql::Fetcher,
     FA: GraphFactory<F>,
 {
     pub(crate) fn new(
@@ -278,8 +278,8 @@ mod tests {
     use super::*;
     use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
-    use apollo_router_core::MockGraphQLFetcher;
     use futures::channel::oneshot;
+    use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
     use std::net::SocketAddr;
     use std::str::FromStr;
@@ -439,9 +439,18 @@ mod tests {
         assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 
+    mock! {
+        #[derive(Debug)]
+        MyFetcher {}
+
+        impl graphql::Fetcher for MyFetcher {
+            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+        }
+    }
+
     async fn execute(
         server_factory: MockHttpServerFactory,
-        graph_factory: MockGraphFactory<MockGraphQLFetcher>,
+        graph_factory: MockGraphFactory<MockMyFetcher>,
         events: Vec<Event>,
         expected_states: Vec<State>,
     ) -> Result<(), FederatedServerError> {
@@ -468,8 +477,7 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<RwLock<MockGraphQLFetcher>>,
-                      configuration: Arc<RwLock<Configuration>>| {
+                move |_: Arc<RwLock<MockMyFetcher>>, configuration: Arc<RwLock<Configuration>>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
                     shutdown_receivers_clone.lock().push(shutdown_receiver);
                     HttpServerHandle {
@@ -482,14 +490,12 @@ mod tests {
         (server_factory, shutdown_receivers)
     }
 
-    fn create_mock_graph_factory(
-        expect_times_called: usize,
-    ) -> MockGraphFactory<MockGraphQLFetcher> {
+    fn create_mock_graph_factory(expect_times_called: usize) -> MockGraphFactory<MockMyFetcher> {
         let mut graph_factory = MockGraphFactory::new();
         graph_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _| MockGraphQLFetcher::new());
+            .returning(|_, _| MockMyFetcher::new());
         graph_factory
     }
 }

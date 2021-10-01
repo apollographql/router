@@ -554,7 +554,7 @@ mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
     use crate::http_subgraph::HttpSubgraphFetcher;
-    use apollo_router_core::{GraphQLFetcher, GraphQLRequest, GraphQLResponseStream};
+    use apollo_router_core::prelude::*;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
 
@@ -585,7 +585,7 @@ mod tests {
     }
 
     async fn assert_federated_response(socket: &SocketAddr, request: &str) {
-        let request = GraphQLRequest::builder().query(request).build();
+        let request = graphql::Request::builder().query(request).build();
         let mut expected = query(socket, request.clone());
 
         let expected = expected.next().await.unwrap();
@@ -593,7 +593,7 @@ mod tests {
         assert!(!response.is_empty());
     }
 
-    fn query(socket: &SocketAddr, request: GraphQLRequest) -> GraphQLResponseStream {
+    fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
         HttpSubgraphFetcher::new("federated".into(), format!("http://{}/graphql", socket))
             .stream(request)
     }

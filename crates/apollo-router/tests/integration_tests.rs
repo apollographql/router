@@ -1,10 +1,7 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::http_service_registry::HttpServiceRegistry;
 use apollo_router::http_subgraph::HttpSubgraphFetcher;
-use apollo_router_core::{
-    FederatedGraph, FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponseStream,
-    HarmonizerQueryPlanner, ServiceRegistry, ValueExt,
-};
+use apollo_router_core::prelude::*;
 use futures::prelude::*;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -20,7 +17,7 @@ fn init() {
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         init();
-        let request = GraphQLRequest::builder()
+        let request = graphql::Request::builder()
             .query($query)
             .variables(Arc::new(
                 vec![
@@ -119,7 +116,7 @@ async fn variables() {
 
 #[tokio::test]
 async fn missing_variables() {
-    let request = GraphQLRequest::builder()
+    let request = graphql::Request::builder()
         .query(
             r#"
                 query ExampleQuery($missingVariable: Int, $yetAnotherMissingVariable: ID!) {
@@ -139,11 +136,11 @@ async fn missing_variables() {
         .collect::<Vec<_>>()
         .await;
     let expected = vec![
-        FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationMissingVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationMissingVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
@@ -151,21 +148,24 @@ async fn missing_variables() {
     assert!(data.iter().all(|x| expected.contains(x)));
 }
 
-fn query_node(request: GraphQLRequest) -> GraphQLResponseStream {
+fn query_node(request: graphql::Request) -> graphql::ResponseStream {
     let nodejs_impl =
         HttpSubgraphFetcher::new("federated".into(), "http://localhost:4000/graphql".into());
     nodejs_impl.stream(request)
 }
 
-fn query_rust(request: GraphQLRequest) -> (GraphQLResponseStream, Arc<CountingServiceRegistry>) {
-    let planner = HarmonizerQueryPlanner::new(include_str!("fixtures/supergraph.graphql").into());
+fn query_rust(
+    request: graphql::Request,
+) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
+    let planner =
+        graphql::HarmonizerQueryPlanner::new(include_str!("fixtures/supergraph.graphql").into());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
         &config,
     )));
-    let federated = FederatedGraph::new(Box::new(planner), registry.clone());
+    let federated = graphql::FederatedGraph::new(Box::new(planner), registry.clone());
     (federated.stream(request), registry)
 }
 
@@ -189,7 +189,7 @@ impl CountingServiceRegistry {
 }
 
 impl ServiceRegistry for CountingServiceRegistry {
-    fn get(&self, service: &str) -> Option<&dyn GraphQLFetcher> {
+    fn get(&self, service: &str) -> Option<&dyn graphql::Fetcher> {
         let mut counts = self.counts.lock();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {

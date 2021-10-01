@@ -1,21 +1,12 @@
-use displaydoc::Display;
+use crate::prelude::graphql::*;
 use serde::{Deserialize, Serialize};
 use serde_json::map::Entry;
 use serde_json::Map;
 pub use serde_json::Value;
 use std::fmt;
-use thiserror::Error;
 
 /// A JSON object.
 pub type Object = Map<String, Value>;
-
-#[derive(Debug, Error, Display)]
-pub enum JsonExtError {
-    /// Could not find path in JSON.
-    PathNotFound,
-    /// Attempt to flatten on non-array node.
-    InvalidFlatten,
-}
 
 /// Extension trait for [`serde_json::Value`].
 pub trait ValueExt {
@@ -237,7 +228,9 @@ where
     serializer.serialize_str("@")
 }
 
-/// A path into the result document. This can be composed of strings and numbers
+/// A path into the result document.
+///
+/// This can be composed of strings and numbers
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Path(Vec<PathElement>);

@@ -1,6 +1,6 @@
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
-use apollo_router_core::{FederatedGraph, GraphQLFetcher, HarmonizerQueryPlanner, WithCaching};
+use apollo_router_core::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[cfg_attr(test, automock)]
 pub(crate) trait GraphFactory<F>
 where
-    F: GraphQLFetcher,
+    F: graphql::Fetcher,
 {
     fn create(&self, configuration: &Configuration, schema: &str) -> F;
 }
@@ -20,11 +20,11 @@ where
 #[derive(Default)]
 pub(crate) struct FederatedGraphFactory;
 
-impl GraphFactory<FederatedGraph> for FederatedGraphFactory {
-    fn create(&self, configuration: &Configuration, schema: &str) -> FederatedGraph {
+impl GraphFactory<graphql::FederatedGraph> for FederatedGraphFactory {
+    fn create(&self, configuration: &Configuration, schema: &str) -> graphql::FederatedGraph {
         let service_registry = HttpServiceRegistry::new(configuration);
-        FederatedGraph::new(
-            Box::new(HarmonizerQueryPlanner::new(schema.to_owned()).with_caching()),
+        graphql::FederatedGraph::new(
+            Box::new(graphql::HarmonizerQueryPlanner::new(schema.to_owned()).with_caching()),
             Arc::new(service_registry),
         )
     }

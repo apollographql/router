@@ -1,12 +1,11 @@
-use apollo_router_core::{
-    FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
-};
+use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::pin::Pin;
 
-type BytesStream =
-    Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, FetchError>> + std::marker::Send>>;
+type BytesStream = Pin<
+    Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
+>;
 
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
@@ -30,7 +29,7 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    fn request_stream(&self, request: GraphQLRequest) -> BytesStream {
+    fn request_stream(&self, request: graphql::Request) -> BytesStream {
         // Perform the actual request and start streaming.
         // Reqwest doesn't care if there is only one response, in this case it'll be a stream of one element.
         let service = self.service.to_owned();
@@ -47,14 +46,16 @@ impl HttpSubgraphFetcher {
                 Ok(s) => s,
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
-            .map_err(move |err: reqwest::Error| FetchError::SubrequestHttpError {
-                service: service.to_owned(),
-                reason: err.to_string(),
-            })
+            .map_err(
+                move |err: reqwest::Error| graphql::FetchError::SubrequestHttpError {
+                    service: service.to_owned(),
+                    reason: err.to_string(),
+                },
+            )
             .boxed()
     }
 
-    fn map_to_graphql(&self, bytes_stream: BytesStream) -> GraphQLResponseStream {
+    fn map_to_graphql(&self, bytes_stream: BytesStream) -> graphql::ResponseStream {
         // Map the stream of bytes to our response type.
         let service = self.service.to_owned();
         let response_stream = bytes_stream
@@ -71,18 +72,20 @@ impl HttpSubgraphFetcher {
     }
 }
 
-fn to_response(service: impl Into<String>, bytes: &Bytes, primary: bool) -> GraphQLResponse {
-    serde_json::from_slice::<GraphQLResponse>(bytes)
-        .map_err(move |err| FetchError::SubrequestMalformedResponse {
-            service: service.into(),
-            reason: err.to_string(),
-        })
+fn to_response(service: impl Into<String>, bytes: &Bytes, primary: bool) -> graphql::Response {
+    serde_json::from_slice::<graphql::Response>(bytes)
+        .map_err(
+            move |err| graphql::FetchError::SubrequestMalformedResponse {
+                service: service.into(),
+                reason: err.to_string(),
+            },
+        )
         .unwrap_or_else(|err| err.to_response(primary))
 }
 
-impl GraphQLFetcher for HttpSubgraphFetcher {
+impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
-    fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
+    fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
         let bytes_stream = self.request_stream(request);
         self.map_to_graphql(bytes_stream)
     }
@@ -98,7 +101,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
-        let response = GraphQLResponse::builder()
+        let response = graphql::Response::builder()
             .data(json!({
               "allProducts": [
                 {
@@ -129,7 +132,7 @@ mod tests {
         let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
         let collect = fetcher
             .stream(
-                GraphQLRequest::builder()
+                graphql::Request::builder()
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )

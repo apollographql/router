@@ -1,12 +1,12 @@
 use crate::configuration::Configuration;
 use crate::http_subgraph::HttpSubgraphFetcher;
-use apollo_router_core::{GraphQLFetcher, ServiceRegistry};
+use apollo_router_core::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
 
 /// Service registry that uses http to connect to subgraphs.
 pub struct HttpServiceRegistry {
-    services: HashMap<String, Box<dyn GraphQLFetcher>>,
+    services: HashMap<String, Box<dyn graphql::Fetcher>>,
 }
 
 impl fmt::Debug for HttpServiceRegistry {
@@ -27,7 +27,7 @@ impl HttpServiceRegistry {
                 .subgraphs
                 .iter()
                 .map(|(name, subgraph)| {
-                    let fetcher: Box<dyn GraphQLFetcher> = Box::new(HttpSubgraphFetcher::new(
+                    let fetcher: Box<dyn graphql::Fetcher> = Box::new(HttpSubgraphFetcher::new(
                         name.to_owned(),
                         subgraph.routing_url.to_owned(),
                     ));
@@ -38,8 +38,8 @@ impl HttpServiceRegistry {
     }
 }
 
-impl ServiceRegistry for HttpServiceRegistry {
-    fn get(&self, service: &str) -> Option<&(dyn GraphQLFetcher)> {
+impl graphql::ServiceRegistry for HttpServiceRegistry {
+    fn get(&self, service: &str) -> Option<&(dyn graphql::Fetcher)> {
         self.services.get(service).map(|a| &**a)
     }
 

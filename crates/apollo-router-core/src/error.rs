@@ -1,10 +1,14 @@
-use crate::*;
+use crate::prelude::graphql::*;
 use displaydoc::Display;
+pub use harmonizer::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use thiserror::Error;
 
-/// Error types for execution. Note that these are not actually returned to the client, but are
-/// instead converted to Json for GraphQLError
+/// Error types for execution.
+///
+/// Note that these are not actually returned to the client, but are instead converted to JSON for
+/// [`struct@Error`].
 #[derive(Error, Display, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
@@ -80,8 +84,8 @@ pub enum FetchError {
 
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
-    pub fn to_graphql_error(&self, path: Option<Path>) -> GraphQLError {
-        GraphQLError {
+    pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        Error {
             message: self.to_string(),
             locations: Default::default(),
             path,
@@ -94,8 +98,8 @@ impl FetchError {
     }
 
     /// Convert the error to an appropriate response.
-    pub fn to_response(&self, primary: bool) -> GraphQLResponse {
-        GraphQLResponse {
+    pub fn to_response(&self, primary: bool) -> Response {
+        Response {
             label: Default::default(),
             data: Default::default(),
             path: Default::default(),
@@ -106,10 +110,11 @@ impl FetchError {
     }
 }
 
-/// {message}
-#[derive(Error, Display, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+/// Any error.
+#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[error("{message}")]
 #[serde(rename_all = "camelCase")]
-pub struct GraphQLError {
+pub struct Error {
     /// The error message.
     pub message: String,
 
@@ -140,5 +145,36 @@ impl From<QueryPlannerError> for FetchError {
         FetchError::ValidationPlanningError {
             reason: err.to_string(),
         }
+    }
+}
+
+/// An error while processing JSON data.
+#[derive(Debug, Error, Display)]
+pub enum JsonExtError {
+    /// Could not find path in JSON.
+    PathNotFound,
+    /// Attempt to flatten on non-array node.
+    InvalidFlatten,
+}
+
+/// Error types for QueryPlanner
+#[derive(Error, Debug, Display, Clone)]
+pub enum QueryPlannerError {
+    /// Query plan was malformed: {0}
+    ParseError(Arc<serde_json::Error>),
+
+    /// Query planning had errors: {0}
+    PlanningErrors(Arc<PlanningErrors>),
+}
+
+impl From<PlanningErrors> for QueryPlannerError {
+    fn from(err: PlanningErrors) -> Self {
+        QueryPlannerError::PlanningErrors(Arc::new(err))
+    }
+}
+
+impl From<serde_json::Error> for QueryPlannerError {
+    fn from(err: serde_json::Error) -> Self {
+        QueryPlannerError::ParseError(Arc::new(err))
     }
 }

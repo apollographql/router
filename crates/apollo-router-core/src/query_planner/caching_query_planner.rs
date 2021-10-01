@@ -1,9 +1,12 @@
-use super::model::QueryPlan;
-use super::{QueryPlanOptions, QueryPlanner, QueryPlannerError};
+use crate::prelude::graphql::*;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
-type CacheKey = (String, Option<String>, super::QueryPlanOptions);
+/// A cache key.
+///
+/// This type consists of a query string, an optional operation string and the
+/// [`QueryPlanOptions`].
+type CacheKey = (String, Option<String>, QueryPlanOptions);
 
 /// A query planner wrapper that caches results.
 ///
@@ -15,7 +18,8 @@ pub struct CachingQueryPlanner<T: QueryPlanner> {
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    fn new(delegate: T) -> CachingQueryPlanner<T> {
+    /// Creates a new query planner that cache the results of another [`QueryPlanner`].
+    pub fn new(delegate: T) -> CachingQueryPlanner<T> {
         Self {
             delegate,
             cached: Default::default(),
@@ -23,7 +27,7 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
     }
 }
 
-impl<T: QueryPlanner> super::QueryPlanner for CachingQueryPlanner<T> {
+impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     fn get(
         &self,
         query: String,
@@ -38,28 +42,29 @@ impl<T: QueryPlanner> super::QueryPlanner for CachingQueryPlanner<T> {
     }
 }
 
-/// With caching trait. Adds with_caching to any query planner.
-pub trait WithCaching: QueryPlanner
-where
-    Self: Sized + QueryPlanner,
-{
-    /// Wrap this query planner in a caching decorator.
-    /// The original query planner is consumed.
-    fn with_caching(self) -> CachingQueryPlanner<Self> {
-        CachingQueryPlanner::new(self)
-    }
-}
-impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query_planner::MockQueryPlanner;
+    use mockall::{mock, predicate::*};
     use std::sync::Arc;
+
+    mock! {
+        #[derive(Debug)]
+        MyQueryPlanner {}
+
+        impl QueryPlanner for MyQueryPlanner {
+            fn get(
+                &self,
+                query: String,
+                operation: Option<String>,
+                options: QueryPlanOptions,
+            ) -> Result<QueryPlan, QueryPlannerError>;
+        }
+    }
 
     #[test]
     fn test_plan() {
-        let mut delegate = MockQueryPlanner::new();
+        let mut delegate = MockMyQueryPlanner::new();
         let serde_json_error = serde_json::from_slice::<()>(&[]).unwrap_err();
         delegate
             .expect_get()

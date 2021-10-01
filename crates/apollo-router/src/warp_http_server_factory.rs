@@ -1,7 +1,7 @@
 use crate::configuration::Configuration;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::{FetchError, GraphQLFetcher, GraphQLRequest};
+use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -36,7 +36,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         configuration: Arc<RwLock<Configuration>>,
     ) -> HttpServerHandle
     where
-        F: GraphQLFetcher + 'static,
+        F: graphql::Fetcher + 'static,
     {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listen_address = configuration.read().server.listen;
@@ -76,7 +76,7 @@ fn run_get_query_or_redirect<F>(
     configuration: Arc<RwLock<Configuration>>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    F: GraphQLFetcher + 'static,
+    F: graphql::Fetcher + 'static,
 {
     let tracing_subscriber = configuration.read().subscriber.clone();
 
@@ -140,10 +140,10 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
 fn run_request<F>(
     graph: Arc<RwLock<F>>,
     dispatcher: Dispatch,
-    request: GraphQLRequest,
+    request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
-    F: GraphQLFetcher + 'static,
+    F: graphql::Fetcher + 'static,
 {
     let stream = tracing::dispatcher::with_default(&dispatcher, || graph.read().stream(request));
 
@@ -155,7 +155,7 @@ where
                 // We didn't manage to serialise the response!
                 // Do our best to send some sort of error back.
                 serde_json::to_string(
-                    &FetchError::MalformedResponse {
+                    &graphql::FetchError::MalformedResponse {
                         reason: err.to_string(),
                     }
                     .to_response(index == 0),
@@ -170,13 +170,13 @@ fn perform_graphql_request<F>(
     configuration: Arc<RwLock<Configuration>>,
 ) -> impl Filter<Extract = (Response<Body>,), Error = Rejection> + Clone
 where
-    F: GraphQLFetcher + 'static,
+    F: graphql::Fetcher + 'static,
 {
     let tracing_subscriber = configuration.read().subscriber.clone();
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
-        .map(move |request: GraphQLRequest| {
+        .map(move |request: graphql::Request| {
             Response::new(Body::wrap_stream(run_request(
                 Arc::clone(&graph),
                 tracing_subscriber
@@ -200,9 +200,6 @@ fn prefers_html(accept_header: String) -> bool {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use apollo_router_core::{
-        FetchError, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
-    };
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -256,15 +253,15 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
-        MyGraphQLFetcher{}
-        impl GraphQLFetcher for MyGraphQLFetcher {   // specification of the trait to mock
-            fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream;
+        MyFetcher {}
+        impl graphql::Fetcher for MyFetcher {
+            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
-    fn init(listen_address: &str) -> (Arc<RwLock<MockMyGraphQLFetcher>>, HttpServerHandle, Client) {
+    fn init(listen_address: &str) -> (Arc<RwLock<MockMyFetcher>>, HttpServerHandle, Client) {
         let _ = env_logger::builder().is_test(true).try_init();
-        let fetcher = MockMyGraphQLFetcher::new();
+        let fetcher = MockMyFetcher::new();
         let server_factory = WarpHttpServerFactory::new();
         let fetcher = Arc::new(RwLock::new(fetcher));
         let server = server_factory.create(
@@ -357,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn response() -> Result<(), FederatedServerError> {
-        let expected_response = GraphQLResponse::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
@@ -384,7 +381,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<GraphQLResponse>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -399,7 +396,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response.json::<GraphQLResponse>().await.unwrap(),
+            response.json::<graphql::Response>().await.unwrap(),
             expected_response,
         );
 
@@ -411,7 +408,7 @@ mod tests {
         let (fetcher, server, client) = init("127.0.0.1:0");
         {
             fetcher.write().expect_stream().times(1).return_once(|_| {
-                futures::stream::iter(vec![FetchError::SubrequestHttpError {
+                futures::stream::iter(vec![graphql::FetchError::SubrequestHttpError {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
@@ -432,13 +429,13 @@ mod tests {
             .await
             .ok()
             .unwrap()
-            .json::<GraphQLResponse>()
+            .json::<graphql::Response>()
             .await
             .unwrap();
 
         assert_eq!(
             response,
-            FetchError::SubrequestHttpError {
+            graphql::FetchError::SubrequestHttpError {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }

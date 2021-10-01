@@ -1,4 +1,4 @@
-use crate::*;
+use crate::prelude::graphql::*;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
@@ -41,7 +41,7 @@ fn validate_services_against_plan(
 ///
 ///  *   `plan`: The root query plan node to validate.
 fn validate_request_variables_against_plan(
-    request: Arc<GraphQLRequest>,
+    request: Arc<Request>,
     plan: &PlanNode,
 ) -> Vec<FetchError> {
     let required = plan.variable_usage().collect::<HashSet<_>>();
@@ -58,6 +58,7 @@ fn validate_request_variables_against_plan(
         .collect::<Vec<_>>()
 }
 
+/// A federated graph that can be queried.
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct FederatedGraph {
@@ -79,8 +80,8 @@ impl FederatedGraph {
     }
 }
 
-impl GraphQLFetcher for FederatedGraph {
-    fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
+impl Fetcher for FederatedGraph {
+    fn stream(&self, request: Request) -> ResponseStream {
         let span = tracing::info_span!("federated_query");
         let _guard = span.enter();
 
@@ -111,15 +112,13 @@ impl GraphQLFetcher for FederatedGraph {
         // If we have any errors so far then let's abort the query
         // Planning/validation/variables are candidates to abort.
         if !early_errors.is_empty() {
-            return stream::once(
-                async move { GraphQLResponse::builder().errors(early_errors).build() },
-            )
-            .boxed();
+            return stream::once(async move { Response::builder().errors(early_errors).build() })
+                .boxed();
         }
 
         stream::once(
             async move {
-                let response = Arc::new(Mutex::new(GraphQLResponse::builder().build()));
+                let response = Arc::new(Mutex::new(Response::builder().build()));
                 let root = Path::empty();
 
                 execute(
@@ -144,10 +143,10 @@ impl GraphQLFetcher for FederatedGraph {
 }
 
 fn execute<'a>(
-    response: Arc<Mutex<GraphQLResponse>>,
+    response: Arc<Mutex<Response>>,
     current_dir: &'a Path,
     plan: &'a PlanNode,
-    request: Arc<GraphQLRequest>,
+    request: Arc<Request>,
     service_registry: Arc<dyn ServiceRegistry>,
 ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
     let span = tracing::info_span!("execution");
@@ -226,7 +225,7 @@ fn execute<'a>(
 }
 
 async fn fetch_node<'a>(
-    response: Arc<Mutex<GraphQLResponse>>,
+    response: Arc<Mutex<Response>>,
     current_dir: &'a Path,
     FetchNode {
         variable_usages,
@@ -234,7 +233,7 @@ async fn fetch_node<'a>(
         operation,
         service_name,
     }: &'a FetchNode,
-    request: Arc<GraphQLRequest>,
+    request: Arc<Request>,
     service_registry: Arc<dyn ServiceRegistry>,
 ) -> Result<(), FetchError> {
     if let Some(requires) = requires {
@@ -263,7 +262,7 @@ async fn fetch_node<'a>(
 
         let (res, _tail) = fetcher
             .stream(
-                GraphQLRequest::builder()
+                Request::builder()
                     .query(operation)
                     .variables(variables)
                     .build(),
@@ -277,7 +276,7 @@ async fn fetch_node<'a>(
                     service: service_name.to_owned(),
                 })
             }
-            Some(GraphQLResponse { data, .. }) => {
+            Some(Response { data, .. }) => {
                 if let Some(entities) = data.get("_entities") {
                     log::trace!(
                         "Received entities: {}",
@@ -327,7 +326,7 @@ async fn fetch_node<'a>(
 
         let (res, _tail) = fetcher
             .stream(
-                GraphQLRequest::builder()
+                Request::builder()
                     .query(operation.clone())
                     .variables(variables.clone())
                     .build(),
@@ -341,7 +340,7 @@ async fn fetch_node<'a>(
                     service: service_name.to_owned(),
                 })
             }
-            Some(GraphQLResponse {
+            Some(Response {
                 data, mut errors, ..
             }) => {
                 let mut response = response.lock().await;

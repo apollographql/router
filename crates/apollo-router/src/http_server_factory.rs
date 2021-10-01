@@ -1,6 +1,6 @@
 use super::FederatedServerError;
 use crate::configuration::Configuration;
-use apollo_router_core::GraphQLFetcher;
+use apollo_router_core::prelude::*;
 use futures::channel::oneshot;
 use futures::prelude::*;
 #[cfg(test)]
@@ -22,7 +22,7 @@ pub(crate) trait HttpServerFactory {
         configuration: Arc<RwLock<Configuration>>,
     ) -> HttpServerHandle
     where
-        F: GraphQLFetcher + 'static;
+        F: graphql::Fetcher + 'static;
 }
 
 /// A handle with with a client can shut down the server gracefully.

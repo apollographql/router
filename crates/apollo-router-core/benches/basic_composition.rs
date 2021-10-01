@@ -1,6 +1,6 @@
 use apollo_router_core::{
-    FederatedGraph, GraphQLFetcher, GraphQLRequest, GraphQLResponse, GraphQLResponseStream,
-    HarmonizerQueryPlanner, ServiceRegistry,
+    FederatedGraph, Fetcher, HarmonizerQueryPlanner, Request, Response, ResponseStream,
+    ServiceRegistry,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::prelude::*;
@@ -27,7 +27,7 @@ macro_rules! generate_registry {
         }
 
         impl ServiceRegistry for $name {
-            fn get(&self, service: &str) -> Option<&dyn GraphQLFetcher> {
+            fn get(&self, service: &str) -> Option<&dyn Fetcher> {
                 match service {
                     $(
                     stringify!($service_name) => Some(&self.$service_name),
@@ -60,13 +60,13 @@ macro_rules! generate_service {
         struct $name;
 
         $(
-        static $id: OnceCell<GraphQLResponse> = OnceCell::new();
+        static $id: OnceCell<Response> = OnceCell::new();
         )+
 
         impl $name {
             fn new() -> Self {
                 $(
-                $id.set(serde_json::from_str::<GraphQLResponse>($res).unwrap())
+                $id.set(serde_json::from_str::<Response>($res).unwrap())
                     .expect("cannot initialize twice");
                 )+
 
@@ -74,8 +74,8 @@ macro_rules! generate_service {
             }
         }
 
-        impl GraphQLFetcher for $name {
-            fn stream(&self, request: GraphQLRequest) -> GraphQLResponseStream {
+        impl Fetcher for $name {
+            fn stream(&self, request: Request) -> ResponseStream {
                 match request.query.as_str() {
                     $(
                     $query => stream::iter(vec![$id.get().unwrap().clone()]).boxed(),
@@ -111,7 +111,7 @@ generate_service!(Products =>
 
 async fn basic_composition_benchmark(federated: &FederatedGraph) {
     let query = r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#;
-    let request = GraphQLRequest::builder()
+    let request = Request::builder()
         .query(query)
         .variables(Arc::new(
             vec![
@@ -124,7 +124,7 @@ async fn basic_composition_benchmark(federated: &FederatedGraph) {
         .build();
     let mut stream = federated.stream(request);
     let _result = stream.next().await.unwrap();
-    // expected: GraphQLResponse { label: None, data: Object({"topProducts": Array([Object({"upc": String("1"), "name": String("Table"), "__typename": String("Product"), "reviews": Array([Object({"id": String("1"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})}), Object({"id": String("4"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])}), Object({"upc": String("2"), "name": String("Couch"), "__typename": String("Product"), "reviews": Array([Object({"id": String("2"), "product": Object({"__typename": String("Product"), "upc": String("2"), "name": String("Couch")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})})])}), Object({"upc": String("3"), "name": String("Chair"), "__typename": String("Product"), "reviews": Array([Object({"id": String("3"), "product": Object({"__typename": String("Product"), "upc": String("3"), "name": String("Chair")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])})])}), path: None, has_next: None, errors: [], extensions: {} }
+    // expected: Response { label: None, data: Object({"topProducts": Array([Object({"upc": String("1"), "name": String("Table"), "__typename": String("Product"), "reviews": Array([Object({"id": String("1"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})}), Object({"id": String("4"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])}), Object({"upc": String("2"), "name": String("Couch"), "__typename": String("Product"), "reviews": Array([Object({"id": String("2"), "product": Object({"__typename": String("Product"), "upc": String("2"), "name": String("Couch")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})})])}), Object({"upc": String("3"), "name": String("Chair"), "__typename": String("Product"), "reviews": Array([Object({"id": String("3"), "product": Object({"__typename": String("Product"), "upc": String("3"), "name": String("Chair")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])})])}), path: None, has_next: None, errors: [], extensions: {} }
 }
 
 fn from_elem(c: &mut Criterion) {
