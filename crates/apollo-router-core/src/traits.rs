@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use async_trait::async_trait;
 use std::fmt::Debug;
 
 /// Maintains a map of services to fetchers.
@@ -14,10 +15,11 @@ pub trait ServiceRegistry: Send + Sync + Debug {
 ///
 /// The goal of this trait is to hide the implementation details of retching a stream of graphql responses.
 /// We can then create multiple implementations that can be plugged into federation.
+#[async_trait]
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    fn stream(&self, request: Request) -> ResponseStream;
+    async fn stream(&self, request: Request) -> ResponseStream;
 }
 
 /// QueryPlanner can be used to plan queries.

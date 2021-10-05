@@ -1,4 +1,5 @@
 use apollo_router_core::prelude::*;
+use async_trait::async_trait;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::pin::Pin;
@@ -87,9 +88,10 @@ fn to_response(service: impl Into<String>, bytes: &Bytes, primary: bool) -> grap
         .unwrap_or_else(|err| err.to_response(primary))
 }
 
+#[async_trait]
 impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
-    fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
+    async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
         let bytes_stream = self.request_stream(request);
         self.map_to_graphql(bytes_stream)
     }
@@ -140,6 +142,7 @@ mod tests {
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )
+            .await
             .collect::<Vec<_>>()
             .await;
 

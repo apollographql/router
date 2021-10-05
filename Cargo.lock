@@ -70,6 +70,7 @@ version = "0.1.0-prealpha.1"
 dependencies = [
  "anyhow",
  "apollo-router-core",
+ "async-trait",
  "bytes",
  "ctor",
  "derivative",
@@ -111,6 +112,7 @@ name = "apollo-router-core"
 version = "0.1.0-prealpha.1"
 dependencies = [
  "apollo-parser",
+ "async-trait",
  "criterion",
  "derivative",
  "displaydoc",

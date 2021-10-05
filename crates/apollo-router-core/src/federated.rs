@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use async_trait::async_trait;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
@@ -83,8 +84,9 @@ impl FederatedGraph {
     }
 }
 
+#[async_trait]
 impl Fetcher for FederatedGraph {
-    fn stream(&self, request: Request) -> ResponseStream {
+    async fn stream(&self, request: Request) -> ResponseStream {
         let span = tracing::info_span!("federated_query");
         let _guard = span.enter();
 
@@ -292,6 +294,7 @@ async fn fetch_node<'a>(
                     .variables(variables)
                     .build(),
             )
+            .await
             .into_future()
             .instrument(query_span)
             .await;
@@ -362,6 +365,7 @@ async fn fetch_node<'a>(
                     .variables(Arc::clone(&variables))
                     .build(),
             )
+            .await
             .into_future()
             .instrument(query_span)
             .await;

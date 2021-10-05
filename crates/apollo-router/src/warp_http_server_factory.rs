@@ -5,8 +5,10 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::prelude::*;
+use std::pin::Pin;
 use std::sync::Arc;
-use tracing::Dispatch;
+use tracing::{instrument::WithSubscriber, Dispatch};
+
 use warp::host::Authority;
 use warp::hyper::Response;
 use warp::{
@@ -29,43 +31,52 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<F>(&self, graph: Arc<F>, configuration: Arc<Configuration>) -> HttpServerHandle
+    fn create<F>(
+        &self,
+        graph: Arc<F>,
+        configuration: Arc<Configuration>,
+    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
     where
         F: graphql::Fetcher + 'static,
     {
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listen_address = configuration.server.listen;
+        let f = async {
+            let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+            let listen_address = configuration.server.listen;
 
-        let cors = configuration
-            .server
-            .cors
-            .as_ref()
-            .map(|cors_configuration| cors_configuration.into_warp_middleware())
-            .unwrap_or_else(warp::cors);
+            let cors = configuration
+                .server
+                .cors
+                .as_ref()
+                .map(|cors_configuration| cors_configuration.into_warp_middleware())
+                .unwrap_or_else(warp::cors);
 
-        let routes = run_get_query_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
-            .or(perform_graphql_request(graph, configuration))
-            .with(cors);
+            let routes = run_get_query_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
+                .await
+                .or(perform_graphql_request(graph, configuration).await)
+                .with(cors);
 
-        let (actual_listen_address, server) =
-            warp::serve(routes).bind_with_graceful_shutdown(listen_address, async {
-                shutdown_receiver.await.ok();
-            });
+            let (actual_listen_address, server) =
+                warp::serve(routes).bind_with_graceful_shutdown(listen_address, async {
+                    shutdown_receiver.await.ok();
+                });
 
-        // Spawn the server into a runtime
-        let server_future = tokio::task::spawn(server)
-            .map_err(|_| FederatedServerError::HttpServerLifecycleError)
-            .boxed();
+            // Spawn the server into a runtime
+            let server_future = tokio::task::spawn(server)
+                .map_err(|_| FederatedServerError::HttpServerLifecycleError)
+                .boxed();
 
-        HttpServerHandle {
-            shutdown_sender,
-            server_future,
-            listen_address: actual_listen_address,
-        }
+            HttpServerHandle {
+                shutdown_sender,
+                server_future,
+                listen_address: actual_listen_address,
+            }
+        };
+
+        Box::pin(f)
     }
 }
 
-fn run_get_query_or_redirect<F>(
+async fn run_get_query_or_redirect<F>(
     graph: Arc<F>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
@@ -79,28 +90,36 @@ where
         .and(warp::header::optional::<String>("accept"))
         .and(warp::host::optional())
         .and(warp::body::bytes())
-        .map(
+        .and_then(
             move |accept: Option<String>, host: Option<Authority>, body: Bytes| {
-                let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                    redirect_to_studio(host)
-                } else if let Ok(request) = serde_json::from_slice(&body) {
-                    // Run GraphQL request
-                    Box::new(Response::new(Body::wrap_stream(run_request(
-                        Arc::clone(&graph),
-                        tracing_subscriber
-                            .clone()
-                            .map(tracing::Dispatch::new)
-                            .unwrap_or_default(),
-                        request,
-                    ))))
-                } else {
-                    Box::new(warp::reply::with_status(
-                        "Invalid GraphQL request",
-                        StatusCode::BAD_REQUEST,
-                    ))
-                };
+                let graph = Arc::clone(&graph);
+                let tracing_subscriber = tracing_subscriber.clone();
 
-                reply
+                async move {
+                    let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
+                        redirect_to_studio(host)
+                    } else if let Ok(request) = serde_json::from_slice(&body) {
+                        // Run GraphQL request
+                        let response_stream = run_request(
+                            graph,
+                            tracing_subscriber
+                                .clone()
+                                .map(tracing::Dispatch::new)
+                                .unwrap_or_default(),
+                            request,
+                        )
+                        .await;
+
+                        Box::new(Response::new(Body::wrap_stream(response_stream)))
+                    } else {
+                        Box::new(warp::reply::with_status(
+                            "Invalid GraphQL request",
+                            StatusCode::BAD_REQUEST,
+                        ))
+                    };
+
+                    Ok::<_, warp::reject::Rejection>(reply)
+                }
             },
         )
         .boxed()
@@ -131,7 +150,7 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
     }
 }
 
-fn run_request<F>(
+async fn run_request<F>(
     graph: Arc<F>,
     dispatcher: Dispatch,
     request: graphql::Request,
@@ -139,7 +158,7 @@ fn run_request<F>(
 where
     F: graphql::Fetcher + 'static,
 {
-    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.stream(request));
+    let stream = { graph.stream(request).with_subscriber(dispatcher).await };
 
     stream
         .enumerate()
@@ -159,7 +178,7 @@ where
         })
 }
 
-fn perform_graphql_request<F>(
+async fn perform_graphql_request<F>(
     graph: Arc<F>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Response<Body>,), Error = Rejection> + Clone
@@ -170,15 +189,22 @@ where
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
-        .map(move |request: graphql::Request| {
-            Response::new(Body::wrap_stream(run_request(
-                Arc::clone(&graph),
-                tracing_subscriber
-                    .clone()
-                    .map(tracing::Dispatch::new)
-                    .unwrap_or_default(),
-                request,
-            )))
+        .and_then(move |request: graphql::Request| {
+            let graph = Arc::clone(&graph);
+            let tracing_subscriber = tracing_subscriber.clone();
+            async move {
+                Ok::<_, warp::reject::Rejection>(Response::new(Body::wrap_stream(
+                    run_request(
+                        graph,
+                        tracing_subscriber
+                            .clone()
+                            .map(tracing::Dispatch::new)
+                            .unwrap_or_default(),
+                        request,
+                    )
+                    .await,
+                )))
+            }
         })
 }
 
@@ -194,6 +220,7 @@ fn prefers_html(accept_header: String) -> bool {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
+    use async_trait::async_trait;
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -248,8 +275,9 @@ mod tests {
     mock! {
         #[derive(Debug)]
         MyFetcher {}
+        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
@@ -261,24 +289,26 @@ mod tests {
             $expect_stream;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = Arc::new($fetcher);
-            let server = server_factory.create(
-                fetcher.to_owned(),
-                Arc::new(
-                    Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
-                                .listen(SocketAddr::from_str($listen_address).unwrap())
-                                .cors(Some(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                ))
-                                .build(),
-                        )
-                        .subgraphs(Default::default())
-                        .build(),
-                ),
-            );
+            let server = server_factory
+                .create(
+                    fetcher.to_owned(),
+                    Arc::new(
+                        Configuration::builder()
+                            .server(
+                                crate::configuration::Server::builder()
+                                    .listen(SocketAddr::from_str($listen_address).unwrap())
+                                    .cors(Some(
+                                        Cors::builder()
+                                            .origins(vec!["http://studio".to_string()])
+                                            .build(),
+                                    ))
+                                    .build(),
+                            )
+                            .subgraphs(Default::default())
+                            .build(),
+                    ),
+                )
+                .await;
             let client = reqwest::Client::builder()
                 .redirect(Policy::none())
                 .build()

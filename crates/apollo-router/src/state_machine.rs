@@ -99,17 +99,21 @@ where
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
                 // Startup: Handle configuration updates, maybe transition to running.
-                (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
-                    .maybe_transition_to_running(Startup {
+                (Startup { configuration, .. }, UpdateSchema(new_schema)) => {
+                    self.maybe_transition_to_running(Startup {
                         configuration,
                         schema: Some(new_schema),
-                    }),
+                    })
+                    .await
+                }
                 // Startup: Handle schema updates, maybe transition to running.
-                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => self
-                    .maybe_transition_to_running(Startup {
+                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
+                    self.maybe_transition_to_running(Startup {
                         configuration: Some(new_configuration),
                         schema,
-                    }),
+                    })
+                    .await
+                }
 
                 // Startup: Missing configuration.
                 (
@@ -151,6 +155,7 @@ where
                         self.graph_factory
                             .create(&configuration, Arc::clone(&schema)),
                     );
+
                     Running {
                         configuration,
                         schema,
@@ -180,7 +185,8 @@ where
                             }
                             let new_handle = self
                                 .http_server_factory
-                                .create(Arc::clone(&graph), Arc::clone(&configuration));
+                                .create(Arc::clone(&graph), Arc::clone(&configuration))
+                                .await;
                             log::debug!("Restarted on {}", new_handle.listen_address);
                             new_handle
                         } else {
@@ -238,7 +244,7 @@ where
         }
     }
 
-    fn maybe_transition_to_running(&self, state: PrivateState<F>) -> PrivateState<F> {
+    async fn maybe_transition_to_running(&self, state: PrivateState<F>) -> PrivateState<F> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -255,7 +261,8 @@ where
 
             let server_handle = self
                 .http_server_factory
-                .create(Arc::clone(&graph), Arc::clone(&configuration));
+                .create(Arc::clone(&graph), Arc::clone(&configuration))
+                .await;
             log::debug!("Started on {}", server_handle.listen_address);
             Running {
                 configuration,
@@ -274,6 +281,7 @@ mod tests {
     use super::*;
     use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
+    use async_trait::async_trait;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
@@ -439,8 +447,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
@@ -476,11 +485,14 @@ mod tests {
                 move |_: Arc<MockMyFetcher>, configuration: Arc<Configuration>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
                     shutdown_receivers_clone.lock().push(shutdown_receiver);
-                    HttpServerHandle {
-                        shutdown_sender,
-                        server_future: future::ready(Ok(())).boxed(),
-                        listen_address: configuration.server.listen,
-                    }
+
+                    Box::pin(async move {
+                        HttpServerHandle {
+                            shutdown_sender,
+                            server_future: future::ready(Ok(())).boxed(),
+                            listen_address: configuration.server.listen,
+                        }
+                    })
                 },
             );
         (server_factory, shutdown_receivers)

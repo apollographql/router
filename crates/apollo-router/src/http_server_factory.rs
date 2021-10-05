@@ -16,7 +16,11 @@ use std::sync::Arc;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<F>(&self, graph: Arc<F>, configuration: Arc<Configuration>) -> HttpServerHandle
+    fn create<F>(
+        &self,
+        graph: Arc<F>,
+        configuration: Arc<Configuration>,
+    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
     where
         F: graphql::Fetcher + 'static;
 }
