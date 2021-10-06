@@ -25,11 +25,12 @@ pub trait Fetcher: Send + Sync + Debug {
 /// QueryPlanner can be used to plan queries.
 ///
 /// Implementations may cache query plans.
+#[async_trait]
 pub trait QueryPlanner: Send + Sync + Debug {
     /// Returns a query plan given the query, operation and options.
     /// Implementations may cache query plans.
     #[must_use = "query plan result must be used"]
-    fn get(
+    async fn get(
         &self,
         query: String,
         operation: Option<String>,

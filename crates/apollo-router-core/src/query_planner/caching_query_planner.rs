@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
@@ -27,18 +28,31 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
     }
 }
 
+#[async_trait]
 impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
-    fn get(
+    async fn get(
         &self,
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<QueryPlan, QueryPlannerError> {
+        if let Some(value) = self
+            .cached
+            .lock()
+            .get(&(query.clone(), operation.clone(), options.clone()))
+            .cloned()
+        {
+            return value;
+        }
+
+        let value = self
+            .delegate
+            .get(query.clone(), operation.clone(), options.clone())
+            .await;
         self.cached
             .lock()
-            .entry((query.clone(), operation.clone(), options.clone()))
-            .or_insert_with(|| self.delegate.get(query, operation, options))
-            .clone()
+            .insert((query, operation, options), value.clone());
+        value
     }
 }
 
@@ -50,10 +64,8 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
-        MyQueryPlanner {}
-
-        impl QueryPlanner for MyQueryPlanner {
-            fn get(
+        MyQueryPlanner {
+            fn sync_get(
                 &self,
                 query: String,
                 operation: Option<String>,
@@ -62,12 +74,24 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_plan() {
+    #[async_trait]
+    impl QueryPlanner for MockMyQueryPlanner {
+        async fn get(
+            &self,
+            query: String,
+            operation: Option<String>,
+            options: QueryPlanOptions,
+        ) -> Result<QueryPlan, QueryPlannerError> {
+            self.sync_get(query, operation, options)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_plan() {
         let mut delegate = MockMyQueryPlanner::new();
         let serde_json_error = serde_json::from_slice::<()>(&[]).unwrap_err();
         delegate
-            .expect_get()
+            .expect_sync_get()
             .times(2)
             .return_const(Err(QueryPlannerError::ParseError(Arc::new(
                 serde_json_error,
@@ -82,6 +106,7 @@ mod tests {
                     Some("".into()),
                     QueryPlanOptions::default()
                 )
+                .await
                 .is_err());
         }
         assert!(planner
@@ -90,6 +115,7 @@ mod tests {
                 Some("".into()),
                 QueryPlanOptions::default()
             )
+            .await
             .is_err());
     }
 }

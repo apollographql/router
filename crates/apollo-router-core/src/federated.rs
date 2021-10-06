@@ -96,11 +96,15 @@ impl Fetcher for FederatedGraph {
             let span = tracing::trace_span!("query_planning");
             let _guard = span.enter();
 
-            match self.query_planner.get(
-                request.query.to_owned(),
-                request.operation_name.to_owned(),
-                Default::default(),
-            ) {
+            match self
+                .query_planner
+                .get(
+                    request.query.to_owned(),
+                    request.operation_name.to_owned(),
+                    Default::default(),
+                )
+                .await
+            {
                 Ok(QueryPlan { node: Some(root) }) => root,
                 Ok(_) => return stream::empty().boxed(),
                 Err(err) => {
@@ -110,6 +114,7 @@ impl Fetcher for FederatedGraph {
         };
         let service_registry = Arc::clone(&self.service_registry);
         let schema = Arc::clone(&self.schema);
+
         let request = Arc::new(request);
 
         let mut early_errors = Vec::new();

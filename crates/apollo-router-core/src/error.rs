@@ -4,6 +4,7 @@ pub use harmonizer::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::task::JoinError;
 
 /// Error types for execution.
 ///
@@ -165,6 +166,9 @@ pub enum QueryPlannerError {
 
     /// Query planning had errors: {0}
     PlanningErrors(Arc<PlanningErrors>),
+
+    /// Query planning panicked: {0}
+    JoinError(Arc<JoinError>),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {
@@ -179,6 +183,11 @@ impl From<serde_json::Error> for QueryPlannerError {
     }
 }
 
+impl From<JoinError> for QueryPlannerError {
+    fn from(err: JoinError) -> Self {
+        QueryPlannerError::JoinError(Arc::new(err))
+    }
+}
 #[derive(Debug, Error)]
 pub enum SchemaError {
     #[error(transparent)]
