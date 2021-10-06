@@ -87,14 +87,21 @@ impl Fetcher for FederatedGraph {
 
         log::trace!("Request received:\n{:#?}", request);
 
-        let plan = match self.query_planner.get(
-            request.query.to_owned(),
-            request.operation_name.to_owned(),
-            Default::default(),
-        ) {
-            Ok(QueryPlan { node: Some(root) }) => root,
-            Ok(_) => return stream::empty().boxed(),
-            Err(err) => return stream::iter(vec![FetchError::from(err).to_response(true)]).boxed(),
+        let plan = {
+            let span = tracing::trace_span!("query_planning");
+            let _guard = span.enter();
+
+            match self.query_planner.get(
+                request.query.to_owned(),
+                request.operation_name.to_owned(),
+                Default::default(),
+            ) {
+                Ok(QueryPlan { node: Some(root) }) => root,
+                Ok(_) => return stream::empty().boxed(),
+                Err(err) => {
+                    return stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
+                }
+            }
         };
         let service_registry = self.service_registry.clone();
         let request = Arc::new(request);
@@ -165,6 +172,7 @@ fn execute<'a>(
                         request.clone(),
                         service_registry.clone(),
                     )
+                    .instrument(tracing::trace_span!("execute-sequence"))
                     .await;
                 }
             }
@@ -178,6 +186,7 @@ fn execute<'a>(
                         service_registry.clone(),
                     )
                 }))
+                .instrument(tracing::trace_span!("execute-parallel"))
                 .await;
             }
             PlanNode::Fetch(info) => {
@@ -188,6 +197,7 @@ fn execute<'a>(
                     request.clone(),
                     service_registry.clone(),
                 )
+                .instrument(tracing::trace_span!("execute-fetch"))
                 .await
                 {
                     Ok(()) => {
@@ -218,6 +228,7 @@ fn execute<'a>(
                     request.clone(),
                     service_registry.clone(),
                 )
+                .instrument(tracing::trace_span!("execute-flatten"))
                 .await;
             }
         }
@@ -268,6 +279,7 @@ async fn fetch_node<'a>(
                     .build(),
             )
             .into_future()
+            .instrument(tracing::trace_span!("fetch-selections"))
             .await;
 
         match res {
@@ -283,8 +295,13 @@ async fn fetch_node<'a>(
                         serde_json::to_string(entities).unwrap(),
                     );
                     if let Some(array) = entities.as_array() {
-                        let mut response = response.lock().await;
+                        let mut response = response
+                            .lock()
+                            .instrument(tracing::trace_span!("response-lock-wait"))
+                            .await;
 
+                        let span = tracing::trace_span!("response-insert");
+                        let _guard = span.enter();
                         for (i, entity) in array.iter().enumerate() {
                             response.insert_data(
                                 &current_dir.join(Path::from(i.to_string())),
@@ -332,6 +349,7 @@ async fn fetch_node<'a>(
                     .build(),
             )
             .into_future()
+            .instrument(tracing::trace_span!("fetch-selections"))
             .await;
 
         match res {
@@ -343,9 +361,16 @@ async fn fetch_node<'a>(
             Some(Response {
                 data, mut errors, ..
             }) => {
-                let mut response = response.lock().await;
+                let mut response = response
+                    .lock()
+                    .instrument(tracing::trace_span!("response-lock-wait"))
+                    .await;
+
+                let span = tracing::trace_span!("response-insert");
+                let _guard = span.enter();
                 response.append_errors(&mut errors);
                 response.insert_data(current_dir, data)?;
+
                 Ok(())
             }
             None => Err(FetchError::SubrequestNoResponse {

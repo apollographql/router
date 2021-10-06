@@ -2,6 +2,7 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::pin::Pin;
+use tracing::Instrument;
 
 type BytesStream = Pin<
     Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
@@ -37,6 +38,7 @@ impl HttpSubgraphFetcher {
             .post(self.url.clone())
             .json(&request)
             .send()
+            .instrument(tracing::trace_span!("http-subgraph-request"))
             // We have a future for the response, convert it to a future of the stream.
             .map_ok(|r| r.bytes_stream().boxed())
             // Convert the entire future to a stream, at this point we have a stream of a result of a single stream
