@@ -275,6 +275,8 @@ fn try_initialize_subscriber(
             }
             let tracer = pipeline.install_batch(opentelemetry::runtime::Tokio)?;
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+            opentelemetry::global::set_error_handler(handle_error)?;
             return Ok(Some(Arc::new(subscriber.with(telemetry))));
         }
         #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
@@ -285,12 +287,27 @@ fn try_initialize_subscriber(
                 configuration::otlp::Tracing::tracer_from_env()?
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            opentelemetry::global::set_error_handler(handle_error)?;
             return Ok(Some(Arc::new(subscriber.with(telemetry))));
         }
         None => {}
     }
 
     Ok(None)
+}
+
+pub fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
+    match err.into() {
+        opentelemetry::global::Error::Trace(err) => {
+            log::error!("OpenTelemetry trace error occurred: {}", err)
+        }
+        opentelemetry::global::Error::Other(err_msg) => {
+            log::error!("OpenTelemetry error occurred: {}", err_msg)
+        }
+        other => {
+            log::error!("OpenTelemetry error occurred: {:?}", other)
+        }
+    }
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
