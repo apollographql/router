@@ -5,7 +5,7 @@ use futures::prelude::*;
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
-use tracing::Instrument;
+use tracing::{Instrument, Level};
 use tracing_futures::WithSubscriber;
 
 /// Recursively validate a query plan node making sure that all services are known before we go
@@ -123,6 +123,8 @@ impl Fetcher for FederatedGraph {
         // If we have any errors so far then let's abort the query
         // Planning/validation/variables are candidates to abort.
         if !early_errors.is_empty() {
+            tracing::error!(errors = format!("{:?}", early_errors).as_str());
+
             return stream::once(async move { Response::builder().errors(early_errors).build() })
                 .boxed();
         }
@@ -258,6 +260,8 @@ async fn fetch_node<'a>(
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 ) -> Result<(), FetchError> {
+    let query_span = tracing::info_span!("query", service = service_name.as_str());
+
     if let Some(requires) = requires {
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
@@ -290,7 +294,7 @@ async fn fetch_node<'a>(
                     .build(),
             )
             .into_future()
-            .instrument(tracing::trace_span!("fetch-selections"))
+            .instrument(query_span)
             .await;
 
         match res {
@@ -360,7 +364,7 @@ async fn fetch_node<'a>(
                     .build(),
             )
             .into_future()
-            .instrument(tracing::trace_span!("fetch-selections"))
+            .instrument(query_span)
             .await;
 
         match res {
