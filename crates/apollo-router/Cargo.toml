@@ -42,7 +42,7 @@ opentelemetry-otlp = { version = "0.9.0", default-features = false, features = [
     "serialize",
 ], optional = true }
 parking_lot = "0.11.2"
-reqwest = { version = "0.11.4", features = ["json", "stream"] }
+reqwest = { version = "0.11.5", features = ["json", "stream"] }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
 serde_json = "1.0.68"
 serde_yaml = "0.8.21"
@@ -64,5 +64,5 @@ httpmock = "0.6.2"
 insta = "1.8.0"
 maplit = "1.0.2"
 mockall = "0.10.2"
-reqwest = { version = "0.11.4", features = ["json", "stream"] }
+reqwest = { version = "0.11.5", features = ["json", "stream"] }
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
