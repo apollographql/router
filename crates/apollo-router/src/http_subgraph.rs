@@ -2,7 +2,7 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::pin::Pin;
-use tracing::Instrument;
+use tracing::{Instrument, Level};
 
 type BytesStream = Pin<
     Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
@@ -48,12 +48,14 @@ impl HttpSubgraphFetcher {
                 Ok(s) => s,
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
-            .map_err(
-                move |err: reqwest::Error| graphql::FetchError::SubrequestHttpError {
+            .map_err(move |err: reqwest::Error| {
+                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+
+                graphql::FetchError::SubrequestHttpError {
                     service: service.to_owned(),
                     reason: err.to_string(),
-                },
-            )
+                }
+            })
             .boxed()
     }
 
