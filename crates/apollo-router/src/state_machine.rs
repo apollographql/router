@@ -3,34 +3,29 @@ use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
-use super::{Event, FederatedServerError, Schema, State};
+use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
-use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
-use parking_lot::RwLock;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Debug)]
 enum PrivateState<F>
 where
     F: graphql::Fetcher,
 {
     Startup {
         configuration: Option<Configuration>,
-        schema: Option<Schema>,
+        schema: Option<graphql::Schema>,
     },
     Running {
-        configuration: Arc<RwLock<Configuration>>,
-        schema: Arc<RwLock<Schema>>,
-        #[derivative(Debug = "ignore")]
-        graph: Arc<RwLock<F>>,
-        #[derivative(Debug = "ignore")]
+        configuration: Arc<Configuration>,
+        schema: Arc<graphql::Schema>,
+        graph: Arc<F>,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -144,18 +139,18 @@ where
                 (
                     Running {
                         configuration,
-                        schema,
-                        graph,
+                        schema: _,
+                        graph: _,
                         server_handle,
                     },
                     UpdateSchema(new_schema),
                 ) => {
                     log::debug!("Reloading schema");
-                    let new_graph = self
-                        .graph_factory
-                        .create(&configuration.read(), &schema.read());
-                    *schema.write() = new_schema;
-                    *graph.write() = new_graph;
+                    let schema = Arc::new(new_schema);
+                    let graph = Arc::new(
+                        self.graph_factory
+                            .create(&configuration, Arc::clone(&schema)),
+                    );
                     Running {
                         configuration,
                         schema,
@@ -167,7 +162,7 @@ where
                 // Running: Handle configuration updates
                 (
                     Running {
-                        configuration,
+                        configuration: _,
                         schema,
                         graph,
                         server_handle,
@@ -176,16 +171,16 @@ where
                 ) => {
                     log::debug!("Reloading configuration");
 
-                    *configuration.write() = new_configuration;
+                    let configuration = Arc::new(new_configuration);
                     let server_handle =
-                        if server_handle.listen_address != configuration.read().server.listen {
+                        if server_handle.listen_address != configuration.server.listen {
                             log::debug!("Restarting http");
                             if let Err(_err) = server_handle.shutdown().await {
                                 log::error!("Failed to notify shutdown")
                             }
                             let new_handle = self
                                 .http_server_factory
-                                .create(graph.to_owned(), configuration.to_owned());
+                                .create(Arc::clone(&graph), Arc::clone(&configuration));
                             log::debug!("Restarted on {}", new_handle.listen_address);
                             new_handle
                         } else {
@@ -251,15 +246,16 @@ where
         {
             log::debug!("Starting http");
 
-            let graph = Arc::new(RwLock::new(
-                self.graph_factory.create(&configuration, &schema),
-            ));
-            let configuration = Arc::new(RwLock::new(configuration));
-            let schema = Arc::new(RwLock::new(schema));
+            let schema = Arc::new(schema);
+            let graph = Arc::new(
+                self.graph_factory
+                    .create(&configuration, Arc::clone(&schema)),
+            );
+            let configuration = Arc::new(configuration);
 
             let server_handle = self
                 .http_server_factory
-                .create(graph.to_owned(), configuration.to_owned());
+                .create(Arc::clone(&graph), Arc::clone(&configuration));
             log::debug!("Started on {}", server_handle.listen_address);
             Running {
                 configuration,
@@ -352,7 +348,7 @@ mod tests {
                             .subgraphs(Default::default())
                             .build()
                     ),
-                    UpdateSchema("".to_string()),
+                    UpdateSchema("".parse().unwrap()),
                     Shutdown
                 ],
                 vec![
@@ -382,8 +378,8 @@ mod tests {
                             .subgraphs(Default::default())
                             .build()
                     ),
-                    UpdateSchema("".to_string()),
-                    UpdateSchema("".to_string()),
+                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema("".parse().unwrap()),
                     Shutdown
                 ],
                 vec![
@@ -413,7 +409,7 @@ mod tests {
                             .subgraphs(Default::default())
                             .build()
                     ),
-                    UpdateSchema("".to_string()),
+                    UpdateSchema("".parse().unwrap()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .server(
@@ -477,13 +473,13 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<RwLock<MockMyFetcher>>, configuration: Arc<RwLock<Configuration>>| {
+                move |_: Arc<MockMyFetcher>, configuration: Arc<Configuration>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
                     shutdown_receivers_clone.lock().push(shutdown_receiver);
                     HttpServerHandle {
                         shutdown_sender,
                         server_future: future::ready(Ok(())).boxed(),
-                        listen_address: configuration.read().server.listen,
+                        listen_address: configuration.server.listen,
                     }
                 },
             );

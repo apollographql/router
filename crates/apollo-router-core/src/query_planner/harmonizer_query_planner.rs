@@ -13,8 +13,10 @@ pub struct HarmonizerQueryPlanner {
 
 impl HarmonizerQueryPlanner {
     /// Create a new harmonizer query planner
-    pub fn new(schema: String) -> Self {
-        Self { schema }
+    pub fn new(schema: &Schema) -> Self {
+        Self {
+            schema: schema.as_str().to_owned(),
+        }
     }
 }
 
@@ -49,7 +51,8 @@ mod tests {
 
     #[test]
     fn test_plan() {
-        let planner = HarmonizerQueryPlanner::new(include_str!("testdata/schema.graphql").into());
+        let planner =
+            HarmonizerQueryPlanner::new(&include_str!("testdata/schema.graphql").parse().unwrap());
         let result = planner.get(
             include_str!("testdata/query.graphql").into(),
             None,
@@ -70,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_plan_error() {
-        let planner = HarmonizerQueryPlanner::new("".to_string());
+        let planner = HarmonizerQueryPlanner::new(&"".parse().unwrap());
         let result = planner.get("".into(), None, QueryPlanOptions::default());
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",

@@ -178,3 +178,11 @@ impl From<serde_json::Error> for QueryPlannerError {
         QueryPlannerError::ParseError(Arc::new(err))
     }
 }
+
+#[derive(Debug, Error)]
+pub enum SchemaError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error("Parsing error(s)")]
+    ParseErrors(Vec<apollo_parser::Error>),
+}

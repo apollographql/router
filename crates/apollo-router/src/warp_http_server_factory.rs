@@ -5,7 +5,6 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use parking_lot::RwLock;
 use std::sync::Arc;
 use tracing::Dispatch;
 use warp::host::Authority;
@@ -30,19 +29,14 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<F>(
-        &self,
-        graph: Arc<RwLock<F>>,
-        configuration: Arc<RwLock<Configuration>>,
-    ) -> HttpServerHandle
+    fn create<F>(&self, graph: Arc<F>, configuration: Arc<Configuration>) -> HttpServerHandle
     where
         F: graphql::Fetcher + 'static,
     {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listen_address = configuration.read().server.listen;
+        let listen_address = configuration.server.listen;
 
         let cors = configuration
-            .read()
             .server
             .cors
             .as_ref()
@@ -72,13 +66,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
 }
 
 fn run_get_query_or_redirect<F>(
-    graph: Arc<RwLock<F>>,
-    configuration: Arc<RwLock<Configuration>>,
+    graph: Arc<F>,
+    configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     F: graphql::Fetcher + 'static,
 {
-    let tracing_subscriber = configuration.read().subscriber.clone();
+    let tracing_subscriber = configuration.subscriber.clone();
 
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -138,14 +132,14 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
 }
 
 fn run_request<F>(
-    graph: Arc<RwLock<F>>,
+    graph: Arc<F>,
     dispatcher: Dispatch,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
     F: graphql::Fetcher + 'static,
 {
-    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.read().stream(request));
+    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.stream(request));
 
     stream
         .enumerate()
@@ -166,13 +160,13 @@ where
 }
 
 fn perform_graphql_request<F>(
-    graph: Arc<RwLock<F>>,
-    configuration: Arc<RwLock<Configuration>>,
+    graph: Arc<F>,
+    configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Response<Body>,), Error = Rejection> + Clone
 where
     F: graphql::Fetcher + 'static,
 {
-    let tracing_subscriber = configuration.read().subscriber.clone();
+    let tracing_subscriber = configuration.subscriber.clone();
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
@@ -207,7 +201,7 @@ mod tests {
         LOCATION, ORIGIN,
     };
     use reqwest::redirect::Policy;
-    use reqwest::{Client, Method, StatusCode};
+    use reqwest::{Method, StatusCode};
     use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
@@ -259,39 +253,43 @@ mod tests {
         }
     }
 
-    fn init(listen_address: &str) -> (Arc<RwLock<MockMyFetcher>>, HttpServerHandle, Client) {
-        let _ = env_logger::builder().is_test(true).try_init();
-        let fetcher = MockMyFetcher::new();
-        let server_factory = WarpHttpServerFactory::new();
-        let fetcher = Arc::new(RwLock::new(fetcher));
-        let server = server_factory.create(
-            fetcher.to_owned(),
-            Arc::new(RwLock::new(
-                Configuration::builder()
-                    .server(
-                        crate::configuration::Server::builder()
-                            .listen(SocketAddr::from_str(listen_address).unwrap())
-                            .cors(Some(
-                                Cors::builder()
-                                    .origins(vec!["http://studio".to_string()])
-                                    .build(),
-                            ))
-                            .build(),
-                    )
-                    .subgraphs(Default::default())
-                    .build(),
-            )),
-        );
-        let client = reqwest::Client::builder()
-            .redirect(Policy::none())
-            .build()
-            .unwrap();
-        (fetcher, server, client)
+    macro_rules! init {
+        ($listen_address:expr, $fetcher:ident => $expect_stream:block) => {{
+            let _ = env_logger::builder().is_test(true).try_init();
+            #[allow(unused_mut)]
+            let mut $fetcher = MockMyFetcher::new();
+            $expect_stream;
+            let server_factory = WarpHttpServerFactory::new();
+            let fetcher = Arc::new($fetcher);
+            let server = server_factory.create(
+                fetcher.to_owned(),
+                Arc::new(
+                    Configuration::builder()
+                        .server(
+                            crate::configuration::Server::builder()
+                                .listen(SocketAddr::from_str($listen_address).unwrap())
+                                .cors(Some(
+                                    Cors::builder()
+                                        .origins(vec!["http://studio".to_string()])
+                                        .build(),
+                                ))
+                                .build(),
+                        )
+                        .subgraphs(Default::default())
+                        .build(),
+                ),
+            );
+            let client = reqwest::Client::builder()
+                .redirect(Policy::none())
+                .build()
+                .unwrap();
+            (server, client)
+        }};
     }
 
     #[tokio::test]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        let (_fetcher, server, client) = init("127.0.0.1:0");
+        let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
             format!("http://{}/", server.listen_address),
@@ -340,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_request() -> Result<(), FederatedServerError> {
-        let (_fetcher, server, client) = init("127.0.0.1:0");
+        let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         let response = client
             .post(format!("http://{}/graphql", server.listen_address))
@@ -358,17 +356,15 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let (fetcher, server, client) = init("127.0.0.1:0");
-        {
+        let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
-                .write()
                 .expect_stream()
                 .times(2)
                 .returning(move |_| {
                     let actual_response = example_response.clone();
                     futures::stream::iter(vec![actual_response]).boxed()
-                });
-        }
+                })
+        });
         let url = format!("http://{}/graphql", server.listen_address);
         // Post query
         let response = client
@@ -405,17 +401,19 @@ mod tests {
 
     #[tokio::test]
     async fn response_failure() -> Result<(), FederatedServerError> {
-        let (fetcher, server, client) = init("127.0.0.1:0");
-        {
-            fetcher.write().expect_stream().times(1).return_once(|_| {
-                futures::stream::iter(vec![graphql::FetchError::SubrequestHttpError {
-                    service: "Mock service".to_string(),
-                    reason: "Mock error".to_string(),
-                }
-                .to_response(true)])
-                .boxed()
-            });
-        }
+        let (server, client) = init!("127.0.0.1:0", fetcher => {
+            fetcher
+                .expect_stream()
+                .times(1)
+                .return_once(|_| {
+                    futures::stream::iter(vec![graphql::FetchError::SubrequestHttpError {
+                        service: "Mock service".to_string(),
+                        reason: "Mock error".to_string(),
+                    }
+                    .to_response(true)])
+                    .boxed()
+                })
+        });
         let response = client
             .post(format!("http://{}/graphql", server.listen_address))
             .body(
@@ -446,7 +444,7 @@ mod tests {
 
     #[tokio::test]
     async fn cors_preflight() -> Result<(), FederatedServerError> {
-        let (_fetcher, server, client) = init("127.0.0.1:0");
+        let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
             format!("http://{}/", server.listen_address),
@@ -471,13 +469,13 @@ mod tests {
             assert_header_contains!(
                 &response,
                 ACCESS_CONTROL_ALLOW_HEADERS,
-                vec!["content-type"],
+                &["content-type"],
                 "Incorrect access control allow header header"
             );
             assert_header_contains!(
                 &response,
                 ACCESS_CONTROL_ALLOW_METHODS,
-                vec!["GET", "POST", "OPTIONS"],
+                &["GET", "POST", "OPTIONS"],
                 "Incorrect access control allow methods header"
             );
 

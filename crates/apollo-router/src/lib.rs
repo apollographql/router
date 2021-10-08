@@ -13,6 +13,7 @@ use crate::graph_factory::FederatedGraphFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
+use apollo_router_core::prelude::*;
 use configuration::{Configuration, OpenTelemetry};
 use derivative::Derivative;
 use derive_more::Display;
@@ -22,7 +23,6 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use std::fs::{read, read_to_string};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -36,8 +36,7 @@ use tracing_subscriber::EnvFilter;
 use typed_builder::TypedBuilder;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-type Schema = String;
-type SchemaStream = Pin<Box<dyn Stream<Item = Schema> + Send>>;
+type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
@@ -63,7 +62,7 @@ pub enum FederatedServerError {
     ReadConfigError(std::io::Error),
 
     /// Could not read schema: {0}
-    ReadSchemaError(std::io::Error),
+    ReadSchemaError(graphql::SchemaError),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -72,7 +71,7 @@ pub enum FederatedServerError {
 pub enum SchemaKind {
     /// A static schema.
     #[display(fmt = "Instance")]
-    Instance(Schema),
+    Instance(graphql::Schema),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -233,15 +232,15 @@ impl ConfigurationKind {
     }
 
     fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
-        let bytes = read(&path).map_err(FederatedServerError::ReadConfigError)?;
-        let config = serde_yaml::from_slice::<Configuration>(&bytes)
+        let file = std::fs::File::open(path).map_err(FederatedServerError::ReadConfigError)?;
+        let config = serde_yaml::from_reader::<_, Configuration>(&file)
             .map_err(FederatedServerError::DeserializeConfigError)?;
 
         Ok(config)
     }
 
-    fn read_schema(path: &Path) -> Result<Schema, FederatedServerError> {
-        read_to_string(&path).map_err(FederatedServerError::ReadSchemaError)
+    fn read_schema(path: &Path) -> Result<graphql::Schema, FederatedServerError> {
+        graphql::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
     }
 }
 
@@ -336,13 +335,14 @@ impl ShutdownKind {
 /// # Examples
 ///
 /// ```
+/// use apollo_router_core::prelude::*;
 /// use apollo_router::FederatedServer;
 /// use apollo_router::ShutdownKind;
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema = "schema".to_string();
+///     let schema: graphql::Schema = "schema".parse().unwrap();
 ///     let server = FederatedServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
@@ -354,13 +354,14 @@ impl ShutdownKind {
 ///
 /// Shutdown via handle.
 /// ```
+/// use apollo_router_core::prelude::*;
 /// use apollo_router::FederatedServer;
 /// use apollo_router::ShutdownKind;
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
-///     let schema = "schema".to_string();
+///     let schema: graphql::Schema = "schema".parse().unwrap();
 ///     let server = FederatedServer::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
@@ -395,7 +396,7 @@ enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(Schema),
+    UpdateSchema(graphql::Schema),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -554,7 +555,6 @@ mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
     use crate::http_subgraph::HttpSubgraphFetcher;
-    use apollo_router_core::prelude::*;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
 
@@ -564,7 +564,7 @@ mod tests {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
-        let schema = include_str!("testdata/supergraph.graphql").to_string();
+        let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         FederatedServer::builder()
             .configuration(configuration)
             .schema(schema)

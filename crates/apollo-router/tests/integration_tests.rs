@@ -157,15 +157,16 @@ fn query_node(request: graphql::Request) -> graphql::ResponseStream {
 fn query_rust(
     request: graphql::Request,
 ) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
-    let planner =
-        graphql::HarmonizerQueryPlanner::new(include_str!("fixtures/supergraph.graphql").into());
+    let schema: graphql::Schema = include_str!("fixtures/supergraph.graphql").parse().unwrap();
+    let planner = graphql::HarmonizerQueryPlanner::new(&schema);
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
         &config,
     )));
-    let federated = graphql::FederatedGraph::new(Box::new(planner), registry.clone());
+    let federated =
+        graphql::FederatedGraph::new(Box::new(planner), registry.clone(), Arc::new(schema));
     (federated.stream(request), registry)
 }
 

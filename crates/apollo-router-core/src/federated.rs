@@ -65,6 +65,7 @@ pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
     query_planner: Box<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
+    schema: Arc<Schema>,
 }
 
 impl FederatedGraph {
@@ -72,10 +73,12 @@ impl FederatedGraph {
     pub fn new(
         query_planner: Box<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
+        schema: Arc<Schema>,
     ) -> Self {
         Self {
             query_planner,
             service_registry,
+            schema,
         }
     }
 }
@@ -103,16 +106,17 @@ impl Fetcher for FederatedGraph {
                 }
             }
         };
-        let service_registry = self.service_registry.clone();
+        let service_registry = Arc::clone(&self.service_registry);
+        let schema = Arc::clone(&self.schema);
         let request = Arc::new(request);
 
         let mut early_errors = Vec::new();
 
-        for err in validate_services_against_plan(service_registry.clone(), &plan) {
+        for err in validate_services_against_plan(Arc::clone(&service_registry), &plan) {
             early_errors.push(err.to_graphql_error(None));
         }
 
-        for err in validate_request_variables_against_plan(request.clone(), &plan) {
+        for err in validate_request_variables_against_plan(Arc::clone(&request), &plan) {
             early_errors.push(err.to_graphql_error(None));
         }
 
@@ -129,11 +133,12 @@ impl Fetcher for FederatedGraph {
                 let root = Path::empty();
 
                 execute(
-                    response.clone(),
+                    Arc::clone(&response),
                     &root,
                     &plan,
                     request,
-                    service_registry.clone(),
+                    Arc::clone(&service_registry),
+                    Arc::clone(&schema),
                 )
                 .await;
 
@@ -155,6 +160,7 @@ fn execute<'a>(
     plan: &'a PlanNode,
     request: Arc<Request>,
     service_registry: Arc<dyn ServiceRegistry>,
+    schema: Arc<Schema>,
 ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
     let span = tracing::info_span!("execution");
     let _guard = span.enter();
@@ -166,11 +172,12 @@ fn execute<'a>(
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
                     execute(
-                        response.clone(),
+                        Arc::clone(&response),
                         current_dir,
                         node,
-                        request.clone(),
-                        service_registry.clone(),
+                        Arc::clone(&request),
+                        Arc::clone(&service_registry),
+                        Arc::clone(&schema),
                     )
                     .instrument(tracing::trace_span!("execute-sequence"))
                     .await;
@@ -179,11 +186,12 @@ fn execute<'a>(
             PlanNode::Parallel { nodes } => {
                 future::join_all(nodes.iter().map(|plan| {
                     execute(
-                        response.clone(),
+                        Arc::clone(&response),
                         current_dir,
                         plan,
-                        request.clone(),
-                        service_registry.clone(),
+                        Arc::clone(&request),
+                        Arc::clone(&service_registry),
+                        Arc::clone(&schema),
                     )
                 }))
                 .instrument(tracing::trace_span!("execute-parallel"))
@@ -191,11 +199,12 @@ fn execute<'a>(
             }
             PlanNode::Fetch(info) => {
                 match fetch_node(
-                    response.clone(),
+                    Arc::clone(&response),
                     current_dir,
                     info,
-                    request.clone(),
-                    service_registry.clone(),
+                    Arc::clone(&request),
+                    Arc::clone(&service_registry),
+                    Arc::clone(&schema),
                 )
                 .instrument(tracing::trace_span!("execute-fetch"))
                 .await
@@ -221,12 +230,13 @@ fn execute<'a>(
                 // this is the only command that actually changes the "current dir"
                 let current_dir = current_dir.join(path);
                 execute(
-                    response.clone(),
+                    Arc::clone(&response),
                     // a path can go over multiple json node!
                     &current_dir,
                     node,
-                    request.clone(),
-                    service_registry.clone(),
+                    Arc::clone(&request),
+                    Arc::clone(&service_registry),
+                    Arc::clone(&schema),
                 )
                 .instrument(tracing::trace_span!("execute-flatten"))
                 .await;
@@ -246,6 +256,7 @@ async fn fetch_node<'a>(
     }: &'a FetchNode,
     request: Arc<Request>,
     service_registry: Arc<dyn ServiceRegistry>,
+    schema: Arc<Schema>,
 ) -> Result<(), FetchError> {
     if let Some(requires) = requires {
         // We already checked that the service exists during planning
@@ -267,7 +278,7 @@ async fn fetch_node<'a>(
                 requires,
                 serde_json::to_string(&response.data).unwrap(),
             );
-            let representations = response.select(current_dir, requires)?;
+            let representations = response.select(current_dir, requires, &schema)?;
             variables.insert("representations".into(), representations);
         }
 
@@ -345,7 +356,7 @@ async fn fetch_node<'a>(
             .stream(
                 Request::builder()
                     .query(operation.clone())
-                    .variables(variables.clone())
+                    .variables(Arc::clone(&variables))
                     .build(),
             )
             .into_future()

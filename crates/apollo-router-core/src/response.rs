@@ -56,7 +56,12 @@ impl Response {
         self.path.is_none()
     }
 
-    pub fn select(&self, path: &Path, selections: &[Selection]) -> Result<Value, FetchError> {
+    pub fn select(
+        &self,
+        path: &Path,
+        selections: &[Selection],
+        schema: &Schema,
+    ) -> Result<Value, FetchError> {
         let values =
             self.data
                 .get_at_path(path)
@@ -69,7 +74,7 @@ impl Response {
                 .into_iter()
                 .flat_map(|value| match (value, selections) {
                     (Value::Object(content), requires) => {
-                        select_object(content, requires).transpose()
+                        select_object(content, requires, schema).transpose()
                     }
                     (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
                         reason: "not an object".to_string(),
@@ -100,12 +105,16 @@ impl Response {
     }
 }
 
-fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Value>, FetchError> {
+fn select_object(
+    content: &Object,
+    selections: &[Selection],
+    schema: &Schema,
+) -> Result<Option<Value>, FetchError> {
     let mut output = Object::new();
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                if let Some(value) = select_field(content, field)? {
+                if let Some(value) = select_field(content, field, schema)? {
                     output
                         .entry(field.name.to_owned())
                         .and_modify(|existing| existing.deep_merge(&value))
@@ -113,7 +122,9 @@ fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Va
                 }
             }
             Selection::InlineFragment(fragment) => {
-                if let Some(Value::Object(value)) = select_inline_fragment(content, fragment)? {
+                if let Some(Value::Object(value)) =
+                    select_inline_fragment(content, fragment, schema)?
+                {
                     output.append(&mut value.to_owned())
                 }
             }
@@ -125,9 +136,13 @@ fn select_object(content: &Object, selections: &[Selection]) -> Result<Option<Va
     Ok(Some(Value::Object(output)))
 }
 
-fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchError> {
+fn select_field(
+    content: &Object,
+    field: &Field,
+    schema: &Schema,
+) -> Result<Option<Value>, FetchError> {
     match (content.get(&field.name), &field.selections) {
-        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections),
+        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
         (Some(value), None) => Ok(Some(value.to_owned())),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
@@ -139,16 +154,17 @@ fn select_field(content: &Object, field: &Field) -> Result<Option<Value>, FetchE
 fn select_inline_fragment(
     content: &Object,
     fragment: &InlineFragment,
+    schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
     match (&fragment.type_condition, &content.get("__typename")) {
         (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename {
-                select_object(content, &fragment.selections)
+            if condition == typename || schema.is_subtype(condition, typename) {
+                select_object(content, &fragment.selections, schema)
             } else {
                 Ok(None)
             }
         }
-        (None, _) => select_object(content, &fragment.selections),
+        (None, _) => select_object(content, &fragment.selections, schema),
         (_, None) => Err(FetchError::ExecutionFieldNotFound {
             field: "__typename".to_string(),
         }),
@@ -162,7 +178,8 @@ mod tests {
     use serde_json::json;
 
     macro_rules! select {
-        ($content:expr $(,)?) => {{
+        ($schema:expr, $content:expr $(,)?) => {{
+            let schema: Schema = $schema.parse().unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -198,7 +215,7 @@ mod tests {
                 },
             ]);
             let selection: Vec<Selection> = serde_json::from_value(stub).unwrap();
-            response.select(&Path::empty(), &selection)
+            response.select(&Path::empty(), &selection, &schema)
         }};
     }
 
@@ -206,6 +223,7 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             select!(
+                "",
                 json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
@@ -220,9 +238,30 @@ mod tests {
     }
 
     #[test]
+    fn test_selection_subtype() {
+        assert_eq!(
+            select!(
+                "union User = Author | Reviewer",
+                json!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
+            )
+            .unwrap(),
+            json!([{
+                "__typename": "Author",
+                "id": 2,
+                "job": {
+                    "name": "astronaut"
+                }
+            }]),
+        );
+    }
+
+    #[test]
     fn test_selection_missing_field() {
         assert!(matches!(
-            select!(json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}))
+            select!(
+                "",
+                json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
+            )
                 .unwrap_err(),
             FetchError::ExecutionFieldNotFound { field } if field == "id"
         ));

@@ -4,6 +4,7 @@ mod json_ext;
 mod query_planner;
 mod request;
 mod response;
+mod schema;
 mod traits;
 
 pub use error::*;
@@ -12,6 +13,7 @@ pub use json_ext::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;
+pub use schema::*;
 pub use traits::*;
 
 pub mod prelude {

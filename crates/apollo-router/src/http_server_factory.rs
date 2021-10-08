@@ -1,11 +1,11 @@
 use super::FederatedServerError;
 use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
+use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
-use parking_lot::RwLock;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,11 +16,7 @@ use std::sync::Arc;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<F>(
-        &self,
-        graph: Arc<RwLock<F>>,
-        configuration: Arc<RwLock<Configuration>>,
-    ) -> HttpServerHandle
+    fn create<F>(&self, graph: Arc<F>, configuration: Arc<Configuration>) -> HttpServerHandle
     where
         F: graphql::Fetcher + 'static;
 }
@@ -29,11 +25,14 @@ pub(crate) trait HttpServerFactory {
 /// This relies on the underlying server implementation doing the right thing.
 /// There are various ways that a user could prevent this working, including holding open connections
 /// and sending huge requests. There is potential work needed for hardening.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
     pub(crate) shutdown_sender: oneshot::Sender<()>,
 
     /// Future to wait on for graceful shutdown
+    #[derivative(Debug = "ignore")]
     pub(crate) server_future:
         Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
 

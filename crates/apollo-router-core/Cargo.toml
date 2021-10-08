@@ -10,6 +10,7 @@ name = "basic_composition"
 harness = false
 
 [dependencies]
+apollo-parser = { git = "ssh://git@github.com/apollographql/apollo-rs.git", rev = "c6418141de4505e317ca30c97ac9e26bab8df0f0" }
 derivative = "2.2.0"
 displaydoc = "0.2"
 futures = "0.3.17"

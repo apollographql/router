@@ -1,5 +1,5 @@
 [workspace]
-default-members = ["crates/apollo-router"]
+default-members = ["crates/apollo-router", "crates/apollo-router-core"]
 members = ["crates/apollo-router", "crates/apollo-router-core", "xtask"]
 
 [patch.crates-io]
