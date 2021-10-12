@@ -24,7 +24,6 @@ tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
 [dependencies]
 anyhow = "1.0.44"
 apollo-router-core = { path = "../apollo-router-core" }
-async-trait = "0.1.51"
 bytes = "1.1.0"
 derivative = "2.2.0"
 derive_more = "0.99.16"

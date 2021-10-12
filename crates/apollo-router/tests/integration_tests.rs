@@ -151,7 +151,7 @@ async fn missing_variables() {
 fn query_node(request: graphql::Request) -> graphql::ResponseStream {
     let nodejs_impl =
         HttpSubgraphFetcher::new("federated".into(), "http://localhost:4000/graphql".into());
-    nodejs_impl.stream(request).await
+    nodejs_impl.stream(request)
 }
 
 fn query_rust(
@@ -166,8 +166,8 @@ fn query_rust(
         &config,
     )));
     let federated =
-        graphql::FederatedGraph::new(Box::new(planner), registry.clone(), Arc::new(schema));
-    (federated.stream(request).await, registry)
+        graphql::FederatedGraph::new(Arc::new(planner), registry.clone(), Arc::new(schema));
+    (federated.stream(request), registry)
 }
 
 #[derive(Debug)]

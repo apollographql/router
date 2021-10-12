@@ -28,7 +28,7 @@ impl GraphFactory<graphql::FederatedGraph> for FederatedGraphFactory {
     ) -> graphql::FederatedGraph {
         let service_registry = HttpServiceRegistry::new(configuration);
         graphql::FederatedGraph::new(
-            Box::new(graphql::HarmonizerQueryPlanner::new(&schema).with_caching()),
+            Arc::new(graphql::HarmonizerQueryPlanner::new(&schema).with_caching()),
             Arc::new(service_registry),
             schema,
         )

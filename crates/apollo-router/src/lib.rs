@@ -632,7 +632,6 @@ mod tests {
     async fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
         HttpSubgraphFetcher::new("federated".into(), format!("http://{}/graphql", socket))
             .stream(request)
-            .await
     }
 
     #[cfg(not(target_os = "macos"))]

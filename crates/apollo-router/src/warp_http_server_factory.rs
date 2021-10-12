@@ -7,7 +7,7 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use std::pin::Pin;
 use std::sync::Arc;
-use tracing::{instrument::WithSubscriber, Dispatch};
+use tracing::Dispatch;
 
 use warp::host::Authority;
 use warp::hyper::Response;
@@ -158,7 +158,7 @@ async fn run_request<F>(
 where
     F: graphql::Fetcher + 'static,
 {
-    let stream = { graph.stream(request).with_subscriber(dispatcher).await };
+    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.stream(request));
 
     stream
         .enumerate()
@@ -220,7 +220,6 @@ fn prefers_html(accept_header: String) -> bool {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use async_trait::async_trait;
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -275,9 +274,9 @@ mod tests {
     mock! {
         #[derive(Debug)]
         MyFetcher {}
-        #[async_trait]
+
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 

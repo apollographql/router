@@ -1,5 +1,4 @@
 use crate::prelude::graphql::*;
-use async_trait::async_trait;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
@@ -64,7 +63,7 @@ fn validate_request_variables_against_plan(
 #[derivative(Debug)]
 pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
-    query_planner: Box<dyn QueryPlanner>,
+    query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 }
@@ -72,7 +71,7 @@ pub struct FederatedGraph {
 impl FederatedGraph {
     /// Create a `FederatedGraph` instance used to execute a GraphQL query.
     pub fn new(
-        query_planner: Box<dyn QueryPlanner>,
+        query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
     ) -> Self {
@@ -84,82 +83,90 @@ impl FederatedGraph {
     }
 }
 
-#[async_trait]
 impl Fetcher for FederatedGraph {
-    async fn stream(&self, request: Request) -> ResponseStream {
+    fn stream(&self, request: Request) -> ResponseStream {
         let span = tracing::info_span!("federated_query");
-        let _guard = span.enter();
 
-        log::trace!("Request received:\n{:#?}", request);
-
-        let plan = {
-            let span = tracing::trace_span!("query_planning");
-            let _guard = span.enter();
-
-            match self
-                .query_planner
-                .get(
-                    request.query.to_owned(),
-                    request.operation_name.to_owned(),
-                    Default::default(),
-                )
-                .await
-            {
-                Ok(QueryPlan { node: Some(root) }) => root,
-                Ok(_) => return stream::empty().boxed(),
-                Err(err) => {
-                    return stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
-                }
-            }
-        };
         let service_registry = Arc::clone(&self.service_registry);
         let schema = Arc::clone(&self.schema);
 
-        let request = Arc::new(request);
+        let query_planner = Arc::clone(&self.query_planner);
+        let query = request.query.to_owned();
+        let operation_name = request.operation_name.to_owned();
+        let f = (async move {
+            let span = tracing::trace_span!("query_planning");
+            query_planner
+                .get(query, operation_name, Default::default())
+                .instrument(span)
+                .await
+        })
+        .map(|plan_res| {
+            log::trace!("Request received:\n{:#?}", request);
 
-        let mut early_errors = Vec::new();
+            let plan = {
+                let span = tracing::trace_span!("query_planning");
+                let _guard = span.enter();
 
-        for err in validate_services_against_plan(Arc::clone(&service_registry), &plan) {
-            early_errors.push(err.to_graphql_error(None));
-        }
+                match plan_res {
+                    Ok(QueryPlan { node: Some(root) }) => root,
+                    Ok(_) => return stream::empty().boxed(),
+                    Err(err) => {
+                        return stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
+                    }
+                }
+            };
 
-        for err in validate_request_variables_against_plan(Arc::clone(&request), &plan) {
-            early_errors.push(err.to_graphql_error(None));
-        }
+            let request = Arc::new(request);
 
-        // If we have any errors so far then let's abort the query
-        // Planning/validation/variables are candidates to abort.
-        if !early_errors.is_empty() {
-            tracing::error!(errors = format!("{:?}", early_errors).as_str());
+            let mut early_errors = Vec::new();
 
-            return stream::once(async move { Response::builder().errors(early_errors).build() })
-                .boxed();
-        }
-
-        stream::once(
-            async move {
-                let response = Arc::new(Mutex::new(Response::builder().build()));
-                let root = Path::empty();
-
-                execute(
-                    Arc::clone(&response),
-                    &root,
-                    &plan,
-                    request,
-                    Arc::clone(&service_registry),
-                    Arc::clone(&schema),
-                )
-                .await;
-
-                // TODO: this is not great but there is no other way
-                Arc::try_unwrap(response)
-                    .expect("todo: how to prove?")
-                    .into_inner()
+            for err in validate_services_against_plan(Arc::clone(&service_registry), &plan) {
+                early_errors.push(err.to_graphql_error(None));
             }
-            .in_current_span()
-            .with_current_subscriber(),
-        )
-        .boxed()
+
+            for err in validate_request_variables_against_plan(Arc::clone(&request), &plan) {
+                early_errors.push(err.to_graphql_error(None));
+            }
+
+            // If we have any errors so far then let's abort the query
+            // Planning/validation/variables are candidates to abort.
+            if !early_errors.is_empty() {
+                tracing::error!(errors = format!("{:?}", early_errors).as_str());
+
+                return stream::once(
+                    async move { Response::builder().errors(early_errors).build() },
+                )
+                .boxed();
+            }
+
+            stream::once(
+                async move {
+                    let response = Arc::new(Mutex::new(Response::builder().build()));
+                    let root = Path::empty();
+
+                    execute(
+                        Arc::clone(&response),
+                        &root,
+                        &plan,
+                        request,
+                        Arc::clone(&service_registry),
+                        Arc::clone(&schema),
+                    )
+                    .await;
+
+                    // TODO: this is not great but there is no other way
+                    Arc::try_unwrap(response)
+                        .expect("todo: how to prove?")
+                        .into_inner()
+                }
+                .in_current_span()
+                .with_current_subscriber(),
+            )
+            .boxed()
+        })
+        .instrument(span);
+
+        Box::pin(f.into_stream().flatten())
     }
 }
 
@@ -299,7 +306,6 @@ async fn fetch_node<'a>(
                     .variables(variables)
                     .build(),
             )
-            .await
             .into_future()
             .instrument(query_span)
             .await;
@@ -370,7 +376,6 @@ async fn fetch_node<'a>(
                     .variables(Arc::clone(&variables))
                     .build(),
             )
-            .await
             .into_future()
             .instrument(query_span)
             .await;
