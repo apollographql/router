@@ -2,7 +2,7 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::prelude::*;
 use std::pin::Pin;
-use tracing::{Instrument, Level};
+use tracing::Instrument;
 
 type BytesStream = Pin<
     Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,

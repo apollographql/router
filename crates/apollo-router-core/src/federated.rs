@@ -5,7 +5,7 @@ use futures::prelude::*;
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
-use tracing::{Instrument, Level};
+use tracing::Instrument;
 use tracing_futures::WithSubscriber;
 
 /// Recursively validate a query plan node making sure that all services are known before we go

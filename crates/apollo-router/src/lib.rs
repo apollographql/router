@@ -23,9 +23,12 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::trace::TracerProvider;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -273,7 +276,23 @@ fn try_initialize_subscriber(
             if let Some(password) = config.password.as_ref() {
                 pipeline = pipeline.with_collector_password(password);
             }
-            let tracer = pipeline.install_batch(opentelemetry::runtime::Tokio)?;
+
+            let batch_size = std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+                .ok()
+                .and_then(|batch_size| usize::from_str(&batch_size).ok())
+                .unwrap_or(100usize);
+            let exporter = pipeline.init_sync_exporter()?;
+            let batch = BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                .with_max_export_batch_size(batch_size)
+                .build();
+
+            let provider = opentelemetry::sdk::trace::TracerProvider::builder()
+                .with_span_processor(batch)
+                .build();
+
+            let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
+            let _ = opentelemetry::global::set_tracer_provider(provider);
+
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
             opentelemetry::global::set_error_handler(handle_error)?;
