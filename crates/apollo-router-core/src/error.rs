@@ -78,7 +78,7 @@ pub enum FetchError {
     /// Invalid content: {reason}
     ExecutionInvalidContent { reason: String },
 
-    /// Could find path: {reason}
+    /// Could not find path: {reason}
     ExecutionPathNotFound { reason: String },
 }
 

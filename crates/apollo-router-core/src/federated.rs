@@ -218,7 +218,6 @@ fn execute<'a>(
                         );
                     }
                     Err(err) => {
-                        debug_assert!(false, "{}", err);
                         log::error!("Fetch error: {}", err);
                         response
                             .lock()
