@@ -57,7 +57,14 @@ where
     fn from(private_state: &PrivateState<F>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
-            Running { server_handle, .. } => State::Running(server_handle.listen_address),
+            Running {
+                server_handle,
+                schema,
+                ..
+            } => State::Running {
+                address: server_handle.listen_address,
+                schema: schema.as_str().to_string(),
+            },
             Stopped => State::Stopped,
             Errored { .. } => State::Errored,
         }
@@ -360,7 +367,10 @@ mod tests {
                 ],
                 vec![
                     State::Startup,
-                    State::Running(SocketAddr::from_str("127.0.0.1:4000").unwrap()),
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: String::new()
+                    },
                     State::Stopped
                 ]
             )
@@ -374,6 +384,7 @@ mod tests {
     async fn startup_reload_schema() {
         let graph_factory = create_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let schema = include_str!("testdata/supergraph.graphql");
 
         assert!(matches!(
             execute(
@@ -386,12 +397,19 @@ mod tests {
                             .build()
                     ),
                     UpdateSchema("".parse().unwrap()),
-                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema(schema.parse().unwrap()),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
-                    State::Running(SocketAddr::from_str("127.0.0.1:4000").unwrap()),
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: String::new()
+                    },
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: schema.to_string(),
+                    },
                     State::Stopped
                 ]
             )
@@ -431,8 +449,14 @@ mod tests {
                 ],
                 vec![
                     State::Startup,
-                    State::Running(SocketAddr::from_str("127.0.0.1:4000").unwrap()),
-                    State::Running(SocketAddr::from_str("127.0.0.1:4001").unwrap()),
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: String::new()
+                    },
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap(),
+                        schema: String::new()
+                    },
                     State::Stopped
                 ]
             )
@@ -457,12 +481,12 @@ mod tests {
         events: Vec<Event>,
         expected_states: Vec<State>,
     ) -> Result<(), FederatedServerError> {
-        let (state_listener, state_reciever) = mpsc::channel(100);
+        let (state_listener, state_receiver) = mpsc::channel(100);
         let state_machine = StateMachine::new(server_factory, Some(state_listener), graph_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())
             .await;
-        let states = state_reciever.collect::<Vec<State>>().await;
+        let states = state_receiver.collect::<Vec<State>>().await;
         assert_eq!(states, expected_states);
         result
     }

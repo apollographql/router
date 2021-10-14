@@ -134,8 +134,8 @@ async fn main() -> Result<()> {
                 State::Startup => {
                     log::info!("Starting Apollo Federation")
                 }
-                State::Running(port) => {
-                    log::info!("Listening on http://{} 🚀", port)
+                State::Running { address, .. } => {
+                    log::info!("Listening on http://{} 🚀", address)
                 }
                 State::Stopped => {
                     log::info!("Stopped")

@@ -449,7 +449,7 @@ pub enum State {
     Startup,
 
     /// The server is running on a particular address.
-    Running(SocketAddr),
+    Running { address: SocketAddr, schema: String },
 
     /// The server has stopped.
     Stopped,
@@ -477,8 +477,8 @@ impl FederatedServerHandle {
     pub async fn ready(&mut self) -> Option<SocketAddr> {
         self.state_receiver()
             .map(|state| {
-                if let State::Running(socket) = state {
-                    Some(socket)
+                if let State::Running { address, .. } = state {
+                    Some(address)
                 } else {
                     None
                 }
