@@ -94,7 +94,7 @@ where
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
-        log::debug!("Starting");
+        tracing::debug!("Starting");
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -139,7 +139,7 @@ where
 
                 // Running: Handle shutdown.
                 (Running { server_handle, .. }, Shutdown) => {
-                    log::debug!("Shutting down");
+                    tracing::debug!("Shutting down");
                     match server_handle.shutdown().await {
                         Ok(_) => Stopped,
                         Err(err) => Errored(err),
@@ -156,7 +156,7 @@ where
                     },
                     UpdateSchema(new_schema),
                 ) => {
-                    log::debug!("Reloading schema");
+                    tracing::debug!("Reloading schema");
                     let schema = Arc::new(new_schema);
                     let graph = Arc::new(
                         self.graph_factory
@@ -181,20 +181,20 @@ where
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
-                    log::debug!("Reloading configuration");
+                    tracing::debug!("Reloading configuration");
 
                     let configuration = Arc::new(new_configuration);
                     let server_handle =
                         if server_handle.listen_address != configuration.server.listen {
-                            log::debug!("Restarting http");
+                            tracing::debug!("Restarting http");
                             if let Err(_err) = server_handle.shutdown().await {
-                                log::error!("Failed to notify shutdown")
+                                tracing::error!("Failed to notify shutdown")
                             }
                             let new_handle = self
                                 .http_server_factory
                                 .create(Arc::clone(&graph), Arc::clone(&configuration))
                                 .await;
-                            log::debug!("Restarted on {}", new_handle.listen_address);
+                            tracing::debug!("Restarted on {}", new_handle.listen_address);
                             new_handle
                         } else {
                             server_handle
@@ -210,7 +210,7 @@ where
 
                 // Anything else we don't care about
                 (state, message) => {
-                    log::debug!("Ignoring message transition {:?}", message);
+                    tracing::debug!("Ignoring message transition {:?}", message);
                     state
                 }
             };
@@ -223,7 +223,7 @@ where
                 )
                 .await;
             }
-            log::debug!("Transitioned to state {:?}", &new_state);
+            tracing::debug!("Transitioned to state {:?}", &new_state);
             state = new_state;
 
             // If we've errored then exit even if there are potentially more messages
@@ -231,7 +231,7 @@ where
                 break;
             }
         }
-        log::debug!("Stopped");
+        tracing::debug!("Stopped");
 
         match state {
             Stopped => Ok(()),
@@ -257,7 +257,7 @@ where
             schema: Some(schema),
         } = state
         {
-            log::debug!("Starting http");
+            tracing::debug!("Starting http");
 
             let schema = Arc::new(schema);
             let graph = Arc::new(
@@ -270,7 +270,7 @@ where
                 .http_server_factory
                 .create(Arc::clone(&graph), Arc::clone(&configuration))
                 .await;
-            log::debug!("Started on {}", server_handle.listen_address);
+            tracing::debug!("Started on {}", server_handle.listen_address);
             Running {
                 configuration,
                 schema,

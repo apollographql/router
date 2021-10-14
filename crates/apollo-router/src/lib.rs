@@ -113,7 +113,7 @@ impl SchemaKind {
             SchemaKind::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
-                    log::error!(
+                    tracing::error!(
                         "Schema file at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
@@ -134,7 +134,7 @@ impl SchemaKind {
                             }
                         }
                         Err(err) => {
-                            log::error!("Failed to read schema: {}", err);
+                            tracing::error!("Failed to read schema: {}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -188,7 +188,7 @@ impl ConfigurationKind {
             ConfigurationKind::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
-                    log::error!(
+                    tracing::error!(
                         "Configuration file at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
@@ -209,7 +209,7 @@ impl ConfigurationKind {
                             }
                         }
                         Err(err) => {
-                            log::error!("Failed to read configuration: {}", err);
+                            tracing::error!("Failed to read configuration: {}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -223,7 +223,7 @@ impl ConfigurationKind {
                         config.subscriber = subscriber;
                     }
                     Err(err) => {
-                        log::error!("Could not initialize tracing subscriber: {}", err,)
+                        tracing::error!("Could not initialize tracing subscriber: {}", err,)
                     }
                 };
                 UpdateConfiguration(config)
@@ -318,13 +318,13 @@ fn try_initialize_subscriber(
 pub fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     match err.into() {
         opentelemetry::global::Error::Trace(err) => {
-            log::error!("OpenTelemetry trace error occurred: {}", err)
+            tracing::error!("OpenTelemetry trace error occurred: {}", err)
         }
         opentelemetry::global::Error::Other(err_msg) => {
-            log::error!("OpenTelemetry error occurred: {}", err_msg)
+            tracing::error!("OpenTelemetry error occurred: {}", err_msg)
         }
         other => {
-            log::error!("OpenTelemetry error occurred: {:?}", other)
+            tracing::error!("OpenTelemetry error occurred: {:?}", other)
         }
     }
 }
@@ -505,7 +505,7 @@ impl FederatedServerHandle {
     pub async fn shutdown(mut self) -> Result<(), FederatedServerError> {
         self.maybe_close_state_receiver();
         if self.shutdown_sender.send(()).is_err() {
-            log::error!("Failed to send shutdown event")
+            tracing::error!("Failed to send shutdown event")
         }
         self.result.await
     }

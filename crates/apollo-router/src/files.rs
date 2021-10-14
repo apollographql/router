@@ -23,7 +23,7 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
         .watch(path, move |event: hotwatch::Event| {
             if let hotwatch::Event::Write(_path) = event {
                 if let Err(_err) = watch_sender.try_send(()) {
-                    log::error!(
+                    tracing::error!(
                         "Failed to process file watch notification. {}",
                         _err.to_string()
                     )

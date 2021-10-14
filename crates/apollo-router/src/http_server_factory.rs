@@ -49,7 +49,7 @@ pub(crate) struct HttpServerHandle {
 impl HttpServerHandle {
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
         if let Err(_err) = self.shutdown_sender.send(()) {
-            log::error!("Failed to notify http thread of shutdown")
+            tracing::error!("Failed to notify http thread of shutdown")
         };
         self.server_future.await
     }

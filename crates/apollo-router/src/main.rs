@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     let base_directory = match opt.project_dir.path {
         Some(project_dir) => project_dir,
         None => {
-            log::error!(
+            tracing::error!(
                 "Unable to determine project directory. \
                 It must be explicitly set by passing in the '-p' flag",
             );
@@ -132,16 +132,16 @@ async fn main() -> Result<()> {
         .for_each(|state| {
             match state {
                 State::Startup => {
-                    log::info!("Starting Apollo Federation")
+                    tracing::info!("Starting Apollo Federation")
                 }
                 State::Running { address, .. } => {
-                    log::info!("Listening on http://{} 🚀", address)
+                    tracing::info!("Listening on http://{} 🚀", address)
                 }
                 State::Stopped => {
-                    log::info!("Stopped")
+                    tracing::info!("Stopped")
                 }
                 State::Errored => {
-                    log::info!("Stopped with error")
+                    tracing::info!("Stopped with error")
                 }
             }
             future::ready(())
@@ -149,7 +149,7 @@ async fn main() -> Result<()> {
         .await;
 
     if let Err(err) = server_handle.await {
-        log::error!("{}", err);
+        tracing::error!("{}", err);
         return Err(err.into());
     }
 

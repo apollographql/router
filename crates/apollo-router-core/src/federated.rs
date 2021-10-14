@@ -101,7 +101,7 @@ impl Fetcher for FederatedGraph {
                 .await
         })
         .map(|plan_res| {
-            log::trace!("Request received:\n{:#?}", request);
+            tracing::trace!("Request received:\n{:#?}", request);
 
             let plan = {
                 let span = tracing::trace_span!("query_planning");
@@ -182,7 +182,7 @@ fn execute<'a>(
     let _guard = span.enter();
 
     Box::pin(async move {
-        log::trace!("Executing plan:\n{:#?}", plan);
+        tracing::trace!("Executing plan:\n{:#?}", plan);
 
         match plan {
             PlanNode::Sequence { nodes } => {
@@ -226,13 +226,12 @@ fn execute<'a>(
                 .await
                 {
                     Ok(()) => {
-                        log::trace!(
-                            "New data:\n{}",
-                            serde_json::to_string_pretty(&response.lock().await.data).unwrap(),
-                        );
+                        let received =
+                            serde_json::to_string_pretty(&response.lock().await.data).unwrap();
+                        tracing::trace!("New data:\n{}", received,);
                     }
                     Err(err) => {
-                        log::error!("Fetch error: {}", err);
+                        tracing::error!("Fetch error: {}", err);
                         response
                             .lock()
                             .await
@@ -289,7 +288,7 @@ async fn fetch_node<'a>(
 
         {
             let response = response.lock().await;
-            log::trace!(
+            tracing::trace!(
                 "Creating representations at path '{}' for selections={:?} using data={}",
                 current_dir,
                 requires,
@@ -318,7 +317,7 @@ async fn fetch_node<'a>(
             }
             Some(Response { data, .. }) => {
                 if let Some(entities) = data.get("_entities") {
-                    log::trace!(
+                    tracing::trace!(
                         "Received entities: {}",
                         serde_json::to_string(entities).unwrap(),
                     );
