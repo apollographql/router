@@ -7,7 +7,7 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use std::pin::Pin;
 use std::sync::Arc;
-use tracing::Dispatch;
+use tracing::Instrument;
 
 use warp::host::Authority;
 use warp::hyper::Response;
@@ -94,21 +94,22 @@ where
             move |accept: Option<String>, host: Option<Authority>, body: Bytes| {
                 let graph = Arc::clone(&graph);
                 let tracing_subscriber = tracing_subscriber.clone();
+                let dispatcher = tracing_subscriber
+                    .clone()
+                    .map(tracing::Dispatch::new)
+                    .unwrap_or_default();
+                let span = tracing::info_span!("federated_query");
 
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
                         // Run GraphQL request
-                        let response_stream = run_request(
-                            graph,
-                            tracing_subscriber
-                                .clone()
-                                .map(tracing::Dispatch::new)
-                                .unwrap_or_default(),
-                            request,
-                        )
-                        .await;
+                        let response_stream =
+                            tracing::dispatcher::with_default(&dispatcher, || {
+                                run_request(graph, request).instrument(span)
+                            })
+                            .await;
 
                         Box::new(Response::new(Body::wrap_stream(response_stream)))
                     } else {
@@ -152,13 +153,12 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
 
 async fn run_request<F>(
     graph: Arc<F>,
-    dispatcher: Dispatch,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
     F: graphql::Fetcher + 'static,
 {
-    let stream = tracing::dispatcher::with_default(&dispatcher, || graph.stream(request));
+    let stream = graph.stream(request);
 
     stream
         .enumerate()
@@ -192,19 +192,16 @@ where
         .and_then(move |request: graphql::Request| {
             let graph = Arc::clone(&graph);
             let tracing_subscriber = tracing_subscriber.clone();
-            async move {
+            let dispatcher = tracing_subscriber
+                .clone()
+                .map(tracing::Dispatch::new)
+                .unwrap_or_default();
+            let span = tracing::info_span!("federated_query");
+            tracing::dispatcher::with_default(&dispatcher, || async move {
                 Ok::<_, warp::reject::Rejection>(Response::new(Body::wrap_stream(
-                    run_request(
-                        graph,
-                        tracing_subscriber
-                            .clone()
-                            .map(tracing::Dispatch::new)
-                            .unwrap_or_default(),
-                        request,
-                    )
-                    .await,
+                    run_request(graph, request).instrument(span).await,
                 )))
-            }
+            })
         })
 }
 

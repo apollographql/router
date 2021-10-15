@@ -85,8 +85,6 @@ impl FederatedGraph {
 
 impl Fetcher for FederatedGraph {
     fn stream(&self, request: Request) -> ResponseStream {
-        let span = tracing::info_span!("federated_query");
-
         let service_registry = Arc::clone(&self.service_registry);
         let schema = Arc::clone(&self.schema);
 
@@ -163,8 +161,7 @@ impl Fetcher for FederatedGraph {
                 .with_current_subscriber(),
             )
             .boxed()
-        })
-        .instrument(span);
+        });
 
         Box::pin(f.into_stream().flatten())
     }
