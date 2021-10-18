@@ -315,7 +315,9 @@ async fn fetch_node<'a>(
                     service: service_name.to_owned(),
                 })
             }
-            Some(Response { data, .. }) => {
+            Some(Response {
+                data, mut errors, ..
+            }) => {
                 if let Some(entities) = data.get("_entities") {
                     tracing::trace!(
                         "Received entities: {}",
@@ -343,6 +345,12 @@ async fn fetch_node<'a>(
                         })
                     }
                 } else {
+                    let mut response = response
+                        .lock()
+                        .instrument(tracing::trace_span!("response-lock-wait"))
+                        .await;
+
+                    response.append_errors(&mut errors);
                     Err(FetchError::ExecutionInvalidContent {
                         reason: "Missing key `_entities`!".to_string(),
                     })
