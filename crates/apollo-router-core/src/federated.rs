@@ -227,7 +227,10 @@ fn execute<'a>(
                             serde_json::to_string_pretty(&response.lock().await.data).unwrap();
                         tracing::trace!("New data:\n{}", received,);
                     }
+                    #[cfg_attr(feature = "failfast", allow(unreachable_code))]
                     Err(err) => {
+                        #[cfg(feature = "failfast")]
+                        panic!("failfast: {}", err);
                         tracing::error!("Fetch error: {}", err);
                         response
                             .lock()

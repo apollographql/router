@@ -31,3 +31,9 @@ mockall = "0.10.2"
 once_cell = "1"
 static_assertions = "1"
 tokio = { version = "1", features = ["full"] }
+
+[features]
+# Prevents the query execution to continue if any error occurs while fetching
+# the data of a subgraph. This is useful in development as you want to be
+# alerted early when something is wrong instead of receiving an invalid result.
+failfast = []
