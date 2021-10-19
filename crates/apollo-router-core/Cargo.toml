@@ -17,8 +17,11 @@ async-trait = "0.1.51"
 derivative = "2.2.0"
 displaydoc = "0.2"
 futures = "0.3.17"
-harmonizer = { git = "https://github.com/apollographql/federation.git", rev = "841c3eb1857df5f6b08a03666c706743ea559e1e" }
+include_dir = "0.6.2"
+log = "0.4.14"
+once_cell = "1.8.0"
 parking_lot = "0.11.2"
+router-bridge = { git = "https://github.com/apollographql/federation.git" }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
 serde_json = { version = "1.0.68", features = ["preserve_order"] }
 thiserror = "1.0.30"

@@ -160,7 +160,8 @@ where
                     let schema = Arc::new(new_schema);
                     let graph = Arc::new(
                         self.graph_factory
-                            .create(&configuration, Arc::clone(&schema)),
+                            .create(&configuration, Arc::clone(&schema))
+                            .await,
                     );
 
                     Running {
@@ -262,7 +263,8 @@ where
             let schema = Arc::new(schema);
             let graph = Arc::new(
                 self.graph_factory
-                    .create(&configuration, Arc::clone(&schema)),
+                    .create(&configuration, Arc::clone(&schema))
+                    .await,
             );
             let configuration = Arc::new(configuration);
 

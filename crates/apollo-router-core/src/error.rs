@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
-pub use harmonizer::plan::PlanningErrors;
+pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -161,9 +161,6 @@ pub enum JsonExtError {
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// Query plan was malformed: {0}
-    ParseError(Arc<serde_json::Error>),
-
     /// Query planning had errors: {0}
     PlanningErrors(Arc<PlanningErrors>),
 
@@ -174,12 +171,6 @@ pub enum QueryPlannerError {
 impl From<PlanningErrors> for QueryPlannerError {
     fn from(err: PlanningErrors) -> Self {
         QueryPlannerError::PlanningErrors(Arc::new(err))
-    }
-}
-
-impl From<serde_json::Error> for QueryPlannerError {
-    fn from(err: serde_json::Error) -> Self {
-        QueryPlannerError::ParseError(Arc::new(err))
     }
 }
 

@@ -92,6 +92,14 @@ pub struct Server {
 #[derive(Debug, Deserialize, Serialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct Cors {
+    #[serde(default)]
+    #[builder(default)]
+    /// Set to false to disallow any origin and rely exclusively on `origins`.
+    ///
+    /// /!\ Defaults to true
+    /// Having this set to true is the only way to allow Origin: null.
+    pub allow_any_origin: Option<bool>,
+
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
     #[serde(default)]
     #[builder(default)]
@@ -111,6 +119,8 @@ pub struct Cors {
 
     /// The origin(s) to allow requests from.
     /// Use `https://studio.apollographql.com/` to allow Apollo Studio to function.
+    #[serde(default)]
+    #[builder(default)]
     pub origins: Vec<String>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
@@ -135,12 +145,17 @@ impl Default for Server {
 
 impl Cors {
     pub fn into_warp_middleware(&self) -> warp::cors::Builder {
-        warp::cors()
+        let cors = warp::cors()
             .allow_credentials(self.allow_credentials.unwrap_or_default())
             .allow_headers(self.allow_headers.iter().map(std::string::String::as_str))
             .expose_headers(self.allow_headers.iter().map(std::string::String::as_str))
-            .allow_methods(self.methods.iter().map(std::string::String::as_str))
-            .allow_origins(self.origins.iter().map(std::string::String::as_str))
+            .allow_methods(self.methods.iter().map(std::string::String::as_str));
+
+        if self.allow_any_origin.unwrap_or(true) {
+            cors.allow_any_origin()
+        } else {
+            cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
+        }
     }
 }
 

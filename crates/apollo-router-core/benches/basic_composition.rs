@@ -1,5 +1,5 @@
 use apollo_router_core::{
-    FederatedGraph, Fetcher, HarmonizerQueryPlanner, Request, Response, ResponseStream,
+    FederatedGraph, Fetcher, Request, Response, ResponseStream, RouterBridgeQueryPlanner,
     ServiceRegistry,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -128,7 +128,9 @@ async fn basic_composition_benchmark(federated: &FederatedGraph) {
 }
 
 fn from_elem(c: &mut Criterion) {
-    let planner = HarmonizerQueryPlanner::new(include_str!("fixtures/supergraph.graphql").into());
+    let planner = RouterBridgeQueryPlanner::new(Arc::new(
+        include_str!("fixtures/supergraph.graphql").parse().unwrap(),
+    ));
     let registry = Arc::new(MockRegistry::new());
     let federated = FederatedGraph::new(Box::new(planner), registry.clone());
 

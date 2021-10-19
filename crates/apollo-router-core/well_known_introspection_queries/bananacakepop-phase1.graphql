@@ -1,0 +1,14 @@
+query introspection_phase_1 {
+  schema: __type(name: "__Schema") {
+    name
+    fields {
+      name
+    }
+  }
+  directive: __type(name: "__Directive") {
+    name
+    fields {
+      name
+    }
+  }
+}

@@ -60,6 +60,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
 mod tests {
     use super::*;
     use mockall::{mock, predicate::*};
+    use router_bridge::plan::PlanningErrors;
     use std::sync::Arc;
 
     mock! {
@@ -89,12 +90,11 @@ mod tests {
     #[tokio::test]
     async fn test_plan() {
         let mut delegate = MockMyQueryPlanner::new();
-        let serde_json_error = serde_json::from_slice::<()>(&[]).unwrap_err();
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::ParseError(Arc::new(
-                serde_json_error,
+            .return_const(Err(QueryPlannerError::PlanningErrors(Arc::new(
+                PlanningErrors { errors: Vec::new() },
             ))));
 
         let planner = delegate.with_caching();

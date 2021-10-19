@@ -20,9 +20,9 @@ pub struct Request {
     pub operation_name: Option<String>,
 
     /// The optional variables in the form of a json object.
-    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     #[builder(default)]
-    pub variables: Arc<Object>,
+    pub variables: Option<Arc<Object>>,
 
     ///  extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
@@ -57,6 +57,53 @@ mod tests {
                 .variables(Arc::new(
                     json!({ "arg1": "me" }).as_object().unwrap().clone()
                 ))
+                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
+                .build()
+        );
+    }
+
+    #[test]
+    fn test_no_variables() {
+        let result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+              "operationName": "aTest",
+              "extensions": {"extension": 1}
+            })
+            .to_string()
+            .as_str(),
+        );
+        assert_eq!(
+            result.unwrap(),
+            Request::builder()
+                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
+                .operation_name(Some("aTest".to_owned()))
+                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
+                .build()
+        );
+    }
+
+    #[test]
+    // rover sends { "variables": null } when running the introspection query,
+    // and possibly running other queries as well.
+    fn test_variables_is_null() {
+        let result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+              "operationName": "aTest",
+              "variables": null,
+              "extensions": {"extension": 1}
+            })
+            .to_string()
+            .as_str(),
+        );
+        assert_eq!(
+            result.unwrap(),
+            Request::builder()
+                .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
+                .operation_name(Some("aTest".to_owned()))
                 .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );

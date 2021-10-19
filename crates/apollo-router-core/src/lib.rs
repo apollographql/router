@@ -1,6 +1,7 @@
 mod error;
 mod federated;
 mod json_ext;
+mod naive_introspection;
 mod query_planner;
 mod request;
 mod response;
@@ -10,6 +11,7 @@ mod traits;
 pub use error::*;
 pub use federated::*;
 pub use json_ext::*;
+pub use naive_introspection::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;

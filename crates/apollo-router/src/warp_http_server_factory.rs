@@ -1,4 +1,4 @@
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
@@ -48,7 +48,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .cors
                 .as_ref()
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
-                .unwrap_or_else(warp::cors);
+                .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
             let routes = run_get_query_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
                 .await

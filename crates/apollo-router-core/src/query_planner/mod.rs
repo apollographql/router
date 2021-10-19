@@ -1,10 +1,10 @@
 mod caching_query_planner;
-mod harmonizer_query_planner;
 mod model;
+mod router_bridge_query_planner;
 
 pub use caching_query_planner::*;
-pub use harmonizer_query_planner::*;
 pub use model::*;
+pub use router_bridge_query_planner::*;
 
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug)]

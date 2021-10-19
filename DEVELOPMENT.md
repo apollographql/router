@@ -30,7 +30,7 @@ asdf install
 asdf reshim
 ```
 
-The `harmonizer` dependency requires building a nodejs project. This should
+The `router-bridge` dependency requires building a nodejs project. This should
 happen automatically, but may take some time.
 
 Set up your git hooks:

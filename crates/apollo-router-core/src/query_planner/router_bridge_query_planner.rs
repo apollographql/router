@@ -1,28 +1,28 @@
 //! Calls out to nodejs query planner
 
+use std::sync::Arc;
+
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use harmonizer::plan;
+use router_bridge::plan;
 
-/// A query planner that calls out to the nodejs harmonizer query planner.
+/// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
 #[derive(Debug)]
-pub struct HarmonizerQueryPlanner {
-    schema: String,
+pub struct RouterBridgeQueryPlanner {
+    schema: Arc<Schema>,
 }
 
-impl HarmonizerQueryPlanner {
-    /// Create a new harmonizer query planner
-    pub fn new(schema: &Schema) -> Self {
-        Self {
-            schema: schema.as_str().to_owned(),
-        }
+impl RouterBridgeQueryPlanner {
+    /// Create a new router-bridge query planner
+    pub fn new(schema: Arc<Schema>) -> Self {
+        Self { schema }
     }
 }
 
 #[async_trait]
-impl QueryPlanner for HarmonizerQueryPlanner {
+impl QueryPlanner for RouterBridgeQueryPlanner {
     async fn get(
         &self,
         query: String,
@@ -30,14 +30,16 @@ impl QueryPlanner for HarmonizerQueryPlanner {
         options: QueryPlanOptions,
     ) -> Result<QueryPlan, QueryPlannerError> {
         let context = plan::OperationalContext {
-            schema: self.schema.clone(),
+            schema: self.schema.as_str().to_string(),
             query,
-            operation: operation.unwrap_or_default(),
+            operation_name: operation.unwrap_or_default(),
         };
 
-        let result = tokio::task::spawn_blocking(|| plan::plan(context, options.into())).await??;
-        let parsed = serde_json::from_str::<QueryPlan>(result.as_str())?;
-        Ok(parsed)
+        tokio::task::spawn_blocking(|| {
+            plan::plan(context, options.into())
+                .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
+        })
+        .await?
     }
 }
 
@@ -53,8 +55,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_plan() {
-        let planner =
-            HarmonizerQueryPlanner::new(&include_str!("testdata/schema.graphql").parse().unwrap());
+        let planner = RouterBridgeQueryPlanner::new(Arc::new(
+            include_str!("testdata/schema.graphql").parse().unwrap(),
+        ));
         let result = planner
             .get(
                 include_str!("testdata/query.graphql").into(),
@@ -77,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_plan_error() {
-        let planner = HarmonizerQueryPlanner::new(&"".parse().unwrap());
+        let planner = RouterBridgeQueryPlanner::new(Arc::new("".parse().unwrap()));
         let result = planner
             .get("".into(), None, QueryPlanOptions::default())
             .await;

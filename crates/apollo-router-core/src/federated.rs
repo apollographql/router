@@ -47,9 +47,9 @@ fn validate_request_variables_against_plan(
     let required = plan.variable_usage().collect::<HashSet<_>>();
     let provided = request
         .variables
-        .keys()
-        .map(|x| x.as_str())
-        .collect::<HashSet<_>>();
+        .as_ref()
+        .map(|v| v.keys().map(|x| x.as_str()).collect::<HashSet<_>>())
+        .unwrap_or_default();
     required
         .difference(&provided)
         .map(|x| FetchError::ValidationMissingVariable {
@@ -63,6 +63,7 @@ fn validate_request_variables_against_plan(
 #[derivative(Debug)]
 pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
+    naive_introspection: NaiveIntrospection,
     query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
@@ -76,6 +77,7 @@ impl FederatedGraph {
         schema: Arc<Schema>,
     ) -> Self {
         Self {
+            naive_introspection: NaiveIntrospection::from_schema(&schema),
             query_planner,
             service_registry,
             schema,
@@ -88,6 +90,21 @@ impl Fetcher for FederatedGraph {
         let service_registry = Arc::clone(&self.service_registry);
         let schema = Arc::clone(&self.schema);
 
+        if let Some(introspection_response) = self.naive_introspection.get(&request) {
+            return stream::once(
+                async move {
+                    let mut response = Response::builder().build();
+                    response
+                        .insert_data(&Path::empty(), introspection_response)
+                        .expect("it is always possible to insert data in root path; qed");
+                    response
+                }
+                .in_current_span()
+                .with_current_subscriber(),
+            )
+            .boxed();
+        }
+
         let query_planner = Arc::clone(&self.query_planner);
         let query = request.query.to_owned();
         let operation_name = request.operation_name.to_owned();
@@ -97,7 +114,8 @@ impl Fetcher for FederatedGraph {
                 .get(query, operation_name, Default::default())
                 .instrument(span)
                 .await
-        })
+        }
+        .in_current_span())
         .map(|plan_res| {
             tracing::trace!("Request received:\n{:#?}", request);
 
@@ -280,10 +298,11 @@ async fn fetch_node<'a>(
 
         let mut variables = Object::with_capacity(1 + variable_usages.len());
         variables.extend(variable_usages.iter().filter_map(|key| {
-            request
-                .variables
-                .get(key)
-                .map(|value| (key.to_owned(), value.to_owned()))
+            request.variables.as_ref().map(|v| {
+                v.get(key)
+                    .map(|value| (key.clone(), value.clone()))
+                    .unwrap_or_default()
+            })
         }));
 
         {
@@ -302,7 +321,7 @@ async fn fetch_node<'a>(
             .stream(
                 Request::builder()
                     .query(operation)
-                    .variables(variables)
+                    .variables(Some(Arc::new(variables)))
                     .build(),
             )
             .into_future()
@@ -367,8 +386,9 @@ async fn fetch_node<'a>(
                 .filter_map(|key| {
                     request
                         .variables
-                        .get(key)
-                        .map(|value| (key.to_owned(), value.to_owned()))
+                        .as_ref()
+                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
+                        .unwrap_or_default()
                 })
                 .collect::<Object>(),
         );
