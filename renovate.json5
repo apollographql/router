@@ -30,6 +30,7 @@
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all non-major packages >= 1.0",
       "groupSlug": "all-non-major-gte-1.0",
+      "automerge": true,
     },
   ]
 }
