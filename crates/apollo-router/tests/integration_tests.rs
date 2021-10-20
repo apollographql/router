@@ -28,8 +28,8 @@ macro_rules! assert_federated_response {
                 .collect(),
             ))
             .build();
-        let (mut actual, registry) = query_rust(request.clone());
-        let mut expected = query_node(request.clone());
+        let (mut actual, registry) = query_rust(request.clone()).await;
+        let mut expected = query_node(request.clone()).await;
 
         let actual = actual.next().await.unwrap();
         let expected = expected.next().await.unwrap();
@@ -130,7 +130,7 @@ async fn missing_variables() {
                 "#,
         )
         .build();
-    let (response, _) = query_rust(request.clone());
+    let (response, _) = query_rust(request.clone()).await;
     let data = response
         .flat_map(|x| stream::iter(x.errors))
         .collect::<Vec<_>>()
@@ -148,13 +148,13 @@ async fn missing_variables() {
     assert!(data.iter().all(|x| expected.contains(x)));
 }
 
-fn query_node(request: graphql::Request) -> graphql::ResponseStream {
+async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
     let nodejs_impl =
         HttpSubgraphFetcher::new("federated".into(), "http://localhost:4000/graphql".into());
-    nodejs_impl.stream(request)
+    nodejs_impl.stream(request).await
 }
 
-fn query_rust(
+async fn query_rust(
     request: graphql::Request,
 ) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
@@ -166,8 +166,8 @@ fn query_rust(
         &config,
     )));
 
-    let federated = graphql::FederatedGraph::new(Arc::new(planner), registry.clone(), schema);
-    (federated.stream(request), registry)
+    let federated = graphql::FederatedGraph::new(Box::new(planner), registry.clone(), schema);
+    (federated.stream(request).await, registry)
 }
 
 #[derive(Debug)]

@@ -15,3 +15,5 @@ subgraphs:
     routing_url: http://localhost:4004/graphql
     schema:
       file: ./inventory.graphql
+opentelemetry:
+  jaeger:

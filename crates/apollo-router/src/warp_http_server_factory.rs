@@ -7,6 +7,7 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use std::pin::Pin;
 use std::sync::Arc;
+use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
 
 use warp::host::Authority;
@@ -105,10 +106,9 @@ where
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
                         // Run GraphQL request
-                        let response_stream =
-                            tracing::dispatcher::with_default(&dispatcher, || {
-                                run_request(graph, request).instrument(span)
-                            })
+                        let response_stream = run_request(graph, request)
+                            .with_subscriber(dispatcher)
+                            .instrument(span)
                             .await;
 
                         Box::new(Response::new(Body::wrap_stream(response_stream)))
@@ -158,7 +158,7 @@ async fn run_request<F>(
 where
     F: graphql::Fetcher + 'static,
 {
-    let stream = graph.stream(request);
+    let stream = graph.stream(request).await;
 
     stream
         .enumerate()
@@ -197,11 +197,10 @@ where
                 .map(tracing::Dispatch::new)
                 .unwrap_or_default();
             let span = tracing::info_span!("federated_query");
-            tracing::dispatcher::with_default(&dispatcher, || async move {
-                Ok::<_, warp::reject::Rejection>(Response::new(Body::wrap_stream(
-                    run_request(graph, request).instrument(span).await,
-                )))
-            })
+            run_request(graph, request)
+                .with_subscriber(dispatcher)
+                .instrument(span)
+                .map(|x| Ok::<_, warp::reject::Rejection>(Response::new(Body::wrap_stream(x))))
         })
 }
 
@@ -217,6 +216,7 @@ fn prefers_html(accept_header: String) -> bool {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
+    use async_trait::async_trait;
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -272,8 +272,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 

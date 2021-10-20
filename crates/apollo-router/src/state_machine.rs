@@ -290,6 +290,7 @@ mod tests {
     use super::*;
     use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
+    use async_trait::async_trait;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
@@ -472,8 +473,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
