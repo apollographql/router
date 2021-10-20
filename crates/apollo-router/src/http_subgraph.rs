@@ -1,6 +1,7 @@
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use bytes::Bytes;
+use derivative::Derivative;
 use futures::prelude::*;
 use std::pin::Pin;
 use tracing::Instrument;
@@ -11,30 +12,38 @@ type BytesStream = Pin<
 
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct HttpSubgraphFetcher {
     service: String,
     url: String,
-    http_client: reqwest::Client,
+    #[derivative(Debug = "ignore")]
+    http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl HttpSubgraphFetcher {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
     pub fn new(service: String, url: String) -> Self {
         HttpSubgraphFetcher {
+            http_client: reqwest_middleware::ClientBuilder::new(
+                reqwest::Client::builder()
+                    .tcp_keepalive(Some(std::time::Duration::from_secs(5)))
+                    .build()
+                    .unwrap(),
+            )
+            .with(reqwest_tracing::TracingMiddleware)
+            .with(LoggingMiddleware::new(&service))
+            .build(),
             service,
             url,
-            http_client: reqwest::Client::builder()
-                .tcp_keepalive(Some(std::time::Duration::from_secs(5)))
-                .build()
-                .unwrap(),
         }
     }
 
     fn request_stream(&self, request: graphql::Request) -> BytesStream {
         // Perform the actual request and start streaming.
-        // Reqwest doesn't care if there is only one response, in this case it'll be a stream of one element.
-        let service = self.service.to_owned();
+        // Reqwest doesn't care if there is only one response, in this case it'll be a stream of
+        // one element.
+        let service = self.service.clone();
         self.http_client
             .post(self.url.clone())
             .json(&request)
@@ -42,14 +51,15 @@ impl HttpSubgraphFetcher {
             .instrument(tracing::trace_span!("http-subgraph-request"))
             // We have a future for the response, convert it to a future of the stream.
             .map_ok(|r| r.bytes_stream().boxed())
-            // Convert the entire future to a stream, at this point we have a stream of a result of a single stream
+            // Convert the entire future to a stream, at this point we have a stream of a result of
+            // a single stream
             .into_stream()
             // Flatten the stream
             .flat_map(|result| match result {
-                Ok(s) => s,
+                Ok(s) => s.map_err(Into::into).boxed(),
                 Err(err) => stream::iter(vec![Err(err)]).boxed(),
             })
-            .map_err(move |err: reqwest::Error| {
+            .map_err(move |err: reqwest_middleware::Error| {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
                 graphql::FetchError::SubrequestHttpError {
@@ -94,6 +104,33 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
         let bytes_stream = self.request_stream(request);
         self.map_to_graphql(bytes_stream)
+    }
+}
+
+struct LoggingMiddleware {
+    service: String,
+}
+
+impl LoggingMiddleware {
+    fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl reqwest_middleware::Middleware for LoggingMiddleware {
+    async fn handle(
+        &self,
+        req: reqwest::Request,
+        extensions: &mut task_local_extensions::Extensions,
+        next: reqwest_middleware::Next<'_>,
+    ) -> reqwest_middleware::Result<reqwest::Response> {
+        tracing::trace!("Request to service {}: {:?}", self.service, req);
+        let res = next.run(req, extensions).await;
+        tracing::trace!("Response from service {}: {:?}", self.service, res);
+        res
     }
 }
 

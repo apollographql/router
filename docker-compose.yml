@@ -10,6 +10,8 @@ services:
       - 4003:4003
       - 4004:4004
     command: npm run start
+    environment:
+      - JAEGER_HOST=jaeger
 
   jaeger:
     image: jaegertracing/all-in-one:latest

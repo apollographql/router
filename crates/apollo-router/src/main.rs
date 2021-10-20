@@ -121,6 +121,16 @@ async fn main() -> Result<()> {
         delay: None,
     };
 
+    // Create your text map propagator & assign it as the global propagator.
+    //
+    // This is required in order to create the header traceparent used in http_subgraph to
+    // propagate the trace id to the subgraph services.
+    //
+    // /!\ If this is not called, there will be no warning and no header will be sent to the
+    //     subgraphs!
+    let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
+    opentelemetry::global::set_text_map_propagator(propagator);
+
     let server = FederatedServer::builder()
         .configuration(configuration)
         .schema(schema)

@@ -5,16 +5,16 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::prelude::*;
+use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
 use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
-
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
-use warp::hyper::Response;
 use warp::{
-    http::{StatusCode, Uri},
-    hyper::Body,
+    http::{header::HeaderMap, StatusCode, Uri},
+    hyper::{Body, Response},
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -91,15 +91,22 @@ where
         .and(warp::header::optional::<String>("accept"))
         .and(warp::host::optional())
         .and(warp::body::bytes())
+        .and(warp::header::headers_cloned())
         .and_then(
-            move |accept: Option<String>, host: Option<Authority>, body: Bytes| {
+            move |accept: Option<String>,
+                  host: Option<Authority>,
+                  body: Bytes,
+                  header_map: HeaderMap| {
                 let graph = Arc::clone(&graph);
-                let tracing_subscriber = tracing_subscriber.clone();
                 let dispatcher = tracing_subscriber
                     .clone()
                     .map(tracing::Dispatch::new)
                     .unwrap_or_default();
                 let span = tracing::info_span!("federated_query");
+                let context = span.context();
+                opentelemetry::global::get_text_map_propagator(|injector| {
+                    injector.extract_with_context(&context, &HeaderMapCarrier(&header_map));
+                });
 
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
@@ -189,7 +196,8 @@ where
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
-        .and_then(move |request: graphql::Request| {
+        .and(warp::header::headers_cloned())
+        .and_then(move |request: graphql::Request, header_map: HeaderMap| {
             let graph = Arc::clone(&graph);
             let tracing_subscriber = tracing_subscriber.clone();
             let dispatcher = tracing_subscriber
@@ -197,6 +205,10 @@ where
                 .map(tracing::Dispatch::new)
                 .unwrap_or_default();
             let span = tracing::info_span!("federated_query");
+            let context = span.context();
+            opentelemetry::global::get_text_map_propagator(|injector| {
+                injector.extract_with_context(&context, &HeaderMapCarrier(&header_map));
+            });
             run_request(graph, request)
                 .with_subscriber(dispatcher)
                 .instrument(span)
@@ -210,6 +222,27 @@ fn prefers_html(accept_header: String) -> bool {
         .map(|a| a.trim())
         .find(|a| ["text/html", "application/json"].contains(a))
         == Some("text/html")
+}
+
+struct HeaderMapCarrier<'a>(&'a HeaderMap);
+
+impl<'a> Extractor for HeaderMapCarrier<'a> {
+    fn get(&self, key: &str) -> Option<&str> {
+        if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
+            tracing::trace!(
+                "found OpenTelemetry key in user's request: {}={}",
+                key,
+                value
+            );
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|x| x.as_str()).collect()
+    }
 }
 
 #[cfg(test)]
