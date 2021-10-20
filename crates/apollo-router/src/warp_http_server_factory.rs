@@ -1,13 +1,16 @@
 use crate::configuration::{Configuration, Cors};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, ReturnListener};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::channel::oneshot;
-use futures::prelude::*;
+use futures::future::{select, Either};
+use futures::{pin_mut, prelude::*};
+use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -36,6 +39,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
+        listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
     where
         F: graphql::Fetcher + 'static,
@@ -56,13 +60,69 @@ impl HttpServerFactory for WarpHttpServerFactory {
                     .or(post_graphql_request(graph, configuration))
                     .with(cors);
 
-            let (actual_listen_address, server) =
-                warp::serve(routes).bind_with_graceful_shutdown(listen_address, async {
-                    shutdown_receiver.await.ok();
-                });
+            let before = std::time::Instant::now();
+
+            // generate a hyper service from warp routes
+            let svc = warp::service(routes);
+
+            let tcp_listener = if let Some(listener) = listener {
+                listener
+            } else {
+                TcpListener::bind(listen_address).await.unwrap()
+            };
+            let actual_listen_address = tcp_listener.local_addr().unwrap();
+
+            let (return_listener, stop_listen_rx, listener_tx) = ReturnListener::new();
+
+            // this server reproduces most of hyper::server::Server's behaviour
+            // we select over the stop_listen_rx channel and the listener's
+            // accept future. If the channel received something or the sender
+            // was dropped, we stop using the listener and send it back through
+            // listener_rx
+            let server = async move {
+                let rx_f = stop_listen_rx.fuse();
+                pin_mut!(rx_f);
+
+                loop {
+                    let listen_f = tcp_listener.accept();
+                    pin_mut!(listen_f);
+
+                    match select(rx_f, listen_f).await {
+                        Either::Left((_res, _listen_f)) => {
+                            break;
+                        }
+                        Either::Right((res, rx_f2)) => {
+                            let (tcp_stream, _) = res.unwrap();
+                            let svc = svc.clone();
+
+                            tokio::task::spawn(async move {
+                                if let Err(http_err) = Http::new()
+                                    .http1_keep_alive(true)
+                                    .serve_connection(tcp_stream, svc)
+                                    .await
+                                {
+                                    tracing::error!(
+                                        "Error while serving HTTP connection: {}",
+                                        http_err
+                                    );
+                                }
+                            });
+                            rx_f = rx_f2;
+                        }
+                    }
+                }
+                listener_tx.send(tcp_listener).unwrap();
+            };
+
+            let after = std::time::Instant::now();
+            tracing::info!(
+                "server future size: {} bytes created in {}ns",
+                std::mem::size_of_val(&server),
+                (after - before).as_nanos()
+            );
 
             // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(server)
+            let server_future = tokio::task::spawn(server.map(|_| ()))
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
@@ -70,6 +130,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 shutdown_sender,
                 server_future,
                 listen_address: actual_listen_address,
+                return_listener,
             }
         };
 

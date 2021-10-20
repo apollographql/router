@@ -9,6 +9,7 @@ use mockall::{automock, predicate::*};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 
 /// Factory for creating the http server component.
 ///
@@ -20,6 +21,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
+        listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
     where
         F: graphql::Fetcher + 'static;
@@ -44,6 +46,8 @@ pub(crate) struct HttpServerHandle {
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
     pub(crate) listen_address: SocketAddr,
+
+    pub(crate) return_listener: ReturnListener,
 }
 
 impl HttpServerHandle {
@@ -52,6 +56,38 @@ impl HttpServerHandle {
             tracing::error!("Failed to notify http thread of shutdown")
         };
         self.server_future.await
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ReturnListener {
+    stop_listen_tx: oneshot::Sender<()>,
+    listener_rx: oneshot::Receiver<TcpListener>,
+}
+
+impl ReturnListener {
+    pub fn new() -> (
+        ReturnListener,
+        oneshot::Receiver<()>,
+        oneshot::Sender<TcpListener>,
+    ) {
+        let (stop_listen_tx, stop_listen_rx) = oneshot::channel::<()>();
+        let (listener_tx, listener_rx) = oneshot::channel::<TcpListener>();
+
+        (
+            ReturnListener {
+                stop_listen_tx,
+                listener_rx,
+            },
+            stop_listen_rx,
+            listener_tx,
+        )
+    }
+
+    ///asks the running server to give back the listener socket
+    pub(crate) async fn stop(self) -> TcpListener {
+        self.stop_listen_tx.send(()).unwrap();
+        self.listener_rx.await.unwrap()
     }
 }
 
