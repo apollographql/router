@@ -194,7 +194,7 @@ where
                             } = server_handle;
                             let listener = return_listener.stop().await;
                             tracing::debug!("restarting http");
-                            if let Err(_err) = shutdown_sender.send(()) {
+                            if let Err(_err) = shutdown_sender.send(true) {
                                 tracing::error!("Failed to notify http thread of shutdown")
                             };
 
@@ -204,11 +204,7 @@ where
 
                             let server_handle = self
                                 .http_server_factory
-                                .create(
-                                    Arc::clone(&graph),
-                                    Arc::clone(&configuration),
-                                    Some(listener),
-                                )
+                                .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
                                 .await;
 
                             Running {
@@ -374,8 +370,7 @@ mod tests {
     use super::*;
     use crate::configuration::Subgraph;
     use crate::graph_factory::MockGraphFactory;
-    use crate::http_server_factory::MockHttpServerFactory;
-    use futures::channel::oneshot;
+    use crate::http_server_factory::{MockHttpServerFactory, ReturnListener};
     use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
@@ -383,6 +378,7 @@ mod tests {
     use std::pin::Pin;
     use std::str::FromStr;
     use test_env_log::test;
+    use tokio::net::TcpListener;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -468,7 +464,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_reload_schema() {
         let graph_factory = create_mock_graph_factory(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let schema = include_str!("testdata/supergraph.graphql");
 
         assert!(matches!(
@@ -501,7 +497,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -687,7 +683,7 @@ mod tests {
         expect_times_called: usize,
     ) -> (
         MockHttpServerFactory,
-        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
+        Arc<Mutex<Vec<tokio::sync::watch::Receiver<bool>>>>,
     ) {
         let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
@@ -696,15 +692,35 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<MockMyFetcher>, configuration: Arc<Configuration>| {
-                    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-                    shutdown_receivers_clone.lock().push(shutdown_receiver);
+                move |_: Arc<MockMyFetcher>,
+                      configuration: Arc<Configuration>,
+                      listener: Option<TcpListener>| {
+                    let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
+                    let (return_listener, stop_listen_rx, listen_tx) = ReturnListener::new();
+                    shutdown_receivers_clone
+                        .lock()
+                        .push(shutdown_receiver.clone());
+
+                    let server = tokio::task::spawn(async move {
+                        let listener = if let Some(l) = listener {
+                            l
+                        } else {
+                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                        };
+
+                        let _ = stop_listen_rx.await;
+                        println!("stop_listen signal was triggered");
+                        listen_tx.send(listener).unwrap();
+                    });
 
                     Box::pin(async move {
                         HttpServerHandle {
                             shutdown_sender,
-                            server_future: future::ready(Ok(())).boxed(),
+                            server_future: Box::pin(
+                                server.map_err(|_| FederatedServerError::HttpServerLifecycleError),
+                            ),
                             listen_address: configuration.server.listen,
+                            return_listener,
                         }
                     })
                 },

@@ -3,7 +3,6 @@ use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, ReturnList
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
-use futures::channel::oneshot;
 use futures::future::{select, Either};
 use futures::{pin_mut, prelude::*};
 use hyper::server::conn::Http;
@@ -45,7 +44,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         F: graphql::Fetcher + 'static,
     {
         let f = async {
-            let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+            let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
             let listen_address = configuration.server.listen;
 
             let cors = configuration
@@ -94,17 +93,41 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         Either::Right((res, rx_f2)) => {
                             let (tcp_stream, _) = res.unwrap();
                             let svc = svc.clone();
+                            let mut shut_rx = shutdown_receiver.clone();
 
                             tokio::task::spawn(async move {
-                                if let Err(http_err) = Http::new()
+                                let conn = Http::new()
                                     .http1_keep_alive(true)
-                                    .serve_connection(tcp_stream, svc)
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Error while serving HTTP connection: {}",
-                                        http_err
-                                    );
+                                    .serve_connection(tcp_stream, svc);
+
+                                let shut_rx_f = shut_rx.changed();
+                                pin_mut!(shut_rx_f);
+                                pin_mut!(conn);
+
+                                match select(shut_rx_f, conn).await {
+                                    // the shutdown signal was triggered: set up graceful shutdown for
+                                    // the connection then let it finish
+                                    Either::Left((_res, mut conn2)) => {
+                                        let c = conn2.as_mut();
+                                        c.graceful_shutdown();
+                                        conn = conn2;
+
+                                        if let Err(http_err) = conn.await {
+                                            tracing::error!(
+                                                "Error while serving HTTP connection: {}",
+                                                http_err
+                                            );
+                                        }
+                                    }
+                                    // the connection finished first: exit normally
+                                    Either::Right((res, _rx_f2)) => {
+                                        if let Err(http_err) = res {
+                                            tracing::error!(
+                                                "Error while serving HTTP connection: {}",
+                                                http_err
+                                            );
+                                        }
+                                    }
                                 }
                             });
                             rx_f = rx_f2;
@@ -400,6 +423,7 @@ mod tests {
                             .subgraphs(Default::default())
                             .build(),
                     ),
+                    None,
                 )
                 .await;
             let client = reqwest::Client::builder()
