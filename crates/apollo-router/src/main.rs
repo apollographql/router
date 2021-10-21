@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
         .for_each(|state| {
             match state {
                 State::Startup => {
-                    tracing::info!("Starting Apollo Federation")
+                    tracing::info!("Starting Apollo Router")
                 }
                 State::Running { address, .. } => {
                     tracing::info!("Listening on http://{} 🚀", address)
