@@ -1,0 +1,9 @@
+Thumbs.db
+db.json
+*.log
+node_modules/
+public/*
+.deploy*/
+docs.json
+_multiconfig.yml
+.cache

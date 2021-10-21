@@ -1,0 +1,97 @@
+---
+title: Configuring the Router
+sidebar_title: Configuration
+description: Configuring the router to serve your graph
+---
+
+The configuration file is in YAML format, with the following options:
+
+```yaml
+# Configuration options pertaining to the http server component
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4100 
+
+  # Cross origin request headers
+  cors:
+    # Set to false to disallow any origin and rely exclusively on `origins`
+    # defaults to true
+    allow_any_origin: true
+    # list of accepted origins
+    origins:
+      - https://studio.apollographql.com
+    # Set to true to add the `Access-Control-Allow-Credentials` header
+    allow_credentials: false
+    # The headers to allow.
+    # Defaults to the required request header for Apollo Studio: Content-Type
+    allow_headers:
+    # Allowed request methods
+    # Defaults to GET, POST, OPTIONS.
+    methods:
+    # Which response headers should be made available to scripts running in the browser,
+    # in response to a cross-origin request.
+    expose_headers:
+# Mapping of name to subgraph that the router may contact
+subgraphs:
+  # Configuration for a subgraph
+  accounts:
+    # url of the subgraph
+    routing_url: http://localhost:4001/graphql
+  products:
+    routing_url: http://localhost:4003/graphql
+# OpenTelemetry configuration. Choose either jaeger or otlp
+opentelemetry:
+  # Configuration to send traces and metrics to a Jaeger service
+  jaeger:
+    # optional url of the jaeger collector
+    collector_endpoint: 
+    # name of the service used in traces
+    # defaults to router
+    service_name: "router"
+    # optional username to authenticate to jaeger
+    # can be obtained from the environment variable JAEGER_USERNAME
+    username:
+    # optional username to authenticate to jaeger
+    # can be obtained from the environment variable JAEGER_PASSWORD
+    password:
+  # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
+  otlp:
+    tracing:
+      exporter:
+        export_config:
+          # URL of the exporter
+          endpoint:
+          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+          protocol: Grpc
+          # timmeout in seconds
+          timeout: 60
+          metadata:
+          - foo: bar
+          - foo: baz
+          - bar: baz
+      trace_config:
+        sampler:
+          ParentBased:
+            TraceIdRatioBased: 0.42
+        max_events_per_span: 1
+        max_attributes_per_span: 2
+        max_links_per_span: 3
+        max_attributes_per_event: 4
+        max_attributes_per_link: 5
+        resource:
+          attrs:
+            key1:
+              String: value
+            key2:
+              Bool: true
+            key3:
+              I64: 42
+            key4:
+              F64: 42.0
+            key5:
+              Array:
+                String:
+                  - value1
+                  - value2
+```
