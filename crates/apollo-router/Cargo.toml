@@ -1,7 +1,7 @@
 [package]
 name = "apollo-router"
 version = "0.1.0-prealpha.2"
-authors = ["Apollo Graph, Inc. <opensource@apollographql.com>"]
+authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2018"
 license-file = "./LICENSE"
 

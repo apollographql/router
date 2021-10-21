@@ -32,4 +32,4 @@ to start the server in future.
 
 ## Project maintainers
 
-Apollo Graph, Inc. <opensource@apollographql.com>
+Apollo Graph, Inc.

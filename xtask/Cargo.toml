@@ -1,7 +1,7 @@
 [package]
 name = "xtask"
 version = "0.1.0-prealpha.1"
-authors = ["Apollo Developers <opensource@apollographql.com>"]
+authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2018"
 license-file = "./LICENSE"
 

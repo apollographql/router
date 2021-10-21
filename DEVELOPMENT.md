@@ -82,4 +82,4 @@ Use `scripts/ci-build.sh` to perform such a build.
 
 ## Project maintainers
 
-Apollo Graph, Inc. <opensource@apollographql.com>
+Apollo Graph, Inc.
