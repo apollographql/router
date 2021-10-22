@@ -6,7 +6,7 @@ orbs:
   # Rust steps which are used below (like `rust/install`, `rust/test`) are
   # defined in this orb. For reference, the orb can be found here:
   # https://github.com/CircleCI-Public/rust-orb
-  rust: circleci/rust@1.5.0
+  rust: circleci/rust@1.6.0
   gh: circleci/github-cli@1.0.4
 
 executors:
