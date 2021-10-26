@@ -19,14 +19,14 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use url::Url;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Otlp {
     Tracing(Option<Tracing>),
     // TODO metrics
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Tracing {
     exporter: Exporter,
@@ -57,7 +57,7 @@ impl Tracing {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ExportConfig {
     pub endpoint: Option<Url>,
@@ -80,7 +80,7 @@ impl ExportConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceConfig {
     pub sampler: Option<Sampler>,

@@ -150,62 +150,99 @@ where
                 (
                     Running {
                         configuration,
-                        schema: _,
-                        graph: _,
+                        schema,
+                        graph,
                         server_handle,
                     },
                     UpdateSchema(new_schema),
                 ) => {
                     tracing::debug!("Reloading schema");
-                    let schema = Arc::new(new_schema);
-                    let graph = Arc::new(
-                        self.graph_factory
-                            .create(&configuration, Arc::clone(&schema))
-                            .await,
-                    );
+                    let mut new_configuration: Configuration = configuration.as_ref().to_owned();
+                    match new_configuration.load_subgraphs(&new_schema) {
+                        Err(e) => {
+                            let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
+                            tracing::error!(
+                                "The new configuration is invalid, keeping the previous one: {}",
+                                strings.join(", ")
+                            );
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
+                        Ok(()) => {
+                            let configuration = Arc::new(new_configuration);
 
-                    Running {
-                        configuration,
-                        schema,
-                        graph,
-                        server_handle,
+                            let schema = Arc::new(new_schema);
+                            let graph = Arc::new(
+                                self.graph_factory
+                                    .create(&configuration, Arc::clone(&schema))
+                                    .await,
+                            );
+
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
                     }
                 }
 
                 // Running: Handle configuration updates
                 (
                     Running {
-                        configuration: _,
-                        schema,
-                        graph,
-                        server_handle,
-                    },
-                    UpdateConfiguration(new_configuration),
-                ) => {
-                    tracing::debug!("Reloading configuration");
-
-                    let configuration = Arc::new(new_configuration);
-                    let server_handle =
-                        if server_handle.listen_address != configuration.server.listen {
-                            tracing::debug!("Restarting http");
-                            if let Err(_err) = server_handle.shutdown().await {
-                                tracing::error!("Failed to notify shutdown")
-                            }
-                            let new_handle = self
-                                .http_server_factory
-                                .create(Arc::clone(&graph), Arc::clone(&configuration))
-                                .await;
-                            tracing::debug!("Restarted on {}", new_handle.listen_address);
-                            new_handle
-                        } else {
-                            server_handle
-                        };
-
-                    Running {
                         configuration,
                         schema,
                         graph,
                         server_handle,
+                    },
+                    UpdateConfiguration(mut new_configuration),
+                ) => {
+                    tracing::debug!("Reloading configuration");
+
+                    match new_configuration.load_subgraphs(schema.as_ref()) {
+                        Err(e) => {
+                            let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
+                            tracing::error!(
+                                "The new configuration is invalid, keeping the previous one: {}",
+                                strings.join(", ")
+                            );
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
+                        Ok(()) => {
+                            let configuration = Arc::new(new_configuration);
+                            let server_handle =
+                                if server_handle.listen_address != configuration.server.listen {
+                                    tracing::debug!("Restarting http");
+                                    if let Err(_err) = server_handle.shutdown().await {
+                                        tracing::error!("Failed to notify shutdown")
+                                    }
+                                    let new_handle = self
+                                        .http_server_factory
+                                        .create(Arc::clone(&graph), Arc::clone(&configuration))
+                                        .await;
+                                    tracing::debug!("Restarted on {}", new_handle.listen_address);
+                                    new_handle
+                                } else {
+                                    server_handle
+                                };
+
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
                     }
                 }
 
@@ -260,24 +297,41 @@ where
         {
             tracing::debug!("Starting http");
 
-            let schema = Arc::new(schema);
-            let graph = Arc::new(
-                self.graph_factory
-                    .create(&configuration, Arc::clone(&schema))
-                    .await,
-            );
-            let configuration = Arc::new(configuration);
+            let mut new_configuration = configuration.clone();
+            match new_configuration.load_subgraphs(&schema) {
+                Err(e) => {
+                    let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
+                    tracing::error!(
+                        "The new configuration is invalid, keeping the previous one: {}",
+                        strings.join(", ")
+                    );
+                    Startup {
+                        configuration: Some(configuration),
+                        schema: Some(schema),
+                    }
+                }
+                Ok(()) => {
+                    let configuration = new_configuration;
+                    let schema = Arc::new(schema);
+                    let graph = Arc::new(
+                        self.graph_factory
+                            .create(&configuration, Arc::clone(&schema))
+                            .await,
+                    );
+                    let configuration = Arc::new(configuration);
 
-            let server_handle = self
-                .http_server_factory
-                .create(Arc::clone(&graph), Arc::clone(&configuration))
-                .await;
-            tracing::debug!("Started on {}", server_handle.listen_address);
-            Running {
-                configuration,
-                schema,
-                graph,
-                server_handle,
+                    let server_handle = self
+                        .http_server_factory
+                        .create(Arc::clone(&graph), Arc::clone(&configuration))
+                        .await;
+                    tracing::debug!("Started on {}", server_handle.listen_address);
+                    Running {
+                        configuration,
+                        schema,
+                        graph,
+                        server_handle,
+                    }
+                }
             }
         } else {
             state
@@ -288,6 +342,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::configuration::Subgraph;
     use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
     use futures::channel::oneshot;
@@ -468,6 +523,113 @@ mod tests {
             Ok(()),
         ));
         assert_eq!(shutdown_receivers.lock().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn extract_routing_urls() {
+        let graph_factory = create_mock_graph_factory(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert!(matches!(
+            execute(
+                server_factory,
+                graph_factory,
+                vec![
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .subgraphs(
+                                [
+                                    (
+                                        "accounts".to_string(),
+                                        Subgraph {
+                                            routing_url: "http://accounts/graphql".to_string()
+                                        }
+                                    ),
+                                    (
+                                        "products".to_string(),
+                                        Subgraph {
+                                            routing_url: "http://accounts/graphql".to_string()
+                                        }
+                                    )
+                                ]
+                                .iter()
+                                .cloned()
+                                .collect()
+                            )
+                            .build()
+                    ),
+                    UpdateSchema(r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                            PRODUCTS @join__graph(name: "products" url: "")
+                            INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
+                        }"#.parse().unwrap()),
+                    Shutdown
+                ],
+                vec![
+                    State::Startup,
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                            PRODUCTS @join__graph(name: "products" url: "")
+                            INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
+                        }"#.to_string()
+                    },
+                    State::Stopped
+                ]
+            )
+            .await,
+            Ok(()),
+        ));
+        assert_eq!(shutdown_receivers.lock().len(), 1);
+    }
+
+    /// if an URL is missing in the schema and the configuration, do not load the schema
+    #[tokio::test]
+    async fn extract_routing_urls_empty() {
+        let graph_factory = create_mock_graph_factory(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
+
+        assert!(matches!(
+            execute(
+                server_factory,
+                graph_factory,
+                vec![
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .subgraphs(
+                                [
+                                    (
+                                        "accounts".to_string(),
+                                        Subgraph {
+                                            routing_url: "http://accounts/graphql".to_string()
+                                        }
+                                    ),
+                                ]
+                                .iter()
+                                .cloned()
+                                .collect()
+                            )
+                            .build()
+                    ),
+                    UpdateSchema(r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                            PRODUCTS @join__graph(name: "products" url: "")
+                        }"#.parse().unwrap()),
+                    Shutdown
+                ],
+                vec![
+                    State::Startup,
+                    State::Stopped
+                ]
+            )
+            .await,
+            Ok(()),
+        ));
+        assert_eq!(shutdown_receivers.lock().len(), 0);
     }
 
     mock! {

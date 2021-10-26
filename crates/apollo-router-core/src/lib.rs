@@ -24,4 +24,5 @@ pub mod prelude {
     pub mod graphql {
         pub use crate::*;
     }
+    pub use crate::schema::Schema;
 }

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
+    subgraphs: HashMap<String, String>,
 }
 
 impl std::str::FromStr for Schema {
@@ -21,6 +22,7 @@ impl std::str::FromStr for Schema {
 
         let document = tree.document();
         let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
+        let mut subgraphs = HashMap::new();
 
         // the logic of this algorithm is inspired from the npm package graphql:
         // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
@@ -83,6 +85,64 @@ impl std::str::FromStr for Schema {
                 }
                 // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
                 ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
+                ast::Definition::EnumTypeDefinition(enum_type) => {
+                    if enum_type
+                        .name()
+                        .and_then(|n| n.ident_token())
+                        .as_ref()
+                        .map(|id| id.text())
+                        == Some("join__Graph")
+                    {
+                        if let Some(enums) = enum_type.enum_values_definition() {
+                            for enum_kind in enums.enum_value_definitions() {
+                                if let Some(directives) = enum_kind.directives() {
+                                    for directive in directives.directives() {
+                                        if directive
+                                            .name()
+                                            .and_then(|n| n.ident_token())
+                                            .as_ref()
+                                            .map(|id| id.text())
+                                            == Some("join__graph")
+                                        {
+                                            let mut name = None;
+                                            let mut url = None;
+
+                                            if let Some(arguments) = directive.arguments() {
+                                                for argument in arguments.arguments() {
+                                                    let arg_name = argument
+                                                        .name()
+                                                        .and_then(|n| n.ident_token())
+                                                        .as_ref()
+                                                        .map(|id| id.text().to_owned());
+
+                                                    let arg_value =
+                                                        argument.value().and_then(|s| {
+                                                            s.to_string()
+                                                                .trim_end()
+                                                                .strip_prefix('"')
+                                                                .and_then(|s| s.strip_suffix('"'))
+                                                                .map(|s| s.to_owned())
+                                                        });
+
+                                                    match arg_name.as_deref() {
+                                                        Some("name") => name = arg_value,
+                                                        Some("url") => url = arg_value,
+                                                        _ => {}
+                                                    };
+                                                }
+                                            }
+
+                                            if let (Some(name), Some(url)) = (name, url) {
+                                                // FIXME: return an error on name collisions
+                                                subgraphs.insert(name, url);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -90,6 +150,7 @@ impl std::str::FromStr for Schema {
         Ok(Self {
             subtype_map,
             string: s.to_owned(),
+            subgraphs,
         })
     }
 }
@@ -108,6 +169,10 @@ impl Schema {
             .get(abstract_type)
             .map(|x| x.contains(maybe_subtype))
             .unwrap_or(false)
+    }
+
+    pub fn subgraphs(&self) -> &HashMap<String, String> {
+        &self.subgraphs
     }
 }
 
@@ -149,5 +214,34 @@ mod tests {
         assert!(schema.is_subtype("Foo", "InterfaceType"));
         assert!(schema.is_subtype("Bar", "InterfaceType"));
         assert!(schema.is_subtype("Baz", "InterfaceType"));
+    }
+
+    #[test]
+    fn routing_urls() {
+        let schema: Schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1"),
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+      {
+        query: Query
+        mutation: Mutation
+      }
+
+      enum join__Graph {
+        ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
+        INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004/graphql")
+        PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
+        REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+      }"#
+        .parse()
+        .unwrap();
+
+        println!("subgraphs: {:?}", schema.subgraphs);
+        assert_eq!(schema.subgraphs.len(), 4);
+        assert_eq!(
+            schema.subgraphs.get("accounts").map(|s| s.as_str()),
+            Some("http://localhost:4001/graphql")
+        );
+
+        assert_eq!(schema.subgraphs.get("test"), None);
     }
 }

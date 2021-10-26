@@ -12,6 +12,7 @@ compile_error!("you can select only one feature otlp-*!");
 #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
 pub mod otlp;
 
+use apollo_router_core::Schema;
 use derivative::Derivative;
 use displaydoc::Display;
 use serde::{Deserialize, Serialize};
@@ -35,11 +36,13 @@ pub enum ConfigurationError {
     OtlpTracing(opentelemetry::trace::TraceError),
     /// The configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
+    /// Could not find an URL for subgraph {0}
+    MissingSubgraphUrl(String),
 }
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
-#[derive(Derivative, Deserialize, Serialize, TypedBuilder)]
+#[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder)]
 #[derivative(Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
@@ -49,6 +52,8 @@ pub struct Configuration {
     pub server: Server,
 
     /// Mapping of name to subgraph that the router may contact.
+    #[serde(default)]
+    #[builder(default)]
     pub subgraphs: HashMap<String, Subgraph>,
 
     /// OpenTelemetry configuration.
@@ -65,15 +70,59 @@ fn default_listen() -> SocketAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap()
 }
 
+impl Configuration {
+    pub fn load_subgraphs(&mut self, schema: &Schema) -> Result<(), Vec<ConfigurationError>> {
+        let mut errors = Vec::new();
+
+        for (name, url) in schema.subgraphs() {
+            match self.subgraphs.get(name) {
+                None => {
+                    if url.is_empty() {
+                        errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
+                        continue;
+                    }
+                    self.subgraphs.insert(
+                        name.to_owned(),
+                        Subgraph {
+                            routing_url: url.to_owned(),
+                        },
+                    );
+                }
+                Some(subgraph) => {
+                    if !url.is_empty() && url != &subgraph.routing_url {
+                        tracing::warn!("overriding URL from subgraph {} at {} with URL from the configuration file: {}",
+                name, url, subgraph.routing_url);
+                    }
+
+                    if !url.is_empty() {
+                        self.subgraphs.insert(
+                            name.to_owned(),
+                            Subgraph {
+                                routing_url: url.to_owned(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
 /// Configuration for a subgraph.
-#[derive(Debug, Deserialize, Serialize, TypedBuilder)]
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 pub struct Subgraph {
     /// The url for the subgraph.
     pub routing_url: String,
 }
 
 /// Configuration options pertaining to the http server component.
-#[derive(Debug, Deserialize, Serialize, TypedBuilder)]
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct Server {
     /// The socket address and port to listen on
@@ -89,7 +138,7 @@ pub struct Server {
 }
 
 /// Cross origin request configuration.
-#[derive(Debug, Deserialize, Serialize, TypedBuilder)]
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 #[serde(deny_unknown_fields)]
 pub struct Cors {
     #[serde(default)]
@@ -159,7 +208,7 @@ impl Cors {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum OpenTelemetry {
@@ -168,7 +217,7 @@ pub enum OpenTelemetry {
     Otlp(otlp::Otlp),
 }
 
-#[derive(Debug, Derivative, Deserialize, Serialize)]
+#[derive(Debug, Clone, Derivative, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[derivative(Default)]
 pub struct Jaeger {
@@ -196,7 +245,7 @@ fn default_jaeger_password() -> Option<String> {
     std::env::var("JAEGER_PASSWORD").ok()
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Secret {
     Env(String),
@@ -214,7 +263,7 @@ impl Secret {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TlsConfig {
     domain_name: Option<String>,
@@ -313,5 +362,84 @@ mod tests {
     #[test]
     fn ensure_configuration_api_does_not_change_tls_config() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tls.yml");
+    }
+
+    #[test]
+    fn routing_url_compatibility_with_schema() {
+        let mut configuration = Configuration::builder()
+            .subgraphs(
+                [
+                    (
+                        "inventory".to_string(),
+                        Subgraph {
+                            routing_url: "http://inventory/graphql".to_string(),
+                        },
+                    ),
+                    (
+                        "products".to_string(),
+                        Subgraph {
+                            routing_url: "http://products/graphql".to_string(),
+                        },
+                    ),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
+            )
+            .build();
+
+        let schema: Schema = r#"
+        enum join__Graph {
+          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
+          PRODUCTS @join__graph(name: "products" url: "")
+          REVIEWS @join__graph(name: "reviews" url: "")
+        }"#
+        .parse()
+        .unwrap();
+
+        let res = configuration.load_subgraphs(&schema);
+
+        // if no configuration override, use the URL from the supergraph
+        assert_eq!(
+            configuration.subgraphs.get("accounts").unwrap().routing_url,
+            "http://localhost:4001/graphql"
+        );
+        // if both configuration and schema specify a non empty URL, the configuration wins
+        // this should show a warning in logs
+        assert_eq!(
+            configuration
+                .subgraphs
+                .get("inventory")
+                .unwrap()
+                .routing_url,
+            "http://localhost:4002/graphql"
+        );
+        // if the configuration has a non empty routing URL, and the supergraph
+        // has an empty one, the schema wins
+        assert_eq!(
+            configuration.subgraphs.get("products").unwrap().routing_url,
+            "http://products/graphql"
+        );
+        // if the configuration has a no routing URL, and the supergraph
+        // has an empty one, it does not get into the configuration
+        // and loading returns an error
+        assert!(configuration.subgraphs.get("reviews").is_none());
+
+        match res {
+            Err(errors) => {
+                assert_eq!(errors.len(), 1);
+
+                if let Some(ConfigurationError::MissingSubgraphUrl(subgraph)) = errors.get(0) {
+                    assert_eq!(subgraph, "reviews");
+                } else {
+                    panic!(
+                        "expected missing subgraph URL for 'reviews', got: {:?}",
+                        errors
+                    );
+                }
+            }
+            Ok(()) => panic!("expected missing subgraph URL for 'reviews'"),
+        }
     }
 }
