@@ -171,8 +171,8 @@ impl Schema {
             .unwrap_or(false)
     }
 
-    pub fn subgraphs(&self) -> &HashMap<String, String> {
-        &self.subgraphs
+    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.subgraphs.iter()
     }
 }
 

@@ -12,7 +12,7 @@ compile_error!("you can select only one feature otlp-*!");
 #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
 pub mod otlp;
 
-use apollo_router_core::Schema;
+use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
 use serde::{Deserialize, Serialize};
