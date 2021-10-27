@@ -198,7 +198,7 @@ where
                                 tracing::error!("Failed to notify http thread of shutdown")
                             };
 
-                            tokio::task::spawn(server_future.map(|_| {
+                            tokio::task::spawn(server_future.inspect(|_| {
                                 tracing::info!("previous server is closed");
                             }));
 

@@ -2,7 +2,7 @@ use super::FederatedServerError;
 use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
-use futures::channel::oneshot::{self, Canceled};
+use futures::channel::oneshot;
 use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -93,7 +93,7 @@ impl ReturnListener {
         }
 
         match self.listener_rx.await {
-            Err(Canceled) => {
+            Err(oneshot::Canceled) => {
                 tracing::error!("cannot return listener, the server task was canceled");
                 None
             }

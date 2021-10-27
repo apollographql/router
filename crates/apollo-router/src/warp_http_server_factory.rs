@@ -43,7 +43,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
     where
         F: graphql::Fetcher + 'static,
     {
-        let f = async {
+        Box::pin(async {
             let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
             let listen_address = configuration.server.listen;
 
@@ -59,8 +59,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                     .or(post_graphql_request(graph, configuration))
                     .with(cors);
 
-            let before = std::time::Instant::now();
-
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
 
@@ -71,48 +69,47 @@ impl HttpServerFactory for WarpHttpServerFactory {
             };
             let actual_listen_address = tcp_listener.local_addr().unwrap();
 
-            let (return_listener, stop_listen_rx, listener_tx) = ReturnListener::new();
+            let (return_listener, stop_listen_receiver, listener_sender) = ReturnListener::new();
 
             // this server reproduces most of hyper::server::Server's behaviour
-            // we select over the stop_listen_rx channel and the listener's
+            // we select over the stop_listen_receiver channel and the listener's
             // accept future. If the channel received something or the sender
             // was dropped, we stop using the listener and send it back through
-            // listener_rx
+            // listener_receiver
             let server = async move {
-                let rx_f = stop_listen_rx.fuse();
-                pin_mut!(rx_f);
+                let stop_listen_receiver_future = stop_listen_receiver.fuse();
+                pin_mut!(stop_listen_receiver_future);
 
                 loop {
                     let listen_f = tcp_listener.accept();
                     pin_mut!(listen_f);
 
-                    match select(rx_f, listen_f).await {
+                    match select(stop_listen_receiver_future, listen_f).await {
                         Either::Left((_res, _listen_f)) => {
                             break;
                         }
-                        Either::Right((res, rx_f2)) => {
+                        Either::Right((res, stop_listen_receiver_future2)) => {
                             let (tcp_stream, _) = res.unwrap();
                             let svc = svc.clone();
-                            let mut shut_rx = shutdown_receiver.clone();
+                            let mut shutdown_receiver = shutdown_receiver.clone();
 
                             tokio::task::spawn(async move {
-                                let conn = Http::new()
+                                let connection = Http::new()
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
 
-                                let shut_rx_f = shut_rx.changed();
-                                pin_mut!(shut_rx_f);
-                                pin_mut!(conn);
+                                let shutdown_receiver_f = shutdown_receiver.changed();
+                                pin_mut!(shutdown_receiver_f);
+                                pin_mut!(connection);
 
-                                match select(shut_rx_f, conn).await {
+                                match select(shutdown_receiver_f, connection).await {
                                     // the shutdown signal was triggered: set up graceful shutdown for
                                     // the connection then let it finish
-                                    Either::Left((_res, mut conn2)) => {
-                                        let c = conn2.as_mut();
+                                    Either::Left((_res, mut connection)) => {
+                                        let c = connection.as_mut();
                                         c.graceful_shutdown();
-                                        conn = conn2;
 
-                                        if let Err(http_err) = conn.await {
+                                        if let Err(http_err) = connection.await {
                                             tracing::error!(
                                                 "Error while serving HTTP connection: {}",
                                                 http_err
@@ -120,7 +117,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                         }
                                     }
                                     // the connection finished first: exit normally
-                                    Either::Right((res, _rx_f2)) => {
+                                    Either::Right((res, _srop_listen_receiver_future2)) => {
                                         if let Err(http_err) = res {
                                             tracing::error!(
                                                 "Error while serving HTTP connection: {}",
@@ -130,22 +127,16 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     }
                                 }
                             });
-                            rx_f = rx_f2;
+
+                            stop_listen_receiver_future = stop_listen_receiver_future2;
                         }
                     }
                 }
-                listener_tx.send(tcp_listener).unwrap();
+                listener_sender.send(tcp_listener).unwrap();
             };
 
-            let after = std::time::Instant::now();
-            tracing::info!(
-                "server future size: {} bytes created in {}ns",
-                std::mem::size_of_val(&server),
-                (after - before).as_nanos()
-            );
-
             // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(server.map(|_| ()))
+            let server_future = tokio::task::spawn(server)
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
@@ -155,9 +146,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listen_address: actual_listen_address,
                 return_listener,
             }
-        };
-
-        Box::pin(f)
+        })
     }
 }
 
