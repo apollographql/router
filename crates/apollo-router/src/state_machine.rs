@@ -186,7 +186,13 @@ where
                             // and start a new one that reuses that socket
                             // it is necessary to keep the queue of new TCP sockets associated with
                             // the listener instead of dropping them
-                            let listener = server_handle.return_listener().await;
+                            let listener = match server_handle.return_listener().await {
+                                Ok(listener) => Some(listener),
+                                Err(e) => {
+                                    tracing::error!("previous server failed with {}", e);
+                                    None
+                                }
+                            };
 
                             let server_handle = self
                                 .http_server_factory
@@ -356,7 +362,8 @@ mod tests {
     use super::*;
     use crate::configuration::Subgraph;
     use crate::graph_factory::MockGraphFactory;
-    use crate::http_server_factory::{MockHttpServerFactory, ReturnListener};
+    use crate::http_server_factory::MockHttpServerFactory;
+    use futures::channel::oneshot;
     use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
@@ -669,7 +676,7 @@ mod tests {
         expect_times_called: usize,
     ) -> (
         MockHttpServerFactory,
-        Arc<Mutex<Vec<tokio::sync::watch::Receiver<bool>>>>,
+        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     ) {
         let mut server_factory = MockHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
@@ -681,33 +688,23 @@ mod tests {
                 move |_: Arc<MockMyFetcher>,
                       configuration: Arc<Configuration>,
                       listener: Option<TcpListener>| {
-                    let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
-                    let (return_listener, stop_listen_rx, listen_tx) = ReturnListener::new();
-                    shutdown_receivers_clone
-                        .lock()
-                        .push(shutdown_receiver.clone());
+                    let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+                    shutdown_receivers_clone.lock().push(shutdown_receiver);
 
-                    let server = tokio::task::spawn(async move {
-                        let listener = if let Some(l) = listener {
+                    let server = async move {
+                        Ok(if let Some(l) = listener {
                             l
                         } else {
                             tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
-                        };
-
-                        let _ = stop_listen_rx.await;
-                        println!("stop_listen signal was triggered");
-                        listen_tx.send(listener).unwrap();
-                    });
+                        })
+                    };
 
                     Box::pin(async move {
-                        HttpServerHandle {
+                        HttpServerHandle::new(
                             shutdown_sender,
-                            server_future: Box::pin(
-                                server.map_err(|_| FederatedServerError::HttpServerLifecycleError),
-                            ),
-                            listen_address: configuration.server.listen,
-                            return_listener,
-                        }
+                            Box::pin(server),
+                            configuration.server.listen,
+                        )
                     })
                 },
             );

@@ -1,10 +1,10 @@
 use crate::configuration::{Configuration, Cors};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, ReturnListener};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::future::{select, Either};
-use futures::{pin_mut, prelude::*};
+use futures::{channel::oneshot, pin_mut, prelude::*};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
@@ -44,7 +44,9 @@ impl HttpServerFactory for WarpHttpServerFactory {
         F: graphql::Fetcher + 'static,
     {
         Box::pin(async {
-            let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
+            let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+            let (connection_shutdown_sender, connection_shutdown_receiver) =
+                tokio::sync::watch::channel(false);
             let listen_address = configuration.server.listen;
 
             let cors = configuration
@@ -69,40 +71,40 @@ impl HttpServerFactory for WarpHttpServerFactory {
             };
             let actual_listen_address = tcp_listener.local_addr().unwrap();
 
-            let (return_listener, stop_listen_receiver, listener_sender) = ReturnListener::new();
-
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
             // accept future. If the channel received something or the sender
             // was dropped, we stop using the listener and send it back through
             // listener_receiver
             let server = async move {
-                let stop_listen_receiver_future = stop_listen_receiver.fuse();
-                pin_mut!(stop_listen_receiver_future);
+                let shutdown_receiver_future = shutdown_receiver.fuse();
+                pin_mut!(shutdown_receiver_future);
 
                 loop {
                     let listen_f = tcp_listener.accept();
                     pin_mut!(listen_f);
 
-                    match select(stop_listen_receiver_future, listen_f).await {
+                    match select(shutdown_receiver_future, listen_f).await {
                         Either::Left((_res, _listen_f)) => {
                             break;
                         }
-                        Either::Right((res, stop_listen_receiver_future2)) => {
+                        Either::Right((res, shutdown_receiver_future2)) => {
                             let (tcp_stream, _) = res.unwrap();
                             let svc = svc.clone();
-                            let mut shutdown_receiver = shutdown_receiver.clone();
+                            let mut connection_shutdown_receiver =
+                                connection_shutdown_receiver.clone();
 
                             tokio::task::spawn(async move {
                                 let connection = Http::new()
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
 
-                                let shutdown_receiver_f = shutdown_receiver.changed();
-                                pin_mut!(shutdown_receiver_f);
+                                let connection_shutdown_receiver_f =
+                                    connection_shutdown_receiver.changed();
+                                pin_mut!(connection_shutdown_receiver_f);
                                 pin_mut!(connection);
 
-                                match select(shutdown_receiver_f, connection).await {
+                                match select(connection_shutdown_receiver_f, connection).await {
                                     // the shutdown signal was triggered: set up graceful shutdown for
                                     // the connection then let it finish
                                     Either::Left((_res, mut connection)) => {
@@ -117,7 +119,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                         }
                                     }
                                     // the connection finished first: exit normally
-                                    Either::Right((res, _srop_listen_receiver_future2)) => {
+                                    Either::Right((res, _stop_listen_receiver_future2)) => {
                                         if let Err(http_err) = res {
                                             tracing::error!(
                                                 "Error while serving HTTP connection: {}",
@@ -128,11 +130,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 }
                             });
 
-                            stop_listen_receiver_future = stop_listen_receiver_future2;
+                            shutdown_receiver_future = shutdown_receiver_future2;
                         }
                     }
                 }
-                listener_sender.send(tcp_listener).unwrap();
+
+                let _ = connection_shutdown_sender.send(true);
+                tcp_listener
             };
 
             // Spawn the server into a runtime
@@ -140,12 +144,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
-            HttpServerHandle::new(
-                shutdown_sender,
-                server_future,
-                actual_listen_address,
-                return_listener,
-            )
+            HttpServerHandle::new(shutdown_sender, server_future, actual_listen_address)
         })
     }
 }
@@ -428,8 +427,8 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address),
-            format!("http://{}/graphql", server.listen_address),
+            format!("http://{}/", server.listen_address()),
+            format!("http://{}/graphql", server.listen_address()),
         ] {
             // Regular studio redirect
             let response = client
@@ -449,7 +448,7 @@ mod tests {
                 LOCATION,
                 vec![format!(
                     "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                    server.listen_address
+                    server.listen_address()
                 )],
                 "Incorrect redirect url"
             );
@@ -477,7 +476,7 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address))
+            .post(format!("http://{}/graphql", server.listen_address()))
             .body("Garbage")
             .send()
             .await
@@ -501,7 +500,7 @@ mod tests {
                     future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
                 })
         });
-        let url = format!("http://{}/graphql", server.listen_address);
+        let url = format!("http://{}/graphql", server.listen_address());
         // Post query
         let response = client
             .post(url.as_str())
@@ -551,7 +550,7 @@ mod tests {
                 })
         });
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address))
+            .post(format!("http://{}/graphql", server.listen_address()))
             .body(
                 json!(
                 {
@@ -583,8 +582,8 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address),
-            format!("http://{}/graphql", server.listen_address),
+            format!("http://{}/", server.listen_address()),
+            format!("http://{}/graphql", server.listen_address()),
         ] {
             let response = client
                 .request(Method::OPTIONS, &url)

@@ -35,51 +35,47 @@ pub(crate) trait HttpServerFactory {
 #[derivative(Debug)]
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
-    shutdown_sender: tokio::sync::watch::Sender<bool>,
+    shutdown_sender: oneshot::Sender<()>,
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
     listen_address: SocketAddr,
-
-    return_listener: ReturnListener,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
-        shutdown_sender: tokio::sync::watch::Sender<bool>,
-        server_future: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+        shutdown_sender: oneshot::Sender<()>,
+        server_future: Pin<
+            Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>,
+        >,
         listen_address: SocketAddr,
-        return_listener: ReturnListener,
     ) -> Self {
         Self {
             shutdown_sender,
             server_future,
             listen_address,
-            return_listener,
         }
     }
 
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
-        if let Err(_err) = self.shutdown_sender.send(true) {
+        if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        let _listener = self.return_listener.stop().await;
-        self.server_future.await
+        self.server_future.await.map(|_| ())
     }
 
-    pub(crate) async fn return_listener(self) -> Option<TcpListener> {
-        if let Err(_err) = self.shutdown_sender.send(true) {
+    pub(crate) async fn return_listener(self) -> Result<TcpListener, FederatedServerError> {
+        if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        let listener = self.return_listener.stop().await;
-        tokio::task::spawn(self.server_future.inspect(|_| {
-            tracing::info!("previous server is closed");
-        }));
+
+        let listener = self.server_future.await;
+        tracing::info!("previous server is closed");
 
         listener
     }
@@ -89,73 +85,28 @@ impl HttpServerHandle {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct ReturnListener {
-    stop_listen_tx: oneshot::Sender<()>,
-    listener_rx: oneshot::Receiver<TcpListener>,
-}
-
-impl ReturnListener {
-    pub fn new() -> (
-        ReturnListener,
-        oneshot::Receiver<()>,
-        oneshot::Sender<TcpListener>,
-    ) {
-        let (stop_listen_tx, stop_listen_rx) = oneshot::channel::<()>();
-        let (listener_tx, listener_rx) = oneshot::channel::<TcpListener>();
-
-        (
-            ReturnListener {
-                stop_listen_tx,
-                listener_rx,
-            },
-            stop_listen_rx,
-            listener_tx,
-        )
-    }
-
-    ///asks the running server to give back the listener socket
-    pub(crate) async fn stop(self) -> Option<TcpListener> {
-        if self.stop_listen_tx.send(()).is_err() {
-            tracing::error!("cannot return listener, the server task was canceled");
-            return None;
-        }
-
-        match self.listener_rx.await {
-            Err(oneshot::Canceled) => {
-                tracing::error!("cannot return listener, the server task was canceled");
-                None
-            }
-            Ok(listener) => Some(listener),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::channel::oneshot;
     use std::str::FromStr;
     use test_env_log::test;
 
     #[test(tokio::test)]
     async fn sanity() {
-        let (shutdown_sender, mut shutdown_receiver) = tokio::sync::watch::channel(false);
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (return_listener, _stop_listen_rx, listen_tx) = ReturnListener::new();
 
-        let _ = listen_tx.send(listener);
-        HttpServerHandle {
-            listen_address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+        HttpServerHandle::new(
             shutdown_sender,
-            server_future: futures::future::ready(Ok(())).boxed(),
-            return_listener,
-        }
+            futures::future::ready(Ok(listener)).boxed(),
+            SocketAddr::from_str("127.0.0.1:0").unwrap(),
+        )
         .shutdown()
         .await
         .expect("Should have waited for shutdown");
 
         shutdown_receiver
-            .changed()
             .await
             .expect("Should have been send notification to shutdown");
     }
