@@ -140,12 +140,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
-            HttpServerHandle {
+            HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                listen_address: actual_listen_address,
+                actual_listen_address,
                 return_listener,
-            }
+            )
         })
     }
 }

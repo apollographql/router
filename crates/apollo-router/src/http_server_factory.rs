@@ -35,28 +35,57 @@ pub(crate) trait HttpServerFactory {
 #[derivative(Debug)]
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
-    pub(crate) shutdown_sender: tokio::sync::watch::Sender<bool>,
+    shutdown_sender: tokio::sync::watch::Sender<bool>,
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    pub(crate) server_future:
-        Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
-    pub(crate) listen_address: SocketAddr,
+    listen_address: SocketAddr,
 
-    pub(crate) return_listener: ReturnListener,
+    return_listener: ReturnListener,
 }
 
 impl HttpServerHandle {
+    pub(crate) fn new(
+        shutdown_sender: tokio::sync::watch::Sender<bool>,
+        server_future: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+        listen_address: SocketAddr,
+        return_listener: ReturnListener,
+    ) -> Self {
+        Self {
+            shutdown_sender,
+            server_future,
+            listen_address,
+            return_listener,
+        }
+    }
+
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
         if let Err(_err) = self.shutdown_sender.send(true) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
         let _listener = self.return_listener.stop().await;
         self.server_future.await
+    }
+
+    pub(crate) async fn return_listener(self) -> Option<TcpListener> {
+        if let Err(_err) = self.shutdown_sender.send(true) {
+            tracing::error!("Failed to notify http thread of shutdown")
+        };
+        let listener = self.return_listener.stop().await;
+        tokio::task::spawn(self.server_future.inspect(|_| {
+            tracing::info!("previous server is closed");
+        }));
+
+        listener
+    }
+
+    pub(crate) fn listen_address(&self) -> SocketAddr {
+        self.listen_address
     }
 }
 

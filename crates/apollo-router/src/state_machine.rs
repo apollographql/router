@@ -62,7 +62,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address,
+                address: server_handle.listen_address(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -186,21 +186,7 @@ where
                             // and start a new one that reuses that socket
                             // it is necessary to keep the queue of new TCP sockets associated with
                             // the listener instead of dropping them
-                            let HttpServerHandle {
-                                shutdown_sender,
-                                server_future,
-                                return_listener,
-                                ..
-                            } = server_handle;
-                            let listener = return_listener.stop().await;
-                            tracing::debug!("restarting http");
-                            if let Err(_err) = shutdown_sender.send(true) {
-                                tracing::error!("Failed to notify http thread of shutdown")
-                            };
-
-                            tokio::task::spawn(server_future.inspect(|_| {
-                                tracing::info!("previous server is closed");
-                            }));
+                            let listener = server_handle.return_listener().await;
 
                             let server_handle = self
                                 .http_server_factory
@@ -245,7 +231,7 @@ where
                         }
                         Ok(()) => {
                             let configuration = Arc::new(new_configuration);
-                            let server_handle = if server_handle.listen_address
+                            let server_handle = if server_handle.listen_address()
                                 != configuration.server.listen
                             {
                                 tracing::debug!("Restarting http");
@@ -256,7 +242,7 @@ where
                                     .http_server_factory
                                     .create(Arc::clone(&graph), Arc::clone(&configuration), None)
                                     .await;
-                                tracing::debug!("Restarted on {}", new_handle.listen_address);
+                                tracing::debug!("Restarted on {}", new_handle.listen_address());
                                 new_handle
                             } else {
                                 server_handle
@@ -350,7 +336,7 @@ where
                         .http_server_factory
                         .create(Arc::clone(&graph), Arc::clone(&configuration), None)
                         .await;
-                    tracing::debug!("Started on {}", server_handle.listen_address);
+                    tracing::debug!("Started on {}", server_handle.listen_address());
                     Running {
                         configuration,
                         schema,
