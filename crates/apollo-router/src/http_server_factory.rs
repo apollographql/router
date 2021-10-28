@@ -22,7 +22,7 @@ pub(crate) trait HttpServerFactory {
         graph: Arc<F>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
-    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
+    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         F: graphql::Fetcher + 'static;
 }
@@ -74,7 +74,7 @@ impl HttpServerHandle {
         factory: &ServerFactory,
         graph: Arc<Fetcher>,
         configuration: Arc<Configuration>,
-    ) -> Self
+    ) -> Result<Self, FederatedServerError>
     where
         Fetcher: graphql::Fetcher + 'static,
         ServerFactory: HttpServerFactory,
@@ -93,15 +93,21 @@ impl HttpServerHandle {
         let listener = if self.listen_address != configuration.server.listen {
             None
         } else {
-            Some(listener.unwrap())
+            match listener {
+                Ok(listener) => Some(listener),
+                Err(e) => {
+                    tracing::error!("the previous listen socket failed: {}", e);
+                    None
+                }
+            }
         };
 
         let handle = factory
             .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
-            .await;
+            .await?;
         tracing::debug!("Restarted on {}", handle.listen_address());
 
-        handle
+        Ok(handle)
     }
 
     pub(crate) fn listen_address(&self) -> SocketAddr {

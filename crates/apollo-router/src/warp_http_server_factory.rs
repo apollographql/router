@@ -39,7 +39,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         graph: Arc<F>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
-    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
+    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         F: graphql::Fetcher + 'static,
     {
@@ -67,9 +67,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let tcp_listener = if let Some(listener) = listener {
                 listener
             } else {
-                TcpListener::bind(listen_address).await.unwrap()
+                TcpListener::bind(listen_address)
+                    .await
+                    .map_err(FederatedServerError::ServerCreationError)?
             };
-            let actual_listen_address = tcp_listener.local_addr().unwrap();
+            let actual_listen_address = tcp_listener
+                .local_addr()
+                .map_err(FederatedServerError::ServerCreationError)?;
 
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
@@ -89,12 +93,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                             break;
                         }
                         Either::Right((res, shutdown_receiver_future2)) => {
-                            let (tcp_stream, _) = res.unwrap();
                             let svc = svc.clone();
                             let mut connection_shutdown_receiver =
                                 connection_shutdown_receiver.clone();
 
                             tokio::task::spawn(async move {
+                                let (tcp_stream, _) = res.unwrap();
+
                                 let connection = Http::new()
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
@@ -144,7 +149,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
-            HttpServerHandle::new(shutdown_sender, server_future, actual_listen_address)
+            Ok(HttpServerHandle::new(
+                shutdown_sender,
+                server_future,
+                actual_listen_address,
+            ))
         })
     }
 }
@@ -413,7 +422,7 @@ mod tests {
                     ),
                     None,
                 )
-                .await;
+                .await?;
             let client = reqwest::Client::builder()
                 .redirect(Policy::none())
                 .build()

@@ -173,6 +173,7 @@ where
                             }
                         }
                         Ok(()) => {
+                            tracing::info!("Reloading schema");
                             let configuration = Arc::new(new_configuration);
 
                             let schema = Arc::new(new_schema);
@@ -182,19 +183,21 @@ where
                                     .await,
                             );
 
-                            let server_handle = server_handle
+                            match server_handle
                                 .restart(
                                     &self.http_server_factory,
                                     Arc::clone(&graph),
                                     Arc::clone(&configuration),
                                 )
-                                .await;
-
-                            Running {
-                                configuration,
-                                schema,
-                                graph,
-                                server_handle,
+                                .await
+                            {
+                                Ok(server_handle) => Running {
+                                    configuration,
+                                    schema,
+                                    graph,
+                                    server_handle,
+                                },
+                                Err(err) => Errored(err),
                             }
                         }
                     }
@@ -228,19 +231,21 @@ where
                         }
                         Ok(()) => {
                             let configuration = Arc::new(new_configuration);
-                            let server_handle = server_handle
+                            match server_handle
                                 .restart(
                                     &self.http_server_factory,
                                     Arc::clone(&graph),
                                     Arc::clone(&configuration),
                                 )
-                                .await;
-
-                            Running {
-                                configuration,
-                                schema,
-                                graph,
-                                server_handle,
+                                .await
+                            {
+                                Ok(server_handle) => Running {
+                                    configuration,
+                                    schema,
+                                    graph,
+                                    server_handle,
+                                },
+                                Err(err) => Errored(err),
                             }
                         }
                     }
@@ -320,16 +325,25 @@ where
                     );
                     let configuration = Arc::new(configuration);
 
-                    let server_handle = self
+                    match self
                         .http_server_factory
                         .create(Arc::clone(&graph), Arc::clone(&configuration), None)
-                        .await;
-                    tracing::debug!("Started on {}", server_handle.listen_address());
-                    Running {
-                        configuration,
-                        schema,
-                        graph,
-                        server_handle,
+                        .await
+                    {
+                        Ok(server_handle) => {
+                            tracing::debug!("Started on {}", server_handle.listen_address());
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
+
+                        Err(err) => {
+                            tracing::error!("Cannot start the router: {}", err);
+                            Errored(err)
+                        }
                     }
                 }
             }
@@ -682,11 +696,11 @@ mod tests {
                     };
 
                     Box::pin(async move {
-                        HttpServerHandle::new(
+                        Ok(HttpServerHandle::new(
                             shutdown_sender,
                             Box::pin(server),
                             configuration.server.listen,
-                        )
+                        ))
                     })
                 },
             );
