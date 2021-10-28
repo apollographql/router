@@ -69,15 +69,39 @@ impl HttpServerHandle {
         self.server_future.await.map(|_| ())
     }
 
-    pub(crate) async fn return_listener(self) -> Result<TcpListener, FederatedServerError> {
+    pub(crate) async fn restart<Fetcher, ServerFactory>(
+        self,
+        factory: &ServerFactory,
+        graph: Arc<Fetcher>,
+        configuration: Arc<Configuration>,
+    ) -> Self
+    where
+        Fetcher: graphql::Fetcher + 'static,
+        ServerFactory: HttpServerFactory,
+    {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
 
+        // we ask the previous HTTP server to give back the TCP listener socket
+        // and start a new one that reuses that socket
+        // it is necessary to keep the queue of new TCP sockets associated with
+        // the listener instead of dropping them
         let listener = self.server_future.await;
         tracing::info!("previous server is closed");
 
-        listener
+        let listener = if self.listen_address != configuration.server.listen {
+            None
+        } else {
+            Some(listener.unwrap())
+        };
+
+        let handle = factory
+            .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
+            .await;
+        tracing::debug!("Restarted on {}", handle.listen_address());
+
+        handle
     }
 
     pub(crate) fn listen_address(&self) -> SocketAddr {

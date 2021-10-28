@@ -182,21 +182,12 @@ where
                                     .await,
                             );
 
-                            // we ask the previous HTTP server to give back the TCP listener socket
-                            // and start a new one that reuses that socket
-                            // it is necessary to keep the queue of new TCP sockets associated with
-                            // the listener instead of dropping them
-                            let listener = match server_handle.return_listener().await {
-                                Ok(listener) => Some(listener),
-                                Err(e) => {
-                                    tracing::error!("previous server failed with {}", e);
-                                    None
-                                }
-                            };
-
-                            let server_handle = self
-                                .http_server_factory
-                                .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
+                            let server_handle = server_handle
+                                .restart(
+                                    &self.http_server_factory,
+                                    Arc::clone(&graph),
+                                    Arc::clone(&configuration),
+                                )
                                 .await;
 
                             Running {
@@ -219,7 +210,7 @@ where
                     },
                     UpdateConfiguration(mut new_configuration),
                 ) => {
-                    tracing::debug!("Reloading configuration");
+                    tracing::info!("Reloading configuration");
 
                     match new_configuration.load_subgraphs(schema.as_ref()) {
                         Err(e) => {
@@ -237,22 +228,13 @@ where
                         }
                         Ok(()) => {
                             let configuration = Arc::new(new_configuration);
-                            let server_handle = if server_handle.listen_address()
-                                != configuration.server.listen
-                            {
-                                tracing::debug!("Restarting http");
-                                if let Err(_err) = server_handle.shutdown().await {
-                                    tracing::error!("Failed to notify shutdown")
-                                }
-                                let new_handle = self
-                                    .http_server_factory
-                                    .create(Arc::clone(&graph), Arc::clone(&configuration), None)
-                                    .await;
-                                tracing::debug!("Restarted on {}", new_handle.listen_address());
-                                new_handle
-                            } else {
-                                server_handle
-                            };
+                            let server_handle = server_handle
+                                .restart(
+                                    &self.http_server_factory,
+                                    Arc::clone(&graph),
+                                    Arc::clone(&configuration),
+                                )
+                                .await;
 
                             Running {
                                 configuration,
