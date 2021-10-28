@@ -1,5 +1,4 @@
 use apollo_router_core::prelude::*;
-use async_trait::async_trait;
 use bytes::BytesMut;
 use derivative::Derivative;
 use futures::prelude::*;
@@ -70,7 +69,7 @@ impl HttpSubgraphFetcher {
             .boxed()
     }
 
-    fn map_to_graphql(&self, bytes_stream: BytesStream) -> graphql::ResponseStream {
+    fn map_to_graphql(service_name: String, bytes_stream: BytesStream) -> graphql::ResponseStream {
         // A `BytesStream` chunk doesn't always represent a `graphql::Response`.
         // We need to accumulate the bytes until we have a deserialization that doesn't end up in EOF, and then yield a `graphql::Response`.
         // `stream::unfold` allows us to do just that: keep some state around, and yield `Some((new_item, new_state))` until we're done (at which point we'll yield `None`).
@@ -87,12 +86,7 @@ impl HttpSubgraphFetcher {
         // `is_primary` les the graphql::ResponseStream users know whether an error occured during a graphql::Response,
         // or during a subsequent HTTP patch that appends an update.
         stream::unfold(
-            (
-                bytes_stream.fuse(),
-                BytesMut::new(),
-                self.service.clone(),
-                true,
-            ),
+            (bytes_stream.fuse(), BytesMut::new(), service_name, true),
             |(mut bytes_stream, mut current_payload_bytes, service_name, is_primary)| async move {
                 while let Some(next_chunk) = bytes_stream.next().await {
                     match next_chunk {
@@ -161,12 +155,15 @@ impl HttpSubgraphFetcher {
     }
 }
 
-#[async_trait]
 impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
-    async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
+    fn stream(
+        &self,
+        request: graphql::Request,
+    ) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>> {
+        let service_name = self.service.to_string();
         let bytes_stream = self.request_stream(request);
-        self.map_to_graphql(bytes_stream)
+        Box::pin(async { Self::map_to_graphql(service_name, bytes_stream) })
     }
 }
 

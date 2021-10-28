@@ -1,5 +1,4 @@
 use crate::prelude::graphql::*;
-use async_trait::async_trait;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
@@ -65,7 +64,7 @@ fn validate_request_variables_against_plan(
 pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Box<dyn QueryPlanner>,
+    query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 }
@@ -73,7 +72,7 @@ pub struct FederatedGraph {
 impl FederatedGraph {
     /// Create a `FederatedGraph` instance used to execute a GraphQL query.
     pub fn new(
-        query_planner: Box<dyn QueryPlanner>,
+        query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
     ) -> Self {
@@ -86,94 +85,104 @@ impl FederatedGraph {
     }
 }
 
-#[async_trait]
 impl Fetcher for FederatedGraph {
-    async fn stream(&self, request: Request) -> ResponseStream {
-        let span = tracing::info_span!("federated_query");
-        let _guard = span.enter();
-
+    fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>> {
+        let federated_query_span = tracing::info_span!("federated");
         log::trace!("Request received:\n{:#?}", request);
 
-        if let Some(introspection_response) = self.naive_introspection.get(&request) {
+        if let Some(introspection_response) =
+            federated_query_span.in_scope(|| self.naive_introspection.get(&request))
+        {
             let mut response = Response::builder().build();
             response
                 .insert_data(&Path::empty(), introspection_response)
                 .expect("it is always possible to insert data in root path; qed");
-            return future::ready(response)
-                .in_current_span()
-                .with_current_subscriber()
-                .into_stream()
-                .boxed();
+            return Box::pin(async { stream::iter(vec![response]).boxed() });
         }
 
-        let plan = {
-            let span = tracing::trace_span!("query_planning");
-            let _guard = span.enter();
-
-            match self
-                .query_planner
-                .get(
-                    request.query.to_owned(),
-                    request.operation_name.to_owned(),
-                    Default::default(),
-                )
-                .await
-            {
-                Ok(QueryPlan { node: Some(root) }) => root,
-                Ok(_) => return stream::empty().boxed(),
-                Err(err) => {
-                    return stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
-                }
-            }
-        };
+        let query_planner = Arc::clone(&self.query_planner);
         let service_registry = Arc::clone(&self.service_registry);
         let schema = Arc::clone(&self.schema);
-
         let request = Arc::new(request);
 
-        let mut early_errors = Vec::new();
-
-        for err in validate_services_against_plan(Arc::clone(&service_registry), &plan) {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
-        for err in validate_request_variables_against_plan(Arc::clone(&request), &plan) {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
-        // If we have any errors so far then let's abort the query
-        // Planning/validation/variables are candidates to abort.
-        if !early_errors.is_empty() {
-            tracing::error!(errors = format!("{:?}", early_errors).as_str());
-
-            return stream::once(async move { Response::builder().errors(early_errors).build() })
-                .boxed();
-        }
-
-        stream::once(
+        Box::pin(
             async move {
-                let response = Arc::new(Mutex::new(Response::builder().build()));
-                let root = Path::empty();
+                let plan = {
+                    match query_planner
+                        .get(
+                            request.query.to_owned(),
+                            request.operation_name.to_owned(),
+                            Default::default(),
+                        )
+                        .instrument(tracing::info_span!("plan"))
+                        .await
+                    {
+                        Ok(QueryPlan { node: Some(root) }) => root,
+                        Ok(_) => return stream::empty().boxed(),
+                        Err(err) => {
+                            return stream::iter(vec![FetchError::from(err).to_response(true)])
+                                .boxed()
+                        }
+                    }
+                };
 
-                execute(
-                    Arc::clone(&response),
-                    &root,
-                    &plan,
-                    request,
-                    Arc::clone(&service_registry),
-                    Arc::clone(&schema),
+                tracing::debug!("query plan\n{:#?}", &plan);
+
+                let early_errors_response = tracing::info_span!("validation").in_scope(|| {
+                    let mut early_errors = Vec::new();
+                    for err in validate_services_against_plan(Arc::clone(&service_registry), &plan)
+                    {
+                        early_errors.push(err.to_graphql_error(None));
+                    }
+
+                    for err in validate_request_variables_against_plan(Arc::clone(&request), &plan)
+                    {
+                        early_errors.push(err.to_graphql_error(None));
+                    }
+
+                    // If we have any errors so far then let's abort the query
+                    // Planning/validation/variables are candidates to abort.
+                    if !early_errors.is_empty() {
+                        tracing::error!(errors = format!("{:?}", early_errors).as_str());
+                        let response = Response::builder().errors(early_errors).build();
+                        Some(stream::once(async move { response }).boxed())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(response) = early_errors_response {
+                    return response;
+                }
+
+                let query_execution_span = tracing::info_span!("execution");
+                stream::once(
+                    async move {
+                        let response = Arc::new(Mutex::new(Response::builder().build()));
+                        let root = Path::empty();
+
+                        execute(
+                            Arc::clone(&response),
+                            &root,
+                            &plan,
+                            request,
+                            Arc::clone(&service_registry),
+                            Arc::clone(&schema),
+                        )
+                        .instrument(query_execution_span)
+                        .await;
+
+                        // TODO: this is not great but there is no other way
+                        Arc::try_unwrap(response)
+                            .expect("todo: how to prove?")
+                            .into_inner()
+                    }
+                    .with_current_subscriber(),
                 )
-                .await;
-
-                // TODO: this is not great but there is no other way
-                Arc::try_unwrap(response)
-                    .expect("todo: how to prove?")
-                    .into_inner()
+                .boxed()
             }
-            .in_current_span()
-            .with_current_subscriber(),
+            .instrument(federated_query_span),
         )
-        .boxed()
     }
 }
 
@@ -185,9 +194,6 @@ fn execute<'a>(
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-    let span = tracing::info_span!("execution");
-    let _guard = span.enter();
-
     Box::pin(async move {
         tracing::trace!("Executing plan:\n{:#?}", plan);
 
@@ -202,8 +208,7 @@ fn execute<'a>(
                         Arc::clone(&service_registry),
                         Arc::clone(&schema),
                     )
-                    .with_current_subscriber()
-                    .instrument(tracing::trace_span!("execute-sequence"))
+                    .instrument(tracing::info_span!("sequence"))
                     .await;
                 }
             }
@@ -218,8 +223,7 @@ fn execute<'a>(
                         Arc::clone(&schema),
                     )
                 }))
-                .with_current_subscriber()
-                .instrument(tracing::trace_span!("execute-parallel"))
+                .instrument(tracing::info_span!("parallel"))
                 .await;
             }
             PlanNode::Fetch(info) => {
@@ -231,8 +235,7 @@ fn execute<'a>(
                     Arc::clone(&service_registry),
                     Arc::clone(&schema),
                 )
-                .with_current_subscriber()
-                .instrument(tracing::trace_span!("execute-fetch"))
+                .instrument(tracing::info_span!("fetch"))
                 .await
                 {
                     Ok(()) => {
@@ -265,8 +268,7 @@ fn execute<'a>(
                     Arc::clone(&service_registry),
                     Arc::clone(&schema),
                 )
-                .with_current_subscriber()
-                .instrument(tracing::trace_span!("execute-flatten"))
+                .instrument(tracing::trace_span!("flatten"))
                 .await;
             }
         }
@@ -286,7 +288,7 @@ async fn fetch_node<'a>(
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 ) -> Result<(), FetchError> {
-    let query_span = tracing::info_span!("query", service = service_name.as_str());
+    let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
     if let Some(requires) = requires {
         // We already checked that the service exists during planning
@@ -342,10 +344,10 @@ async fn fetch_node<'a>(
                     if let Some(array) = entities.as_array() {
                         let mut response = response
                             .lock()
-                            .instrument(tracing::trace_span!("response-lock-wait"))
+                            .instrument(tracing::trace_span!("response_lock_wait"))
                             .await;
 
-                        let span = tracing::trace_span!("response-insert");
+                        let span = tracing::trace_span!("response_insert");
                         let _guard = span.enter();
                         for (i, entity) in array.iter().enumerate() {
                             response.insert_data(
@@ -363,7 +365,7 @@ async fn fetch_node<'a>(
                 } else {
                     let mut response = response
                         .lock()
-                        .instrument(tracing::trace_span!("response-lock-wait"))
+                        .instrument(tracing::trace_span!("response_lock_wait"))
                         .await;
 
                     response.append_errors(&mut errors);
@@ -416,10 +418,10 @@ async fn fetch_node<'a>(
             }) => {
                 let mut response = response
                     .lock()
-                    .instrument(tracing::trace_span!("response-lock-wait"))
+                    .instrument(tracing::trace_span!("response_lock_wait"))
                     .await;
 
-                let span = tracing::trace_span!("response-insert");
+                let span = tracing::trace_span!("response_insert");
                 let _guard = span.enter();
                 response.append_errors(&mut errors);
                 response.insert_data(current_dir, data)?;

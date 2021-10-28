@@ -9,7 +9,7 @@ use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
 use tracing::instrument::WithSubscriber;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -51,10 +51,10 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let routes = run_get_query_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
-                .await
-                .or(perform_graphql_request(graph, configuration).await)
-                .with(cors);
+            let routes =
+                get_graphql_request_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
+                    .or(post_graphql_request(graph, configuration))
+                    .with(cors);
 
             let (actual_listen_address, server) =
                 warp::serve(routes).bind_with_graceful_shutdown(listen_address, async {
@@ -77,15 +77,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-async fn run_get_query_or_redirect<F>(
+fn get_graphql_request_or_redirect<F>(
     graph: Arc<F>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     F: graphql::Fetcher + 'static,
 {
-    let tracing_subscriber = configuration.subscriber.clone();
-
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
@@ -97,28 +95,13 @@ where
                   host: Option<Authority>,
                   body: Bytes,
                   header_map: HeaderMap| {
+                let configuration = Arc::clone(&configuration);
                 let graph = Arc::clone(&graph);
-                let dispatcher = tracing_subscriber
-                    .clone()
-                    .map(tracing::Dispatch::new)
-                    .unwrap_or_default();
-                let span = tracing::info_span!("federated_query");
-                let context = span.context();
-                opentelemetry::global::get_text_map_propagator(|injector| {
-                    injector.extract_with_context(&context, &HeaderMapCarrier(&header_map));
-                });
-
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
-                        // Run GraphQL request
-                        let response_stream = run_request(graph, request)
-                            .with_subscriber(dispatcher)
-                            .instrument(span)
-                            .await;
-
-                        Box::new(Response::new(Body::wrap_stream(response_stream)))
+                        run_graphql_request(configuration, graph, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -158,7 +141,59 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
     }
 }
 
-async fn run_request<F>(
+fn post_graphql_request<F>(
+    graph: Arc<F>,
+    configuration: Arc<Configuration>,
+) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
+where
+    F: graphql::Fetcher + 'static,
+{
+    warp::post()
+        .and(warp::path::end().or(warp::path("graphql")).unify())
+        .and(warp::body::json())
+        .and(warp::header::headers_cloned())
+        .and_then(move |request: graphql::Request, header_map: HeaderMap| {
+            let configuration = Arc::clone(&configuration);
+            let graph = Arc::clone(&graph);
+            async move {
+                let reply = run_graphql_request(configuration, graph, request, header_map).await;
+                Ok::<_, warp::reject::Rejection>(reply)
+            }
+            .boxed()
+        })
+}
+
+fn run_graphql_request<F>(
+    configuration: Arc<Configuration>,
+    graph: Arc<F>,
+    request: graphql::Request,
+    header_map: HeaderMap,
+) -> impl Future<Output = Box<dyn Reply>>
+where
+    F: graphql::Fetcher + 'static,
+{
+    let dispatcher = configuration
+        .subscriber
+        .clone()
+        .map(tracing::Dispatch::new)
+        .unwrap_or_default();
+
+    // retrieve and reuse the potential trace id from the caller
+    opentelemetry::global::get_text_map_propagator(|injector| {
+        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
+    });
+
+    async move {
+        let response_stream = stream_request(graph, request)
+            .instrument(tracing::info_span!("graphql_request"))
+            .await;
+
+        Box::new(Response::new(Body::wrap_stream(response_stream))) as Box<dyn Reply>
+    }
+    .with_subscriber(dispatcher)
+}
+
+async fn stream_request<F>(
     graph: Arc<F>,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
@@ -182,37 +217,6 @@ where
                 )
                 .map(Bytes::from)
             }
-        })
-}
-
-async fn perform_graphql_request<F>(
-    graph: Arc<F>,
-    configuration: Arc<Configuration>,
-) -> impl Filter<Extract = (Response<Body>,), Error = Rejection> + Clone
-where
-    F: graphql::Fetcher + 'static,
-{
-    let tracing_subscriber = configuration.subscriber.clone();
-    warp::post()
-        .and(warp::path::end().or(warp::path("graphql")).unify())
-        .and(warp::body::json())
-        .and(warp::header::headers_cloned())
-        .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let graph = Arc::clone(&graph);
-            let tracing_subscriber = tracing_subscriber.clone();
-            let dispatcher = tracing_subscriber
-                .clone()
-                .map(tracing::Dispatch::new)
-                .unwrap_or_default();
-            let span = tracing::info_span!("federated_query");
-            let context = span.context();
-            opentelemetry::global::get_text_map_propagator(|injector| {
-                injector.extract_with_context(&context, &HeaderMapCarrier(&header_map));
-            });
-            run_request(graph, request)
-                .with_subscriber(dispatcher)
-                .instrument(span)
-                .map(|x| Ok::<_, warp::reject::Rejection>(Response::new(Body::wrap_stream(x))))
         })
 }
 
@@ -249,7 +253,6 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use async_trait::async_trait;
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -305,9 +308,8 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
-        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
         }
     }
 
@@ -422,7 +424,7 @@ mod tests {
                 .times(2)
                 .returning(move |_| {
                     let actual_response = example_response.clone();
-                    futures::stream::iter(vec![actual_response]).boxed()
+                    future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
                 })
         });
         let url = format!("http://{}/graphql", server.listen_address);
@@ -466,12 +468,12 @@ mod tests {
                 .expect_stream()
                 .times(1)
                 .return_once(|_| {
-                    futures::stream::iter(vec![graphql::FetchError::SubrequestHttpError {
+                    let expected_response = graphql::FetchError::SubrequestHttpError {
                         service: "Mock service".to_string(),
                         reason: "Mock error".to_string(),
                     }
-                    .to_response(true)])
-                    .boxed()
+                    .to_response(true);
+                    future::ready(futures::stream::iter(vec![expected_response]).boxed()).boxed()
                 })
         });
         let response = client

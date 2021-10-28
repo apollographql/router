@@ -41,7 +41,7 @@ impl NaiveIntrospection {
     /// This function will populate a cache in a blocking manner.
     /// This is why `NaiveIntrospection` instanciation happens in a spawn_blocking task on the state_machine side.
     pub fn from_schema(schema: &Schema) -> Self {
-        let span = tracing::info_span!("naive_introspection: populating cache");
+        let span = tracing::info_span!("naive_introspection_population");
         let _guard = span.enter();
 
         let cache = introspect::batch_introspect(
@@ -72,6 +72,8 @@ impl NaiveIntrospection {
     }
 
     pub fn get(&self, request: &Request) -> Option<serde_json::Value> {
+        let span = tracing::info_span!("introspection_cache");
+        let _guard = span.enter();
         self.cache.get(&request.query).map(std::clone::Clone::clone)
     }
 }

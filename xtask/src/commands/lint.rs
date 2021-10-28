@@ -8,7 +8,7 @@ pub struct Lint {}
 impl Lint {
     pub fn run(&self) -> Result<()> {
         cargo!(["fmt", "--all", "--", "--check"]);
-        cargo!(["clippy", "--all", "--", "-D", "warnings"]);
+        cargo!(["clippy", "--all", "--tests", "--", "-D", "warnings"]);
 
         Ok(())
     }

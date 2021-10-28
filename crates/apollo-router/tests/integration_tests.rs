@@ -166,7 +166,7 @@ async fn query_rust(
         &config,
     )));
 
-    let federated = graphql::FederatedGraph::new(Box::new(planner), registry.clone(), schema);
+    let federated = graphql::FederatedGraph::new(Arc::new(planner), registry.clone(), schema);
     (federated.stream(request).await, registry)
 }
 

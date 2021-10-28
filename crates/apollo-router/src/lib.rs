@@ -260,7 +260,6 @@ fn try_initialize_subscriber(
         ))
         .finish();
 
-    #[allow(clippy::single_match)]
     match config.opentelemetry.as_ref() {
         Some(OpenTelemetry::Jaeger(config)) => {
             let default_config = Default::default();
@@ -279,12 +278,18 @@ fn try_initialize_subscriber(
 
             let batch_size = std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
                 .ok()
-                .and_then(|batch_size| usize::from_str(&batch_size).ok())
-                .unwrap_or(100usize);
-            let exporter = pipeline.init_sync_exporter()?;
+                .and_then(|batch_size| usize::from_str(&batch_size).ok());
+
+            let exporter = pipeline.init_async_exporter(opentelemetry::runtime::Tokio)?;
+
             let batch = BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_max_export_batch_size(batch_size)
-                .build();
+                .with_scheduled_delay(std::time::Duration::from_secs(1));
+            let batch = if let Some(size) = batch_size {
+                batch.with_max_export_batch_size(size)
+            } else {
+                batch
+            }
+            .build();
 
             let provider = opentelemetry::sdk::trace::TracerProvider::builder()
                 .with_span_processor(batch)

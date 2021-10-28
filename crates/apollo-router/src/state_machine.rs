@@ -290,11 +290,12 @@ mod tests {
     use super::*;
     use crate::graph_factory::MockGraphFactory;
     use crate::http_server_factory::MockHttpServerFactory;
-    use async_trait::async_trait;
     use futures::channel::oneshot;
+    use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
     use parking_lot::Mutex;
     use std::net::SocketAddr;
+    use std::pin::Pin;
     use std::str::FromStr;
 
     #[ctor::ctor]
@@ -473,9 +474,8 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
-        #[async_trait]
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>>;
         }
     }
 
