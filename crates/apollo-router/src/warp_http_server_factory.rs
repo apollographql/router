@@ -3,8 +3,7 @@ use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
-use futures::future::{select, Either};
-use futures::{channel::oneshot, pin_mut, prelude::*};
+use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
@@ -81,18 +80,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
             // was dropped, we stop using the listener and send it back through
             // listener_receiver
             let server = async move {
-                let shutdown_receiver_future = shutdown_receiver.fuse();
-                pin_mut!(shutdown_receiver_future);
+                tokio::pin!(shutdown_receiver);
 
                 loop {
-                    let listen_f = tcp_listener.accept();
-                    pin_mut!(listen_f);
-
-                    match select(shutdown_receiver_future, listen_f).await {
-                        Either::Left((_res, _listen_f)) => {
+                    tokio::select! {
+                        _ = &mut shutdown_receiver => {
                             break;
                         }
-                        Either::Right((res, shutdown_receiver_future2)) => {
+                        res = tcp_listener.accept() => {
                             let svc = svc.clone();
                             let mut connection_shutdown_receiver =
                                 connection_shutdown_receiver.clone();
@@ -104,15 +99,17 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
 
-                                let connection_shutdown_receiver_f =
-                                    connection_shutdown_receiver.changed();
-                                pin_mut!(connection_shutdown_receiver_f);
-                                pin_mut!(connection);
-
-                                match select(connection_shutdown_receiver_f, connection).await {
-                                    // the shutdown signal was triggered: set up graceful shutdown for
-                                    // the connection then let it finish
-                                    Either::Left((_res, mut connection)) => {
+                                tokio::pin!(connection);
+                                tokio::select! {
+                                    res = &mut connection => {
+                                        if let Err(http_err) = res {
+                                            tracing::error!(
+                                                "Error while serving HTTP connection: {}",
+                                                http_err
+                                            );
+                                        }
+                                    }
+                                    _ = connection_shutdown_receiver.changed() => {
                                         let c = connection.as_mut();
                                         c.graceful_shutdown();
 
@@ -123,19 +120,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                             );
                                         }
                                     }
-                                    // the connection finished first: exit normally
-                                    Either::Right((res, _stop_listen_receiver_future2)) => {
-                                        if let Err(http_err) = res {
-                                            tracing::error!(
-                                                "Error while serving HTTP connection: {}",
-                                                http_err
-                                            );
-                                        }
-                                    }
                                 }
                             });
-
-                            shutdown_receiver_future = shutdown_receiver_future2;
                         }
                     }
                 }
