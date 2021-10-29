@@ -2,9 +2,7 @@
 
 use anyhow::{Context, Result};
 use apollo_router::GLOBAL_ENV_FILTER;
-use apollo_router::{
-    ConfigurationKind, FederatedServer, FederatedServerError, SchemaKind, ShutdownKind, State,
-};
+use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
 use std::ffi::OsStr;
@@ -26,27 +24,12 @@ struct Opt {
     #[structopt(short, long)]
     watch: bool,
 
-    /// Directory where configuration files are located (OS dependent).
-    #[structopt(short, long = "project_dir", parse(from_os_str), env, default_value)]
-    project_dir: ProjectDir,
-
     /// Configuration location relative to the project directory.
-    #[structopt(
-        short,
-        long = "config",
-        parse(from_os_str),
-        default_value = "configuration.yaml",
-        env
-    )]
+    #[structopt(short, long = "config", parse(from_os_str), env)]
     configuration_path: PathBuf,
 
     /// Schema location relative to the project directory.
-    #[structopt(
-        long = "schema",
-        parse(from_os_str),
-        default_value = "supergraph.graphql",
-        env
-    )]
+    #[structopt(long = "schema", parse(from_os_str), env)]
     schema_path: PathBuf,
 }
 
@@ -98,25 +81,28 @@ async fn main() -> Result<()> {
 
     GLOBAL_ENV_FILTER.set(opt.env_filter.clone()).unwrap();
 
-    let base_directory = match opt.project_dir.path {
-        Some(project_dir) => project_dir,
-        None => {
-            tracing::error!(
-                "Unable to determine project directory. \
-                It must be explicitly set by passing in the '-p' flag",
-            );
-            return Err(FederatedServerError::StartupError.into());
-        }
+    let current_directory = std::env::current_dir()?;
+
+    let configuration_path = if opt.configuration_path.is_relative() {
+        current_directory.join(opt.configuration_path)
+    } else {
+        opt.configuration_path
     };
 
     let configuration = ConfigurationKind::File {
-        path: base_directory.join(opt.configuration_path),
+        path: configuration_path,
         watch: opt.watch,
         delay: None,
     };
 
+    let schema_path = if opt.schema_path.is_relative() {
+        current_directory.join(opt.schema_path)
+    } else {
+        opt.schema_path
+    };
+
     let schema = SchemaKind::File {
-        path: base_directory.join(opt.schema_path),
+        path: schema_path,
         watch: opt.watch,
         delay: None,
     };
