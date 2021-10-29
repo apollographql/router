@@ -2,6 +2,13 @@
 
 Rust implementation of Federated GraphQL router.
 
+## Status
+
+🚧 Apollo Federation Router is experimental software, not yet ready for production use.
+It is not yet feature complete nor fully compliant to the GraphQL specification, we are
+working on it.
+It can already perform queries though, so we'd welcome experiments and feedback on it.
+
 ## Usage
 
 Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql`
