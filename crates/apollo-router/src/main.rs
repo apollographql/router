@@ -142,7 +142,12 @@ async fn main() -> Result<()> {
         .for_each(|state| {
             match state {
                 State::Startup => {
-                    tracing::info!("Starting Apollo Router")
+                    tracing::info!(
+                        r#"Starting Apollo Router
+*******************************************************************
+⚠️  Experimental software, not YET recommended for production use ⚠️
+*******************************************************************"#
+                    )
                 }
                 State::Running { address, .. } => {
                     tracing::info!("Listening on http://{} 🚀", address)
