@@ -63,6 +63,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
 
+            // if we received a TCP listener, reuse it, otherwise create a new one
             let tcp_listener = if let Some(listener) = listener {
                 listener
             } else {
@@ -93,6 +94,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 connection_shutdown_receiver.clone();
 
                             tokio::task::spawn(async move {
+                                // we unwrap the result of accept() here to avoid stopping
+                                // the entire server on an issue with that socket
+                                // Unfortunately, the error here could also be linked
+                                // to the listen socket (no RAM for kernel buffers, no
+                                // more file descriptors, network interface is down...)
+                                // ideally we'd want to handle the errors in the server task
+                                // with varying behaviours
                                 let (tcp_stream, _) = res.unwrap();
 
                                 let connection = Http::new()
@@ -101,6 +109,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
                                 tokio::pin!(connection);
                                 tokio::select! {
+                                    // the connection finished first
                                     res = &mut connection => {
                                         if let Err(http_err) = res {
                                             tracing::error!(
@@ -109,6 +118,9 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                             );
                                         }
                                     }
+                                    // the shutdown receiver was triggered first,
+                                    // so we tell the connection to do a graceful shutdown
+                                    // on the next request, then we wait for it to finish
                                     _ = connection_shutdown_receiver.changed() => {
                                         let c = connection.as_mut();
                                         c.graceful_shutdown();
@@ -126,6 +138,9 @@ impl HttpServerFactory for WarpHttpServerFactory {
                     }
                 }
 
+                // the shutdown receiver was triggered so we break out of
+                // the server loop, tell the currently active connections to stop
+                // then return the TCP listen socket
                 let _ = connection_shutdown_sender.send(true);
                 tcp_listener
             };

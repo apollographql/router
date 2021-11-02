@@ -79,17 +79,19 @@ impl HttpServerHandle {
         Fetcher: graphql::Fetcher + 'static,
         ServerFactory: HttpServerFactory,
     {
+        // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
 
-        // we ask the previous HTTP server to give back the TCP listener socket
-        // and start a new one that reuses that socket
+        // when the server receives the shutdown signal, it stops accepting new
+        // connections, and returns the TCP listener, to reuse it in the next server
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
         let listener = self.server_future.await;
         tracing::info!("previous server is closed");
 
+        // we keep the TCP listener if it is compatible with the new configuration
         let listener = if self.listen_address != configuration.server.listen {
             None
         } else {
