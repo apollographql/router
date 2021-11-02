@@ -231,6 +231,12 @@ where
                         }
                         Ok(()) => {
                             let configuration = Arc::new(new_configuration);
+                            let graph = Arc::new(
+                                self.graph_factory
+                                    .create(&configuration, Arc::clone(&schema))
+                                    .await,
+                            );
+
                             match server_handle
                                 .restart(
                                     &self.http_server_factory,
@@ -491,7 +497,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let graph_factory = create_mock_graph_factory(1);
+        let graph_factory = create_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
