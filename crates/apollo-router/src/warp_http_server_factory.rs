@@ -264,6 +264,7 @@ mod tests {
     use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use test_env_log::test;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -315,7 +316,6 @@ mod tests {
 
     macro_rules! init {
         ($listen_address:expr, $fetcher:ident => $expect_stream:block) => {{
-            let _ = env_logger::builder().is_test(true).try_init();
             #[allow(unused_mut)]
             let mut $fetcher = MockMyFetcher::new();
             $expect_stream;
@@ -349,7 +349,7 @@ mod tests {
         }};
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
@@ -398,7 +398,7 @@ mod tests {
         server.shutdown().await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn malformed_request() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
@@ -412,7 +412,7 @@ mod tests {
         server.shutdown().await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn response() -> Result<(), FederatedServerError> {
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
@@ -461,7 +461,7 @@ mod tests {
         server.shutdown().await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn response_failure() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
@@ -504,7 +504,7 @@ mod tests {
         server.shutdown().await
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn cors_preflight() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 

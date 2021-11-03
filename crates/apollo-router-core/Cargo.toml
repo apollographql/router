@@ -18,7 +18,6 @@ derivative = "2.2.0"
 displaydoc = "0.2"
 futures = "0.3.17"
 include_dir = "0.6.2"
-log = "0.4.14"
 once_cell = "1.8.0"
 parking_lot = "0.11.2"
 router-bridge = { git = "https://github.com/apollographql/federation-private.git", rev = "bc9c266f3b1b5cc7b8d20c27d50cc6cbeef85f2a" }
@@ -35,7 +34,9 @@ criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
 mockall = "0.10.2"
 once_cell = "1"
 static_assertions = "1"
+test-env-log = { version = "0.2.7", default-features = false, features = ["trace"] }
 tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.2.25", default-features = false, features = ["env-filter", "fmt"] }
 
 [[bench]]
 name = "basic_composition"

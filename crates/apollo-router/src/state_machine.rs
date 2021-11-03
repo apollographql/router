@@ -352,13 +352,9 @@ mod tests {
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
+    use test_env_log::test;
 
-    #[ctor::ctor]
-    fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn no_configuration() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
@@ -374,7 +370,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn no_schema() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
@@ -390,7 +386,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn shutdown_during_startup() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
@@ -406,7 +402,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn startup_shutdown() {
         let graph_factory = create_mock_graph_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
@@ -439,7 +435,7 @@ mod tests {
         assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn startup_reload_schema() {
         let graph_factory = create_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
@@ -478,7 +474,7 @@ mod tests {
         assert_eq!(shutdown_receivers.lock().len(), 1);
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn startup_reload_configuration() {
         let graph_factory = create_mock_graph_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
@@ -525,7 +521,7 @@ mod tests {
         assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn extract_routing_urls() {
         let graph_factory = create_mock_graph_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
@@ -587,7 +583,7 @@ mod tests {
     }
 
     /// if an URL is missing in the schema and the configuration, do not load the schema
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn extract_routing_urls_empty() {
         let graph_factory = create_mock_graph_factory(0);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);

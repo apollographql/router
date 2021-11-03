@@ -62,6 +62,7 @@ mod tests {
     use mockall::{mock, predicate::*};
     use router_bridge::plan::PlanningErrors;
     use std::sync::Arc;
+    use test_env_log::test;
 
     mock! {
         #[derive(Debug)]
@@ -87,7 +88,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_plan() {
         let mut delegate = MockMyQueryPlanner::new();
         delegate

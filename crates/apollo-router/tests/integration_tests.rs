@@ -8,15 +8,10 @@ use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-#[ctor::ctor]
-fn init() {
-    let _ = env_logger::builder().is_test(true).try_init();
-}
+use test_env_log::test;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
-        init();
         let request = graphql::Request::builder()
             .query($query)
             .variables(Arc::new(
@@ -44,7 +39,7 @@ macro_rules! assert_federated_response {
     };
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name } }"#,
@@ -54,7 +49,7 @@ async fn basic_request() {
     );
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -66,7 +61,7 @@ async fn basic_composition() {
     );
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -89,7 +84,7 @@ async fn basic_mutation() {
     );
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn variables() {
     assert_federated_response!(
         r#"
@@ -114,7 +109,7 @@ async fn variables() {
     );
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(

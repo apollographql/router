@@ -598,10 +598,9 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
+    use test_env_log::test;
 
     fn init_with_server() -> FederatedServerHandle {
-        let _ = env_logger::builder().is_test(true).try_init();
-
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
@@ -613,11 +612,7 @@ mod tests {
             .serve()
     }
 
-    fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn basic_request() {
         let mut server_handle = init_with_server();
         let socket = server_handle.ready().await.expect("Server never ready");
@@ -641,9 +636,8 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn config_by_file_watching() {
-        init();
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
         write_and_flush(&mut file, contents).await;
@@ -673,9 +667,8 @@ mod tests {
         assert!(stream.into_future().now_or_never().is_none());
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn config_by_file_invalid() {
-        init();
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
         let mut stream = ConfigurationKind::File {
@@ -689,9 +682,8 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn config_by_file_missing() {
-        init();
         let mut stream = ConfigurationKind::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
@@ -703,9 +695,8 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn config_by_file_no_watch() {
-        init();
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
         write_and_flush(&mut file, contents).await;
@@ -724,9 +715,8 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn schema_by_file_watching() {
-        init();
         let (path, mut file) = create_temp_file();
         let schema = include_str!("testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;
@@ -746,9 +736,8 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn schema_by_file_missing() {
-        init();
         let mut stream = SchemaKind::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
@@ -760,9 +749,8 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn schema_by_file_no_watch() {
-        init();
         let (path, mut file) = create_temp_file();
         let schema = include_str!("testdata/supergraph.graphql");
         write_and_flush(&mut file, schema).await;

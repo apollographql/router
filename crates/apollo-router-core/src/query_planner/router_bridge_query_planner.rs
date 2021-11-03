@@ -52,8 +52,9 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_env_log::test;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_plan() {
         let planner = RouterBridgeQueryPlanner::new(Arc::new(
             include_str!("testdata/schema.graphql").parse().unwrap(),
@@ -78,7 +79,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_plan_error() {
         let planner = RouterBridgeQueryPlanner::new(Arc::new("".parse().unwrap()));
         let result = planner

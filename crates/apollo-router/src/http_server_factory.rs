@@ -57,13 +57,11 @@ impl HttpServerHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use futures::prelude::*;
-
     use super::*;
+    use std::str::FromStr;
+    use test_env_log::test;
 
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = futures::channel::oneshot::channel();
         HttpServerHandle {

@@ -35,6 +35,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::Arc;
+    use test_env_log::test;
 
     #[test]
     fn test_request() {

@@ -88,7 +88,7 @@ impl FederatedGraph {
 impl Fetcher for FederatedGraph {
     fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>> {
         let federated_query_span = tracing::info_span!("federated");
-        log::trace!("Request received:\n{:#?}", request);
+        tracing::trace!("Request received:\n{:#?}", request);
 
         if let Some(introspection_response) =
             federated_query_span.in_scope(|| self.naive_introspection.get(&request))

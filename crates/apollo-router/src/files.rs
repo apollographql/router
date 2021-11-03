@@ -46,19 +46,15 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::fs::File;
-    use std::io::{Seek, SeekFrom, Write};
-
     use super::*;
     use std::env::temp_dir;
-
-    #[ctor::ctor]
-    fn init() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
+    use std::fs::File;
+    use std::io::{Seek, SeekFrom, Write};
+    #[cfg(not(target_os = "macos"))]
+    use test_env_log::test;
 
     #[cfg(not(target_os = "macos"))]
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
         let mut watch = watch(path, Some(Duration::from_millis(10)));

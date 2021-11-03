@@ -196,13 +196,13 @@ impl reqwest_middleware::Middleware for LoggingMiddleware {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use httpmock::Method::POST;
     use httpmock::{MockServer, Regex};
     use serde_json::json;
+    use test_env_log::test;
 
-    use super::*;
-
-    #[tokio::test]
+    #[test(tokio::test)]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
         let response = graphql::Response::builder()
             .data(json!({
