@@ -110,13 +110,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 tokio::pin!(connection);
                                 tokio::select! {
                                     // the connection finished first
-                                    res = &mut connection => {
-                                        if let Err(http_err) = res {
+                                    _res = &mut connection => {
+                                        /*if let Err(http_err) = res {
                                             tracing::error!(
                                                 "Error while serving HTTP connection: {}",
                                                 http_err
                                             );
-                                        }
+                                        }*/
                                     }
                                     // the shutdown receiver was triggered first,
                                     // so we tell the connection to do a graceful shutdown
@@ -125,11 +125,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                         let c = connection.as_mut();
                                         c.graceful_shutdown();
 
-                                        if let Err(http_err) = connection.await {
-                                            tracing::error!(
+                                        if let Err(_http_err) = connection.await {
+                                            /*tracing::error!(
                                                 "Error while serving HTTP connection: {}",
                                                 http_err
-                                            );
+                                            );*/
                                         }
                                     }
                                 }
