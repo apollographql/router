@@ -180,24 +180,21 @@ impl Query {
             .collect();
 
         for definition in document.definitions() {
-            match definition {
-                // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-                ast::Definition::OperationDefinition(operation) => {
-                    let selection_set = operation
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed");
-                    let data = response
-                        .data
-                        .as_object_mut()
-                        .ok_or(QueryError::InvalidDataTypeInResponse)?;
-                    let mut output = Object::default();
+            // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
+            if let ast::Definition::OperationDefinition(operation) = definition {
+                let selection_set = operation
+                    .selection_set()
+                    .expect("the node SelectionSet is not optional in the spec; qed");
+                let data = response
+                    .data
+                    .as_object_mut()
+                    .ok_or(QueryError::InvalidDataTypeInResponse)?;
+                let mut output = Object::default();
 
-                    apply_selection_set(&selection_set, data, &mut output, &fragments);
+                apply_selection_set(&selection_set, data, &mut output, &fragments);
 
-                    response.data = output.into();
-                    return Ok(());
-                }
-                _ => {}
+                response.data = output.into();
+                return Ok(());
             }
         }
 
