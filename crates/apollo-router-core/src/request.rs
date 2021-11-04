@@ -78,11 +78,7 @@ impl Query {
             }
         }
 
-        tracing::debug!(
-            "Could not re-format response output. No suitable definition found. This is a bug.",
-        );
-
-        Ok(())
+        Err(QueryError::NoSuitableDefinition)
     }
 
     fn apply_selection_set(

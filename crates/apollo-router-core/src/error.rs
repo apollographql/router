@@ -179,10 +179,23 @@ impl From<JoinError> for QueryPlannerError {
         QueryPlannerError::JoinError(Arc::new(err))
     }
 }
-#[derive(Debug, Error)]
+
+/// Error in the schema.
+#[derive(Debug, Error, Display)]
 pub enum SchemaError {
-    #[error(transparent)]
+    /// IO error: {0}
     IoError(#[from] std::io::Error),
-    #[error("Parsing error(s)")]
+    /// Parsing error(s).
     ParseErrors(Vec<apollo_parser::Error>),
+}
+
+/// Error in the query.
+#[derive(Debug, Error, Display)]
+pub enum QueryError {
+    /// Parsing error(s).
+    ParseErrors(Vec<apollo_parser::Error>),
+    /// Invalid type for data in response.
+    InvalidDataTypeInResponse,
+    /// No suitable definition found. This is a bug.
+    NoSuitableDefinition,
 }
