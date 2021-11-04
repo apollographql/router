@@ -125,7 +125,7 @@ impl Query {
                                                 );
                                                 output_object.into()
                                             } else {
-                                                tracing::debug!(
+                                                failfast_debug!(
                                                     "Array element is not an object: {}[{}]",
                                                     name,
                                                     i,
@@ -138,7 +138,7 @@ impl Query {
                                 }
                                 _ => {
                                     output.insert(name.clone(), input_value);
-                                    tracing::debug!(
+                                    failfast_debug!(
                                         "Field is not an object nor an array of object: {}",
                                         name,
                                     );
@@ -148,7 +148,7 @@ impl Query {
                             output.insert(name, input_value);
                         }
                     } else {
-                        tracing::debug!("Missing field: {}", name);
+                        failfast_debug!("Missing field: {}", name);
                     }
                 }
                 // Spec: https://spec.graphql.org/draft/#InlineFragment
@@ -172,7 +172,7 @@ impl Query {
                     if let Some(selection_set) = fragments.get(&name) {
                         Self::apply_selection_set(selection_set, input, output, fragments);
                     } else {
-                        tracing::debug!("Missing fragment named: {}", name);
+                        failfast_debug!("Missing fragment named: {}", name);
                     }
                 }
             }

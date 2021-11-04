@@ -180,7 +180,7 @@ impl Fetcher for FederatedGraph {
                         if let Err(err) = tracing::debug_span!("format_response")
                             .in_scope(|| request.query.format_response(&mut response))
                         {
-                            tracing::debug!(
+                            failfast_debug!(
                                 "Something went wrong while reformatting the response: {}",
                                 err,
                             );
@@ -254,11 +254,8 @@ fn execute<'a>(
                             serde_json::to_string_pretty(&response.lock().await.data).unwrap();
                         tracing::trace!("New data:\n{}", received,);
                     }
-                    #[cfg_attr(feature = "failfast", allow(unreachable_code))]
                     Err(err) => {
-                        #[cfg(feature = "failfast")]
-                        panic!("failfast: {}", err);
-                        tracing::error!("Fetch error: {}", err);
+                        failfast_error!("Fetch error: {}", err);
                         response
                             .lock()
                             .await
