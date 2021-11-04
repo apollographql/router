@@ -1,33 +1,6 @@
-[package]
-name = "router"
-version = "0.1.0-prealpha.1"
-authors = ["Apollo Graph, Inc. <opensource@apollographql.com>"]
-edition = "2018"
-license-file = "./LICENSE"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-members = [".", "crates/*", "xtask"]
-
-[features]
-default = ["otlp-tonic"]
-otlp-tonic = ["configuration/otlp-tonic", "server/otlp"]
-otlp-grpcio = ["configuration/otlp-grpcio", "server/otlp"]
-otlp-http = ["configuration/otlp-http", "server/otlp"]
-tls = ["configuration/tls"]
-
-[dependencies]
-anyhow = "1.0.43"
-configuration = { path = "crates/configuration" }
-directories = "3.0.2"
-execution = { path = "crates/execution" }
-futures = { version = "0.3.15", features = ["thread-pool"]}
-log = "0.4.14"
-query-planner = { path = "crates/query-planner" }
-server = { path = "crates/server" }
-structopt = "0.3.22"
-tokio = { version = "1.11.0", features = ["full"] }
-tracing-subscriber = "0.2.20"
+default-members = ["crates/apollo-router"]
+members = ["crates/apollo-router", "crates/apollo-router-core", "xtask"]
 
 [patch.crates-io]
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "414b3f459" }

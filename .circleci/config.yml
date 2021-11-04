@@ -13,6 +13,7 @@ executors:
   rust_linux: &rust_linux_executor
     docker:
       - image: cimg/base:stable
+    resource_class: medium+
   rust_macos: &rust_macos_executor
     macos:
       xcode: 11.4
