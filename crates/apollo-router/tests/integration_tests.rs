@@ -26,15 +26,20 @@ macro_rules! assert_federated_response {
         let (mut actual, registry) = query_rust(request.clone()).await;
         let mut expected = query_node(request.clone()).await;
 
-        let actual = actual.next().await.unwrap();
-        let expected = expected.next().await.unwrap();
-        eprintln!("actual: {}", to_string_pretty(&actual).unwrap());
-        eprintln!("expected: {}", to_string_pretty(&expected).unwrap());
+        tracing::debug!("query:\n{}\n", request.query.as_str());
 
-        // The current implementation does not cull extra properties that should not make is to the
-        // output yet, so we check that the nodejs implementation returns a subset of the
-        // output of the rust output.
-        assert!(expected.data.is_subset(&actual.data));
+        let expected = expected.next().await.unwrap();
+
+        assert!(
+            expected.data.is_object(),
+            "no response's data: please check that the subgraphs are running",
+        );
+
+        let actual = actual.next().await.unwrap();
+        tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
+        tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
+
+        assert!(expected.data.eq_and_ordered(&actual.data));
         assert_eq!(registry.totals(), $service_requests);
     };
 }
