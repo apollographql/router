@@ -19,7 +19,7 @@ executors:
       xcode: 11.4
   rust_windows: &rust_windows_executor
     machine:
-      image: 'windows-server-2019-vs2019:stable'
+      image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
@@ -42,7 +42,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
@@ -80,7 +80,7 @@ jobs:
                   - target/
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -118,18 +118,18 @@ jobs:
                   - target/
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
-#            - run:
-#                # TODO compiling grpcio on Windows is still not working
-#                #      using boringssl gives an error message
-#                #      using openssl hangs indefinitely
-#                name: Install grpcio build dependencies
-#                command: |
-#                  choco install activeperl -y
-#                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-#                  choco install yasm -y
-#                  choco install openssl -y
+            #            - run:
+            #                # TODO compiling grpcio on Windows is still not working
+            #                #      using boringssl gives an error message
+            #                #      using openssl hangs indefinitely
+            #                name: Install grpcio build dependencies
+            #                command: |
+            #                  choco install activeperl -y
+            #                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+            #                  choco install yasm -y
+            #                  choco install openssl -y
             - run:
                 name: Install rustup
                 environment:
@@ -196,11 +196,11 @@ jobs:
             #       doesn't work here on CircleCI on Windows only.
             - run:
                 name: npm clean-install
-                working_directory: dockerfiles/federation-demo/federation-demo
+                working_directory: examples/nodejs/federation-demo
                 command: npm clean-install
             - run:
                 name: start federation-demo (background)
-                working_directory: dockerfiles/federation-demo/federation-demo
+                working_directory: examples/nodejs/federation-demo
                 command: npm start
                 background: true
             - run:
@@ -236,7 +236,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
@@ -280,7 +280,7 @@ jobs:
                   --output artifacts/
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -316,7 +316,7 @@ jobs:
                   cargo xtask package --output artifacts/
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install rustup
@@ -423,11 +423,11 @@ workflows:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
       - publish_github_release:
           requires: [build_release]
           filters:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
