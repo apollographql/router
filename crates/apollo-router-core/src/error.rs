@@ -188,14 +188,3 @@ pub enum SchemaError {
     /// Parsing error(s).
     ParseErrors(Vec<apollo_parser::Error>),
 }
-
-/// Error in the query.
-#[derive(Debug, Error, Display)]
-pub enum QueryError {
-    /// Parsing error(s).
-    ParseErrors(Vec<apollo_parser::Error>),
-    /// Invalid type for data in response.
-    InvalidDataTypeInResponse,
-    /// No suitable definition found. This is a bug.
-    NoSuitableDefinition,
-}

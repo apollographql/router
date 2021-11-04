@@ -177,14 +177,8 @@ impl Fetcher for FederatedGraph {
                             .expect("todo: how to prove?")
                             .into_inner();
 
-                        if let Err(err) = tracing::debug_span!("format_response")
-                            .in_scope(|| request.query.format_response(&mut response))
-                        {
-                            failfast_debug!(
-                                "Something went wrong while reformatting the response: {}",
-                                err,
-                            );
-                        }
+                        tracing::debug_span!("format_response")
+                            .in_scope(|| request.query.format_response(&mut response));
 
                         response
                     }

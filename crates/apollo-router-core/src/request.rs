@@ -48,7 +48,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    pub fn format_response(&self, response: &mut Response) -> Result<(), QueryError> {
+    pub fn format_response(&self, response: &mut Response) {
         fn apply_selection_set(
             selection_set: &ast::SelectionSet,
             input: &mut Object,
@@ -176,7 +176,13 @@ impl Query {
         let tree = parser.parse();
 
         if !tree.errors().is_empty() {
-            return Err(QueryError::ParseErrors(tree.errors().to_vec()));
+            let errors = tree
+                .errors()
+                .into_iter()
+                .map(|err| format!("{:?}", err))
+                .collect::<Vec<_>>();
+            failfast_debug!("Parsing error(s): {}", errors.join(", "));
+            return;
         }
 
         let document = tree.document();
@@ -188,20 +194,18 @@ impl Query {
                 let selection_set = operation
                     .selection_set()
                     .expect("the node SelectionSet is not optional in the spec; qed");
-                let data = response
-                    .data
-                    .as_object_mut()
-                    .ok_or(QueryError::InvalidDataTypeInResponse)?;
-                let mut output = Object::default();
-
-                apply_selection_set(&selection_set, data, &mut output, &fragments);
-
-                response.data = output.into();
-                return Ok(());
+                if let Some(data) = response.data.as_object_mut() {
+                    let mut output = Object::default();
+                    apply_selection_set(&selection_set, data, &mut output, &fragments);
+                    response.data = output.into();
+                    return;
+                } else {
+                    failfast_debug!("Invalid type for data in response.");
+                }
             }
         }
 
-        Err(QueryError::NoSuitableDefinition)
+        failfast_debug!("No suitable definition found. This is a bug.");
     }
 }
 
@@ -317,7 +321,7 @@ mod tests {
                 "baz": "7",
             }})
             .build();
-        query.format_response(&mut response).unwrap();
+        query.format_response(&mut response);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -339,7 +343,7 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
-        query.format_response(&mut response).unwrap();
+        query.format_response(&mut response);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -357,7 +361,7 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2"}})
             .build();
-        query.format_response(&mut response).unwrap();
+        query.format_response(&mut response);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -382,7 +386,7 @@ mod tests {
                 "other": "6",
             }})
             .build();
-        query.format_response(&mut response).unwrap();
+        query.format_response(&mut response);
         assert_eq_and_ordered!(
             response.data,
             json! {{
