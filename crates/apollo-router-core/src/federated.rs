@@ -110,7 +110,7 @@ impl Fetcher for FederatedGraph {
                 let plan = {
                     match query_planner
                         .get(
-                            request.query.to_owned(),
+                            request.query.as_str().to_owned(),
                             request.operation_name.to_owned(),
                             Default::default(),
                         )
@@ -165,7 +165,7 @@ impl Fetcher for FederatedGraph {
                             Arc::clone(&response),
                             &root,
                             &plan,
-                            request,
+                            request.clone(),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
                         )
@@ -173,9 +173,20 @@ impl Fetcher for FederatedGraph {
                         .await;
 
                         // TODO: this is not great but there is no other way
-                        Arc::try_unwrap(response)
+                        let mut response = Arc::try_unwrap(response)
                             .expect("todo: how to prove?")
-                            .into_inner()
+                            .into_inner();
+
+                        if let Err(err) = tracing::debug_span!("format_response")
+                            .in_scope(|| request.query.format_response(&mut response))
+                        {
+                            tracing::debug!(
+                                "Something went wrong while reformatting the response: {}",
+                                err,
+                            );
+                        }
+
+                        response
                     }
                     .with_current_subscriber(),
                 )
