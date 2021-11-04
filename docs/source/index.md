@@ -17,7 +17,7 @@ cargo install apollo-router
 ## Usage
 
 Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql`
-to be supplied.  These are either located in the current directory or explicitly
+to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
 
@@ -28,7 +28,6 @@ OPTIONS:
     -s, --schema <schema-path>           Schema location [env: SCHEMA_PATH=]
 ```
 
-
 ### Configuration file
 
 The configuration file is in YAML format. Here is a reduced list of options, see [configuration](../configuration) for the complete list:
@@ -38,7 +37,7 @@ The configuration file is in YAML format. Here is a reduced list of options, see
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4100
+  listen: 127.0.0.1:4000
 # Mapping of name to subgraph that the router may contact
 subgraphs:
   # Configuration for a subgraph
@@ -68,5 +67,5 @@ Once the configuration file and supergraph are written, start the router:
 ```
 $ apollo-router -c configuration.yaml --schema supergraph.graphql
 Oct 20 12:11:05.128  INFO router: Starting Apollo Federation
-Oct 20 12:11:05.581  INFO router: Listening on http://127.0.0.1:4100 🚀
+Oct 20 12:11:05.581  INFO router: Listening on http://127.0.0.1:4000 🚀
 ```

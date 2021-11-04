@@ -1,13 +1,13 @@
 version: "3.9"
 services:
   services:
-    build: examples/nodejs/
+    build: ../nodejs/
     ports:
       - 4001:4001
       - 4002:4002
       - 4003:4003
       - 4004:4004
-    command: npm run start
+    command: npm run start-services
     environment:
       - JAEGER_HOST=jaeger
 

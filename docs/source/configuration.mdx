@@ -11,7 +11,7 @@ The configuration file is in YAML format, with the following options:
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4100 
+  listen: 127.0.0.1:4000
 
   # Cross origin request headers
   cors:
@@ -45,7 +45,7 @@ opentelemetry:
   # Configuration to send traces and metrics to a Jaeger service
   jaeger:
     # optional url of the jaeger collector
-    collector_endpoint: 
+    collector_endpoint:
     # name of the service used in traces
     # defaults to router
     service_name: "router"
@@ -67,9 +67,9 @@ opentelemetry:
           # timmeout in seconds
           timeout: 60
           metadata:
-          - foo: bar
-          - foo: baz
-          - bar: baz
+            - foo: bar
+            - foo: baz
+            - bar: baz
       trace_config:
         sampler:
           ParentBased:

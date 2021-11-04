@@ -1,0 +1,14 @@
+server:
+  listen: 127.0.0.1:4000
+  cors:
+    origins:
+      - https://studio.apollographql.com
+subgraphs:
+  accounts:
+    routing_url: http://localhost:4001/graphql
+  reviews:
+    routing_url: http://localhost:4002/graphql
+  products:
+    routing_url: http://localhost:4003/graphql
+  inventory:
+    routing_url: http://localhost:4004/graphql
