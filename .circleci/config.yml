@@ -19,20 +19,17 @@ executors:
       xcode: 11.4
   rust_windows: &rust_windows_executor
     machine:
-      image: 'windows-server-2019-vs2019:stable'
+      image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
 jobs:
-  build_test_lint:
+  build_test_lint_check:
     parameters:
       platform:
         type: executor
     executor: << parameters.platform >>
     environment:
-      # Note: This is a no-op at the second, but bear with me on this.  If this
-      # comment is not removed by 2021-06-30 remove it along with the next line.
-      # renovate: datasource=github-tags depName=nodejs/node versioning=node
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
     steps:
@@ -42,7 +39,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
@@ -50,6 +47,7 @@ jobs:
             - run: brew install cmake
             - rust/install:
                 version: stable
+            - run: cargo install --locked cargo-deny
             - restore_cache:
                 keys:
                   - rust-target-v1-macos-{{ checksum "Cargo.lock" }}
@@ -80,7 +78,7 @@ jobs:
                   - target/
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -89,6 +87,7 @@ jobs:
                   sudo apt-get install -y libssl-dev cmake
             - rust/install:
                 version: stable
+            - run: cargo install --locked cargo-deny
             - restore_cache:
                 keys:
                   - rust-target-v1-linux-{{ checksum "Cargo.lock" }}
@@ -118,18 +117,18 @@ jobs:
                   - target/
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
-#            - run:
-#                # TODO compiling grpcio on Windows is still not working
-#                #      using boringssl gives an error message
-#                #      using openssl hangs indefinitely
-#                name: Install grpcio build dependencies
-#                command: |
-#                  choco install activeperl -y
-#                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-#                  choco install yasm -y
-#                  choco install openssl -y
+            #            - run:
+            #                # TODO compiling grpcio on Windows is still not working
+            #                #      using boringssl gives an error message
+            #                #      using openssl hangs indefinitely
+            #                name: Install grpcio build dependencies
+            #                command: |
+            #                  choco install activeperl -y
+            #                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+            #                  choco install yasm -y
+            #                  choco install openssl -y
             - run:
                 name: Install rustup
                 environment:
@@ -150,6 +149,8 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
+                  $env:CARGO_NET_GIT_FETCH_WITH_CLI='true'
+            - run: cargo install --locked cargo-deny
             - restore_cache:
                 keys:
                   - rust-target-v1-windows-{{ checksum "Cargo.lock" }}
@@ -206,13 +207,21 @@ jobs:
             - run:
                 name: wait for federation demo to start
                 command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
-
-      - run:
-          command: >
-            cargo xtask test
+      - when:
+          condition:
+            not:
+              # TODO [igni]: figure out how to make this work on windows
+              equal: [*rust_windows_executor, << parameters.platform >>]
+          steps:
+            - run:
+                command: >
+                  cargo xtask check
       - run:
           command: >
             cargo xtask lint
+      - run:
+          command: >
+            cargo xtask test
 
   build_release:
     parameters:
@@ -220,9 +229,6 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     environment:
-      # Note: This is a no-op at the second, but bear with me on this.  If this
-      # comment is not removed by 2021-06-30 remove it along with the next line.
-      # renovate: datasource=github-tags depName=nodejs/node versioning=node
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
       RELEASE_BIN: router
@@ -236,7 +242,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
@@ -280,7 +286,7 @@ jobs:
                   --output artifacts/
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -316,7 +322,7 @@ jobs:
                   cargo xtask package --output artifacts/
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install rustup
@@ -409,7 +415,7 @@ jobs:
 workflows:
   build:
     jobs:
-      - build_test_lint:
+      - build_test_lint_check:
           matrix:
             parameters:
               platform: [rust_macos, rust_windows, rust_linux]
@@ -423,11 +429,11 @@ workflows:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
       - publish_github_release:
           requires: [build_release]
           filters:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
