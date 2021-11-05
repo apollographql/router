@@ -3,6 +3,15 @@ const themeOptions = require("gatsby-theme-apollo-docs/theme-options");
 module.exports = {
   plugins: [
     {
+      resolve: "gatsby-transformer-remark",
+      options: {
+        plugins: [
+          "gatsby-remark-autolink-headers",
+          "gatsby-remark-check-links",
+        ],
+      },
+    },
+    {
       resolve: "gatsby-theme-apollo-docs",
       options: {
         ...themeOptions,
