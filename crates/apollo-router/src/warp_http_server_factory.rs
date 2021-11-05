@@ -9,6 +9,7 @@ use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -44,8 +45,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
     {
         Box::pin(async {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-            let (connection_shutdown_sender, connection_shutdown_receiver) =
-                tokio::sync::watch::channel(false);
             let listen_address = configuration.server.listen;
 
             let cors = configuration
@@ -83,6 +82,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let server = async move {
                 tokio::pin!(shutdown_receiver);
 
+                let connection_shutdown = Arc::new(Notify::new());
+
                 loop {
                     tokio::select! {
                         _ = &mut shutdown_receiver => {
@@ -90,8 +91,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         }
                         res = tcp_listener.accept() => {
                             let svc = svc.clone();
-                            let mut connection_shutdown_receiver =
-                                connection_shutdown_receiver.clone();
+                            let connection_shutdown = connection_shutdown.clone();
 
                             tokio::task::spawn(async move {
                                 // we unwrap the result of accept() here to avoid stopping
@@ -121,7 +121,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     // the shutdown receiver was triggered first,
                                     // so we tell the connection to do a graceful shutdown
                                     // on the next request, then we wait for it to finish
-                                    _ = connection_shutdown_receiver.changed() => {
+                                    _ = connection_shutdown.notified() => {
                                         let c = connection.as_mut();
                                         c.graceful_shutdown();
 
@@ -141,7 +141,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 // the shutdown receiver was triggered so we break out of
                 // the server loop, tell the currently active connections to stop
                 // then return the TCP listen socket
-                let _ = connection_shutdown_sender.send(true);
+                connection_shutdown.notify_waiters();
                 tcp_listener
             };
 
