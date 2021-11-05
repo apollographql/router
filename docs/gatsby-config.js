@@ -15,6 +15,7 @@ module.exports = {
           null: ["index", "configuration"],
           Quickstart: [
             "quickstart/helloworld",
+            "quickstart/build",
             "quickstart/docker",
             "quickstart/nodejs",
           ],
