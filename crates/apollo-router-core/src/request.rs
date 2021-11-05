@@ -65,6 +65,7 @@ impl Query {
                             .text()
                             .to_string();
                         let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
+                        let name = alias.unwrap_or(name);
 
                         if let Some(input_value) = input.remove(&name) {
                             if let Some(selection_set) = field.selection_set() {
@@ -77,7 +78,7 @@ impl Query {
                                             &mut output_object,
                                             fragments,
                                         );
-                                        output.insert(alias.unwrap_or(name), output_object.into());
+                                        output.insert(name, output_object.into());
                                     }
                                     Value::Array(input_array) => {
                                         let output_array = input_array
@@ -104,13 +105,10 @@ impl Query {
                                                 }
                                             })
                                             .collect::<Value>();
-                                        output.insert(alias.unwrap_or(name), output_array);
+                                        output.insert(name, output_array);
                                     }
                                     _ => {
-                                        output.insert(
-                                            alias.unwrap_or_else(|| name.clone()),
-                                            input_value,
-                                        );
+                                        output.insert(name.clone(), input_value);
                                         failfast_debug!(
                                             "Field is not an object nor an array of object: {}",
                                             name,
@@ -118,7 +116,7 @@ impl Query {
                                     }
                                 }
                             } else {
-                                output.insert(alias.unwrap_or(name), input_value);
+                                output.insert(name, input_value);
                             }
                         } else {
                             failfast_debug!("Missing field: {}", name);
@@ -320,6 +318,7 @@ mod tests {
                 foo
                 stuff{bar}
                 array{bar}
+                baz
                 alias:baz
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
@@ -331,8 +330,9 @@ mod tests {
                 "stuff": {"bar": "2"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
                 "baz": "7",
-                "baz_obj": {"bar": "8"},
-                "baz_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
+                "alias": "7",
+                "alias_obj": {"bar": "8"},
+                "alias_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
                 "other": "13",
             }})
             .build();
@@ -348,6 +348,7 @@ mod tests {
                     {"bar": "3"},
                     {"bar": "5"},
                 ],
+                "baz": "7",
                 "alias": "7",
                 "alias_obj": {
                     "bar": "8",

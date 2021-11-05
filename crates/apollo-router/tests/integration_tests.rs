@@ -47,7 +47,7 @@ macro_rules! assert_federated_response {
 #[test(tokio::test)]
 async fn basic_request() {
     assert_federated_response!(
-        r#"{ topProducts { name } }"#,
+        r#"{ topProducts { name name2:name } }"#,
         hashmap! {
             "products".to_string()=>1,
         },
