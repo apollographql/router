@@ -64,6 +64,7 @@ impl Query {
                             .expect("the node Name is not optional in the spec; qed")
                             .text()
                             .to_string();
+                        let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
 
                         if let Some(input_value) = input.remove(&name) {
                             if let Some(selection_set) = field.selection_set() {
@@ -76,7 +77,7 @@ impl Query {
                                             &mut output_object,
                                             fragments,
                                         );
-                                        output.insert(name, output_object.into());
+                                        output.insert(alias.unwrap_or(name), output_object.into());
                                     }
                                     Value::Array(input_array) => {
                                         let output_array = input_array
@@ -103,10 +104,10 @@ impl Query {
                                                 }
                                             })
                                             .collect::<Value>();
-                                        output.insert(name.clone(), output_array);
+                                        output.insert(alias.unwrap_or(name), output_array);
                                     }
                                     _ => {
-                                        output.insert(name.clone(), input_value);
+                                        output.insert(alias.unwrap_or(name.clone()), input_value);
                                         failfast_debug!(
                                             "Field is not an object nor an array of object: {}",
                                             name,
@@ -114,7 +115,7 @@ impl Query {
                                     }
                                 }
                             } else {
-                                output.insert(name, input_value);
+                                output.insert(alias.unwrap_or(name), input_value);
                             }
                         } else {
                             failfast_debug!("Missing field: {}", name);
@@ -178,7 +179,7 @@ impl Query {
         if !tree.errors().is_empty() {
             let errors = tree
                 .errors()
-                .into_iter()
+                .iter()
                 .map(|err| format!("{:?}", err))
                 .collect::<Vec<_>>();
             failfast_debug!("Parsing error(s): {}", errors.join(", "));
@@ -311,13 +312,14 @@ mod tests {
 
     #[test]
     fn reformat_response_data_field() {
-        let query = Query::from(r#"{foo stuff{bar} array{bar}}"#);
+        let query = Query::from(r#"{foo stuff{bar} array{bar} alias:baz}"#);
         let mut response = Response::builder()
             .data(json! {{
                 "foo": "1",
                 "stuff": {"bar": "2"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
                 "baz": "7",
+                "other": "8",
             }})
             .build();
         query.format_response(&mut response);
@@ -332,6 +334,7 @@ mod tests {
                     {"bar": "3"},
                     {"bar": "5"},
                 ],
+                "alias": "7",
             }},
         );
     }
