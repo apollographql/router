@@ -9,6 +9,7 @@ use mockall::{automock, predicate::*};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 
 /// Factory for creating the http server component.
 ///
@@ -20,7 +21,8 @@ pub(crate) trait HttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
-    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
+        listener: Option<TcpListener>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         F: graphql::Fetcher + 'static;
 }
@@ -33,48 +35,110 @@ pub(crate) trait HttpServerFactory {
 #[derivative(Debug)]
 pub(crate) struct HttpServerHandle {
     /// Sender to use to notify of shutdown
-    pub(crate) shutdown_sender: oneshot::Sender<()>,
+    shutdown_sender: oneshot::Sender<()>,
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    pub(crate) server_future:
-        Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
-    pub(crate) listen_address: SocketAddr,
+    listen_address: SocketAddr,
 }
 
 impl HttpServerHandle {
+    pub(crate) fn new(
+        shutdown_sender: oneshot::Sender<()>,
+        server_future: Pin<
+            Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>,
+        >,
+        listen_address: SocketAddr,
+    ) -> Self {
+        Self {
+            shutdown_sender,
+            server_future,
+            listen_address,
+        }
+    }
+
     pub(crate) async fn shutdown(self) -> Result<(), FederatedServerError> {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        self.server_future.await
+        self.server_future.await.map(|_| ())
+    }
+
+    pub(crate) async fn restart<Fetcher, ServerFactory>(
+        self,
+        factory: &ServerFactory,
+        graph: Arc<Fetcher>,
+        configuration: Arc<Configuration>,
+    ) -> Result<Self, FederatedServerError>
+    where
+        Fetcher: graphql::Fetcher + 'static,
+        ServerFactory: HttpServerFactory,
+    {
+        // we tell the currently running server to stop
+        if let Err(_err) = self.shutdown_sender.send(()) {
+            tracing::error!("Failed to notify http thread of shutdown")
+        };
+
+        // when the server receives the shutdown signal, it stops accepting new
+        // connections, and returns the TCP listener, to reuse it in the next server
+        // it is necessary to keep the queue of new TCP sockets associated with
+        // the listener instead of dropping them
+        let listener = self.server_future.await;
+        tracing::info!("previous server is closed");
+
+        // we keep the TCP listener if it is compatible with the new configuration
+        let listener = if self.listen_address != configuration.server.listen {
+            None
+        } else {
+            match listener {
+                Ok(listener) => Some(listener),
+                Err(e) => {
+                    tracing::error!("the previous listen socket failed: {}", e);
+                    None
+                }
+            }
+        };
+
+        let handle = factory
+            .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
+            .await?;
+        tracing::debug!("Restarted on {}", handle.listen_address());
+
+        Ok(handle)
+    }
+
+    pub(crate) fn listen_address(&self) -> SocketAddr {
+        self.listen_address
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::channel::oneshot;
     use std::str::FromStr;
     use test_env_log::test;
 
     #[test(tokio::test)]
     async fn sanity() {
-        let (shutdown_sender, shutdown_receiver) = futures::channel::oneshot::channel();
-        HttpServerHandle {
-            listen_address: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+        HttpServerHandle::new(
             shutdown_sender,
-            server_future: futures::future::ready(Ok(())).boxed(),
-        }
+            futures::future::ready(Ok(listener)).boxed(),
+            SocketAddr::from_str("127.0.0.1:0").unwrap(),
+        )
         .shutdown()
         .await
         .expect("Should have waited for shutdown");
 
         shutdown_receiver
-            .into_future()
             .await
             .expect("Should have been send notification to shutdown");
     }
