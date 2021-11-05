@@ -26,7 +26,7 @@ impl FederationDemoRunner {
         let mut command = Command::new(which::which("npm")?);
         command
             .current_dir(&self.path)
-            .args(["run", "start-services"])
+            .args(["run", "start"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let task = BackgroundTask::new(command)?;
