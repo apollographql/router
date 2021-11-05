@@ -52,18 +52,14 @@ confidence-threshold = 0.8
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-license-files = [{ path = "./LICENSE", hash = 0xaceadac9 }]
+version = "0.1.0-prealpha.3"
+license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-license-files = [{ path = "./LICENSE", hash = 0xaceadac9 }]
-
-[[licenses.clarify]]
-name = "xtask"
-expression = "LicenseRef-ELv2"
-license-files = [{ path = "./LICENSE", hash = 0xaceadac9 }]
-
+version = "0.1.0-prealpha.3"
+license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "router-bridge"
@@ -77,7 +73,7 @@ license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
 # Lint level for when multiple versions of the same crate are detected
 multiple-versions = "warn"
 # Lint level for when a crate version requirement is `*`
-wildcards = "allow"
+wildcards = "warn"
 # The graph highlighting used when creating dotgraphs for crates
 # with multiple versions
 # * lowest-version - The path to the lowest versioned duplicate is highlighted
@@ -91,14 +87,14 @@ highlight = "all"
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["apollographql"]
+github = ["open-telemetry", "apollographql"]
