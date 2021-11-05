@@ -167,7 +167,9 @@ async fn query_rust(
         &config,
     )));
 
-    let router = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
+    let extensions = config.load_wasm_modules().unwrap();
+
+    let router = ApolloRouter::new(Arc::new(planner), registry.clone(), schema, extensions);
 
     let stream = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,

@@ -3,6 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use apollo_router_core::prelude::graphql::extensions::Extensions;
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -33,6 +34,8 @@ pub enum ConfigurationError {
     MissingFeature(&'static str),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
+    /// Could not compile wasm module {0}
+    Wasm(anyhow::Error),
 }
 
 /// The configuration for the router.
@@ -59,6 +62,9 @@ pub struct Configuration {
     #[builder(default)]
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
+
+    #[builder(default)]
+    pub extensions: Option<HashMap<String, Extension>>,
 }
 
 fn default_listen() -> SocketAddr {
@@ -97,6 +103,26 @@ impl Configuration {
         } else {
             Err(errors)
         }
+    }
+
+    pub fn load_wasm_modules(&self) -> Result<Extensions, ConfigurationError> {
+        Extensions::new(
+            self.extensions
+                .clone()
+                .unwrap_or_else(HashMap::new)
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        apollo_router_core::extensions::Configuration {
+                            path: v.path.clone(),
+                            hook: v.hook.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        )
+        .map_err(ConfigurationError::Wasm)
     }
 }
 
@@ -281,6 +307,15 @@ impl TlsConfig {
 
         Ok(config)
     }
+}
+
+/// Configuration for a wasm extension
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
+pub struct Extension {
+    /// path to the wasm file
+    pub path: String,
+    /// where the wasm file hooks
+    pub hook: String,
 }
 
 #[cfg(test)]

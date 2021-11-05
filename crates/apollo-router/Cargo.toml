@@ -66,6 +66,7 @@ url = { version = "2.2.2", features = ["serde"] }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
+wasmtime = "0.31.0"
 
 [dev-dependencies]
 apollo-router = { path = ".", default-features = false, features = [

@@ -32,13 +32,16 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         schema: Arc<graphql::Schema>,
     ) -> future::BoxFuture<'static, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
-        tokio::task::spawn_blocking(|| {
+        let c = configuration.clone();
+        tokio::task::spawn_blocking(move || {
+            let extensions = c.load_wasm_modules().unwrap();
             ApolloRouter::new(
                 Arc::new(
                     graphql::RouterBridgeQueryPlanner::new(Arc::clone(&schema)).with_caching(),
                 ),
                 Arc::new(service_registry),
                 schema,
+                extensions,
             )
         })
         .map(|res| res.expect("ApolloRouter::new() is infallible; qed"))
