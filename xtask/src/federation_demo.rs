@@ -12,8 +12,8 @@ pub struct FederationDemoRunner {
 impl FederationDemoRunner {
     pub fn new() -> Result<Self> {
         let path = PKG_PROJECT_ROOT
-            .join("dockerfiles")
-            .join("federation-demo")
+            .join("examples")
+            .join("nodejs")
             .join("federation-demo");
 
         Ok(Self { path })
