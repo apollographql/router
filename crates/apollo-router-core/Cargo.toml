@@ -12,7 +12,7 @@ license-file = "./LICENSE"
 failfast = []
 
 [dependencies]
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "0e845624d8f93f9c2f228a456941f07007b60dfc" }
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "14bb84337a8bacd5cd27d7d7df429936f104b63b" }
 async-trait = "0.1.51"
 derivative = "2.2.0"
 displaydoc = "0.2"

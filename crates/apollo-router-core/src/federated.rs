@@ -110,7 +110,7 @@ impl Fetcher for FederatedGraph {
                 let plan = {
                     match query_planner
                         .get(
-                            request.query.to_owned(),
+                            request.query.as_str().to_owned(),
                             request.operation_name.to_owned(),
                             Default::default(),
                         )
@@ -165,7 +165,7 @@ impl Fetcher for FederatedGraph {
                             Arc::clone(&response),
                             &root,
                             &plan,
-                            request,
+                            request.clone(),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
                         )
@@ -173,9 +173,14 @@ impl Fetcher for FederatedGraph {
                         .await;
 
                         // TODO: this is not great but there is no other way
-                        Arc::try_unwrap(response)
+                        let mut response = Arc::try_unwrap(response)
                             .expect("todo: how to prove?")
-                            .into_inner()
+                            .into_inner();
+
+                        tracing::debug_span!("format_response")
+                            .in_scope(|| request.query.format_response(&mut response));
+
+                        response
                     }
                     .with_current_subscriber(),
                 )
@@ -243,11 +248,8 @@ fn execute<'a>(
                             serde_json::to_string_pretty(&response.lock().await.data).unwrap();
                         tracing::trace!("New data:\n{}", received,);
                     }
-                    #[cfg_attr(feature = "failfast", allow(unreachable_code))]
                     Err(err) => {
-                        #[cfg(feature = "failfast")]
-                        panic!("failfast: {}", err);
-                        tracing::error!("Fetch error: {}", err);
+                        failfast_error!("Fetch error: {}", err);
                         response
                             .lock()
                             .await
