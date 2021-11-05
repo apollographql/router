@@ -20,7 +20,7 @@ futures = "0.3.17"
 include_dir = "0.6.2"
 once_cell = "1.8.0"
 parking_lot = "0.11.2"
-router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "5f7184829607024343fb8b8ad0ac4e122407cd3a" }
+router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "5ebbc140b5e1c86a7f68f61fec96ab261f420d68" }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
 serde_json = { version = "1.0.68", features = ["preserve_order"] }
 thiserror = "1.0.30"
