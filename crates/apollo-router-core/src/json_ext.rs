@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn eq_and_oredered() {
+    fn eq_and_ordered() {
         // test not objects
         assert!(json!([1, 2, 3]).eq_and_ordered(&json!([1, 2, 3])));
         assert!(!json!([1, 3, 2]).eq_and_ordered(&json!([1, 2, 3])));
@@ -512,7 +512,7 @@ mod tests {
         assert!(!json!({"bar":2,"foo":1}).eq_and_ordered(&json!({"foo":1,"bar":2})));
 
         // test objects nested
-        assert!(json!({"baz":{"bar":1,"foo":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
