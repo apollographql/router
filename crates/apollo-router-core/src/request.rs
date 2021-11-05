@@ -315,14 +315,25 @@ mod tests {
 
     #[test]
     fn reformat_response_data_field() {
-        let query = Query::from(r#"{foo stuff{bar} array{bar} alias:baz}"#);
+        let query = Query::from(
+            r#"{
+                foo
+                stuff{bar}
+                array{bar}
+                alias:baz
+                alias_obj:baz_obj{bar}
+                alias_array:baz_array{bar}
+            }"#,
+        );
         let mut response = Response::builder()
             .data(json! {{
                 "foo": "1",
                 "stuff": {"bar": "2"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
                 "baz": "7",
-                "other": "8",
+                "baz_obj": {"bar": "8"},
+                "baz_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
+                "other": "13",
             }})
             .build();
         query.format_response(&mut response);
@@ -338,6 +349,13 @@ mod tests {
                     {"bar": "5"},
                 ],
                 "alias": "7",
+                "alias_obj": {
+                    "bar": "8",
+                },
+                "alias_array": [
+                    {"bar": "9"},
+                    {"bar": "11"},
+                ],
             }},
         );
     }
