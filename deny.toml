@@ -52,17 +52,19 @@ confidence-threshold = 0.8
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
+license-files = [{ path = "crates/apollo-router/LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
+license-files = [
+    { path = "crates/apollo-router-core/LICENSE", hash = 0xaceadac9 },
+]
 
 [[licenses.clarify]]
 name = "xtask"
 expression = "LicenseRef-ELv2"
-license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
+license-files = [{ path = "xtask/LICENSE", hash = 0xaceadac9 }]
 
 
 [[licenses.clarify]]
