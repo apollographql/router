@@ -107,7 +107,10 @@ impl Query {
                                         output.insert(alias.unwrap_or(name), output_array);
                                     }
                                     _ => {
-                                        output.insert(alias.unwrap_or(name.clone()), input_value);
+                                        output.insert(
+                                            alias.unwrap_or_else(|| name.clone()),
+                                            input_value,
+                                        );
                                         failfast_debug!(
                                             "Field is not an object nor an array of object: {}",
                                             name,
