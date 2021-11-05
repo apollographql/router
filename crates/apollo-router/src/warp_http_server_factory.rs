@@ -3,11 +3,13 @@ use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
-use futures::channel::oneshot;
-use futures::prelude::*;
+use futures::{channel::oneshot, prelude::*};
+use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::net::TcpListener;
+use tokio::sync::Notify;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -36,12 +38,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
-    ) -> Pin<Box<dyn Future<Output = HttpServerHandle> + Send>>
+        listener: Option<TcpListener>,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         F: graphql::Fetcher + 'static,
     {
-        let f = async {
-            let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        Box::pin(async {
+            let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen;
 
             let cors = configuration
@@ -56,24 +59,103 @@ impl HttpServerFactory for WarpHttpServerFactory {
                     .or(post_graphql_request(graph, configuration))
                     .with(cors);
 
-            let (actual_listen_address, server) =
-                warp::serve(routes).bind_with_graceful_shutdown(listen_address, async {
-                    shutdown_receiver.await.ok();
-                });
+            // generate a hyper service from warp routes
+            let svc = warp::service(routes);
+
+            // if we received a TCP listener, reuse it, otherwise create a new one
+            let tcp_listener = if let Some(listener) = listener {
+                listener
+            } else {
+                TcpListener::bind(listen_address)
+                    .await
+                    .map_err(FederatedServerError::ServerCreationError)?
+            };
+            let actual_listen_address = tcp_listener
+                .local_addr()
+                .map_err(FederatedServerError::ServerCreationError)?;
+
+            // this server reproduces most of hyper::server::Server's behaviour
+            // we select over the stop_listen_receiver channel and the listener's
+            // accept future. If the channel received something or the sender
+            // was dropped, we stop using the listener and send it back through
+            // listener_receiver
+            let server = async move {
+                tokio::pin!(shutdown_receiver);
+
+                let connection_shutdown = Arc::new(Notify::new());
+
+                loop {
+                    tokio::select! {
+                        _ = &mut shutdown_receiver => {
+                            break;
+                        }
+                        res = tcp_listener.accept() => {
+                            let svc = svc.clone();
+                            let connection_shutdown = connection_shutdown.clone();
+
+                            tokio::task::spawn(async move {
+                                // we unwrap the result of accept() here to avoid stopping
+                                // the entire server on an issue with that socket
+                                // Unfortunately, the error here could also be linked
+                                // to the listen socket (no RAM for kernel buffers, no
+                                // more file descriptors, network interface is down...)
+                                // ideally we'd want to handle the errors in the server task
+                                // with varying behaviours
+                                let (tcp_stream, _) = res.unwrap();
+
+                                let connection = Http::new()
+                                    .http1_keep_alive(true)
+                                    .serve_connection(tcp_stream, svc);
+
+                                tokio::pin!(connection);
+                                tokio::select! {
+                                    // the connection finished first
+                                    _res = &mut connection => {
+                                        /*if let Err(http_err) = res {
+                                            tracing::error!(
+                                                "Error while serving HTTP connection: {}",
+                                                http_err
+                                            );
+                                        }*/
+                                    }
+                                    // the shutdown receiver was triggered first,
+                                    // so we tell the connection to do a graceful shutdown
+                                    // on the next request, then we wait for it to finish
+                                    _ = connection_shutdown.notified() => {
+                                        let c = connection.as_mut();
+                                        c.graceful_shutdown();
+
+                                        if let Err(_http_err) = connection.await {
+                                            /*tracing::error!(
+                                                "Error while serving HTTP connection: {}",
+                                                http_err
+                                            );*/
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // the shutdown receiver was triggered so we break out of
+                // the server loop, tell the currently active connections to stop
+                // then return the TCP listen socket
+                connection_shutdown.notify_waiters();
+                tcp_listener
+            };
 
             // Spawn the server into a runtime
             let server_future = tokio::task::spawn(server)
                 .map_err(|_| FederatedServerError::HttpServerLifecycleError)
                 .boxed();
 
-            HttpServerHandle {
+            Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                listen_address: actual_listen_address,
-            }
-        };
-
-        Box::pin(f)
+                actual_listen_address,
+            ))
+        })
     }
 }
 
@@ -339,8 +421,9 @@ mod tests {
                             .subgraphs(Default::default())
                             .build(),
                     ),
+                    None,
                 )
-                .await;
+                .await?;
             let client = reqwest::Client::builder()
                 .redirect(Policy::none())
                 .build()
@@ -354,8 +437,8 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address),
-            format!("http://{}/graphql", server.listen_address),
+            format!("http://{}/", server.listen_address()),
+            format!("http://{}/graphql", server.listen_address()),
         ] {
             // Regular studio redirect
             let response = client
@@ -375,7 +458,7 @@ mod tests {
                 LOCATION,
                 vec![format!(
                     "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-                    server.listen_address
+                    server.listen_address()
                 )],
                 "Incorrect redirect url"
             );
@@ -403,7 +486,7 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address))
+            .post(format!("http://{}/graphql", server.listen_address()))
             .body("Garbage")
             .send()
             .await
@@ -427,7 +510,7 @@ mod tests {
                     future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
                 })
         });
-        let url = format!("http://{}/graphql", server.listen_address);
+        let url = format!("http://{}/graphql", server.listen_address());
         // Post query
         let response = client
             .post(url.as_str())
@@ -477,7 +560,7 @@ mod tests {
                 })
         });
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address))
+            .post(format!("http://{}/graphql", server.listen_address()))
             .body(
                 json!(
                 {
@@ -509,8 +592,8 @@ mod tests {
         let (server, client) = init!("127.0.0.1:0", fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address),
-            format!("http://{}/graphql", server.listen_address),
+            format!("http://{}/", server.listen_address()),
+            format!("http://{}/graphql", server.listen_address()),
         ] {
             let response = client
                 .request(Method::OPTIONS, &url)

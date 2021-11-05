@@ -79,6 +79,7 @@ dependencies = [
  "futures",
  "hotwatch",
  "httpmock",
+ "hyper",
  "insta",
  "maplit",
  "mockall",
