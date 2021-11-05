@@ -3,76 +3,103 @@ title: Installing and configuring the Apollo Router
 sidebar_title: Setup
 ---
 
-## Setup
+## Installation
 
-First, let's install the router:
+To install the Apollo Router, you first need to install **Cargo**, the package manager for Rust.
 
-```
+[Install Cargo.](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+
+After you install Cargo, you can install the Apollo Router with the following command:
+
+```bash
 cargo install apollo-router
 ```
 
 ## Usage
 
-Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql`
-to be supplied. These are either located in the current directory or explicitly
-specified via flag, either by an absolute path, or a path relative to the current
-directory.
+You run the Apollo Router with the following command:
 
-```
-OPTIONS:
-    -c, --config <configuration-path>    Configuration file location [env:
-                                         CONFIGURATION_PATH=]
-    -s, --schema <schema-path>           Schema location [env: SCHEMA_PATH=]
+```bash
+apollo-router --config configuration.yaml --schema supergraph.graphql
 ```
 
-### Configuration file
+Options are described below.
 
-The configuration file is in YAML format. Here is a reduced list of options, see [configuration](#configuration) for the complete list:
+### Options
 
-```yaml
-# Configuration options pertaining to the http server component
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-# Mapping of name to subgraph that the router may contact
-subgraphs:
-  # Configuration for a subgraph
-  accounts:
-    # url of the subgraph
-    routing_url: http://localhost:4001/graphql
-  products:
-    routing_url: http://localhost:4003/graphql
-# OpenTelemetry configuration. Choose either jaeger or otlp
-opentelemetry:
-  # Configuration to send traces and metrics to a Jaeger service
-  jaeger:
-```
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
 
-### Generating the supergraph
+<tbody>
 
-The `schema` argument is the supergraph that will be exposed by the router, it is not created automatically by the router from the subgraphs.
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+</td>
+<td>
+
+The absolute or relative path to the router's [YAML configuration file](#configuration-file).
+
+**Required** unless you provide this value via the `CONFIGURATION_PATH` environment variable.
+
+</td>
+</tr>
+
+
+<tr class="required">
+<td>
+
+##### `-s` / `--schema`
+
+</td>
+<td>
+
+The absolute or relative path to the router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
 
-> 🚧 For now, the router requires the supergraph to be generated separately. In the future, it might be possible to start a router with the right schema directly from Rover
+**Required** unless you provide this value via the `SCHEMA_PATH` environment variable.
 
-## Launching the router
+</td>
+</tr>
 
-Once the configuration file and supergraph are written, start the router:
+</tbody>
+</table>
 
+### Required configuration
+
+The Apollo Router requires a YAML configuration file. Here's an example file with the minimum recommended configuration:
+
+```yaml:title=configuration.yaml
+# Configuration of the router's HTTP server
+server:
+  # The socket address and port to listen on
+  # (Defaults to 127.0.0.1:4000)
+  listen: 127.0.0.1:4000
+# Names and URLs of all subgraphs
+subgraphs:
+  # Defines a subgraph named "accounts"
+  accounts:
+    # The URL of the accounts subgraph's GraphQL endpoint
+    routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
+  products:
+    routing_url: http://localhost:4003/graphql
 ```
-$ apollo-router -c configuration.yaml --schema supergraph.graphql
-Oct 20 12:11:05.128  INFO router: Starting Apollo Federation
-Oct 20 12:11:05.581  INFO router: Listening on http://127.0.0.1:4000 🚀
-```
 
-## Configuration
+### All configuration options
 
-The configuration file is in YAML format, with the following options:
+All supported Apollo Router configuration options are listed below:
 
 ```yaml
-# Configuration options pertaining to the http server component
+# Configuration of the router's HTTP server
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
@@ -81,9 +108,9 @@ server:
   # Cross origin request headers
   cors:
     # Set to false to disallow any origin and rely exclusively on `origins`
-    # defaults to true
+    # Defaults to true
     allow_any_origin: true
-    # list of accepted origins
+    # List of accepted origins
     origins:
       - https://studio.apollographql.com
     # Set to true to add the `Access-Control-Allow-Credentials` header
@@ -97,12 +124,13 @@ server:
     # Which response headers should be made available to scripts running in the browser,
     # in response to a cross-origin request.
     expose_headers:
-# Mapping of name to subgraph that the router may contact
+# Names and URLs of all subgraphs
 subgraphs:
-  # Configuration for a subgraph
+  # Defines a subgraph named "accounts"
   accounts:
-    # url of the subgraph
+    # The URL of the accounts subgraph's GraphQL endpoint
     routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
   products:
     routing_url: http://localhost:4003/graphql
 # OpenTelemetry configuration. Choose either jaeger or otlp
