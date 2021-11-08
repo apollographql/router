@@ -21,8 +21,9 @@ module.exports = {
         description: "A guide to the Router",
         githubRepo: "apollographql/router",
         sidebarCategories: {
-          null: ["index", "configuration"],
+          null: ["index"],
           Quickstart: ["quickstart/hosted", "quickstart/build"],
+          Settings: ["settings/configuration", "settings/troubleshoot"],
         },
       },
     },
