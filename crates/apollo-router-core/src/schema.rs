@@ -117,11 +117,9 @@ impl std::str::FromStr for Schema {
 
                                                     let arg_value =
                                                         argument.value().and_then(|s| {
-                                                            s.to_string()
-                                                                .trim_end()
-                                                                .strip_prefix('"')
-                                                                .and_then(|s| s.strip_suffix('"'))
-                                                                .map(|s| s.to_owned())
+                                                            let mut without_quotes = s.to_string();
+                                                            without_quotes.retain(|c| c != '"');
+                                                            Some(without_quotes.trim().to_string())
                                                         });
 
                                                     match arg_name.as_deref() {
@@ -131,7 +129,9 @@ impl std::str::FromStr for Schema {
                                                     };
                                                 }
                                             }
-
+                                            if directive.clone().to_string().contains("inventory") {
+                                                dbg!(&name, &url);
+                                            }
                                             if let (Some(name), Some(url)) = (name, url) {
                                                 // FIXME: return an error on name collisions
                                                 subgraphs.insert(name, url);
@@ -228,8 +228,10 @@ mod tests {
 
       enum join__Graph {
         ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-        INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004/graphql")
-        PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
+        INVENTORY
+          @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+        PRODUCTS
+        @join__graph(name: "products" url: "http://localhost:4003/graphql")
         REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
       }"#
         .parse()
