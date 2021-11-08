@@ -26,7 +26,7 @@ struct Opt {
 
     /// Configuration location relative to the project directory.
     #[structopt(short, long = "config", parse(from_os_str), env)]
-    configuration_path: PathBuf,
+    configuration_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
@@ -83,17 +83,23 @@ async fn main() -> Result<()> {
 
     let current_directory = std::env::current_dir()?;
 
-    let configuration_path = if opt.configuration_path.is_relative() {
-        current_directory.join(opt.configuration_path)
-    } else {
-        opt.configuration_path
-    };
+    let configuration = opt
+        .configuration_path
+        .as_ref()
+        .map(|path| {
+            let path = if path.is_relative() {
+                current_directory.join(path)
+            } else {
+                path.to_path_buf()
+            };
 
-    let configuration = ConfigurationKind::File {
-        path: configuration_path,
-        watch: opt.watch,
-        delay: None,
-    };
+            ConfigurationKind::File {
+                path,
+                watch: opt.watch,
+                delay: None,
+            }
+        })
+        .unwrap_or(ConfigurationKind::Default);
 
     let supergraph_path = if opt.supergraph_path.is_relative() {
         current_directory.join(opt.supergraph_path)
