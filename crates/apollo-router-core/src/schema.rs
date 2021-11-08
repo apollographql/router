@@ -115,12 +115,11 @@ impl std::str::FromStr for Schema {
                                                         .as_ref()
                                                         .map(|id| id.text().to_owned());
 
-                                                    let arg_value =
-                                                        argument.value().and_then(|s| {
-                                                            let mut without_quotes = s.to_string();
-                                                            without_quotes.retain(|c| c != '"');
-                                                            Some(without_quotes.trim().to_string())
-                                                        });
+                                                    let arg_value = argument.value().map(|s| {
+                                                        let mut without_quotes = s.to_string();
+                                                        without_quotes.retain(|c| c != '"');
+                                                        without_quotes.trim().to_string()
+                                                    });
 
                                                     match arg_name.as_deref() {
                                                         Some("name") => name = arg_value,
@@ -128,9 +127,6 @@ impl std::str::FromStr for Schema {
                                                         _ => {}
                                                     };
                                                 }
-                                            }
-                                            if directive.clone().to_string().contains("inventory") {
-                                                dbg!(&name, &url);
                                             }
                                             if let (Some(name), Some(url)) = (name, url) {
                                                 // FIXME: return an error on name collisions
