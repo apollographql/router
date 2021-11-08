@@ -100,9 +100,7 @@ async fn main() -> Result<()> {
                 delay: None,
             }
         })
-        .unwrap_or(ConfigurationKind::Instance(
-            Configuration::builder().build(),
-        ));
+        .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build()));
 
     let supergraph_path = if opt.supergraph_path.is_relative() {
         current_directory.join(opt.supergraph_path)
