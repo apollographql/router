@@ -1,6 +1,7 @@
 //! Main entry point for CLI command to start server.
 
 use anyhow::{Context, Result};
+use apollo_router::configuration::Configuration;
 use apollo_router::GLOBAL_ENV_FILTER;
 use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
@@ -99,7 +100,9 @@ async fn main() -> Result<()> {
                 delay: None,
             }
         })
-        .unwrap_or(ConfigurationKind::Default);
+        .unwrap_or(ConfigurationKind::Instance(
+            Configuration::builder().build(),
+        ));
 
     let supergraph_path = if opt.supergraph_path.is_relative() {
         current_directory.join(opt.supergraph_path)

@@ -157,7 +157,6 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 #[derive(From, Display, Derivative)]
 #[derivative(Debug)]
 pub enum ConfigurationKind {
-    Default,
     /// A static configuration.
     #[display(fmt = "Instance")]
     Instance(Configuration),
@@ -185,10 +184,6 @@ impl ConfigurationKind {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
-            ConfigurationKind::Default => stream::once(future::ready(UpdateConfiguration(
-                Configuration::builder().build(),
-            )))
-            .boxed(),
             ConfigurationKind::Instance(instance) => {
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
