@@ -177,6 +177,7 @@ impl Fetcher for FederatedGraph {
                             .expect("todo: how to prove?")
                             .into_inner();
 
+                        #[cfg(feature = "post-processing")]
                         tracing::debug_span!("format_response")
                             .in_scope(|| request.query.format_response(&mut response));
 
