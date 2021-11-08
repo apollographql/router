@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-prealpha.3"
+version = "0.1.0-prealpha.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2018"
 license-file = "./LICENSE"
@@ -12,7 +12,7 @@ license-file = "./LICENSE"
 failfast = []
 
 [dependencies]
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "0e845624d8f93f9c2f228a456941f07007b60dfc" }
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "14bb84337a8bacd5cd27d7d7df429936f104b63b" }
 async-trait = "0.1.51"
 derivative = "2.2.0"
 displaydoc = "0.2"
@@ -22,7 +22,7 @@ once_cell = "1.8.0"
 parking_lot = "0.11.2"
 router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "1ffecef9ef52f6dc127939cdc375f0465774f093" }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
-serde_json = { version = "1.0.68", features = ["preserve_order"] }
+serde_json = { version = "1.0.69", features = ["preserve_order"] }
 thiserror = "1.0.30"
 tokio = { version = "1.13.0", features = ["rt"] }
 tracing = "0.1.29"

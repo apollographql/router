@@ -26,6 +26,11 @@ pub trait ValueExt {
     #[track_caller]
     fn deep_merge(&mut self, other: &Self);
 
+    /// Returns `true` if the values are equal and the objects are ordered the same.
+    ///
+    /// **Note:** this is recursive.
+    fn eq_and_ordered(&self, other: &Self) -> bool;
+
     /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the
     /// values in `self`.
     #[track_caller]
@@ -142,6 +147,46 @@ impl ValueExt for Value {
             (a, b) => {
                 *a = b.to_owned();
             }
+        }
+    }
+
+    fn eq_and_ordered(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Object(a), Value::Object(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some((field_a, value_a)), Some((field_b, value_b)))
+                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (Value::Array(a), Value::Array(b)) => {
+                let mut it_a = a.iter();
+                let mut it_b = b.iter();
+
+                loop {
+                    match (it_a.next(), it_b.next()) {
+                        (Some(_), None) | (None, Some(_)) => break false,
+                        (None, None) => break true,
+                        (Some(value_a), Some(value_b))
+                            if ValueExt::eq_and_ordered(value_a, value_b) =>
+                        {
+                            continue
+                        }
+                        (Some(_), Some(_)) => break false,
+                    }
+                }
+            }
+            (a, b) => a == b,
         }
     }
 
@@ -451,5 +496,24 @@ mod tests {
             json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
             json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
         );
+    }
+
+    #[test]
+    fn eq_and_ordered() {
+        // test not objects
+        assert!(json!([1, 2, 3]).eq_and_ordered(&json!([1, 2, 3])));
+        assert!(!json!([1, 3, 2]).eq_and_ordered(&json!([1, 2, 3])));
+
+        // test objects not nested
+        assert!(json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":2})));
+        assert!(!json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":3})));
+        assert!(!json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":2,"baz":3})));
+        assert!(!json!({"foo":1,"bar":2,"baz":3}).eq_and_ordered(&json!({"foo":1,"bar":2})));
+        assert!(!json!({"bar":2,"foo":1}).eq_and_ordered(&json!({"foo":1,"bar":2})));
+
+        // test objects nested
+        assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
 }

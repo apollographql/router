@@ -1,3 +1,27 @@
+#![cfg_attr(feature = "failfast", allow(unreachable_code))]
+
+macro_rules! failfast_debug {
+    ($($tokens:tt)+) => {{
+        tracing::debug!($($tokens)+);
+        #[cfg(feature = "failfast")]
+        panic!(
+            "failfast triggered. \
+            Please remove the feature failfast if you don't want to see these panics"
+        );
+    }};
+}
+
+macro_rules! failfast_error {
+    ($($tokens:tt)+) => {{
+        tracing::error!($($tokens)+);
+        #[cfg(feature = "failfast")]
+        panic!(
+            "failfast triggered. \
+            Please remove the feature failfast if you don't want to see these panics"
+        );
+    }};
+}
+
 mod error;
 mod federated;
 mod json_ext;

@@ -66,6 +66,9 @@ pub enum FederatedServerError {
 
     /// Could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
+
+    /// Could not create the HTTP server: {0}
+    ServerCreationError(std::io::Error),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.

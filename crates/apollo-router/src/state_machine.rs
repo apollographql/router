@@ -62,7 +62,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address,
+                address: server_handle.listen_address(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -173,6 +173,7 @@ where
                             }
                         }
                         Ok(()) => {
+                            tracing::info!("Reloading schema");
                             let configuration = Arc::new(new_configuration);
 
                             let schema = Arc::new(new_schema);
@@ -182,11 +183,21 @@ where
                                     .await,
                             );
 
-                            Running {
-                                configuration,
-                                schema,
-                                graph,
-                                server_handle,
+                            match server_handle
+                                .restart(
+                                    &self.http_server_factory,
+                                    Arc::clone(&graph),
+                                    Arc::clone(&configuration),
+                                )
+                                .await
+                            {
+                                Ok(server_handle) => Running {
+                                    configuration,
+                                    schema,
+                                    graph,
+                                    server_handle,
+                                },
+                                Err(err) => Errored(err),
                             }
                         }
                     }
@@ -202,7 +213,7 @@ where
                     },
                     UpdateConfiguration(mut new_configuration),
                 ) => {
-                    tracing::debug!("Reloading configuration");
+                    tracing::info!("Reloading configuration");
 
                     match new_configuration.load_subgraphs(schema.as_ref()) {
                         Err(e) => {
@@ -220,27 +231,27 @@ where
                         }
                         Ok(()) => {
                             let configuration = Arc::new(new_configuration);
-                            let server_handle =
-                                if server_handle.listen_address != configuration.server.listen {
-                                    tracing::debug!("Restarting http");
-                                    if let Err(_err) = server_handle.shutdown().await {
-                                        tracing::error!("Failed to notify shutdown")
-                                    }
-                                    let new_handle = self
-                                        .http_server_factory
-                                        .create(Arc::clone(&graph), Arc::clone(&configuration))
-                                        .await;
-                                    tracing::debug!("Restarted on {}", new_handle.listen_address);
-                                    new_handle
-                                } else {
-                                    server_handle
-                                };
+                            let graph = Arc::new(
+                                self.graph_factory
+                                    .create(&configuration, Arc::clone(&schema))
+                                    .await,
+                            );
 
-                            Running {
-                                configuration,
-                                schema,
-                                graph,
-                                server_handle,
+                            match server_handle
+                                .restart(
+                                    &self.http_server_factory,
+                                    Arc::clone(&graph),
+                                    Arc::clone(&configuration),
+                                )
+                                .await
+                            {
+                                Ok(server_handle) => Running {
+                                    configuration,
+                                    schema,
+                                    graph,
+                                    server_handle,
+                                },
+                                Err(err) => Errored(err),
                             }
                         }
                     }
@@ -320,16 +331,25 @@ where
                     );
                     let configuration = Arc::new(configuration);
 
-                    let server_handle = self
+                    match self
                         .http_server_factory
-                        .create(Arc::clone(&graph), Arc::clone(&configuration))
-                        .await;
-                    tracing::debug!("Started on {}", server_handle.listen_address);
-                    Running {
-                        configuration,
-                        schema,
-                        graph,
-                        server_handle,
+                        .create(Arc::clone(&graph), Arc::clone(&configuration), None)
+                        .await
+                    {
+                        Ok(server_handle) => {
+                            tracing::debug!("Started on {}", server_handle.listen_address());
+                            Running {
+                                configuration,
+                                schema,
+                                graph,
+                                server_handle,
+                            }
+                        }
+
+                        Err(err) => {
+                            tracing::error!("Cannot start the router: {}", err);
+                            Errored(err)
+                        }
                     }
                 }
             }
@@ -353,6 +373,7 @@ mod tests {
     use std::pin::Pin;
     use std::str::FromStr;
     use test_env_log::test;
+    use tokio::net::TcpListener;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -438,7 +459,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_reload_schema() {
         let graph_factory = create_mock_graph_factory(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let schema = include_str!("testdata/supergraph.graphql");
 
         assert!(matches!(
@@ -471,12 +492,12 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().len(), 2);
     }
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let graph_factory = create_mock_graph_factory(1);
+        let graph_factory = create_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -666,16 +687,26 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<MockMyFetcher>, configuration: Arc<Configuration>| {
-                    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+                move |_: Arc<MockMyFetcher>,
+                      configuration: Arc<Configuration>,
+                      listener: Option<TcpListener>| {
+                    let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone.lock().push(shutdown_receiver);
 
+                    let server = async move {
+                        Ok(if let Some(l) = listener {
+                            l
+                        } else {
+                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                        })
+                    };
+
                     Box::pin(async move {
-                        HttpServerHandle {
+                        Ok(HttpServerHandle::new(
                             shutdown_sender,
-                            server_future: future::ready(Ok(())).boxed(),
-                            listen_address: configuration.server.listen,
-                        }
+                            Box::pin(server),
+                            configuration.server.listen,
+                        ))
                     })
                 },
             );
