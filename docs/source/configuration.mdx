@@ -1,24 +1,116 @@
 ---
-title: Configuring the Router
-sidebar_title: Configuration
-description: Configuring the router to serve your graph
+title: Installing and configuring the Apollo Router
+sidebar_title: Setup
 ---
 
-The configuration file is in YAML format, with the following options:
+## Installation
+
+To install the Apollo Router, you first need to install **Cargo**, the package manager for Rust.
+
+[Install Cargo.](https://doc.rust-lang.org/cargo/getting-started/installation.html)
+
+After you install Cargo, you can install the Apollo Router with the following command:
+
+```bash
+cargo install apollo-router
+```
+
+## Usage
+
+You run the Apollo Router with the following command:
+
+```bash
+apollo-router --config configuration.yaml --schema supergraph.graphql
+```
+
+Options are described below.
+
+### Options
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+</td>
+<td>
+
+The absolute or relative path to the router's [YAML configuration file](#required-configuration).
+
+**Required** unless you provide this value via the `CONFIGURATION_PATH` environment variable.
+
+</td>
+</tr>
+
+
+<tr class="required">
+<td>
+
+##### `-s` / `--schema`
+
+</td>
+<td>
+
+The absolute or relative path to the router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
+
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
+
+**Required** unless you provide this value via the `SCHEMA_PATH` environment variable.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+### Required configuration
+
+The Apollo Router requires a YAML configuration file. Here's an example file with the minimum recommended configuration:
+
+```yaml:title=configuration.yaml
+# Configuration of the router's HTTP server
+server:
+  # The socket address and port to listen on
+  # (Defaults to 127.0.0.1:4000)
+  listen: 127.0.0.1:4000
+# Names and URLs of all subgraphs
+subgraphs:
+  # Defines a subgraph named "accounts"
+  accounts:
+    # The URL of the accounts subgraph's GraphQL endpoint
+    routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
+  products:
+    routing_url: http://localhost:4003/graphql
+```
+
+### All configuration options
+
+All supported Apollo Router configuration options are listed below:
 
 ```yaml
-# Configuration options pertaining to the http server component
+# Configuration of the router's HTTP server
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4100 
+  listen: 127.0.0.1:4000
 
   # Cross origin request headers
   cors:
     # Set to false to disallow any origin and rely exclusively on `origins`
-    # defaults to true
+    # Defaults to true
     allow_any_origin: true
-    # list of accepted origins
+    # List of accepted origins
     origins:
       - https://studio.apollographql.com
     # Set to true to add the `Access-Control-Allow-Credentials` header
@@ -32,12 +124,13 @@ server:
     # Which response headers should be made available to scripts running in the browser,
     # in response to a cross-origin request.
     expose_headers:
-# Mapping of name to subgraph that the router may contact
+# Names and URLs of all subgraphs
 subgraphs:
-  # Configuration for a subgraph
+  # Defines a subgraph named "accounts"
   accounts:
-    # url of the subgraph
+    # The URL of the accounts subgraph's GraphQL endpoint
     routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
   products:
     routing_url: http://localhost:4003/graphql
 # OpenTelemetry configuration. Choose either jaeger or otlp
@@ -45,7 +138,7 @@ opentelemetry:
   # Configuration to send traces and metrics to a Jaeger service
   jaeger:
     # optional url of the jaeger collector
-    collector_endpoint: 
+    collector_endpoint:
     # name of the service used in traces
     # defaults to router
     service_name: "router"
@@ -67,9 +160,9 @@ opentelemetry:
           # timmeout in seconds
           timeout: 60
           metadata:
-          - foo: bar
-          - foo: baz
-          - bar: baz
+            - foo: bar
+            - foo: baz
+            - bar: baz
       trace_config:
         sampler:
           ParentBased:

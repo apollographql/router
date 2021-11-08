@@ -1,0 +1,57 @@
+---
+title: Local setup
+sidebar_title: Local setup
+description: Build and run the Apollo router against a cloud based example.
+---
+
+In this tutorial we will have a look at how to clone the router repository and build it from the sources.
+
+If you are looking for an example where you can set up the subservices locally, have a look at the [🐳 Docker based example](docker). If you would don't want to install docker locally, or want to edit the subraphs nodejs code, have a look at the the [Nodejs based example](nodejs).
+
+### Prerequisites
+
+If you would like to compile the binary yourself, you will need:
+
+- Git: Github provides a tutorial on how to [install git on your machine](https://github.com/git-guides/install-git)
+- Rust: Head over to [the rustup website](https://rustup.rs/) to install rust
+
+### Git clone
+
+⚠️ This project uses submodules. Make sure your submodules are initialized and up to date!
+
+```sh
+git clone https://github.com/apollographql/router.git
+cd router
+git submodule update --init --recursive
+```
+
+### Environment setup
+
+This tutorial will only require one port on your machine:
+
+- 4000: The Apollo federation router
+
+If you would like to change the server's used port, change the `examples/hello-world/configuration.yaml` file's `listen` entry:
+
+```yml
+listen: 127.0.0.1:<YOUR_PORT>
+```
+
+You should be good to go!
+
+## Building and running the Apollo federation router
+
+In this project's root directory, you can run the following command to build and run the Apollo federation router:
+
+```bash
+ignition@ignition-apollo router % cargo run --release -- -p ./examples/hello-world
+   Compiling router-bridge v0.1.0 (https://github.com/apollographql/federation.git)
+   Compiling apollo-router-core v0.1.0-prealpha.3 (/Users/ignition/projects/apollo/router/crates/apollo-router-core)
+   Compiling apollo-router v0.1.0-prealpha.3 (/Users/ignition/projects/apollo/router/crates/apollo-router)
+    Finished dev [unoptimized + debuginfo] target(s) in 5.38s
+     Running `target/debug/router -p ./examples/hello-world`
+Nov 02 17:08:09.926  INFO router: Starting Apollo Router
+Nov 02 17:08:10.279  INFO router: Listening on http://127.0.0.1:4000 🚀
+```
+
+Go to http://127.0.0.1:4000 to open the [Apollo studio explorer](https://www.apollographql.com/docs/studio/explorer/) and inspect the graph, and run your first queries using the Apollo federation router!
