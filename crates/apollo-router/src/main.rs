@@ -1,6 +1,6 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use apollo_router::configuration::Configuration;
 use apollo_router::GLOBAL_ENV_FILTER;
 use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
@@ -102,16 +102,17 @@ async fn main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build()));
 
-    ensure!(opt.supergraph_path.is_some(),
-            r#"🚨 Missing supergraph 🚨
+    ensure!(
+        opt.supergraph_path.is_some(),
+        r#"🚨 Missing supergraph 🚨
 It looks like you haven't passed a supergraph to the router!
 example: `./router --supergraph <path_to_supergraph.graphql>`
 
 💡 If you're just experimenting and would like to try out a demo, you can download a supergraph here:
-`https://demo.supergraph.starstuff.dev/`
+`https://supergraph.demo.starstuff.dev/`
 
 for example (note: this is platform dependent!):
-`curl -L https://demo.supergraph.starstuff.dev/ > demo_supergraph.graphql`
+`curl -L https://supergraph.demo.starstuff.dev/ > demo_supergraph.graphql`
 
 🚀 You can then start the router again:
 
@@ -120,7 +121,8 @@ for example (note: this is platform dependent!):
 
 💡 You can create a Supergraph using Rover, or use Rover to download an existing Supergraph from the Apollo Registry.
 For more information see https://www.apollographql.com/docs/rover/supergraphs/.
-"#);
+"#
+    );
 
     let supergraph_path = opt.supergraph_path.unwrap();
 
