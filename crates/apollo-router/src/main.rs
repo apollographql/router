@@ -29,8 +29,8 @@ struct Opt {
     configuration_path: PathBuf,
 
     /// Schema location relative to the project directory.
-    #[structopt(long = "schema", parse(from_os_str), env)]
-    schema_path: PathBuf,
+    #[structopt(short, long = "supergraph", parse(from_os_str), env)]
+    supergraph_path: PathBuf,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -95,14 +95,14 @@ async fn main() -> Result<()> {
         delay: None,
     };
 
-    let schema_path = if opt.schema_path.is_relative() {
-        current_directory.join(opt.schema_path)
+    let supergraph_path = if opt.supergraph_path.is_relative() {
+        current_directory.join(opt.supergraph_path)
     } else {
-        opt.schema_path
+        opt.supergraph_path
     };
 
     let schema = SchemaKind::File {
-        path: schema_path,
+        path: supergraph_path,
         watch: opt.watch,
         delay: None,
     };

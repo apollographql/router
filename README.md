@@ -12,7 +12,7 @@ It can already perform queries though, so we'd welcome experiments and feedback 
 ## Usage
 
 Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql`
-to be supplied.  These are either located in the current directory or explicitly
+to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
 
@@ -20,9 +20,8 @@ directory.
 OPTIONS:
     -c, --config <configuration-path>    Configuration file location [env:
                                          CONFIGURATION_PATH=]
-    -s, --schema <schema-path>           Schema location [env: SCHEMA_PATH=]
+    -s, --supergraph <supergraph-path>   Supergraph Schema location [env: SUPERGRAPH_PATH=]
 ```
-
 
 This CLI is not meant to be a long term thing, as users will likely use Rover
 to start the server in future.
