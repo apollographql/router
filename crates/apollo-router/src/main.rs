@@ -104,23 +104,25 @@ async fn main() -> Result<()> {
 
     ensure!(
         opt.supergraph_path.is_some(),
-        r#"🚨 Missing supergraph 🚨
-It looks like you haven't passed a supergraph to the router!
-example: `./router --supergraph <path_to_supergraph.graphql>`
+        r#"
+💫 The router requires a supergraph to be set using '--supergraph':
 
-💡 If you're just experimenting and would like to try out a demo, you can download a supergraph here:
-`https://supergraph.demo.starstuff.dev/`
+    $ ./router --supergraph <file>`
+  
+🪐 The supergraph can be built or downloaded from the Apollo Registry
+   using the Rover CLI. To find out how, see:
+    
+    https://www.apollographql.com/docs/rover/supergraphs/.
 
-for example (note: this is platform dependent!):
-`curl -L https://supergraph.demo.starstuff.dev/ > demo_supergraph.graphql`
+🧪 If you're just experimenting, you can download and use an example
+   supergraph with pre-deployed subgraphs:
 
-🚀 You can then start the router again:
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-`./router --supergraph demo_supergraph.graphql`
+   Then run the Apollo Router with that supergraph:
 
+    $ ./router --supergraph starstuff.graphql
 
-💡 You can create a Supergraph using Rover, or use Rover to download an existing Supergraph from the Apollo Registry.
-For more information see https://www.apollographql.com/docs/rover/supergraphs/.
 "#
     );
 
