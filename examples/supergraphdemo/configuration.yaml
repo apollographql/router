@@ -1,0 +1,20 @@
+server:
+  listen: 127.0.0.1:4100
+  cors:
+    origins:
+      - https://studio.apollographql.com
+subgraphs:
+  accounts:
+    routing_url: http://localhost:4001/graphql
+  reviews:
+    routing_url: http://localhost:4002/graphql
+  products:
+    routing_url: http://localhost:4003/graphql
+  inventory:
+    routing_url: http://localhost:4004/graphql
+opentelemetry:
+  jaeger:
+extensions:
+  example:
+    path: /home/geal/dev/wasm-example/target/wasm32-wasi/debug/wasm_example.wasm
+    hook: launch

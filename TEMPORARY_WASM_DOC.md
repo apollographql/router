@@ -59,3 +59,19 @@ cargo build --target wasm32-wasi
 ```
 
 the wasm file is in `target/wasm32-wasi/debug/wasm_example.wasm`
+
+## TODO
+
+investigate WITX for the host API
+https://bytecodealliance.org/articles/implementing-wasi-nn-in-wasmtime
+
+investigate externref to pass data from host to guest (like HTTP headers) to avoid copies
+
+
+investigate the envoy wasm ecosystem:
+https://github.com/proxy-wasm/proxy-wasm-rust-sdk/blob/master/examples/http_auth_random.rs
+https://github.com/proxy-wasm/proxy-wasm-cpp-host/blob/master/src/wasmtime/wasmtime.cc
+https://www.solo.io/blog/the-state-of-webassembly-in-envoy-proxy/
+https://docs.solo.io/web-assembly-hub/latest/tutorial_code/getting_started/
+ABI spec: https://github.com/proxy-wasm/spec/tree/master/abi-versions/vNEXT
+https://github.com/proxy-wasm/proxy-wasm-rust-sdk/blob/abd0f5437212e5fd3dd6a70eac3959934278e643/src/traits.rs#L438

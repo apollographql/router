@@ -113,15 +113,12 @@ impl PreparedQuery for ApolloPreparedQuery {
                 let hello = instance
                     .get_func(&mut self.execution_context.store, "hello")
                     .expect("`hello` was not an exported function");
-                tracing::info!("got the hello function");
 
-                /*let res = hello
-                .typed::<(i32, u64), u64, _>(&execution_context.store)
-                .unwrap();*/
+                tracing::info!("got the hello function");
 
                 let world = "world";
                 //FIXME: obviously invalid pointer
-                let mut args = [Val::I32(world.as_ptr() as _), Val::I64(world.len() as i64)];
+                let args = [Val::I32(world.as_ptr() as _), Val::I64(world.len() as i64)];
                 let mut results = [Val::I64(1); 1];
                 let result = hello
                     .call(
@@ -131,6 +128,18 @@ impl PreparedQuery for ApolloPreparedQuery {
                     )
                     .unwrap();
                 println!("Answer: {:?}", results);
+                /*let greet = instance
+                    .get_func(&mut execution_context.store, "greet")
+                    .expect("`hello` was not an exported function");
+                tracing::info!("got the greet function");
+                let world = "world";
+                //FIXME: obviously invalid pointer
+                let args = [Val::I32(world.as_ptr() as _), Val::I32(world.len() as i32)];
+                let mut results = [Val::I64(1); 1];
+                let result = greet
+                    .call(&mut execution_context.store, &args[..], &mut results[..])
+                    .unwrap();
+                println!("Answer: {:?}", results);*/
 
                 // TODO
                 #[allow(unused_mut)]
