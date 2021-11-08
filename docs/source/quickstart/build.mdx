@@ -29,12 +29,6 @@ This tutorial will only require one port on your machine:
 
 - 4000: The Apollo federation router
 
-If you would like to change the server's used port, change the `examples/hello-world/configuration.yaml` file's `listen` entry:
-
-```yml
-listen: 127.0.0.1:<YOUR_PORT>
-```
-
 You should be good to go!
 
 ## Building and running the Apollo federation router
@@ -42,7 +36,7 @@ You should be good to go!
 In this project's root directory, you can run the following command to build and run the Apollo federation router:
 
 ```bash
-ignition@ignition-apollo router % cargo run --release -- -p ./examples/hello-world
+ignition@ignition-apollo router % cargo run -- --supergraph ./examples/supergraph.graphql
    Compiling router-bridge v0.1.0 (https://github.com/apollographql/federation.git)
    Compiling apollo-router-core v0.1.0-prealpha.3 (/Users/ignition/projects/apollo/router/crates/apollo-router-core)
    Compiling apollo-router v0.1.0-prealpha.3 (/Users/ignition/projects/apollo/router/crates/apollo-router)

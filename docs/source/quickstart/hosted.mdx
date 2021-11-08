@@ -12,30 +12,29 @@ If you would like to build and run the router from sources, have a look at the [
 
 - None! We will use a tarball available [in the Github releases section](https://github.com/apollographql/router/releases).
 
-### 1. Download the router binary
+### 1. Download and extract the router binary
 
 Go to the [Apollo router releases section](https://github.com/apollographql/router/releases) and download the latest tarball that matches your system. Available systems and architectures are `Linux(x86_64)`, `MacOS(x86_64)` and `Windows(x86_64)`.
 If your target system and architecture aren't available, you can [build and run the Apollo router from source](build).
 
-```sh
-curl -o router.tar.gz https://github.com/apollographql/router/releases/download/v0.1.0-prealpha.3/router-0.1.0-prealpha.3-x86_64-linux.tar.gz
-```
-
-### 2. Unzip the router binary
-
-Use your favorite method to unzip the downloaded archive. The archive contains the router (built in `release` mode), and the hello-world configuration.
-
 On linux:
 
 ```sh
-tar -xczf router.tar.gz
+curl -o router.tar.gz https://github.com/apollographql/router/releases/download/v0.1.0-prealpha.3/router-0.1.0-prealpha.3-x86_64-linux.tar.gz
+tar -xzf router.tar.gz
+```
+
+### 2. Download the demo supergraph:
+
+```sh
+curl -L https://supergraph.demo.starstuff.dev/ > demo_supergraph.graphql
 ```
 
 ### 3. Run the router with the provided configuration
 
 ```sh
 cd router
-./router -p ./hello-world
+./router --supergraph demo_supergraph.graphql
 ```
 
 The console output should look as following:
