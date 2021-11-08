@@ -32,7 +32,7 @@ macro_rules! assert_federated_response {
 
         assert!(
             expected.data.is_object(),
-            "no response's data: please check that the subgraphs are running",
+            "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
         let actual = actual.next().await.unwrap();
