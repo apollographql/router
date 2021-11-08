@@ -1,6 +1,6 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use apollo_router::configuration::Configuration;
 use apollo_router::GLOBAL_ENV_FILTER;
 use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
@@ -31,7 +31,7 @@ struct Opt {
 
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
-    supergraph_path: PathBuf,
+    supergraph_path: Option<PathBuf>,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -102,10 +102,32 @@ async fn main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build()));
 
-    let supergraph_path = if opt.supergraph_path.is_relative() {
-        current_directory.join(opt.supergraph_path)
+    ensure!(opt.supergraph_path.is_some(),
+            r#"🚨 Missing supergraph 🚨
+It looks like you haven't passed a supergraph to the router!
+example: `./router --supergraph <path_to_supergraph.graphql>`
+
+💡 If you're just experimenting and would like to try out a demo, you can download a supergraph here:
+`https://demo.supergraph.starstuff.dev/`
+
+for example (note: this is platform dependent!):
+`curl -L https://demo.supergraph.starstuff.dev/ > demo_supergraph.graphql`
+
+🚀 You can then start the router again:
+
+`./router --supergraph demo_supergraph.graphql`
+
+
+💡 You can create a Supergraph using Rover, or use Rover to download an existing Supergraph from the Apollo Registry.
+For more information see https://www.apollographql.com/docs/rover/supergraphs/.
+"#);
+
+    let supergraph_path = opt.supergraph_path.unwrap();
+
+    let supergraph_path = if supergraph_path.is_relative() {
+        current_directory.join(supergraph_path)
     } else {
-        opt.supergraph_path
+        supergraph_path
     };
 
     let schema = SchemaKind::File {
