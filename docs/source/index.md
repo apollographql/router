@@ -17,7 +17,7 @@ cargo install apollo-router
 ## Usage
 
 Apollo Federation Router requires `configuration.yaml` and `supergraph.graphql`
-to be supplied.  These are either located in the current directory or explicitly
+to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
 
@@ -25,9 +25,8 @@ directory.
 OPTIONS:
     -c, --config <configuration-path>    Configuration file location [env:
                                          CONFIGURATION_PATH=]
-    -s, --schema <schema-path>           Schema location [env: SCHEMA_PATH=]
+    -s, --supergraph <supergraph-path>   Supergraph Schema location [env: SUPERGRAPH_PATH=]
 ```
-
 
 ### Configuration file
 
@@ -59,14 +58,14 @@ The `schema` argument is the supergraph that will be exposed by the router, it i
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
 
-> 🚧 For now, the router requires the supergraph to be generated separately. In the future, it might be possible to start a router with the right schema directly from Rover
+> 🚧 For now, the router requires the supergraph to be generated separately. In the future, it might be possible to start a router with the right supergraph schema directly from Rover
 
 ## Launching the router
 
 Once the configuration file and supergraph are written, start the router:
 
 ```
-$ apollo-router -c configuration.yaml --schema supergraph.graphql
+$ apollo-router -c configuration.yaml --s supergraph.graphql
 Oct 20 12:11:05.128  INFO router: Starting Apollo Federation
 Oct 20 12:11:05.581  INFO router: Listening on http://127.0.0.1:4100 🚀
 ```
