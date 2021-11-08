@@ -22,12 +22,7 @@ module.exports = {
         githubRepo: "apollographql/router",
         sidebarCategories: {
           null: ["index", "configuration"],
-          Quickstart: [
-            "quickstart/helloworld",
-            "quickstart/build",
-            "quickstart/docker",
-            "quickstart/nodejs",
-          ],
+          Quickstart: ["quickstart/hosted", "quickstart/build"],
         },
       },
     },
