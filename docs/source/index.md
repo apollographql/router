@@ -1,8 +1,10 @@
 ---
 title: Apollo Router
-sidebar_title: Overview
+sidebar_title: 🔭 Overview
 description: Overview
 ---
+
+> ⚠️ **The Apollo Router is in public pre-alpha.** Until it is generally available, do not use it in business-critical graphs. [Learn about release stages.](https://www.apollographql.com/docs/resources/release-stages/#open-source-release-stages)
 
 The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/):
 
@@ -20,6 +22,6 @@ flowchart BT;
   class clients secondary;
 ```
 
-The Apollo Router is implemented in Rust, which provides [dramatic speed and bandwidth benefits](./) over the `@apollo/gateway` extension of Apollo Server.
+The Apollo Router is [implemented in Rust](https://github.com/apollographql/router), which provides dramatic speed and bandwidth benefits over the `@apollo/gateway` extension of Apollo Server.
 
-[Get started!](./quickstart/hosted)
+[Try it out!](./quickstart/)

@@ -1,23 +1,19 @@
 ---
-title: Installing and configuring the Apollo Router
-sidebar_title: Setup
+title: Apollo Router usage and config
+sidebar_title: ⚙️ Usage and config
 ---
 
-## Installation
+> For installation instructions, see the [quickstart](../quickstart/).
 
-Refer to the [quickstart](../quickstart/hosted) to install the Apollo Router.
-
-## Usage
-
-You run the Apollo Router with the following command:
+You run the Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
 ```bash
-./router --config configuration.yaml --supergraph supergraph.graphql
+./router --config configuration.yaml --supergraph supergraph-schema.graphql
 ```
 
 Options are described below.
 
-### Options
+## Options
 
 <table class="field-table api-ref">
   <thead>
@@ -28,21 +24,6 @@ Options are described below.
   </thead>
 
 <tbody>
-
-<tr class="required">
-<td style="min-width: 150px;">
-
-##### `-c` / `--config`
-
-</td>
-<td>
-
-The absolute or relative path to the router's [YAML configuration file](#required-configuration).
-
-**Required** unless you provide this value via the `CONFIGURATION_PATH` environment variable.
-
-</td>
-</tr>
 
 <tr class="required">
 <td>
@@ -61,40 +42,65 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 </td>
 </tr>
 
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+</td>
+<td>
+
+The absolute or relative path to the router's optional [YAML configuration file](#configuration-file).
+
+You can also provide this value via the `CONFIGURATION_PATH` environment variable.
+
+</td>
+</tr>
+
 </tbody>
 </table>
 
-### Required configuration
+## Handling CORS
 
-The Apollo Router requires a YAML configuration file. Here's an example file with the minimum recommended configuration:
+If you attempt to query the Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
+
+You can configure CORS in the [YAML configuration file](#configuration-file) you can provide to the Apollo Router.
+
+Here's an example configuration for adding `localhost` to the list of approved origins:
+
+```yaml
+# examples/nodejs/configuration.yaml
+server:
+  listen: 127.0.0.1:4000
+  cors:
+    origins:
+      - https://studio.apollographql.com
+      - https://localhost
+```
+
+## Configuration file
+
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are listed below:
 
 ```yaml:title=configuration.yaml
 # Configuration of the router's HTTP server
 server:
   # The socket address and port to listen on
-  # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1:4000
-# Names and URLs of all subgraphs
-subgraphs:
-  # Defines a subgraph named "accounts"
-  accounts:
-    # The URL of the accounts subgraph's GraphQL endpoint
-    routing_url: http://localhost:4001/graphql
-  # Defines a second subgraph named "products"
-  products:
-    routing_url: http://localhost:4003/graphql
-```
-
-### All configuration options
-
-All supported Apollo Router configuration options are listed below:
-
-```yaml
-# Configuration of the router's HTTP server
-server:
-  # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
+
+  # Names and URLs of all subgraphs
+  # By default, this information is parsed from the supergraph schema
+  # Provide it here to override subgraph names or URLs
+  subgraphs:
+    # Defines a subgraph named "accounts"
+    accounts:
+      # The URL of the accounts subgraph's GraphQL endpoint
+      routing_url: http://localhost:4001/graphql
+    # Defines a second subgraph named "products"
+    products:
+      routing_url: http://localhost:4003/graphql
 
   # Cross origin request headers
   cors:
@@ -115,15 +121,7 @@ server:
     # Which response headers should be made available to scripts running in the browser,
     # in response to a cross-origin request.
     expose_headers:
-# Names and URLs of all subgraphs
-subgraphs:
-  # Defines a subgraph named "accounts"
-  accounts:
-    # The URL of the accounts subgraph's GraphQL endpoint
-    routing_url: http://localhost:4001/graphql
-  # Defines a second subgraph named "products"
-  products:
-    routing_url: http://localhost:4003/graphql
+
 # OpenTelemetry configuration. Choose either jaeger or otlp
 opentelemetry:
   # Configuration to send traces and metrics to a Jaeger service
