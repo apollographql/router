@@ -16,7 +16,7 @@ Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographq
 * macOS (x86_64)
 * Windows (x86_64)
 
-> If a tarball for your system or architecture isn't available, you can [build and run the Apollo Router from source](./quickstart/build/).
+> If a tarball for your system or architecture isn't available, you can [build and run the Apollo Router from source](./build-from-source/).
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -138,7 +138,6 @@ This file is all that the Apollo Router needs to communicate with our subgraphs!
 Now from your project root, run the following:
 
 ```sh
-cd router
 ./dist/router --supergraph supergraph-schema.graphql
 ```
 
@@ -156,4 +155,4 @@ That's it! Visit `localhost:4000` to open the [Apollo Studio Explorer](https://w
 Now that you know how to run the Apollo Router with a supergraph schema, you can:
 
 * Try running the Router in front of test instances of your own subgraphs
-* Learn about [advanced configuration options](./settings/configuration/)
+* Learn about [advanced configuration options](./configuration/)
