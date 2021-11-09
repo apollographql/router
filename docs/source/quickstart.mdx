@@ -4,7 +4,7 @@ sidebar_title: 🚀 Quickstart
 description: Run the Router with Apollo-hosted subgraphs
 ---
 
-import {ExpansionPanel} from 'gatsby-theme-apollo-docs';
+import { ExpansionPanel } from "gatsby-theme-apollo-docs";
 
 Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
@@ -21,7 +21,7 @@ Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographq
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
 ```bash
-tar -xzf path/to/file.tar.gz
+tar -xf path/to/file.tar.gz
 ```
 
 You can now try running the Apollo Router from your project's root directory with the following command:
@@ -33,8 +33,24 @@ You can now try running the Apollo Router from your project's root directory wit
 If you do, you'll get the following error:
 
 ```
-error: The following required arguments were not provided:
-    --schema <schema-path>
+Error: 
+💫 The router requires a supergraph to be set using '--supergraph':
+
+    $ ./router --supergraph <file>`
+  
+🪐 The supergraph can be built or downloaded from the Apollo Registry
+   using the Rover CLI. To find out how, see:
+    
+    https://www.apollographql.com/docs/rover/supergraphs/.
+
+🧪 If you're just experimenting, you can download and use an example
+   supergraph with pre-deployed subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+   Then run the Apollo Router with that supergraph:
+
+    $ ./router --supergraph starstuff.graphql
 ```
 
 This is because the Router requires a supergraph schema as input! Let's obtain one.

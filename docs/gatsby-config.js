@@ -4,12 +4,6 @@ module.exports = {
   plugins: [
     {
       resolve: "gatsby-transformer-remark",
-      options: {
-        plugins: [
-          "gatsby-remark-autolink-headers",
-          "gatsby-remark-check-links",
-        ],
-      },
     },
     {
       resolve: "gatsby-theme-apollo-docs",
@@ -21,12 +15,7 @@ module.exports = {
         description: "Documentation for the Apollo Router",
         githubRepo: "apollographql/router",
         sidebarCategories: {
-          null: [
-            "index",
-            "quickstart",
-            "configuration",
-            "build-from-source",
-          ],
+          null: ["index", "quickstart", "configuration", "build-from-source"],
         },
       },
     },
