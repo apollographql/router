@@ -115,15 +115,24 @@ impl std::str::FromStr for Schema {
                                                         .as_ref()
                                                         .map(|id| id.text().to_owned());
 
-                                                    let arg_value = argument.value().map(|v| {
-                                                        v.syntax()
-                                                            .text()
-                                                            .to_string()
-                                                            .trim()
-                                                            .trim_start_matches('"')
-                                                            .trim_end_matches('"')
-                                                            .to_string()
-                                                    });
+                                                    let arg_value =
+                                                        argument.value().and_then(|s| {
+                                                            // This is a temporary workaround until we have nice semantic analysis
+                                                            s.syntax()
+                                                                .green()
+                                                                .children()
+                                                                .next()
+                                                                .and_then(|it| it.into_token())
+                                                                .map(|token| {
+                                                                    token
+                                                                        .text()
+                                                                        .trim()
+                                                                        .trim_start_matches('"')
+                                                                        .trim_end_matches('"')
+                                                                        .trim()
+                                                                        .to_string()
+                                                                })
+                                                        });
 
                                                     match arg_name.as_deref() {
                                                         Some("name") => name = arg_value,
