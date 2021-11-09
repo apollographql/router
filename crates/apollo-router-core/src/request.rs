@@ -181,8 +181,44 @@ impl<T: Into<String>> From<T> for Query {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apollo_parser::ast;
     use serde_json::json;
     use test_env_log::test;
+
+    fn fragments_and_operations(query: &str) -> (Vec<Operation>, HashMap<String, Fragment>) {
+        let parser = apollo_parser::Parser::new(&query);
+        let tree = parser.parse();
+
+        if !tree.errors().is_empty() {
+            let errors = tree
+                .errors()
+                .iter()
+                .map(|err| format!("{:?}", err))
+                .collect::<Vec<_>>();
+            panic!("Parsing error(s): {}", errors.join(", "));
+        }
+
+        let mut operations = Vec::new();
+        let mut fragments = HashMap::new();
+
+        let document = tree.document();
+
+        for definition in document.definitions() {
+            match definition {
+                // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
+                ast::Definition::OperationDefinition(operation) => {
+                    operations.push(operation.into());
+                }
+                ast::Definition::FragmentDefinition(fragment_definition) => {
+                    let fragment: Fragment = fragment_definition.into();
+                    fragments.insert(fragment.fragment_name.clone(), fragment);
+                }
+                _ => {}
+            }
+        }
+
+        (operations, fragments)
+    }
 
     #[test]
     fn test_request() {
@@ -295,7 +331,8 @@ mod tests {
                 "other": "13",
             }})
             .build();
-        query.format_response(&mut response);
+        let (operations, fragments) = fragments_and_operations(&query.string);
+        query.format_response(&mut response, &operations, &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -326,7 +363,9 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
-        query.format_response(&mut response);
+        let (operations, fragments) = fragments_and_operations(&query.string);
+
+        query.format_response(&mut response, &operations, &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -344,7 +383,9 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2"}})
             .build();
-        query.format_response(&mut response);
+        let (operations, fragments) = fragments_and_operations(&query.string);
+
+        query.format_response(&mut response, &operations, &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -369,7 +410,9 @@ mod tests {
                 "other": "6",
             }})
             .build();
-        query.format_response(&mut response);
+        let (operations, fragments) = fragments_and_operations(&query.string);
+
+        query.format_response(&mut response, &operations, &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{

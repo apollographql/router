@@ -133,17 +133,13 @@ mod tests {
             )
             .await;
         assert_eq!(
-            QueryPlan {
-                node: Some(PlanNode::Fetch(FetchNode {
-                    service_name: "accounts".into(),
-                    requires: None,
-                    variable_usages: vec![],
-                    operation: "{me{name{first last}}}".into()
-                })),
-                operations: Vec::new(),
-                fragments: Vec::new(),
-            },
-            result.unwrap()
+            Some(PlanNode::Fetch(FetchNode {
+                service_name: "accounts".into(),
+                requires: None,
+                variable_usages: vec![],
+                operation: "{me{name{first last}}}".into()
+            })),
+            result.unwrap().node
         );
     }
 

@@ -45,9 +45,11 @@ pub struct QueryPlan {
     pub node: Option<PlanNode>,
     // list of operations to apply on the final response
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub operations: Vec<Operation>,
     // list of fragments to apply on the final response
     #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub fragments: HashMap<String, Fragment>,
 }
 
@@ -455,7 +457,7 @@ mod tests {
                     }]
             }),
             operations: Vec::new(),
-            fragments: Vec::new(),
+            fragments: HashMap::new(),
         }
     }
 
