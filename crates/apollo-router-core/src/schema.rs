@@ -237,7 +237,26 @@ mod tests {
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
             schema.subgraphs.get("accounts").map(|s| s.as_str()),
-            Some("http://localhost:4001/graphql")
+            Some("http://localhost:4001/graphql"),
+            "Incorrect url for accounts"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("inventory").map(|s| s.as_str()),
+            Some("http://localhost:4004/graphql"),
+            "Incorrect url for inventory"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("products").map(|s| s.as_str()),
+            Some("http://localhost:4003/graphql"),
+            "Incorrect url for products"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("reviews").map(|s| s.as_str()),
+            Some("http://localhost:4002/graphql"),
+            "Incorrect url for reviews"
         );
 
         assert_eq!(schema.subgraphs.get("test"), None);
