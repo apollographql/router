@@ -59,7 +59,7 @@ tracing-opentelemetry = "0.15.0"
 tracing-subscriber = "0.2.25"
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
-warp = { version = "0.3.1", default-features = false, features = [
+warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
 
