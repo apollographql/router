@@ -22,6 +22,6 @@ flowchart BT;
   class clients secondary;
 ```
 
-The Apollo Router is [implemented in Rust](https://github.com/apollographql/router), which provides dramatic speed and bandwidth benefits over the `@apollo/gateway` extension of Apollo Server.
+The Apollo Router is [implemented in Rust](https://github.com/apollographql/router), which provides performance benefits over the TypeScript Apollo Gateway.
 
 [Try it out!](./quickstart/)
