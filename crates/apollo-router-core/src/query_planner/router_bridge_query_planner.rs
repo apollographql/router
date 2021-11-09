@@ -36,6 +36,8 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
             operation_name: operation.unwrap_or_default(),
         };
 
+        let schema = self.schema.as_str().to_string();
+
         tokio::task::spawn_blocking(move || {
             let js_query_plan: JsQueryPlan = plan::plan(context, options.into())
                 .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))?;
@@ -45,6 +47,31 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
                 operations: Vec::new(),
                 fragments: HashMap::new(),
             };
+
+            let schema_parser = apollo_parser::Parser::new(&schema);
+            let schema_tree = schema_parser.parse();
+
+            if !schema_tree.errors().is_empty() {
+                let errors = schema_tree
+                    .errors()
+                    .iter()
+                    .map(|err| format!("{:?}", err))
+                    .collect::<Vec<_>>();
+                panic!("Parsing error(s): {}", errors.join(", "));
+            }
+
+            let document = schema_tree.document();
+            for definition in document.definitions() {
+                match definition {
+                    ast::Definition::FragmentDefinition(fragment_definition) => {
+                        let fragment: Fragment = fragment_definition.into();
+                        query_plan
+                            .fragments
+                            .insert(fragment.fragment_name.clone(), fragment);
+                    }
+                    _ => {}
+                }
+            }
 
             let parser = apollo_parser::Parser::new(&query);
             let tree = parser.parse();
