@@ -1,5 +1,4 @@
 use crate::prelude::graphql::*;
-use apollo_parser::ast;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -48,27 +47,27 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    pub fn format_response(&self, response: &mut Response) {
+    pub fn format_response(
+        &self,
+        response: &mut Response,
+        operations: &[Operation],
+        fragments: &HashMap<String, Fragment>,
+    ) {
         fn apply_selection_set(
-            selection_set: &ast::SelectionSet,
+            selection_set: &SelectionSet,
             input: &mut Object,
             output: &mut Object,
-            fragments: &HashMap<String, ast::SelectionSet>,
+            fragments: &HashMap<String, SelectionSet>,
         ) {
-            for selection in selection_set.selections() {
+            for selection in selection_set.selections.clone() {
                 match selection {
                     // Spec: https://spec.graphql.org/draft/#Field
-                    ast::Selection::Field(field) => {
-                        let name = field
-                            .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string();
-                        let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                        let name = alias.unwrap_or(name);
+                    Selection::Field(field) => {
+                        let name = field.alias.unwrap_or(field.name);
 
                         if let Some(input_value) = input.remove(&name) {
-                            if let Some(selection_set) = field.selection_set() {
+                            if let Some(selections) = field.selections {
+                                let selection_set = SelectionSet { selections };
                                 match input_value {
                                     Value::Object(mut input_object) => {
                                         let mut output_object = Object::default();
@@ -123,22 +122,15 @@ impl Query {
                         }
                     }
                     // Spec: https://spec.graphql.org/draft/#InlineFragment
-                    ast::Selection::InlineFragment(inline_fragment) => {
-                        let selection_set = inline_fragment
-                            .selection_set()
-                            .expect("the node SelectionSet is not optional in the spec; qed");
-
+                    Selection::InlineFragment(inline_fragment) => {
+                        let selection_set = SelectionSet {
+                            selections: inline_fragment.selections,
+                        };
                         apply_selection_set(&selection_set, input, output, fragments);
                     }
                     // Spec: https://spec.graphql.org/draft/#FragmentSpread
-                    ast::Selection::FragmentSpread(fragment_spread) => {
-                        let name = fragment_spread
-                            .fragment_name()
-                            .expect("the node FragmentName is not optional in the spec; qed")
-                            .name()
-                            .unwrap()
-                            .text()
-                            .to_string();
+                    Selection::FragmentSpread(fragment_spread) => {
+                        let name = fragment_spread.fragment_name;
 
                         if let Some(selection_set) = fragments.get(&name) {
                             apply_selection_set(selection_set, input, output, fragments);
@@ -150,60 +142,27 @@ impl Query {
             }
         }
 
-        fn fragments(document: &ast::Document) -> HashMap<String, ast::SelectionSet> {
-            document
-                .definitions()
-                .filter_map(|definition| match definition {
-                    // Spec: https://spec.graphql.org/draft/#FragmentDefinition
-                    ast::Definition::FragmentDefinition(fragment_definition) => {
-                        let name = fragment_definition
-                            .fragment_name()
-                            .expect("the node FragmentName is not optional in the spec; qed")
-                            .name()
-                            .unwrap()
-                            .text()
-                            .to_string();
-                        let selection_set = fragment_definition
-                            .selection_set()
-                            .expect("the node SelectionSet is not optional in the spec; qed");
-
-                        Some((name, selection_set))
-                    }
-                    _ => None,
-                })
-                .collect()
-        }
-
-        let parser = apollo_parser::Parser::new(self.as_str());
-        let tree = parser.parse();
-
-        if !tree.errors().is_empty() {
-            let errors = tree
-                .errors()
-                .iter()
-                .map(|err| format!("{:?}", err))
-                .collect::<Vec<_>>();
-            failfast_debug!("Parsing error(s): {}", errors.join(", "));
-            return;
-        }
-
-        let document = tree.document();
-        let fragments = fragments(&document);
-
-        for definition in document.definitions() {
-            // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-            if let ast::Definition::OperationDefinition(operation) = definition {
-                let selection_set = operation
-                    .selection_set()
-                    .expect("the node SelectionSet is not optional in the spec; qed");
-                if let Some(data) = response.data.as_object_mut() {
-                    let mut output = Object::default();
-                    apply_selection_set(&selection_set, data, &mut output, &fragments);
-                    response.data = output.into();
-                    return;
-                } else {
-                    failfast_debug!("Invalid type for data in response.");
-                }
+        let fragments: HashMap<String, SelectionSet> = fragments
+            .iter()
+            .map(|(name, fragment)| {
+                (
+                    name.to_string(),
+                    SelectionSet {
+                        selections: fragment.selections.clone(),
+                    },
+                )
+            })
+            .collect();
+        // FIXME there can be multiple operations in a query
+        // we must check the operation parameter to know which one applies
+        for operation in operations {
+            if let Some(data) = response.data.as_object_mut() {
+                let mut output = Object::default();
+                apply_selection_set(&operation.selection_set, data, &mut output, &fragments);
+                response.data = output.into();
+                return;
+            } else {
+                failfast_debug!("Invalid type for data in response.");
             }
         }
 

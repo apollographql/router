@@ -3,6 +3,8 @@
 //!
 //! QueryPlans are a set of operations that describe how a federated query is processed.
 
+use std::collections::HashMap;
+
 use crate::prelude::graphql::*;
 use apollo_parser::ast;
 use serde::{Deserialize, Serialize};
@@ -46,7 +48,7 @@ pub struct QueryPlan {
     pub operations: Vec<Operation>,
     // list of fragments to apply on the final response
     #[serde(default)]
-    pub fragments: Vec<Fragment>,
+    pub fragments: HashMap<String, Fragment>,
 }
 
 /// Query plans are composed of a set of nodes.
@@ -280,8 +282,8 @@ impl From<ast::FragmentSpread> for FragmentSpread {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Operation {
-    name: Option<String>,
-    selection_set: SelectionSet,
+    pub name: Option<String>,
+    pub selection_set: SelectionSet,
 }
 
 impl From<ast::OperationDefinition> for Operation {
@@ -298,7 +300,7 @@ impl From<ast::OperationDefinition> for Operation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SelectionSet {
-    selections: Vec<Selection>,
+    pub selections: Vec<Selection>,
 }
 
 impl From<ast::SelectionSet> for SelectionSet {

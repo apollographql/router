@@ -188,8 +188,11 @@ impl Fetcher for FederatedGraph {
                             .into_inner();
 
                         #[cfg(feature = "post-processing")]
-                        tracing::debug_span!("format_response")
-                            .in_scope(|| request.query.format_response(&mut response));
+                        tracing::debug_span!("format_response").in_scope(|| {
+                            request
+                                .query
+                                .format_response(&mut response, &operations, &fragments)
+                        });
 
                         response
                     }

@@ -1,6 +1,6 @@
 //! Calls out to nodejs query planner
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::prelude::graphql::*;
 use apollo_parser::ast;
@@ -43,7 +43,7 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
             let mut query_plan = QueryPlan {
                 node: js_query_plan.node,
                 operations: Vec::new(),
-                fragments: Vec::new(),
+                fragments: HashMap::new(),
             };
 
             let parser = apollo_parser::Parser::new(&query);
@@ -67,7 +67,10 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
                         query_plan.operations.push(operation.into());
                     }
                     ast::Definition::FragmentDefinition(fragment_definition) => {
-                        query_plan.fragments.push(fragment_definition.into());
+                        let fragment: Fragment = fragment_definition.into();
+                        query_plan
+                            .fragments
+                            .insert(fragment.fragment_name.clone(), fragment);
                     }
                     _ => {}
                 }
