@@ -187,22 +187,17 @@ impl Fetcher for FederatedGraph {
                             .expect("todo: how to prove?")
                             .into_inner();
 
-                    
-                        #[cfg(feature = "post-processing")]
-                        {
-                            let operation = match &request.operation_name {
-                                // operations is never empty
-                                None => operations.remove(0),
-                                Some(name) => operations.drain(..).find(|op| op.name.as_deref() == Some(name)).expect("the query plan was already validated, if there's no operation name there's a query shorthand, while if there are named queries there's an operation name"),
-                            };
-                            
-                            
-                            tracing::info_span!("format_response").in_scope(|| {
-                                request
-                                    .query
-                                    .format_response(&mut response, operation, &fragments)
-                            });
-                        }
+                        let operation = match &request.operation_name {
+                            // operations is never empty
+                            None => operations.remove(0),
+                            Some(name) => operations.drain(..).find(|op| op.name.as_deref() == Some(name)).expect("the query plan was already validated, if there's no operation name there's a query shorthand, while if there are named queries there's an operation name"),
+                        };
+
+                        tracing::info_span!("format_response").in_scope(|| {
+                            request
+                                .query
+                                .format_response(&mut response, operation, &fragments)
+                        });
 
                         response
                     }
