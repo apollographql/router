@@ -33,7 +33,7 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         let context = plan::OperationalContext {
             schema: self.schema.as_str().to_string(),
             query: query.clone(),
-            operation_name: operation.unwrap_or_default(),
+            operation_name: operation.clone().unwrap_or_default(),
         };
 
         let schema = self.schema.as_str().to_string();
@@ -62,14 +62,11 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
 
             let document = schema_tree.document();
             for definition in document.definitions() {
-                match definition {
-                    ast::Definition::FragmentDefinition(fragment_definition) => {
-                        let fragment: Fragment = fragment_definition.into();
-                        query_plan
-                            .fragments
-                            .insert(fragment.fragment_name.clone(), fragment);
-                    }
-                    _ => {}
+                if let ast::Definition::FragmentDefinition(fragment_definition) = definition {
+                    let fragment: Fragment = fragment_definition.into();
+                    query_plan
+                        .fragments
+                        .insert(fragment.fragment_name.clone(), fragment);
                 }
             }
 

@@ -50,7 +50,7 @@ impl Query {
     pub fn format_response(
         &self,
         response: &mut Response,
-        operations: &[Operation],
+        operation: Operation,
         fragments: &HashMap<String, Fragment>,
     ) {
         fn apply_selection_set(
@@ -153,17 +153,14 @@ impl Query {
                 )
             })
             .collect();
-        // FIXME there can be multiple operations in a query
-        // we must check the operation parameter to know which one applies
-        for operation in operations {
-            if let Some(data) = response.data.as_object_mut() {
-                let mut output = Object::default();
-                apply_selection_set(&operation.selection_set, data, &mut output, &fragments);
-                response.data = output.into();
-                return;
-            } else {
-                failfast_debug!("Invalid type for data in response.");
-            }
+
+        if let Some(data) = response.data.as_object_mut() {
+            let mut output = Object::default();
+            apply_selection_set(&operation.selection_set, data, &mut output, &fragments);
+            response.data = output.into();
+            return;
+        } else {
+            failfast_debug!("Invalid type for data in response.");
         }
 
         failfast_debug!("No suitable definition found. This is a bug.");
@@ -186,7 +183,7 @@ mod tests {
     use test_env_log::test;
 
     fn fragments_and_operations(query: &str) -> (Vec<Operation>, HashMap<String, Fragment>) {
-        let parser = apollo_parser::Parser::new(&query);
+        let parser = apollo_parser::Parser::new(query);
         let tree = parser.parse();
 
         if !tree.errors().is_empty() {
@@ -331,8 +328,8 @@ mod tests {
                 "other": "13",
             }})
             .build();
-        let (operations, fragments) = fragments_and_operations(&query.string);
-        query.format_response(&mut response, &operations, &fragments);
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
+        query.format_response(&mut response, operations.remove(0), &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -363,9 +360,9 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
-        let (operations, fragments) = fragments_and_operations(&query.string);
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
 
-        query.format_response(&mut response, &operations, &fragments);
+        query.format_response(&mut response, operations.remove(0), &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -383,9 +380,9 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2"}})
             .build();
-        let (operations, fragments) = fragments_and_operations(&query.string);
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
 
-        query.format_response(&mut response, &operations, &fragments);
+        query.format_response(&mut response, operations.remove(0), &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -410,9 +407,9 @@ mod tests {
                 "other": "6",
             }})
             .build();
-        let (operations, fragments) = fragments_and_operations(&query.string);
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
 
-        query.format_response(&mut response, &operations, &fragments);
+        query.format_response(&mut response, operations.remove(0), &fragments);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -427,6 +424,29 @@ mod tests {
                 ],
                 "other": "6",
             }},
+        );
+    }
+
+    #[test]
+    fn multi_query() {
+        let query = Query::from(r#"query meId { me { id } } query meName { me { name } }"#);
+        let mut response = Response::builder()
+            .data(json! {{
+                "me": {
+                    "name": "moi"
+                }
+            }})
+            .build();
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
+
+        query.format_response(&mut response, operations.remove(1), &fragments);
+        assert_eq_and_ordered!(
+            response.data,
+            json! {{
+                "me": {
+                    "name": "moi"
+                }
+            }}
         );
     }
 }
