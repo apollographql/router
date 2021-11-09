@@ -85,6 +85,7 @@ impl FederatedGraph {
     }
 }
 
+#[allow(unused_mut, clippy::let_and_return)]
 impl Fetcher for FederatedGraph {
     fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>> {
         let federated_query_span = tracing::info_span!("federated");
@@ -177,6 +178,7 @@ impl Fetcher for FederatedGraph {
                             .expect("todo: how to prove?")
                             .into_inner();
 
+                        #[cfg(feature = "post-processing")]
                         tracing::debug_span!("format_response")
                             .in_scope(|| request.query.format_response(&mut response));
 
