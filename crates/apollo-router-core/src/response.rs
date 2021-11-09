@@ -128,6 +128,9 @@ fn select_object(
                     output.append(&mut value.to_owned())
                 }
             }
+            Selection::FragmentSpread(_fragment) => {
+                unimplemented!("do we get in a case where it is used in the router?")
+            }
         };
     }
     if output.is_empty() {

@@ -4,14 +4,49 @@
 //! QueryPlans are a set of operations that describe how a federated query is processed.
 
 use crate::prelude::graphql::*;
+use apollo_parser::ast;
 use serde::{Deserialize, Serialize};
 
+/// The root query plan container.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub struct JsQueryPlan {
+    /// The hierarchical nodes that make up the query plan
+    pub node: Option<PlanNode>,
+}
+
+/*FIXME: I get a panic when calling JS if I add the fields to QueryPlan:
+thread 'tokio-runtime-worker' panicked at 'unable to invoke var _a;
+Object.defineProperty(exports, "__esModule", { value: true });
+const planResult = bridge.plan(schemaString, queryString, operationName);
+if (((_a = planResult.errors) === null || _a === void 0 ? void 0 : _a.length) > 0) {
+    done({ Err: planResult.errors });
+}
+else {
+    done({ Ok: planResult.data });
+}
+//# sourceMappingURL=do_plan.js.map in JavaScript runtime
+ error:
+ Error: Error parsing args: serde_v8 error: ExpectedArray
+    at unwrapOpResult (deno:core/core.js:99:13)
+    at Object.opSync (deno:core/core.js:113:12)
+    at done (<init>:7:15)
+    at do_plan:8:5', /home/geal/.cargo/git/checkouts/federation-320f8bad94ab52a0/1ffecef/router-bridge/src/js.rs:105:13
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+*/
 /// The root query plan container.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     pub node: Option<PlanNode>,
+    // list of operations to apply on the final response
+    #[serde(default)]
+    pub operations: Vec<Operation>,
+    // list of fragments to apply on the final response
+    #[serde(default)]
+    pub fragments: Vec<Fragment>,
 }
 
 /// Query plans are composed of a set of nodes.
@@ -104,6 +139,23 @@ pub enum Selection {
 
     /// An inline fragment selection.
     InlineFragment(InlineFragment),
+
+    /// An inline fragment selection.
+    FragmentSpread(FragmentSpread),
+}
+
+impl From<ast::Selection> for Selection {
+    fn from(selection: ast::Selection) -> Selection {
+        match selection {
+            ast::Selection::Field(field) => Selection::Field(field.into()),
+            ast::Selection::InlineFragment(inline_fragment) => {
+                Selection::InlineFragment(inline_fragment.into())
+            }
+            ast::Selection::FragmentSpread(fragment_spread) => {
+                Selection::FragmentSpread(fragment_spread.into())
+            }
+        }
+    }
 }
 
 /// The field that is used
@@ -122,6 +174,26 @@ pub struct Field {
     pub selections: Option<Vec<Selection>>,
 }
 
+impl From<ast::Field> for Field {
+    fn from(field: ast::Field) -> Field {
+        Field {
+            alias: field
+                .alias()
+                .as_ref()
+                .and_then(|alias| alias.name().as_ref().map(|name| name.text().to_string())),
+            name: field
+                .name()
+                .as_ref()
+                .map(|name| name.text().to_string())
+                .expect("a field is always named"),
+            selections: field
+                .selection_set()
+                .as_ref()
+                .map(|set| set.selections().map(|selection| selection.into()).collect()),
+        }
+    }
+}
+
 /// An inline fragment.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,6 +204,109 @@ pub struct InlineFragment {
 
     /// The selections from the fragment.
     pub selections: Vec<Selection>,
+}
+
+impl From<ast::InlineFragment> for InlineFragment {
+    fn from(fragment: ast::InlineFragment) -> InlineFragment {
+        InlineFragment {
+            type_condition: fragment.type_condition().as_ref().and_then(|ty| {
+                ty.named_type()
+                    .as_ref()
+                    .and_then(|ty| ty.name().as_ref().map(|name| name.text().to_string()))
+            }),
+            selections: fragment
+                .selection_set()
+                .as_ref()
+                .expect("a fragment always has selections")
+                .selections()
+                .map(|selection| selection.into())
+                .collect(),
+        }
+    }
+}
+
+/// A fragment
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Fragment {
+    /// name of the fragment
+    pub fragment_name: String,
+
+    /// The selections from the fragment.
+    pub selections: Vec<Selection>,
+}
+
+impl From<ast::FragmentDefinition> for Fragment {
+    fn from(fragment: ast::FragmentDefinition) -> Fragment {
+        Fragment {
+            fragment_name: fragment
+                .fragment_name()
+                .as_ref()
+                .and_then(|fragment_name| fragment_name.name())
+                .map(|name| name.text().to_string())
+                .expect("the fragment name is always present"),
+            selections: fragment
+                .selection_set()
+                .as_ref()
+                .expect("a fragment always has selections")
+                .selections()
+                .map(|selection| selection.into())
+                .collect(),
+        }
+    }
+}
+
+/// A fragment spread
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FragmentSpread {
+    /// name of the fragment
+    pub fragment_name: String,
+    // ignoring the directives for now, we don't execute them
+}
+
+impl From<ast::FragmentSpread> for FragmentSpread {
+    fn from(fragment: ast::FragmentSpread) -> FragmentSpread {
+        FragmentSpread {
+            fragment_name: fragment
+                .fragment_name()
+                .as_ref()
+                .and_then(|fragment_name| fragment_name.name())
+                .map(|name| name.text().to_string())
+                .expect("the fragment name is always present"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Operation {
+    name: Option<String>,
+    selection_set: SelectionSet,
+}
+
+impl From<ast::OperationDefinition> for Operation {
+    fn from(op: ast::OperationDefinition) -> Operation {
+        Operation {
+            name: op.name().as_ref().map(|name| name.text().to_string()),
+            selection_set: op
+                .selection_set()
+                .expect("the node SelectionSet is not optional in the spec")
+                .into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SelectionSet {
+    selections: Vec<Selection>,
+}
+
+impl From<ast::SelectionSet> for SelectionSet {
+    fn from(set: ast::SelectionSet) -> SelectionSet {
+        SelectionSet {
+            selections: set.selections().map(|selection| selection.into()).collect(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -276,7 +451,9 @@ mod tests {
                                     })]
                             }]
                     }]
-            })
+            }),
+            operations: Vec::new(),
+            fragments: Vec::new(),
         }
     }
 

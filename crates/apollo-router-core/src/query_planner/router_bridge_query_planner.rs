@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::prelude::graphql::*;
+use apollo_parser::ast;
 use async_trait::async_trait;
 use router_bridge::plan;
 
@@ -31,13 +32,48 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
     ) -> Result<QueryPlan, QueryPlannerError> {
         let context = plan::OperationalContext {
             schema: self.schema.as_str().to_string(),
-            query,
+            query: query.clone(),
             operation_name: operation.unwrap_or_default(),
         };
 
-        tokio::task::spawn_blocking(|| {
-            plan::plan(context, options.into())
-                .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
+        tokio::task::spawn_blocking(move || {
+            let js_query_plan: JsQueryPlan = plan::plan(context, options.into())
+                .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))?;
+
+            let mut query_plan = QueryPlan {
+                node: js_query_plan.node,
+                operations: Vec::new(),
+                fragments: Vec::new(),
+            };
+
+            let parser = apollo_parser::Parser::new(&query);
+            let tree = parser.parse();
+
+            if !tree.errors().is_empty() {
+                let errors = tree
+                    .errors()
+                    .iter()
+                    .map(|err| format!("{:?}", err))
+                    .collect::<Vec<_>>();
+                panic!("Parsing error(s): {}", errors.join(", "));
+            }
+
+            let document = tree.document();
+
+            for definition in document.definitions() {
+                match definition {
+                    // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
+                    ast::Definition::OperationDefinition(operation) => {
+                        query_plan.operations.push(operation.into());
+                    }
+                    ast::Definition::FragmentDefinition(fragment_definition) => {
+                        query_plan.fragments.push(fragment_definition.into());
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(query_plan)
         })
         .await?
     }
@@ -73,7 +109,9 @@ mod tests {
                     requires: None,
                     variable_usages: vec![],
                     operation: "{me{name{first last}}}".into()
-                }))
+                })),
+                operations: Vec::new(),
+                fragments: Vec::new(),
             },
             result.unwrap()
         );

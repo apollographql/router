@@ -108,7 +108,7 @@ impl Fetcher for FederatedGraph {
 
         Box::pin(
             async move {
-                let plan = {
+                let (plan, operations, fragments) = {
                     match query_planner
                         .get(
                             request.query.as_str().to_owned(),
@@ -118,7 +118,11 @@ impl Fetcher for FederatedGraph {
                         .instrument(tracing::info_span!("plan"))
                         .await
                     {
-                        Ok(QueryPlan { node: Some(root) }) => root,
+                        Ok(QueryPlan {
+                            node: Some(root),
+                            operations,
+                            fragments,
+                        }) => (root, operations, fragments),
                         Ok(_) => return stream::empty().boxed(),
                         Err(err) => {
                             return stream::iter(vec![FetchError::from(err).to_response(true)])
@@ -127,7 +131,12 @@ impl Fetcher for FederatedGraph {
                     }
                 };
 
-                tracing::debug!("query plan\n{:#?}", &plan);
+                tracing::info!(
+                    "query plan\n{:#?}\n{:#?}\n{:#?}",
+                    &plan,
+                    &operations,
+                    &fragments
+                );
 
                 let early_errors_response = tracing::info_span!("validation").in_scope(|| {
                     let mut early_errors = Vec::new();
