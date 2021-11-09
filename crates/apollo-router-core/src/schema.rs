@@ -1,5 +1,5 @@
 use crate::*;
-use apollo_parser::ast;
+use apollo_parser::ast::{self, AstNode};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -115,10 +115,12 @@ impl std::str::FromStr for Schema {
                                                         .as_ref()
                                                         .map(|id| id.text().to_owned());
 
-                                                    let arg_value = argument.value().map(|s| {
-                                                        let mut without_quotes = s.to_string();
-                                                        without_quotes.retain(|c| c != '"');
-                                                        without_quotes.trim().to_string()
+                                                    let arg_value = argument.value().map(|v| {
+                                                        v.syntax()
+                                                            .text()
+                                                            .to_string()
+                                                            .trim()
+                                                            .to_string()
                                                     });
 
                                                     match arg_name.as_deref() {
