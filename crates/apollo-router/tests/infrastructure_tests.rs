@@ -1,5 +1,4 @@
 use apollo_router_core::prelude::*;
-use insta;
 
 #[test]
 fn test_starstuff_supergraph_is_valid() {
