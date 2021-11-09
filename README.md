@@ -2,6 +2,10 @@
 
 Rust implementation of Federated GraphQL router.
 
+## Getting started
+
+Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quickstart/) to get up and running with the Apollo Federation Routerl.
+
 ## Status
 
 🚧 Apollo Federation Router is experimental software, not yet ready for production use.
