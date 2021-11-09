@@ -120,6 +120,8 @@ impl std::str::FromStr for Schema {
                                                             .text()
                                                             .to_string()
                                                             .trim()
+                                                            .trim_start_matches('"')
+                                                            .trim_end_matches('"')
                                                             .to_string()
                                                     });
 
