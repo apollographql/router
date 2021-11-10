@@ -19,10 +19,10 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts" url: "https://localhost:4001")
-  INVENTORY @join__graph(name: "inventory" url: "https://localhost:4004")
-  PRODUCTS @join__graph(name: "products" url: "https://localhost:4003")
-  REVIEWS @join__graph(name: "reviews" url: "https://localhost:4002")
+  ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001")
+  INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004")
+  PRODUCTS @join__graph(name: "products" url: "http://localhost:4003")
+  REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002")
 }
 
 type Mutation {
