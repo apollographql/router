@@ -69,6 +69,14 @@ requires that the `federation-demo` project is running:
     npm run start
     ```
 
+### Run the router against the docker-compose or Node.js setup
+
+Once the subgraphs are up and running, run the router with this command:
+
+```shell
+cargo run -- -s ./examples/local.graphql
+```
+
 Go to https://studio.apollographql.com/sandbox/explorer to make queries and
 http://localhost:16686/ to reach Jaeger.
 
