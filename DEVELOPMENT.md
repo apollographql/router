@@ -69,7 +69,7 @@ requires that the `federation-demo` project is running:
     npm run start
     ```
 
-### Run the router against the docker-compose or nodejs setup
+### Run the router against the docker-compose or Node.js setup
 
 Once the subgraphs are up and running, run the router with this command:
 
