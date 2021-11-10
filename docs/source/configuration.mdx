@@ -90,18 +90,6 @@ server:
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
 
-  # Names and URLs of all subgraphs
-  # By default, this information is parsed from the supergraph schema
-  # Provide it here to override subgraph names or URLs
-  subgraphs:
-    # Defines a subgraph named "accounts"
-    accounts:
-      # The URL of the accounts subgraph's GraphQL endpoint
-      routing_url: http://localhost:4001/graphql
-    # Defines a second subgraph named "products"
-    products:
-      routing_url: http://localhost:4003/graphql
-
   # Cross origin request headers
   cors:
     # Set to false to disallow any origin and rely exclusively on `origins`
@@ -114,44 +102,51 @@ server:
     allow_credentials: false
     # The headers to allow.
     # Defaults to the required request header for Apollo Studio: Content-Type
-    allow_headers:
+    allow_headers: [ Content-Type ]
     # Allowed request methods
     # Defaults to GET, POST, OPTIONS.
-    methods:
+    methods: [ GET, POST, OPTIONS ]
     # Which response headers should be made available to scripts running in the browser,
     # in response to a cross-origin request.
     expose_headers:
+
+# Names and URLs of all subgraphs
+# By default, this information is parsed from the supergraph schema
+# Provide it here to override subgraph names or URLs
+subgraphs:
+  # Defines a subgraph named "accounts"
+  accounts:
+    # The URL of the accounts subgraph's GraphQL endpoint
+    routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
+  products:
+    routing_url: http://localhost:4003/graphql
 
 # OpenTelemetry configuration. Choose either jaeger or otlp
 opentelemetry:
   # Configuration to send traces and metrics to a Jaeger service
   jaeger:
     # optional url of the jaeger collector
-    collector_endpoint:
+    collector_endpoint: "http://example.org"
     # name of the service used in traces
     # defaults to router
     service_name: "router"
-    # optional username to authenticate to jaeger
-    # can be obtained from the environment variable JAEGER_USERNAME
-    username:
-    # optional username to authenticate to jaeger
-    # can be obtained from the environment variable JAEGER_PASSWORD
-    password:
+    # the username and password are obtained from the environment variables
+    # JAEGER_USERNAME and JAEGER_PASSWORD
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   otlp:
     tracing:
       exporter:
-        export_config:
-          # URL of the exporter
-          endpoint:
-          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-          protocol: Grpc
-          # timmeout in seconds
-          timeout: 60
-          metadata:
-            - foo: bar
-            - foo: baz
-            - bar: baz
+        # URL of the exporter
+        endpoint:
+        # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+        protocol: Grpc
+        # timmeout in seconds
+        timeout: 60
+        metadata:
+          - foo: bar
+          - foo: baz
+          - bar: baz
       trace_config:
         sampler:
           ParentBased:
