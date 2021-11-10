@@ -17,7 +17,7 @@ That will allow us to figure out a way to solve the issue together, and possibly
 The Apollo Router is written in [Rust]. In order to contribute, you'll need to have Rust installed. To install Rust,
 visit [https://www.rust-lang.org/tools/install].
 
-Rust has a build tool and package manager called [`cargo`] that you'll use to interact with Apollo Router's code.
+Rust has a build tool and package manager called [`cargo`] that you'll use to interact with the Apollo Router's code.
 
 To build the CLI:
 
@@ -29,7 +29,7 @@ To run the CLI:
 
 ```bash
 cargo run -- <args>
-# e.g. 'cargo run -- help' will run Apollo Router's help command
+# e.g. 'cargo run -- help' will run the Apollo Router's help command
 ```
 
 Refer to [the README file](README.md) or run `cargo run --help` for more information.
@@ -56,7 +56,7 @@ Some of the functionalities rely on the current Javascript / TypeScript implemen
 
 ## Documentation
 
-Documentation for using and contributing to Apollo Router is built using Gatsby
+Documentation for using and contributing to the Apollo Router is built using Gatsby
 and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs)
 .
 
@@ -92,7 +92,7 @@ XTASKs:
 
 - **Tests**: The CI will run `cargo xtask test` which will test each relevant permutation of the available features and run the demo subgraphs.
 - **Lints**: The CI will check for lints and clippy compliance.
-- **Checks**: The CI will run cargo-deny to make sure Apollo Router doesn't suffer an existing CVE, and that each dependency used by Apollo Router is compatible with our license.
+- **Checks**: The CI will run cargo-deny to make sure the Apollo Router doesn't suffer an existing CVE, and that each dependency used by the Apollo Router is compatible with our license.
 
 After you have opened your PR and all of the status checks are passing, please assign it to one of the maintainers (found in the bottom of [the README](./README.md#contributing) who will review it and give feedback.
 

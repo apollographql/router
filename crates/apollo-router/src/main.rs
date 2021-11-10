@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
     ensure!(
         opt.supergraph_path.is_some(),
         r#"
-💫 The router requires a supergraph to be set using '--supergraph':
+💫 Apollo Router requires a supergraph to be set using '--supergraph':
 
     $ ./router --supergraph <file>`
   
