@@ -449,4 +449,34 @@ mod tests {
             }}
         );
     }
+
+    #[test]
+    fn field_ordering() {
+        let query = Query::from(
+            r#"{
+                identifiant: id
+                reviews { body }
+                id
+            }"#,
+        );
+        let mut response = Response::builder()
+            .data(json! {{
+                "id": "1",
+                "reviews": {"body": "awesome"},
+                "identifiant": "1",
+
+            }})
+            .build();
+        let (mut operations, fragments) = fragments_and_operations(&query.string);
+
+        query.format_response(&mut response, operations.remove(0), &fragments);
+        assert_eq_and_ordered!(
+            response.data,
+            json! {{
+                "identifiant": "1",
+                "reviews": {"body": "awesome"},
+                "id": "1",
+            }},
+        );
+    }
 }
