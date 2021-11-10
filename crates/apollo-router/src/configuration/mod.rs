@@ -225,10 +225,10 @@ pub struct Jaeger {
     #[serde(default = "default_jaeger_service_name")]
     #[derivative(Default(value = "default_jaeger_service_name()"))]
     pub service_name: String,
-    #[serde(skip, default = "default_jaeger_username")]
+    #[serde(default = "default_jaeger_username")]
     #[derivative(Default(value = "default_jaeger_username()"))]
     pub username: Option<String>,
-    #[serde(skip, default = "default_jaeger_password")]
+    #[serde(default = "default_jaeger_password")]
     #[derivative(Default(value = "default_jaeger_password()"))]
     pub password: Option<String>,
 }
