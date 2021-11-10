@@ -34,11 +34,9 @@ We'll be working to open issues and surface designs about these things and more,
   
   Until we finish this work, there may be responses returned to the clients which are not fully specification compliant, including artifacts of Federation query plan execution. (e.g., the inclusion of additional metadata).
   
-  
 - **OpenTelemetry/Prometheus metrics**
 
   These will compliment the existing OpenTelemetry traces which we already support. It will help to paint a clearer picture of how the Apollo Router is performing and allow you to set alerts in your favorite alerting software.
-
 
 - **Structured logging**
 
