@@ -51,8 +51,7 @@ See our [release stages] for more information.
   
   See our [blog post] for more.
   
-  <!-- TODO -->
-  [blog post]: https://www.apollographql.com/blog/
+  [blog post]: https://www.apollographql.com/blog/announcement/backend/apollo-router-our-graphql-federation-runtime-in-rust/
   
 - **Apollo Sandbox Explorer**
 
