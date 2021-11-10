@@ -15,7 +15,7 @@ It can already perform queries though, so we'd welcome experiments and feedback 
 
 ## Usage
 
-Apollo Router requires `configuration.yaml` and `supergraph.graphql`
+Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/supergraphs/) to be passed as the `--supergraph` argument and [optional configuration](https://www.apollographql.com/docs/router/configuration/).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
