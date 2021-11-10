@@ -209,7 +209,7 @@ jobs:
 
       - run:
           command: >
-            cargo xtask test
+            cargo xtask test --with-demo
       - run:
           command: >
             cargo xtask lint
