@@ -46,7 +46,6 @@ impl Test {
             eprintln!("Running tests with features: {}", features.join(", "));
             cargo!(
                 ["test", "--workspace", "--locked", "--no-default-features"],
-                ["--features", "apollo-router-core/post-processing"],
                 features.iter().flat_map(|feature| ["--features", feature]),
             );
         }
