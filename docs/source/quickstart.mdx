@@ -1,14 +1,14 @@
 ---
 title: Apollo Router quickstart
 sidebar_title: 🚀 Quickstart
-description: Run the Router with Apollo-hosted subgraphs
+description: Run the Apollo Router with Apollo-hosted subgraphs
 ---
 
 import { ExpansionPanel } from "gatsby-theme-apollo-docs";
 
-Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
+Hello! This tutorial walks you through installing Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
-## 1. Download and extract the router binary
+## 1. Download and extract the Apollo Router binary
 
 Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
 
@@ -16,7 +16,7 @@ Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographq
 * macOS (x86_64)
 * Windows (x86_64)
 
-> If a tarball for your system or architecture isn't available, you can [build and run the Apollo Router from source](./build-from-source/).
+> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](./build-from-source/).
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -24,7 +24,7 @@ After downloading, extract the file by running the following from a new project 
 tar -xf path/to/file.tar.gz
 ```
 
-You can now try running the Apollo Router from your project's root directory with the following command:
+You can now try running Apollo Router from your project's root directory with the following command:
 
 ```bash
 ./dist/router
@@ -34,7 +34,7 @@ If you do, you'll get the following error:
 
 ```
 Error:
-💫 The router requires a supergraph to be set using '--supergraph':
+💫 Apollo Router requires a supergraph to be set using '--supergraph':
 
     $ ./router --supergraph <file>`
 
@@ -48,12 +48,12 @@ Error:
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-   Then run the Apollo Router with that supergraph:
+   Then run Apollo Router with that supergraph:
 
     $ ./router --supergraph starstuff.graphql
 ```
 
-This is because the Router requires a supergraph schema as input! Let's obtain one.
+This is because Apollo Router requires a supergraph schema as input! Let's obtain one.
 
 ## 2. Download the example supergraph schema
 
@@ -147,9 +147,9 @@ type User
 
 </ExpansionPanel>
 
-This file is all that the Apollo Router needs to communicate with our subgraphs!
+This file is all that Apollo Router needs to communicate with our subgraphs!
 
-## 3. Run the Router with the default configuration
+## 3. Run Apollo Router with the default configuration
 
 Now from your project root, run the following:
 
@@ -164,11 +164,11 @@ Nov 02 17:08:09.926  INFO router: Starting Apollo Router
 Nov 02 17:08:10.279  INFO router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-That's it! Visit `localhost:4000` to open the [Apollo Studio Explorer](https://www.apollographql.com/docs/studio/explorer/). You can inspect the entire federated graph and run your first queries against the Apollo Router!
+That's it! Visit `localhost:4000` to open the [Apollo Studio Explorer](https://www.apollographql.com/docs/studio/explorer/). You can inspect the entire federated graph and run your first queries against Apollo Router!
 
 ## Next steps
 
-Now that you know how to run the Apollo Router with a supergraph schema, you can:
+Now that you know how to run Apollo Router with a supergraph schema, you can:
 
-* Try running the Router in front of test instances of your own subgraphs
+* Try running Apollo Router in front of test instances of your own subgraphs
 * Learn about [advanced configuration options](./configuration/)

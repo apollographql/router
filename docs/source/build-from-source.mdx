@@ -1,13 +1,13 @@
 ---
-title: Building the Apollo Router from source
+title: Building Apollo Router from source
 sidebar_title: 🛠 Build from source
 ---
 
-If the Apollo Router doesn't provide a [prebuilt executable](./quickstart/#1-download-and-extract-the-router-binary) for your system or architecture, you can build the executable from source.
+If Apollo Router doesn't provide a [prebuilt executable](./quickstart/#1-download-and-extract-the-router-binary) for your system or architecture, you can build the executable from source.
 
 ## 1. Install prerequisites
 
-To compile the Apollo Router binary on your machine, you need the following:
+To compile Apollo Router binary on your machine, you need the following:
 
 - **Git.** Github provides a tutorial on [how to install Git](https://github.com/git-guides/install-git).
 - **The Rust language.** Head over to [rustup.rs](https://rustup.rs/) to install Rust.
@@ -26,7 +26,7 @@ git submodule update --init --recursive
 
 ## 3. Build and run the executable
 
-From the repository's root directory (`router`), you can run the following command to build and run the Apollo Router:
+From the repository's root directory (`router`), you can run the following command to build and run Apollo Router:
 
 ```bash
 cargo run -- --supergraph ./examples/supergraph.graphql
@@ -44,4 +44,4 @@ Nov 02 17:08:09.926  INFO router: Starting Apollo Router
 Nov 02 17:08:10.279  INFO router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-That's it! Visit `localhost:4000` to open the [Apollo Studio Explorer](https://www.apollographql.com/docs/studio/explorer/). You can inspect the entire example federated graph and run your first queries against the Apollo Router!
+That's it! Visit `localhost:4000` to open the [Apollo Studio Explorer](https://www.apollographql.com/docs/studio/explorer/). You can inspect the entire example federated graph and run your first queries against Apollo Router!
