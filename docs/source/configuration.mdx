@@ -5,7 +5,7 @@ sidebar_title: ⚙️ Usage and config
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
-You run the Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
+You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
 ```bash
 ./router --config configuration.yaml --supergraph supergraph-schema.graphql
@@ -63,9 +63,9 @@ You can also provide this value via the `CONFIGURATION_PATH` environment variabl
 
 ## Handling CORS
 
-If you attempt to query the Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
+If you attempt to query Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
 
-You can configure CORS in the [YAML configuration file](#configuration-file) you can provide to the Apollo Router.
+You can configure CORS in the [YAML configuration file](#configuration-file) you can provide to Apollo Router.
 
 Here's an example configuration for adding `localhost` to the list of approved origins:
 
@@ -81,7 +81,7 @@ server:
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are listed below:
+Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are listed below:
 
 ```yaml:title=configuration.yaml
 # Configuration of the router's HTTP server

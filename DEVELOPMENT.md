@@ -1,6 +1,6 @@
 # Development
 
-Rust implementation of federation router.
+The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/):
 
 ## Crates
 
@@ -43,7 +43,7 @@ git config --local core.hooksPath .githooks/
 
 Use `cargo build --all-targets` to build the project.
 
-Some tests run against the existing Node.js implementation of the router. This
+Some tests run against the existing Node.js implementation of the Apollo Router. This
 requires that the `federation-demo` project is running:
 
  *  If you have Docker and Docker Compose installed:
@@ -69,9 +69,9 @@ requires that the `federation-demo` project is running:
     npm run start
     ```
 
-### Run the router against the docker-compose or Node.js setup
+### Run Apollo Router against the docker-compose or Node.js setup
 
-Once the subgraphs are up and running, run the router with this command:
+Once the subgraphs are up and running, run Apollo Router with this command:
 
 ```shell
 cargo run -- -s ./examples/local.graphql
