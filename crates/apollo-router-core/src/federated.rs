@@ -172,7 +172,7 @@ impl Fetcher for FederatedGraph {
                             &root,
                             query_plan
                                 .node()
-                                .expect("we already we sure the plan is some; qed"),
+                                .expect("we already ensured that the plan is some; qed"),
                             request.clone(),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
