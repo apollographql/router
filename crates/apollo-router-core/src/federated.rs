@@ -108,7 +108,7 @@ impl Fetcher for FederatedGraph {
 
         Box::pin(
             async move {
-                let plan = {
+                let query_plan = {
                     match query_planner
                         .get(
                             request.query.as_str().to_owned(),
@@ -118,8 +118,7 @@ impl Fetcher for FederatedGraph {
                         .instrument(tracing::info_span!("plan"))
                         .await
                     {
-                        Ok(QueryPlan { node: Some(root) }) => root,
-                        Ok(_) => return stream::empty().boxed(),
+                        Ok(query_plan) => query_plan,
                         Err(err) => {
                             return stream::iter(vec![FetchError::from(err).to_response(true)])
                                 .boxed()
@@ -127,33 +126,39 @@ impl Fetcher for FederatedGraph {
                     }
                 };
 
-                tracing::debug!("query plan\n{:#?}", &plan);
+                if let Some(plan) = query_plan.node.as_ref() {
+                    tracing::debug!("query plan\n{:#?}", &plan);
 
-                let early_errors_response = tracing::info_span!("validation").in_scope(|| {
-                    let mut early_errors = Vec::new();
-                    for err in validate_services_against_plan(Arc::clone(&service_registry), &plan)
-                    {
-                        early_errors.push(err.to_graphql_error(None));
+                    let early_errors_response = tracing::info_span!("validation").in_scope(|| {
+                        let mut early_errors = Vec::new();
+                        for err in
+                            validate_services_against_plan(Arc::clone(&service_registry), &plan)
+                        {
+                            early_errors.push(err.to_graphql_error(None));
+                        }
+
+                        for err in
+                            validate_request_variables_against_plan(Arc::clone(&request), &plan)
+                        {
+                            early_errors.push(err.to_graphql_error(None));
+                        }
+
+                        // If we have any errors so far then let's abort the query
+                        // Planning/validation/variables are candidates to abort.
+                        if !early_errors.is_empty() {
+                            tracing::error!(errors = format!("{:?}", early_errors).as_str());
+                            let response = Response::builder().errors(early_errors).build();
+                            Some(stream::once(async move { response }).boxed())
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(response) = early_errors_response {
+                        return response;
                     }
-
-                    for err in validate_request_variables_against_plan(Arc::clone(&request), &plan)
-                    {
-                        early_errors.push(err.to_graphql_error(None));
-                    }
-
-                    // If we have any errors so far then let's abort the query
-                    // Planning/validation/variables are candidates to abort.
-                    if !early_errors.is_empty() {
-                        tracing::error!(errors = format!("{:?}", early_errors).as_str());
-                        let response = Response::builder().errors(early_errors).build();
-                        Some(stream::once(async move { response }).boxed())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(response) = early_errors_response {
-                    return response;
+                } else {
+                    return stream::empty().boxed();
                 }
 
                 let query_execution_span = tracing::info_span!("execution");
@@ -165,7 +170,10 @@ impl Fetcher for FederatedGraph {
                         execute(
                             Arc::clone(&response),
                             &root,
-                            &plan,
+                            query_plan
+                                .node
+                                .as_ref()
+                                .expect("we already we sure the plan is some; qed"),
                             request.clone(),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),

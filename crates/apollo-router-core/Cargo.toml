@@ -34,6 +34,7 @@ typed-builder = "0.9.1"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
+insta = "1.8.0"
 mockall = "0.10.2"
 once_cell = "1"
 static_assertions = "1"

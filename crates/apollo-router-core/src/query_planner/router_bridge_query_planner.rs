@@ -1,10 +1,9 @@
 //! Calls out to nodejs query planner
 
-use std::sync::Arc;
-
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use router_bridge::plan;
+use std::sync::Arc;
 
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -28,7 +27,7 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<QueryPlan, QueryPlannerError> {
+    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
         let context = plan::OperationalContext {
             schema: self.schema.as_str().to_string(),
             query,
@@ -65,18 +64,9 @@ mod tests {
                 None,
                 QueryPlanOptions::default(),
             )
-            .await;
-        assert_eq!(
-            QueryPlan {
-                node: Some(PlanNode::Fetch(FetchNode {
-                    service_name: "accounts".into(),
-                    requires: None,
-                    variable_usages: vec![],
-                    operation: "{me{name{first last}}}".into()
-                }))
-            },
-            result.unwrap()
-        );
+            .await
+            .unwrap();
+        insta::assert_debug_snapshot!(result);
     }
 
     #[test(tokio::test)]

@@ -1,6 +1,7 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use futures::Future;
+use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
 /// Maintains a map of services to fetchers.
@@ -35,7 +36,7 @@ pub trait QueryPlanner: Send + Sync + Debug {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<QueryPlan, QueryPlannerError>;
+    ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
 }
 
 /// With caching trait.

@@ -120,6 +120,7 @@ dependencies = [
  "displaydoc",
  "futures",
  "include_dir",
+ "insta",
  "mockall",
  "once_cell",
  "parking_lot",
