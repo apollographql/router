@@ -11,7 +11,14 @@ use serde::Deserialize;
 #[serde(tag = "kind")]
 pub struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
-    pub node: Option<PlanNode>,
+    node: Option<PlanNode>,
+}
+
+impl QueryPlan {
+    /// Returns a reference to the plan.
+    pub fn node(&self) -> Option<&PlanNode> {
+        self.node.as_ref()
+    }
 }
 
 /// Query plans are composed of a set of nodes.

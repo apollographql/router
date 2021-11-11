@@ -126,19 +126,19 @@ impl Fetcher for FederatedGraph {
                     }
                 };
 
-                if let Some(plan) = query_plan.node.as_ref() {
-                    tracing::debug!("query plan\n{:#?}", &plan);
+                if let Some(plan) = query_plan.node() {
+                    tracing::debug!("query plan\n{:#?}", plan);
 
                     let early_errors_response = tracing::info_span!("validation").in_scope(|| {
                         let mut early_errors = Vec::new();
                         for err in
-                            validate_services_against_plan(Arc::clone(&service_registry), &plan)
+                            validate_services_against_plan(Arc::clone(&service_registry), plan)
                         {
                             early_errors.push(err.to_graphql_error(None));
                         }
 
                         for err in
-                            validate_request_variables_against_plan(Arc::clone(&request), &plan)
+                            validate_request_variables_against_plan(Arc::clone(&request), plan)
                         {
                             early_errors.push(err.to_graphql_error(None));
                         }
@@ -171,8 +171,7 @@ impl Fetcher for FederatedGraph {
                             Arc::clone(&response),
                             &root,
                             query_plan
-                                .node
-                                .as_ref()
+                                .node()
                                 .expect("we already we sure the plan is some; qed"),
                             request.clone(),
                             Arc::clone(&service_registry),
