@@ -1,6 +1,6 @@
 ## 🗺️🔭 Roadmap
 
-We'll be working to open issues and surface designs about these things and more, as the planning progresses.  Follow this file for more details as they become available and we'll link the items below to issues as we create them.  We look forward to your participation in those discsussions!
+We'll be working to open issues and surface designs about these things and more, as the planning progresses.  Follow this file for more details as they become available and we'll link the items below to issues as we create them.  We look forward to your participation in those discussions!
 
 - **Apollo Studio integrations**
 
