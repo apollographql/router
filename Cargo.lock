@@ -59,7 +59,7 @@ checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
 [[package]]
 name = "apollo-parser"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=14bb84337a8bacd5cd27d7d7df429936f104b63b#14bb84337a8bacd5cd27d7d7df429936f104b63b"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=2435c81798502813a7fd26da44e3b6ae6e9ee27e#2435c81798502813a7fd26da44e3b6ae6e9ee27e"
 dependencies = [
  "rowan",
 ]
@@ -2834,7 +2834,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation.git?rev=1ffecef9ef52f6dc127939cdc375f0465774f093#1ffecef9ef52f6dc127939cdc375f0465774f093"
+source = "git+https://github.com/apollographql/federation.git?rev=3aa8f3a533f19e31ab984c87a0674ec78c42ebb6#3aa8f3a533f19e31ab984c87a0674ec78c42ebb6"
 dependencies = [
  "anyhow",
  "deno_core",
