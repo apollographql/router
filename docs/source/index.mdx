@@ -4,6 +4,10 @@ sidebar_title: 🔭 Overview
 description: Overview
 ---
 
+import { Button } from '@apollo/space-kit/Button';
+import { Link } from 'gatsby';
+import { colors } from 'gatsby-theme-apollo-core';
+
 > ⚠️ **The Apollo Router is in public pre-alpha.** Until it is generally available, do not use it in business-critical graphs. [Learn about release stages.](https://www.apollographql.com/docs/resources/release-stages/#open-source-release-stages)
 
 The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/):
@@ -24,4 +28,12 @@ flowchart BT;
 
 The Apollo Router is [implemented in Rust](https://github.com/apollographql/router), which provides [performance benefits](https://www.apollographql.com/blog/announcement/backend/apollo-router-our-graphql-federation-runtime-in-rust/) over the TypeScript Apollo Gateway.
 
-[Try it out!](./quickstart/)
+<p>
+  <Button
+    size="default"
+    color={colors.primary}
+    as={<Link to="/quickstart/" />}
+  >
+    Try it out!
+  </Button>
+</p>
