@@ -122,19 +122,19 @@ jobs:
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-linux
                 crate: --workspace --tests
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-linux
                 crate: --workspace --tests --features="tls"
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-linux
                 crate: --workspace --tests --no-default-features --features="otlp-http"
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-linux
                 crate: --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
@@ -209,19 +209,19 @@ jobs:
                   if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-windows
                 crate: --workspace --tests
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-windows
                 crate: --workspace --tests --features="tls"
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-windows
                 crate: --workspace --tests --no-default-features --features="otlp-http"
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
+                cache_version: v2-windows
                 crate: --workspace --tests --no-default-features --features="otlp-grpcio"
             # this feature couldn't be built on windows, need to figure this out
             # - rust/build:
