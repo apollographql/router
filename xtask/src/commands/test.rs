@@ -6,8 +6,11 @@ use xtask::*;
 
 const TEST_DEFAULT_ARGS: &[&str] = &[
     "test",
-    "--workspace",
     "--locked",
+    "-p",
+    "apollo-router",
+    "-p",
+    "apollo-router-core",
     "--no-default-features",
     "--features",
 ];
