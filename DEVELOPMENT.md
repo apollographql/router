@@ -24,8 +24,8 @@ are specified in [.tool-versions](.tool-versions). To set up your toolchain
 run:
 
 ```shell
-asdf add-plugin rust
-asdf add-plugin nodejs
+asdf plugin add rust
+asdf plugin add nodejs
 asdf install
 asdf reshim
 ```
@@ -61,13 +61,13 @@ requires that the `federation-demo` project is running:
     You will need Node.js and npm to be installed. It is known to be working on
     Node.js 16 and npm 7.18.
 
-    ```shell
-    git submodule sync --recursive
-    git submodule update --recursive --init
-    cd dockerfiles/federation-demo/federation-demo
-    npm install;
-    npm run start
-    ```
+  ```shell
+  git submodule sync --recursive
+  git submodule update --recursive --init
+  cd dockerfiles/federation-demo/federation-demo
+  npm install;
+  npm run start
+  ```
 
 ### Run Apollo Router against the docker-compose or Node.js setup
 
