@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use std::collections::HashMap;
 
 /// A cache key.
@@ -39,6 +39,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         if let Some(value) = self
             .cached
             .lock()
+            .await
             .get(&(query.clone(), operation.clone(), options.clone()))
             .cloned()
         {
@@ -51,6 +52,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
             .await;
         self.cached
             .lock()
+            .await
             .insert((query, operation, options), value.clone());
         value
     }

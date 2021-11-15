@@ -122,7 +122,6 @@ dependencies = [
  "include_dir",
  "mockall",
  "once_cell",
- "parking_lot",
  "router-bridge",
  "serde",
  "serde_json",
