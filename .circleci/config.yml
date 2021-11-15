@@ -73,7 +73,10 @@ jobs:
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
                 cache_version: v2-macos
-                crate: --all-features --workspace --tests
+                crate: --workspace --tests
+                crate: --workspace --tests --features="tls"
+                crate: --workspace --tests --no-default-features --features="otlp-http"
+                crate: --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
                 key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
                 paths:
@@ -187,6 +190,10 @@ jobs:
                 # This is prefixed in the orb with 'cargo-'
                 cache_version: v2-windows
                 crate: --workspace --tests
+                crate: --workspace --tests --features="tls"
+                crate: --workspace --tests --no-default-features --features="otlp-http"
+                # this feature couldn't be built on windows, need to figure this out
+                # crate: --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
                 key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
                 paths:
