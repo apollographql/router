@@ -73,7 +73,7 @@ jobs:
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
                 cache_version: v2-macos
-                crate: --workspace --tests
+                crate: --all-features --workspace --tests
             - save_cache:
                 key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
                 paths:
@@ -111,7 +111,7 @@ jobs:
             - rust/build:
                 # This is prefixed in the orb with 'cargo-'
                 cache_version: v2-linux
-                crate: --workspace --tests
+                crate: --all-features --workspace --tests
             - save_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
                 paths:
