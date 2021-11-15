@@ -181,10 +181,12 @@ impl From<JoinError> for QueryPlannerError {
 }
 
 /// Error in the schema.
-#[derive(Debug, Error, Display)]
+#[derive(Debug, Error)]
 pub enum SchemaError {
     /// IO error: {0}
+    #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     /// Parsing error(s).
+    #[error("parse errors {0:#?}")]
     ParseErrors(Vec<apollo_parser::Error>),
 }
