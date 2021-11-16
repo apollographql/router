@@ -8,4 +8,6 @@ opentelemetry:
     tracing:
       exporter:
         grpc:
-          endpoint:
+          endpoint: http://example.org
+          protocol: Grpc
+          timeout: 42

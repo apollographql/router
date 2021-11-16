@@ -144,16 +144,6 @@ commands:
 
   windows_prepare_rust_env:
     steps:
-      #            - run:
-      #                # TODO compiling grpcio on Windows is still not working
-      #                #      using boringssl gives an error message
-      #                #      using openssl hangs indefinitely
-      #                name: Install grpcio build dependencies
-      #                command: |
-      #                  choco install activeperl -y
-      #                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-      #                  choco install yasm -y
-      #                  choco install openssl -y
       - run:
           name: Install rustup
           environment:
@@ -255,7 +245,7 @@ commands:
       - build_common_permutations
       - rust/build:
           with_cache: false
-          crate: --no-default-features --features otlp-grpcio -p apollo-router -p apollo-router-core
+          crate: --no-default-features -p apollo-router -p apollo-router-core
   build_workspace:
     parameters:
       os:

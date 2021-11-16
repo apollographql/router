@@ -10,14 +10,13 @@ name = "router"
 path = "src/main.rs"
 
 [features]
-default = ["otlp-tonic"]
-otlp-tonic = [
+default = ["otlp-grpc"]
+otlp-grpc = [
     "opentelemetry-otlp/tonic",
     "opentelemetry-otlp/tonic-build",
     "opentelemetry-otlp/prost",
     "tonic",
 ]
-otlp-grpcio = ["opentelemetry-otlp/grpc-sys", "opentelemetry-otlp/openssl"]
 otlp-http = ["opentelemetry-otlp/http-proto"]
 tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
 
