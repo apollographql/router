@@ -6,3 +6,6 @@ subgraphs:
 opentelemetry:
   otlp:
     tracing:
+      exporter:
+        http:
+          endpoint:
