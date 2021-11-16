@@ -24,6 +24,38 @@ executors:
     shell: powershell.exe -ExecutionPolicy Bypass
 
 jobs:
+  setup_asdf_env:
+    docker:
+      - image: jeremylempereur/asdf:latest
+        environment:
+          shell: /bin/bash
+    steps:
+      - when:
+          condition:
+            equal: [ *rust_linux_executor, << parameters.platform >> ]
+          steps:
+            - restore_cache:
+                key: v1-tools-cache-{{ checksum ".tool-versions" }}
+            - run:
+                command: |
+                  echo 'export PATH=/$HOME/.asdf/bin:$PATH' >> $BASH_ENV
+                  source $BASH_ENV
+                  asdf-install-plugins
+                  asdf-install-versions
+                  asdf reshim
+                  cargo deny --help || cargo install cargo-deny
+
+            - save_cache:
+                key: v1-tools-cache-{{ checksum ".tool-versions" }}
+                paths:
+                  - "~/.asdf/plugins"
+                  - "~/.asdf/plugins"
+                  - "~/.asdf/installs"
+                  - "~/.cargo/bin"
+            - persist_to_workspace:
+                root: /root
+                paths: 
+                  - ".asdf"
   build_test_lint:
     parameters:
       platform:
@@ -86,44 +118,18 @@ jobs:
           condition:
             equal: [ *rust_linux_executor, << parameters.platform >> ]
           steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  sudo apt-get update
-                  sudo apt-get install -y libssl-dev cmake
-            - rust/install:
-                version: stable
+            - attach_workspace:
+                at: /root
             - restore_cache:
-                keys:
-                  - rust-target-v1-linux-{{ checksum "Cargo.lock" }}
-            - run:
-                name: Install nvm
-                command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
-            - run: echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
-            - run:
-                name: Install desired Node.js version
-                command: |
-                  nvm install $NODE_VERSION
-                  nvm alias default $NODE_VERSION
-                  npm install --global npm@${NPM_VERSION}
-            - run:
-                name: Assert Node.js version
-                command: test "$(node --version)" = "v${NODE_VERSION}"
-            - run:
-                name: Assert npm version
-                command: test "$(npm --version)" = "${NPM_VERSION}"
-            - rust/build:
-                crate: --workspace --tests
-            - rust/build:
-                crate: --workspace --tests --features="tls"
-            - rust/build:
-                crate: --workspace --tests --no-default-features --features="otlp-http"
-            - rust/build:
-                crate: --workspace --tests --no-default-features --features="otlp-grpcio"
+                key: rust-target-v1-<< parameters.platform >>-{{ checksum "Cargo.lock" }}
+            - run: cargo build --workspace --tests
+            - run: cargo build --workspace --tests --features="tls"
+            - run: cargo build --workspace --tests --no-default-features --features="otlp-http"
+            - run: cargo build  --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
-                key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
+                key: rust-target-v1-<< parameters.platform >>-{{ checksum "Cargo.lock" }}
                 paths:
-                  - target/
+                  - target/debug/
       - when:
           condition:
             equal: [ *rust_windows_executor, << parameters.platform >> ]
