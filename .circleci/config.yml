@@ -118,7 +118,7 @@ jobs:
             equal: [ *rust_linux_executor, << parameters.platform >> ]
           steps:
             - attach_workspace:
-                at: /$HOME
+                at: /home/circleci
             - restore_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
             - run:
