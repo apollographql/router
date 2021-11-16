@@ -203,8 +203,8 @@ jobs:
                 crate: --workspace --tests --features="tls"
             - rust/build:
                 crate: --workspace --tests --no-default-features --features="otlp-http"
-            - rust/build:
             # this feature couldn't be built on windows, need to figure this out
+            # - rust/build:
                 # crate: --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
                 key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
