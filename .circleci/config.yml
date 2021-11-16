@@ -71,8 +71,6 @@ jobs:
                 name: Assert npm version
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
                 crate: --workspace --tests
             - rust/build:
                 crate: --workspace --tests --features="tls"
@@ -115,8 +113,6 @@ jobs:
                 name: Assert npm version
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-linux
                 crate: --workspace --tests
             - rust/build:
                 crate: --workspace --tests --features="tls"
@@ -196,8 +192,6 @@ jobs:
                 command: |
                   if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-windows
                 crate: --workspace --tests
             - rust/build:
                 crate: --workspace --tests --features="tls"
