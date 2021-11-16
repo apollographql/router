@@ -51,8 +51,11 @@ impl Test {
         eprintln!("Running tests with features: {}", features);
         cargo!([
             "test",
-            "--workspace",
             "--locked",
+            "-p",
+            "apollo-router",
+            "-p",
+            "apollo-router-core",
             "--no-default-features",
             "--features",
             features
