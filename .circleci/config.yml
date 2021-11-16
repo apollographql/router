@@ -52,7 +52,7 @@ jobs:
                   - "~/.asdf/installs"
                   - "~/.cargo/bin"
             - persist_to_workspace:
-                root: /root
+                root: /$HOME
                 paths: 
                   - ".asdf"
   build_test_lint:
@@ -118,7 +118,7 @@ jobs:
             equal: [ *rust_linux_executor, << parameters.platform >> ]
           steps:
             - attach_workspace:
-                at: /root
+                at: /$HOME
             - restore_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
             - run:
