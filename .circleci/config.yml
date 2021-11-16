@@ -80,6 +80,7 @@ jobs:
                 key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
+                  - ~/.cargo/
       - when:
           condition:
             equal: [ *rust_linux_executor, << parameters.platform >> ]
@@ -120,6 +121,7 @@ jobs:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
+                  - ~/.cargo
       - when:
           condition:
             equal: [ *rust_windows_executor, << parameters.platform >> ]
@@ -197,6 +199,7 @@ jobs:
                 key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
+                  - C:\\Users\\circleci\.cargo
             # TODO: normally xtask can run the federation by itself and it
             #       works on GitHub Actions on Windows. Unfortunately it
             #       doesn't work here on CircleCI on Windows only.
