@@ -42,7 +42,6 @@ jobs:
                   source $BASH_ENV
                   asdf-install-plugins
                   asdf-install-versions
-                  asdf reshim
                   cargo deny --help || cargo install cargo-deny
 
             - save_cache:
@@ -122,10 +121,13 @@ jobs:
                 at: /root
             - restore_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
-            - run: cargo build --workspace --tests
-            - run: cargo build --workspace --tests --features="tls"
-            - run: cargo build --workspace --tests --no-default-features --features="otlp-http"
-            - run: cargo build  --workspace --tests --no-default-features --features="otlp-grpcio"
+            - run:
+                command: |
+                  asdf reshim
+                  cargo build --workspace --tests
+                  cargo build --workspace --tests --features="tls"
+                  cargo build --workspace --tests --no-default-features --features="otlp-http"
+                  cargo build  --workspace --tests --no-default-features --features="otlp-grpcio"
             - save_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
                 paths:
