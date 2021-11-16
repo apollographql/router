@@ -219,9 +219,15 @@ jobs:
       - run:
           command: >
             cargo xtask test --with-demo
-      - run:
-          command: >
-            cargo xtask lint
+      # xtask lint is far too slow on OSX and windows, and executes in the same way
+      # on all platforms anyway
+      - when:
+          condition:
+            equal: [ *rust_linux_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                command: >
+                  cargo xtask lint
 
   build_release:
     parameters:
