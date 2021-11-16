@@ -71,9 +71,11 @@ jobs:
                 name: Assert npm version
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
-                crate: --workspace --tests
+                with_cache: false
+                crate: --tests --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+            - rust/build:
+                with_cache: false
+                crate: -p xtask
             - save_cache:
                 key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
                 paths:
@@ -109,9 +111,11 @@ jobs:
                 name: Assert npm version
                 command: test "$(npm --version)" = "${NPM_VERSION}"
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-linux
-                crate: --workspace --tests
+                with_cache: false
+                crate: --tests --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+            - rust/build:
+                with_cache: false
+                crate: -p xtask
             - save_cache:
                 key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
                 paths:
@@ -184,9 +188,11 @@ jobs:
                 command: |
                   if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
             - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-windows
-                crate: --workspace --tests
+                with_cache: false
+                crate: --tests --features otlp-tonic,otlp-http,tls -p apollo-router -p apollo-router-core
+            - rust/build:
+                with_cache: false
+                crate: -p xtask
             - save_cache:
                 key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
                 paths:
