@@ -2,14 +2,6 @@ use anyhow::{ensure, Result};
 use structopt::StructOpt;
 use xtask::*;
 
-const FEATURE_SETS: &[&[&str]] = &[
-    &[],
-    &["otlp-http"],
-    &["otlp-tonic"],
-    &["otlp-tonic", "tls"],
-    &["otlp-grpcio"],
-];
-
 #[derive(Debug, StructOpt)]
 pub struct Test {
     /// Do not start federation demo (deprecated, this is the default now).
@@ -49,18 +41,22 @@ impl Test {
             Box::new((demo, guard))
         };
 
-        for features in FEATURE_SETS {
-            if cfg!(windows) && features.contains(&"otlp-grpcio") {
-                // TODO: I couldn't make it build on Windows but it is supposed to build.
-                continue;
-            }
+        let features = if cfg!(windows) {
+            // TODO: I couldn't make it build on Windows but it is supposed to build.
+            "otlp-tonic,otlp-http,tls"
+        } else {
+            "otlp-tonic,otlp-http,otlp-grpcio,tls"
+        };
 
-            eprintln!("Running tests with features: {}", features.join(", "));
-            cargo!(
-                ["test", "--workspace", "--locked", "--no-default-features"],
-                features.iter().flat_map(|feature| ["--features", feature]),
-            );
-        }
+        eprintln!("Running tests with features: {}", features);
+        cargo!([
+            "test",
+            "--workspace",
+            "--locked",
+            "--no-default-features",
+            "--features",
+            features
+        ],);
 
         Ok(())
     }
