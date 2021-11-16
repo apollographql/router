@@ -7,5 +7,7 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        tonic:
-          endpoint:
+        grpc_io:
+          endpoint: http://example.org
+          protocol: Grpc
+          timeout: 42

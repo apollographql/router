@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct Exporter {
+pub struct GrpcIoExporter {
     #[serde(flatten)]
     export_config: ExportConfig,
     // TODO this should probably use TlsConfig instead?
@@ -18,7 +18,7 @@ pub struct Exporter {
     completion_queue_count: Option<usize>,
 }
 
-impl Exporter {
+impl GrpcIoExporter {
     pub fn exporter(
         &self,
     ) -> Result<opentelemetry_otlp::GrpcioExporterBuilder, ConfigurationError> {

@@ -11,5 +11,13 @@ subgraphs:
     routing_url: foo
 opentelemetry:
   otlp:
-    tracing: ~
+    tracing:
+      exporter:
+        tonic:
+          endpoint: ~
+          metadata: ~
+          protocol: ~
+          timeout: ~
+          tls_config: ~
+      trace_config: ~
 

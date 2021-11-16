@@ -13,18 +13,19 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        cert:
-          file: /foo/bar
-        completion_queue_count: 42
-        compression: Gzip
-        endpoint: "http://example.org/"
-        headers:
-          foo: bar
-        key:
-          env: SECRET_ENV_VAR
-        protocol: Grpc
-        timeout: 42
-        tls: false
+        grpc_io:
+          cert:
+            file: /foo/bar
+          completion_queue_count: 42
+          compression: Gzip
+          endpoint: "http://example.org/"
+          headers:
+            foo: bar
+          key:
+            env: SECRET_ENV_VAR
+          protocol: Grpc
+          timeout: 42
+          tls: false
       trace_config:
         sampler:
           ParentBased:

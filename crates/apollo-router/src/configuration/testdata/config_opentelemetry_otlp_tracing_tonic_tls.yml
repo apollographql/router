@@ -1,11 +1,5 @@
----
-source: crates/apollo-router/src/configuration/mod.rs
-expression: config
-
----
 server:
-  listen: "1.2.3.4:5"
-  cors: ~
+  listen: 1.2.3.4:5
 subgraphs:
   example:
     routing_url: foo
@@ -14,17 +8,10 @@ opentelemetry:
     tracing:
       exporter:
         tonic:
-          endpoint: ~
-          metadata: ~
-          protocol: ~
-          timeout: ~
           tls_config:
-            domain_name: ~
             ca:
               env: SECRET_STUFF
             cert:
               file: /foo
             key:
               file: /bar
-      trace_config: ~
-

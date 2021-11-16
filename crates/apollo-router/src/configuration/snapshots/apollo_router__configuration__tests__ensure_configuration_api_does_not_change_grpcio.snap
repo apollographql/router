@@ -11,5 +11,17 @@ subgraphs:
     routing_url: foo
 opentelemetry:
   otlp:
-    tracing: ~
+    tracing:
+      exporter:
+        grpc_io:
+          cert: ~
+          completion_queue_count: ~
+          compression: ~
+          endpoint: ~
+          headers: ~
+          key: ~
+          protocol: ~
+          timeout: ~
+          tls: ~
+      trace_config: ~
 
