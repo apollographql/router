@@ -368,10 +368,10 @@ mod tests {
     use futures::channel::oneshot;
     use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
-    use parking_lot::Mutex;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
+    use std::sync::Mutex;
     use test_env_log::test;
     use tokio::net::TcpListener;
 
@@ -453,7 +453,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -492,7 +492,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -539,7 +539,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -600,7 +600,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
     /// if an URL is missing in the schema and the configuration, do not load the schema
@@ -646,7 +646,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 0);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
 
     mock! {
@@ -691,7 +691,10 @@ mod tests {
                       configuration: Arc<Configuration>,
                       listener: Option<TcpListener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-                    shutdown_receivers_clone.lock().push(shutdown_receiver);
+                    shutdown_receivers_clone
+                        .lock()
+                        .unwrap()
+                        .push(shutdown_receiver);
 
                     let server = async move {
                         Ok(if let Some(l) = listener {
