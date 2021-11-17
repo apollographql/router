@@ -44,7 +44,7 @@ commands:
 
   # This job sets up our nodejs dependencies,
   # and makes sure everything is ready to run integration tests
-  macos_prepare_test_env:
+  macos_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
       # Installing this with the curl nvm command was proving difficult,
@@ -61,7 +61,7 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
-  linux_prepare_test_env:
+  linux_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
       - run:
@@ -82,7 +82,7 @@ commands:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
 
-  windows_prepare_test_env:
+  windows_prepare_node_env:
     #TODO[igni]: check for node version before we try to install it
     steps:
       - run:
@@ -115,6 +115,8 @@ commands:
           name: Assert npm version
           command: |
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+  windows_prepare_test_env:
+    steps:
       - restore_cache:
           keys:
             - subgraph-node-modules-v1-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
@@ -306,6 +308,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - linux_prepare_node_env
             - prepare_rust_env
             - build_workspace:
                 os: linux
@@ -313,6 +316,7 @@ jobs:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
+            - windows_prepare_node_env
             - windows_prepare_rust_env
             - windows_build_workspace
       - when:
@@ -320,6 +324,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
+            - macos_prepare_node_env
             - prepare_rust_env
             - build_workspace:
                 os: macos
@@ -340,7 +345,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - linux_prepare_test_env
+            - linux_prepare_node_env
             - prepare_rust_env
             - build_tools:
                 os: linux
@@ -350,6 +355,7 @@ jobs:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
+            - windows_prepare_node_env
             - windows_prepare_test_env
             - windows_prepare_rust_env
             - build_tools:
@@ -360,7 +366,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
-            - macos_prepare_test_env
+            - macos_prepare_node_env
             - prepare_rust_env
             - build_tools:
                 os: macos
