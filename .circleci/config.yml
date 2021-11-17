@@ -278,6 +278,9 @@ commands:
 
 jobs:
   lint:
+    environment:
+      NODE_VERSION: 14.17.5
+      NPM_VERSION: 7.10.0
     parameters:
       platform:
         type: executor
