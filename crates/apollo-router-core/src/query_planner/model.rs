@@ -7,7 +7,7 @@ use crate::prelude::graphql::*;
 use serde::Deserialize;
 
 /// The root query plan container.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind")]
 pub struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
@@ -22,7 +22,7 @@ impl QueryPlan {
 }
 
 /// Query plans are composed of a set of nodes.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub enum PlanNode {
     /// These nodes must be executed in order.
@@ -73,7 +73,7 @@ impl PlanNode {
 }
 
 /// A fetch node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
@@ -91,7 +91,7 @@ pub struct FetchNode {
 }
 
 /// A flatten node.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlattenNode {
     /// The path when result should be merged.
@@ -103,7 +103,7 @@ pub struct FlattenNode {
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub enum Selection {
     /// A field selection.
@@ -114,7 +114,7 @@ pub enum Selection {
 }
 
 /// The field that is used
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
     /// An optional alias for the field.
@@ -130,7 +130,7 @@ pub struct Field {
 }
 
 /// An inline fragment.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InlineFragment {
     /// The required fragment type.
