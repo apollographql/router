@@ -87,7 +87,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
- "parking_lot",
  "reqwest",
  "reqwest-middleware",
  "reqwest-tracing",
