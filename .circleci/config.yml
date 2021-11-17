@@ -205,11 +205,11 @@ jobs:
                 background: true
             - run:
                 name: wait for federation demo to start
-                command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
+                command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4100
 
       - run:
           command: >
-            cargo xtask test
+            cargo xtask test --with-demo
       - run:
           command: >
             cargo xtask lint

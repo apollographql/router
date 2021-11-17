@@ -7,7 +7,7 @@ use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use test_env_log::test;
 
 macro_rules! assert_federated_response {
@@ -150,7 +150,7 @@ async fn missing_variables() {
 
 async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
     let nodejs_impl =
-        HttpSubgraphFetcher::new("federated".into(), "http://localhost:4000/graphql".into());
+        HttpSubgraphFetcher::new("federated".into(), "http://localhost:4100/graphql".into());
     nodejs_impl.stream(request).await
 }
 
@@ -172,26 +172,26 @@ async fn query_rust(
 
 #[derive(Debug)]
 struct CountingServiceRegistry {
-    counts: Arc<parking_lot::Mutex<HashMap<String, usize>>>,
+    counts: Arc<Mutex<HashMap<String, usize>>>,
     delegate: HttpServiceRegistry,
 }
 
 impl CountingServiceRegistry {
     fn new(delegate: HttpServiceRegistry) -> CountingServiceRegistry {
         CountingServiceRegistry {
-            counts: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+            counts: Arc::new(Mutex::new(HashMap::new())),
             delegate,
         }
     }
 
     fn totals(&self) -> HashMap<String, usize> {
-        self.counts.lock().clone()
+        self.counts.lock().unwrap().clone()
     }
 }
 
 impl ServiceRegistry for CountingServiceRegistry {
     fn get(&self, service: &str) -> Option<&dyn graphql::Fetcher> {
-        let mut counts = self.counts.lock();
+        let mut counts = self.counts.lock().unwrap();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {
                 *e.get_mut() += 1;

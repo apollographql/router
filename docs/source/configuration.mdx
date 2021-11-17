@@ -1,72 +1,148 @@
 ---
-title: Configuring the Router
-sidebar_title: Configuration
-description: Configuring the router to serve your graph
+title: Apollo Router usage and config
+sidebar_title: ⚙️ Usage and config
 ---
 
-The configuration file is in YAML format, with the following options:
+> For installation instructions, see the [quickstart](../quickstart/).
+
+You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
+
+```bash
+./router --config configuration.yaml --supergraph supergraph-schema.graphql
+```
+
+Options are described below.
+
+## Options
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td>
+
+##### `-s` / `--supergraph`
+
+</td>
+<td>
+
+The absolute or relative path to the router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
+
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
+
+**Required** unless you provide this value via the `SCHEMA_PATH` environment variable.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+</td>
+<td>
+
+The absolute or relative path to the router's optional [YAML configuration file](#configuration-file).
+
+You can also provide this value via the `CONFIGURATION_PATH` environment variable.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+## Handling CORS
+
+If you attempt to query Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
+
+You can configure CORS in the [YAML configuration file](#configuration-file) you can provide to Apollo Router.
+
+Here's an example configuration for adding `localhost` to the list of approved origins:
 
 ```yaml
-# Configuration options pertaining to the http server component
+# examples/nodejs/configuration.yaml
+server:
+  listen: 127.0.0.1:4000
+  cors:
+    origins:
+      - https://studio.apollographql.com
+      - http://localhost
+```
+
+## Configuration file
+
+Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are listed below:
+
+```yaml:title=configuration.yaml
+# Configuration of the router's HTTP server
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4100 
+  listen: 127.0.0.1:4000
 
   # Cross origin request headers
   cors:
     # Set to false to disallow any origin and rely exclusively on `origins`
-    # defaults to true
+    # Defaults to true
     allow_any_origin: true
-    # list of accepted origins
+    # List of accepted origins
     origins:
       - https://studio.apollographql.com
     # Set to true to add the `Access-Control-Allow-Credentials` header
     allow_credentials: false
     # The headers to allow.
     # Defaults to the required request header for Apollo Studio: Content-Type
-    allow_headers:
+    allow_headers: [ Content-Type ]
     # Allowed request methods
     # Defaults to GET, POST, OPTIONS.
-    methods:
+    methods: [ GET, POST, OPTIONS ]
     # Which response headers should be made available to scripts running in the browser,
     # in response to a cross-origin request.
     expose_headers:
-# Mapping of name to subgraph that the router may contact
+
+# Names and URLs of all subgraphs
+# By default, this information is parsed from the supergraph schema
+# Provide it here to override subgraph names or URLs
 subgraphs:
-  # Configuration for a subgraph
+  # Defines a subgraph named "accounts"
   accounts:
-    # url of the subgraph
+    # The URL of the accounts subgraph's GraphQL endpoint
     routing_url: http://localhost:4001/graphql
+  # Defines a second subgraph named "products"
   products:
     routing_url: http://localhost:4003/graphql
+
 # OpenTelemetry configuration. Choose either jaeger or otlp
 opentelemetry:
   # Configuration to send traces and metrics to a Jaeger service
   jaeger:
     # optional url of the jaeger collector
-    collector_endpoint: 
+    collector_endpoint: "http://example.org"
     # name of the service used in traces
     # defaults to router
     service_name: "router"
-    # optional username to authenticate to jaeger
-    # can be obtained from the environment variable JAEGER_USERNAME
-    username:
-    # optional username to authenticate to jaeger
-    # can be obtained from the environment variable JAEGER_PASSWORD
-    password:
+    # the username and password are obtained from the environment variables
+    # JAEGER_USERNAME and JAEGER_PASSWORD
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   otlp:
     tracing:
       exporter:
-        export_config:
-          # URL of the exporter
-          endpoint:
-          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-          protocol: Grpc
-          # timmeout in seconds
-          timeout: 60
-          metadata:
+        # URL of the exporter
+        endpoint:
+        # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+        protocol: Grpc
+        # timmeout in seconds
+        timeout: 60
+        metadata:
           - foo: bar
           - foo: baz
           - bar: baz
