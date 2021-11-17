@@ -61,9 +61,6 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
-      - run:
-          name: Assert npm version
-          command: test "$(npm --version)" = "${NPM_VERSION}"
   linux_prepare_test_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
@@ -175,11 +172,7 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
-  linux_prepare_rust_env:
-    steps:
-      - rust/install:
-          version: stable
-  macos_prepare_rust_env:
+  prepare_rust_env:
     steps:
       - rust/install:
           version: stable
@@ -222,29 +215,18 @@ commands:
       - rust/build:
           with_cache: false
           crate: --no-default-features --features otlp-grpcio -p apollo-router -p apollo-router-core
-  macos_build_workspace:
+  build_workspace:
+    parameters:
+      os:
+        type: string
     steps:
       - restore_cache:
           keys:
-            - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-v1-macos-build
       - build_all_permutations
       - save_cache:
-          key: rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
-          paths:
-            - target/
-            - ~/.cargo
-  linux_build_workspace:
-    steps:
-      - restore_cache:
-          keys:
-            - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-linux-build
-      - build_all_permutations
-      - save_cache:
-          key: rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
+          key: rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - ~/.cargo
@@ -252,12 +234,11 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-windows-build
+            - rust-target-v1-build-windows-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-build-windows
       - build_common_permutations
       - save_cache:
-          key: rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
+          key: rust-target-v1-build-windows-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - C:\\Users\\circleci\.cargo
@@ -266,39 +247,28 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-windows-test
+            - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-test-windows
       - run: cargo xtask test --with-demo
       - save_cache:
-          key: rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          key: rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - target/
             - C:\\Users\\circleci\.cargo
-  linux_test_workspace:
+  test_workspace:
+    parameters:
+      os:
+        type: string
     steps:
       - restore_cache:
           keys:
-            - rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-linux-test
+            - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-test-<< parameters.os >>
       - run: cargo xtask test --with-demo
       - save_cache:
-          key: rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-          paths:
-            - target/
-            - ~/.cargo
-            - dockerfiles/federation-demo/federation-demo/node_modules
-  macos_test_workspace:
-    steps:
-      - restore_cache:
-          keys:
-            - rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-macos-test
-      - run: cargo xtask test --with-demo
-      - save_cache:
-          key: rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          key: rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - target/
             - ~/.cargo
@@ -317,7 +287,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - linux_prepare_rust_env
+            - prepare_rust_env
             - build_tools:
                 os: linux
             - xtask_lint
@@ -336,8 +306,9 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
-            - linux_prepare_rust_env
-            - linux_build_workspace
+            - prepare_rust_env
+            - build_workspace:
+                os: linux
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
@@ -349,8 +320,9 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
-            - macos_prepare_rust_env
-            - macos_build_workspace
+            - prepare_rust_env
+            - build_workspace:
+                os: macos
 
   test:
     environment:
@@ -369,10 +341,11 @@ jobs:
           steps:
             - linux_install_baseline
             - linux_prepare_test_env
-            - linux_prepare_rust_env
+            - prepare_rust_env
             - build_tools:
                 os: linux
-            - linux_test_workspace
+            - test_workspace:
+                os: macos
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
@@ -388,10 +361,11 @@ jobs:
           steps:
             - macos_install_baseline
             - macos_prepare_test_env
-            - macos_prepare_rust_env
+            - prepare_rust_env
             - build_tools:
                 os: macos
-            - macos_test_workspace
+            - test_workspace:
+                os: macos
 
   build_release:
     parameters:
