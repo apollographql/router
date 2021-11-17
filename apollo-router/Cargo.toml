@@ -54,6 +54,7 @@ structopt = "0.3.26"
 task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["full"] }
+tokio-util = { git = "https://github.com/tokio-rs/tokio.git", rev = "91b9850", features = ["net", "codec"] }
 # don't bump it to 0.6 until opentelemetry-otlp does
 tonic = { version = "0.5.2", optional = true }
 tower = "0.4.11"

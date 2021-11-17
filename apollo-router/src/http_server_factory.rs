@@ -1,15 +1,13 @@
 use super::FederatedServerError;
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ListenAddr};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 
 /// Factory for creating the http server component.
 ///
@@ -21,7 +19,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         router: Arc<Router>,
         configuration: Arc<Configuration>,
-        listener: Option<TcpListener>,
+        listener: Option<Listener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         Router: graphql::Router<PreparedQuery> + 'static,
@@ -40,21 +38,19 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
-    listen_address: SocketAddr,
+    listen_address: ListenAddr,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<
-            Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>,
-        >,
-        listen_address: SocketAddr,
+        server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
+        listen_address: ListenAddr,
     ) -> Self {
         Self {
             shutdown_sender,
@@ -114,27 +110,51 @@ impl HttpServerHandle {
         Ok(handle)
     }
 
-    pub(crate) fn listen_address(&self) -> SocketAddr {
-        self.listen_address
+    pub(crate) fn listen_address(&self) -> &ListenAddr {
+        &self.listen_address
     }
 }
+
+pub type Listener = tokio_util::either::Either<tokio::net::TcpListener, tokio::net::UnixListener>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::channel::oneshot;
+    use std::net::SocketAddr;
     use std::str::FromStr;
     use test_log::test;
 
     #[test(tokio::test)]
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = Box::new(TcpListener::bind("127.0.0.1:0").await.unwrap()) as Box<_>;
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(listener)).boxed(),
-            SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+        )
+        .shutdown()
+        .await
+        .expect("Should have waited for shutdown");
+
+        shutdown_receiver
+            .await
+            .expect("Should have been send notification to shutdown");
+    }
+
+    #[test(tokio::test)]
+    #[cfg(unix)]
+    async fn sanity_unix() {
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        // TODO get path from tempfile
+        let listener = Box::new(UnixListener::bind("/tmp/sanity_unix.sock").unwrap()) as Box<_>;
+
+        HttpServerHandle::new(
+            shutdown_sender,
+            futures::future::ready(Ok(listener)).boxed(),
+            ListenAddr::UnixSocket("/tmp/sanity_unix.sock".into()),
         )
         .shutdown()
         .await
