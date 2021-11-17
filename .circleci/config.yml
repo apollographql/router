@@ -212,13 +212,16 @@ commands:
           crate: --features otlp-tonic,tls -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false
-          crate: --features otlp-http -p apollo-router -p apollo-router-core
+          crate: --features otlp-tonic -p apollo-router -p apollo-router-core
+      - rust/build:
+          with_cache: false
+          crate: --no-default-features --features otlp-http -p apollo-router -p apollo-router-core
   build_all_permutations:
     steps:
       - build_common_permutations
       - rust/build:
           with_cache: false
-          crate: --features otlp-grpcio -p apollo-router -p apollo-router-core
+          crate: --no-default-features --features otlp-grpcio -p apollo-router -p apollo-router-core
   macos_build_workspace:
     steps:
       - restore_cache:
