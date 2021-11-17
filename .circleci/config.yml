@@ -354,7 +354,7 @@ jobs:
             - build_tools:
                 os: linux
             - test_workspace:
-                os: macos
+                os: linux
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
