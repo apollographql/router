@@ -1,5 +1,5 @@
-use crate::configuration::{Configuration, Cors};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
@@ -9,6 +9,8 @@ use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Span};
@@ -38,14 +40,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
-        listener: Option<TcpListener>,
+        listener: Option<Box<dyn Listener>>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         F: graphql::Fetcher + 'static,
     {
         Box::pin(async {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-            let listen_address = configuration.server.listen;
+            let listen_address = configuration.server.listen.clone();
 
             let cors = configuration
                 .server
@@ -66,9 +68,17 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let tcp_listener = if let Some(listener) = listener {
                 listener
             } else {
-                TcpListener::bind(listen_address)
-                    .await
-                    .map_err(FederatedServerError::ServerCreationError)?
+                match listen_address {
+                    ListenAddr::SocketAddr(addr) => Box::new(
+                        TcpListener::bind(addr)
+                            .await
+                            .map_err(FederatedServerError::ServerCreationError)?,
+                    ) as _,
+                    ListenAddr::UnixSocket(path) => Box::new(
+                        UnixListener::bind(path)
+                            .map_err(FederatedServerError::ServerCreationError)?,
+                    ) as _,
+                }
             };
             let actual_listen_address = tcp_listener
                 .local_addr()
@@ -92,6 +102,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         res = tcp_listener.accept() => {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
+                            eprintln!("############# 1");
 
                             tokio::task::spawn(async move {
                                 // we unwrap the result of accept() here to avoid stopping
@@ -101,12 +112,15 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // more file descriptors, network interface is down...)
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
+                                eprintln!("############# 2");
                                 let (tcp_stream, _) = res.unwrap();
+                                eprintln!("############# 3");
                                 tcp_stream.set_nodelay(true).expect("this should not fail unless the socket is invalid");
 
                                 let connection = Http::new()
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
+                                eprintln!("############# 4");
 
                                 tokio::pin!(connection);
                                 tokio::select! {
@@ -118,6 +132,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                                 http_err
                                             );
                                         }*/
+                                        eprintln!("############# 5");
+                                        //todo!();
                                     }
                                     // the shutdown receiver was triggered first,
                                     // so we tell the connection to do a graceful shutdown
@@ -154,7 +170,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address,
+                actual_listen_address.into(),
             ))
         })
     }
@@ -178,6 +194,7 @@ where
                   host: Option<Authority>,
                   body: Bytes,
                   header_map: HeaderMap| {
+                eprintln!("############# 6");
                 let configuration = Arc::clone(&configuration);
                 let graph = Arc::clone(&graph);
                 async move {
@@ -236,6 +253,7 @@ where
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
+            eprintln!("############# 7 {:?}", request);
             let configuration = Arc::clone(&configuration);
             let graph = Arc::clone(&graph);
             async move {
@@ -267,6 +285,7 @@ where
     });
 
     async move {
+        eprintln!("############# 8 {:?}", request);
         let response_stream = stream_request(graph, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
@@ -284,12 +303,17 @@ where
     F: graphql::Fetcher + 'static,
 {
     let stream = graph.stream(request).await;
+    eprintln!("############# 9");
 
     stream
         .enumerate()
         .map(|(index, res)| match serde_json::to_string(&res) {
-            Ok(bytes) => Ok(Bytes::from(bytes)),
+            Ok(bytes) => {
+                eprintln!("############# 11 {:?}", bytes);
+                Ok(Bytes::from(bytes))
+            }
             Err(err) => {
+                eprintln!("############# 10 {:?}", err);
                 // We didn't manage to serialise the response!
                 // Do our best to send some sort of error back.
                 serde_json::to_string(
@@ -398,7 +422,7 @@ mod tests {
     }
 
     macro_rules! init {
-        ($listen_address:expr, $fetcher:ident => $expect_stream:block) => {{
+        ($fetcher:ident => $expect_stream:block) => {{
             #[allow(unused_mut)]
             let mut $fetcher = MockMyFetcher::new();
             $expect_stream;
@@ -411,7 +435,7 @@ mod tests {
                         Configuration::builder()
                             .server(
                                 crate::configuration::Server::builder()
-                                    .listen(SocketAddr::from_str($listen_address).unwrap())
+                                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                     .cors(Some(
                                         Cors::builder()
                                             .origins(vec!["http://studio".to_string()])
@@ -435,11 +459,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address()),
-            format!("http://{}/graphql", server.listen_address()),
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
         ] {
             // Regular studio redirect
             let response = client
@@ -458,7 +482,7 @@ mod tests {
                 &response,
                 LOCATION,
                 vec![format!(
-                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                    "https://studio.apollographql.com/sandbox?endpoint={}",
                     server.listen_address()
                 )],
                 "Incorrect redirect url"
@@ -484,10 +508,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn malformed_request() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address()))
+            .post(format!("{}/graphql", server.listen_address()))
             .body("Garbage")
             .send()
             .await
@@ -502,7 +526,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
+        let (server, client) = init!(fetcher => {
             fetcher
                 .expect_stream()
                 .times(2)
@@ -511,7 +535,7 @@ mod tests {
                     future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
                 })
         });
-        let url = format!("http://{}/graphql", server.listen_address());
+        let url = format!("{}/graphql", server.listen_address());
         // Post query
         let response = client
             .post(url.as_str())
@@ -547,7 +571,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn response_failure() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
+        let (server, client) = init!(fetcher => {
             fetcher
                 .expect_stream()
                 .times(1)
@@ -561,7 +585,7 @@ mod tests {
                 })
         });
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address()))
+            .post(format!("{}/graphql", server.listen_address()))
             .body(
                 json!(
                 {
@@ -590,11 +614,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn cors_preflight() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address()),
-            format!("http://{}/graphql", server.listen_address()),
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
         ] {
             let response = client
                 .request(Method::OPTIONS, &url)
@@ -641,5 +665,121 @@ mod tests {
         ["application/json", "application/json,text/html"]
             .iter()
             .for_each(|accepts| assert!(!prefers_html(accepts.to_string())));
+    }
+
+    #[test(tokio::test)]
+    #[cfg(unix)]
+    async fn listening_to_unix_socket() {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+
+        #[allow(unused_mut)]
+        let mut fetcher = MockMyFetcher::new();
+        fetcher.expect_stream().times(2).returning(move |_| {
+            let actual_response = example_response.clone();
+            future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
+        });
+
+        let server_factory = WarpHttpServerFactory::new();
+        let fetcher = Arc::new(fetcher);
+        let server = server_factory
+            .create(
+                fetcher.to_owned(),
+                Arc::new(
+                    Configuration::builder()
+                        .server(
+                            crate::configuration::Server::builder()
+                                .listen(ListenAddr::UnixSocket(
+                                    "/tmp/listening_to_unix_socket.sock".into(),
+                                ))
+                                .cors(Some(
+                                    Cors::builder()
+                                        .origins(vec!["http://studio".to_string()])
+                                        .build(),
+                                ))
+                                .build(),
+                        )
+                        .subgraphs(Default::default())
+                        .build(),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let output =
+            send_to_unix_socket(server.listen_address(), "POST", r#"{"query":"query"}"#).await;
+
+        assert_eq!(
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let output =
+            send_to_unix_socket(server.listen_address(), "GET", r#"{"query":"query"}"#).await;
+
+        assert_eq!(
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    async fn send_to_unix_socket(addr: &ListenAddr, method: &str, body: &str) -> Vec<u8> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Interest};
+        use tokio::net::UnixStream;
+
+        let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
+        stream.ready(Interest::WRITABLE).await.unwrap();
+        stream
+            .write_all(
+                &format!(
+                    "{} / HTTP/1.1\r
+Host: localhost:4100\r
+Content-Length: {}\r
+
+{}\n",
+                    method,
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+        let mut stream = BufReader::new(stream);
+        let mut lines = stream.lines();
+        let mut header_first_line = lines
+            .next_line()
+            .await
+            .unwrap()
+            .expect("no header received");
+        // skip the rest of the headers
+        let mut headers = String::new();
+        loop {
+            if lines.get_mut().read_line(&mut headers).await.unwrap() == 2 {
+                break;
+            }
+        }
+        // read body
+        let mut stream = lines.into_inner();
+        let mut body = Vec::new();
+        let mut size = String::new();
+        loop {
+            size.clear();
+            if stream.read_line(&mut size).await.unwrap() == 2 {
+                break;
+            }
+            let size = u64::from_str_radix(size.trim_end(), 16).unwrap();
+            (&mut stream).take(size).read_buf(&mut body).await.unwrap();
+        }
+        assert!(header_first_line.contains(" 200 "), "");
+        body
     }
 }

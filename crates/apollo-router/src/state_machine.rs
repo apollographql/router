@@ -62,7 +62,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address(),
+                address: server_handle.listen_address().to_owned(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -364,7 +364,7 @@ mod tests {
     use super::*;
     use crate::configuration::Subgraph;
     use crate::graph_factory::MockGraphFactory;
-    use crate::http_server_factory::MockHttpServerFactory;
+    use crate::http_server_factory::{Listener, MockHttpServerFactory};
     use futures::channel::oneshot;
     use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
@@ -373,7 +373,6 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Mutex;
     use test_env_log::test;
-    use tokio::net::TcpListener;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -444,7 +443,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -479,11 +478,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: schema.to_string(),
                     },
                     State::Stopped
@@ -526,11 +525,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -586,7 +585,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -689,7 +688,7 @@ mod tests {
             .returning(
                 move |_: Arc<MockMyFetcher>,
                       configuration: Arc<Configuration>,
-                      listener: Option<TcpListener>| {
+                      listener: Option<Box<dyn Listener>>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -700,7 +699,8 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            Box::new(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap())
+                                as Box<_>
                         })
                     };
 
@@ -708,7 +708,7 @@ mod tests {
                         Ok(HttpServerHandle::new(
                             shutdown_sender,
                             Box::pin(server),
-                            configuration.server.listen,
+                            configuration.server.listen.clone(),
                         ))
                     })
                 },
