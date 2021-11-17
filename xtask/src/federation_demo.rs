@@ -2,8 +2,6 @@ use crate::*;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use std::process::{Command, Stdio};
-use std::thread::sleep;
-use std::time::Duration;
 
 pub struct FederationDemoRunner {
     path: Utf8PathBuf,
@@ -30,15 +28,6 @@ impl FederationDemoRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let task = BackgroundTask::new(command)?;
-
-        eprintln!("Waiting for service to be ready...");
-        loop {
-            match reqwest::blocking::get("http://localhost:4100/graphql") {
-                Ok(_) => break,
-                Err(err) => eprintln!("{}", err),
-            }
-            sleep(Duration::from_secs(2));
-        }
 
         Ok(task)
     }

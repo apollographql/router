@@ -1,14 +1,8 @@
+use std::{thread::sleep, time::Duration};
+
 use anyhow::{ensure, Result};
 use structopt::StructOpt;
 use xtask::*;
-
-const FEATURE_SETS: &[&[&str]] = &[
-    &[],
-    &["otlp-http"],
-    &["otlp-tonic"],
-    &["otlp-tonic", "tls"],
-    &["otlp-grpcio"],
-];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
@@ -27,6 +21,30 @@ impl Test {
             !(self.no_demo && self.with_demo),
             "--no-demo and --with-demo are mutually exclusive",
         );
+
+        let features = if cfg!(windows) {
+            // TODO: I couldn't make it build on Windows but it is supposed to build.
+            "otlp-tonic,otlp-http,tls"
+        } else {
+            "otlp-tonic,otlp-http,otlp-grpcio,tls"
+        };
+
+        // start building tests, while the subservices are spinning up
+        eprintln!("Starting to build tests...");
+        let _build = std::process::Command::new(which::which("cargo")?)
+            .args([
+                "test",
+                "--no-run",
+                "--locked",
+                "-p",
+                "apollo-router",
+                "-p",
+                "apollo-router-core",
+                "--no-default-features",
+                "--features",
+                features,
+            ])
+            .spawn()?;
 
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
@@ -49,18 +67,27 @@ impl Test {
             Box::new((demo, guard))
         };
 
-        for features in FEATURE_SETS {
-            if cfg!(windows) && features.contains(&"otlp-grpcio") {
-                // TODO: I couldn't make it build on Windows but it is supposed to build.
-                continue;
+        eprintln!("Waiting for service to be ready...");
+        loop {
+            match reqwest::blocking::get("http://localhost:4100/graphql") {
+                Ok(_) => break,
+                Err(err) => eprintln!("{}", err),
             }
-
-            eprintln!("Running tests with features: {}", features.join(", "));
-            cargo!(
-                ["test", "--workspace", "--locked", "--no-default-features"],
-                features.iter().flat_map(|feature| ["--features", feature]),
-            );
+            sleep(Duration::from_secs(2));
         }
+
+        eprintln!("Running tests with features: {}", features);
+        cargo!([
+            "test",
+            "--locked",
+            "-p",
+            "apollo-router",
+            "-p",
+            "apollo-router-core",
+            "--no-default-features",
+            "--features",
+            features
+        ],);
 
         Ok(())
     }

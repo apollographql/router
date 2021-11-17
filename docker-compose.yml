@@ -4,7 +4,7 @@ services:
   services:
     build: dockerfiles/federation-demo
     ports:
-      - 4100:4100
+      - 4100:4000
       - 4001:4001
       - 4002:4002
       - 4003:4003

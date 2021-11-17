@@ -19,200 +19,368 @@ executors:
       xcode: 11.4
   rust_windows: &rust_windows_executor
     machine:
-      image: 'windows-server-2019-vs2019:stable'
+      image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
+commands:
+  initialize_submodules:
+    steps:
+      - run: git submodule update --recursive --init
+
+  linux_install_baseline:
+    steps:
+      - run:
+          name: Update and install dependencies
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y libssl-dev cmake
+  macos_install_baseline:
+    steps:
+      - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
+      - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
+      - run: test -e "$OPENSSL_ROOT_DIR"
+      - run: brew install cmake
+
+  # This job sets up our nodejs dependencies,
+  # and makes sure everything is ready to run integration tests
+  macos_prepare_test_env:
+    steps:
+      #TODO[igni]: check for node version before we try to install it
+      # Installing this with the curl nvm command was proving difficult,
+      # so I've opted to just install the .pkg.  Should be the same net
+      # result, even if liked the opportunity for symmetry with Linux.
+      - run:
+          name: Installing Node.js with a .pkg.
+          command: |
+            curl "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.pkg" > "$HOME/Downloads/node.pkg" && sudo installer -store -pkg "$HOME/Downloads/node.pkg" -target "/"
+            sudo npm install --global npm@${NPM_VERSION}
+      - run:
+          name: Assert Node.js version
+          command: test "$(node --version)" = "v${NODE_VERSION}"
+      - run:
+          name: Assert npm version
+          command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          name: Assert npm version
+          command: test "$(npm --version)" = "${NPM_VERSION}"
+  linux_prepare_test_env:
+    steps:
+      #TODO[igni]: check for node version before we try to install it
+      - run:
+          name: Install nvm
+          command: |
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+            echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
+      - run:
+          name: Install desired Node.js version
+          command: |
+            nvm install $NODE_VERSION
+            nvm alias default $NODE_VERSION
+            npm install --global npm@${NPM_VERSION}
+      - run:
+          name: Assert Node.js version
+          command: test "$(node --version)" = "v${NODE_VERSION}"
+      - run:
+          name: Assert npm version
+          command: test "$(npm --version)" = "${NPM_VERSION}"
+
+  windows_prepare_test_env:
+    #TODO[igni]: check for node version before we try to install it
+    steps:
+      - run:
+          name: Install desired Node.js version with nvm
+          command: |
+            nvm install ${Env:NODE_VERSION}
+            nvm on
+      - run:
+          # https://github.com/coreybutler/nvm-windows/issues/300
+          # Have to move the command out of the way because it can't
+          # overwrite itself otherwise.   This is madness, but apparently
+          # accepted.  Other things I tried: using yarn to install npm,
+          # using http://npm.im/npm-windows-upgrade and even shouting.
+          name: Install specific version of npm in a crazy Windows way
+          command: |
+            $node_dir = (get-item (get-command npm).source).directory.fullname
+            foreach ($cmd in @("npm", "npx")) {
+              foreach ($ext in @(".ps1", ".cmd", "")) {
+                if (Test-Path "$node_dir/$cmd$ext") {
+                  rename-item -path (join-path -path $node_dir -childpath "$cmd$ext") "${cmd}-orig${ext}"
+                }
+              }
+            }
+            npm-orig install --global "npm@${Env:NPM_VERSION}"
+      - run:
+          name: Assert Node.js version
+          command: |
+            if ((node --version) -Ne "v${Env:NODE_VERSION}") { exit 1 }
+      - run:
+          name: Assert npm version
+          command: |
+            if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+      - restore_cache:
+          keys:
+            - subgraph-node-modules-v1-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - subgraph-node-modules-v1-windows
+      - run:
+          name: npm clean-install
+          working_directory: dockerfiles/federation-demo/federation-demo
+          command: npm clean-install
+      - save_cache:
+          key: subgraph-node-modules-v1-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          paths:
+            - dockerfiles/federation-demo/federation-demo/node_modules
+
+      # TODO: normally xtask can run the federation by itself and it
+      #       works on GitHub Actions on Windows. Unfortunately it
+      #       doesn't work here on CircleCI on Windows only.
+      - run:
+          name: start federation-demo (background)
+          working_directory: dockerfiles/federation-demo/federation-demo
+          command: npm start
+          background: true
+      - run:
+          name: wait for federation demo to start
+          command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4100
+
+  windows_prepare_rust_env:
+    steps:
+      #            - run:
+      #                # TODO compiling grpcio on Windows is still not working
+      #                #      using boringssl gives an error message
+      #                #      using openssl hangs indefinitely
+      #                name: Install grpcio build dependencies
+      #                command: |
+      #                  choco install activeperl -y
+      #                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
+      #                  choco install yasm -y
+      #                  choco install openssl -y
+      - run:
+          name: Install rustup
+          environment:
+            # Override auto-detection of RAM for Rustc install.
+            # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
+            RUSTUP_UNPACK_RAM: "21474836480"
+          command: |
+            $installer_dir = "$Env:TEMP"
+            echo "Downloading rustup"
+            (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
+            echo "Installing rustup"
+            & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
+            exit $LASTEXITCODE
+      - run:
+          name: Special case for Windows because of ssh-agent
+          command: |
+            Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
+            [net]
+            git-fetch-with-cli = true
+            "@
+  linux_prepare_rust_env:
+    steps:
+      - rust/install:
+          version: stable
+  macos_prepare_rust_env:
+    steps:
+      - rust/install:
+          version: stable
+
+  build_tools:
+    parameters:
+      os:
+        type: string
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+      - rust/build:
+          with_cache: false
+          crate: -p xtask
+      - save_cache:
+          key: rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+          paths:
+            - target/
+            - ~/.cargo
+
+  xtask_lint:
+    steps:
+      - run: cargo xtask lint
+
+  macos_build_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-macos-build
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+      - save_cache:
+          key: rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
+          paths:
+            - target/
+            - ~/.cargo
+  linux_build_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-linux-build
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+      - save_cache:
+          key: rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
+          paths:
+            - target/
+            - ~/.cargo
+  windows_build_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-windows-build
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-tonic,otlp-http,tls -p apollo-router -p apollo-router-core
+      - save_cache:
+          key: rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
+          paths:
+            - target/
+            - C:\\Users\\circleci\.cargo
+
+  windows_test_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-windows-test
+      - run: cargo xtask test --with-demo
+      - save_cache:
+          key: rust-target-v1-windows-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          paths:
+            - target/
+            - C:\\Users\\circleci\.cargo
+  linux_test_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-linux-test
+      - run: cargo xtask test --with-demo
+      - save_cache:
+          key: rust-target-v1-linux-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          paths:
+            - target/
+            - ~/.cargo
+            - dockerfiles/federation-demo/federation-demo/node_modules
+  macos_test_workspace:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-macos-test
+      - run: cargo xtask test --with-demo
+      - save_cache:
+          key: rust-target-v1-macos-test-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          paths:
+            - target/
+            - ~/.cargo
+            - dockerfiles/federation-demo/federation-demo/node_modules
+
 jobs:
-  build_test_lint:
+  lint:
     parameters:
       platform:
         type: executor
     executor: << parameters.platform >>
-    environment:
-      # Note: This is a no-op at the second, but bear with me on this.  If this
-      # comment is not removed by 2021-06-30 remove it along with the next line.
-      # renovate: datasource=github-tags depName=nodejs/node versioning=node
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
-            - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
-            - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
-            - run: test -e "$OPENSSL_ROOT_DIR"
-            - run: brew install cmake
-            - rust/install:
-                version: stable
-            - restore_cache:
-                keys:
-                  - rust-target-v1-macos-{{ checksum "Cargo.lock" }}
-            # Installing this with the curl nvm command was proving difficult,
-            # so I've opted to just install the .pkg.  Should be the same net
-            # result, even if liked the opportunity for symmetry with Linux.
-            - run:
-                name: Installing Node.js with a .pkg.
-                command: |
-                  curl "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.pkg" > "$HOME/Downloads/node.pkg" && sudo installer -store -pkg "$HOME/Downloads/node.pkg" -target "/"
-            - run:
-                name: Install specific version of npm
-                command: |
-                  sudo npm install --global npm@${NPM_VERSION}
-            - run:
-                name: Assert Node.js version
-                command: test "$(node --version)" = "v${NODE_VERSION}"
-            - run:
-                name: Assert npm version
-                command: test "$(npm --version)" = "${NPM_VERSION}"
-            - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-macos
-                crate: --workspace --tests
-            - save_cache:
-                key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
-                paths:
-                  - target/
+            - linux_install_baseline
+            - linux_prepare_rust_env
+            - build_tools:
+                os: linux
+            - xtask_lint
+  build:
+    environment:
+      NODE_VERSION: 14.17.5
+      NPM_VERSION: 7.10.0
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  sudo apt-get update
-                  sudo apt-get install -y libssl-dev cmake
-            - rust/install:
-                version: stable
-            - restore_cache:
-                keys:
-                  - rust-target-v1-linux-{{ checksum "Cargo.lock" }}
-            - run:
-                name: Install nvm
-                command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
-            - run: echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
-            - run:
-                name: Install desired Node.js version
-                command: |
-                  nvm install $NODE_VERSION
-                  nvm alias default $NODE_VERSION
-                  npm install --global npm@${NPM_VERSION}
-            - run:
-                name: Assert Node.js version
-                command: test "$(node --version)" = "v${NODE_VERSION}"
-            - run:
-                name: Assert npm version
-                command: test "$(npm --version)" = "${NPM_VERSION}"
-            - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-linux
-                crate: --workspace --tests
-            - save_cache:
-                key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
-                paths:
-                  - target/
+            - linux_install_baseline
+            - linux_prepare_rust_env
+            - linux_build_workspace
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
-#            - run:
-#                # TODO compiling grpcio on Windows is still not working
-#                #      using boringssl gives an error message
-#                #      using openssl hangs indefinitely
-#                name: Install grpcio build dependencies
-#                command: |
-#                  choco install activeperl -y
-#                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-#                  choco install yasm -y
-#                  choco install openssl -y
-            - run:
-                name: Install rustup
-                environment:
-                  # Override auto-detection of RAM for Rustc install.
-                  # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-                  RUSTUP_UNPACK_RAM: "21474836480"
-                command: |
-                  $installer_dir = "$Env:TEMP"
-                  echo "Downloading rustup"
-                  (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
-                  echo "Installing rustup"
-                  & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
-                  exit $LASTEXITCODE
-            - run:
-                name: Special case for Windows because of ssh-agent
-                command: |
-                  Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
-                  [net]
-                  git-fetch-with-cli = true
-                  "@
-            - restore_cache:
-                keys:
-                  - rust-target-v1-windows-{{ checksum "Cargo.lock" }}
-            - run:
-                name: Install desired Node.js version with nvm
-                command: |
-                  nvm install ${Env:NODE_VERSION}
-                  nvm on
-            - run:
-                # https://github.com/coreybutler/nvm-windows/issues/300
-                # Have to move the command out of the way because it can't
-                # overwrite itself otherwise.   This is madness, but apparently
-                # accepted.  Other things I tried: using yarn to install npm,
-                # using http://npm.im/npm-windows-upgrade and even shouting.
-                name: Install specific version of npm in a crazy Windows way
-                command: |
-                  $node_dir = (get-item (get-command npm).source).directory.fullname
-                  foreach ($cmd in @("npm", "npx")) {
-                    foreach ($ext in @(".ps1", ".cmd", "")) {
-                      if (Test-Path "$node_dir/$cmd$ext") {
-                        rename-item -path (join-path -path $node_dir -childpath "$cmd$ext") "${cmd}-orig${ext}"
-                      }
-                    }
-                  }
-                  npm-orig install --global "npm@${Env:NPM_VERSION}"
-            - run:
-                name: Assert Node.js version
-                command: |
-                  if ((node --version) -Ne "v${Env:NODE_VERSION}") { exit 1 }
-            - run:
-                name: Assert npm version
-                command: |
-                  if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
-            - rust/build:
-                # This is prefixed in the orb with 'cargo-'
-                cache_version: v2-windows
-                crate: --workspace --tests
-            - save_cache:
-                key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
-                paths:
-                  - target/
-            # TODO: normally xtask can run the federation by itself and it
-            #       works on GitHub Actions on Windows. Unfortunately it
-            #       doesn't work here on CircleCI on Windows only.
-            - run:
-                name: npm clean-install
-                working_directory: dockerfiles/federation-demo/federation-demo
-                command: npm clean-install
-            - run:
-                name: start federation-demo (background)
-                working_directory: dockerfiles/federation-demo/federation-demo
-                command: npm start
-                background: true
-            - run:
-                name: wait for federation demo to start
-                command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4100
+            - windows_prepare_rust_env
+            - windows_build_workspace
+      - when:
+          condition:
+            equal: [*rust_macos_executor, << parameters.platform >>]
+          steps:
+            - macos_install_baseline
+            - macos_prepare_rust_env
+            - macos_build_workspace
 
-      - run:
-          command: >
-            cargo xtask test --with-demo
-      - run:
-          command: >
-            cargo xtask lint
+  test:
+    environment:
+      NODE_VERSION: 14.17.5
+      NPM_VERSION: 7.10.0
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - initialize_submodules
+      - when:
+          condition:
+            equal: [*rust_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_install_baseline
+            - linux_prepare_test_env
+            - linux_prepare_rust_env
+            - build_tools:
+                os: linux
+            - linux_test_workspace
+      - when:
+          condition:
+            equal: [*rust_windows_executor, << parameters.platform >>]
+          steps:
+            - windows_prepare_test_env
+            - windows_prepare_rust_env
+            - build_tools:
+                os: windows
+            - windows_test_workspace
+      - when:
+          condition:
+            equal: [*rust_macos_executor, << parameters.platform >>]
+          steps:
+            - macos_install_baseline
+            - macos_prepare_test_env
+            - macos_prepare_rust_env
+            - build_tools:
+                os: macos
+            - macos_test_workspace
 
   build_release:
     parameters:
@@ -236,7 +404,7 @@ jobs:
           command: git submodule update --recursive --init
       - when:
           condition:
-            equal: [ *rust_macos_executor, << parameters.platform >> ]
+            equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
             - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
@@ -244,23 +412,6 @@ jobs:
             - run: brew install cmake
             - rust/install:
                 version: stable
-            # Installing this with the curl nvm command was proving difficult,
-            # so I've opted to just install the .pkg.  Should be the same net
-            # result, even if liked the opportunity for symmetry with Linux.
-            - run:
-                name: Installing Node.js with a .pkg.
-                command: |
-                  curl "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.pkg" > "$HOME/Downloads/node.pkg" && sudo installer -store -pkg "$HOME/Downloads/node.pkg" -target "/"
-            - run:
-                name: Install specific version of npm
-                command: |
-                  sudo npm install --global npm@${NPM_VERSION}
-            - run:
-                name: Assert Node.js version
-                command: test "$(node --version)" = "v${NODE_VERSION}"
-            - run:
-                name: Assert npm version
-                command: test "$(npm --version)" = "${NPM_VERSION}"
             - run:
                 command: >
                   cargo xtask dist
@@ -280,7 +431,7 @@ jobs:
                   --output artifacts/
       - when:
           condition:
-            equal: [ *rust_linux_executor, << parameters.platform >> ]
+            equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
@@ -289,22 +440,6 @@ jobs:
                   sudo apt-get install -y libssl-dev
             - rust/install:
                 version: stable
-            - run:
-                name: Install nvm
-                command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
-            - run: echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
-            - run:
-                name: Install desired Node.js version
-                command: |
-                  nvm install $NODE_VERSION
-                  nvm alias default $NODE_VERSION
-                  npm install --global npm@${NPM_VERSION}
-            - run:
-                name: Assert Node.js version
-                command: test "$(node --version)" = "v${NODE_VERSION}"
-            - run:
-                name: Assert npm version
-                command: test "$(npm --version)" = "${NPM_VERSION}"
             - run:
                 command: >
                   cargo xtask dist
@@ -316,7 +451,7 @@ jobs:
                   cargo xtask package --output artifacts/
       - when:
           condition:
-            equal: [ *rust_windows_executor, << parameters.platform >> ]
+            equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install rustup
@@ -338,36 +473,6 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
-            - run:
-                name: Install desired Node.js version with nvm
-                command: |
-                  nvm install ${Env:NODE_VERSION}
-                  nvm on
-            - run:
-                # https://github.com/coreybutler/nvm-windows/issues/300
-                # Have to move the command out of the way because it can't
-                # overwrite itself otherwise.   This is madness, but apparently
-                # accepted.  Other things I tried: using yarn to install npm,
-                # using http://npm.im/npm-windows-upgrade and even shouting.
-                name: Install specific version of npm in a crazy Windows way
-                command: |
-                  $node_dir = (get-item (get-command npm).source).directory.fullname
-                  foreach ($cmd in @("npm", "npx")) {
-                    foreach ($ext in @(".ps1", ".cmd", "")) {
-                      if (Test-Path "$node_dir/$cmd$ext") {
-                        rename-item -path (join-path -path $node_dir -childpath "$cmd$ext") "${cmd}-orig${ext}"
-                      }
-                    }
-                  }
-                  npm-orig install --global "npm@${Env:NPM_VERSION}"
-            - run:
-                name: Assert Node.js version
-                command: |
-                  if ((node --version) -Ne "v${Env:NODE_VERSION}") { exit 1 }
-            - run:
-                name: Assert npm version
-                command: |
-                  if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
             - run:
                 command: >
                   cargo xtask dist
@@ -407,9 +512,17 @@ jobs:
             gh release create $VERSION --notes-file CHANGELOG.md --title $VERSION artifacts/*
 
 workflows:
-  build:
+  ci_checks:
     jobs:
-      - build_test_lint:
+      - lint:
+          matrix:
+            parameters:
+              platform: [rust_linux]
+      - build:
+          matrix:
+            parameters:
+              platform: [rust_macos, rust_windows, rust_linux]
+      - test:
           matrix:
             parameters:
               platform: [rust_macos, rust_windows, rust_linux]
@@ -423,11 +536,11 @@ workflows:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
       - publish_github_release:
           requires: [build_release]
           filters:
             branches:
               ignore: /.*/
             tags:
-              only : /v.*/
+              only: /v.*/
