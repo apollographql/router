@@ -207,7 +207,6 @@ commands:
 
   build_common_permutations:
     steps:
-      - build_common_permutations
       - rust/build:
           with_cache: false
           crate: --features otlp-tonic,tls -p apollo-router -p apollo-router-core
