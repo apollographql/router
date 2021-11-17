@@ -15,7 +15,7 @@ use crate::configuration::ConfigurationError;
 use opentelemetry::sdk::resource::Resource;
 use opentelemetry::sdk::trace::{Sampler, Tracer};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
 use url::Url;
 
@@ -60,7 +60,7 @@ impl Tracing {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ExportConfig {
-    pub endpoint: Option<Url>,
+    pub endpoint: Option<EndpointUrl>,
     pub protocol: Option<Protocol>,
     pub timeout: Option<u64>,
 }
@@ -68,7 +68,7 @@ pub struct ExportConfig {
 impl ExportConfig {
     pub fn apply<T: WithExportConfig>(&self, mut exporter: T) -> T {
         if let Some(url) = self.endpoint.as_ref() {
-            exporter = exporter.with_endpoint(url.as_str());
+            exporter = exporter.with_endpoint(url.endpoint.as_str());
         }
         if let Some(protocol) = self.protocol {
             exporter = exporter.with_protocol(protocol);
@@ -78,6 +78,37 @@ impl ExportConfig {
         }
         exporter
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct EndpointUrl {
+    #[serde(deserialize_with = "endpoint_url")]
+    endpoint: Url,
+}
+
+fn endpoint_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut buf = String::deserialize(deserializer)?;
+
+    // support the case of a IP:port endpoint
+    if buf.parse::<std::net::SocketAddr>().is_ok() {
+        buf = format!("https://{}", buf);
+    }
+
+    let mut url = Url::parse(&buf).map_err(serde::de::Error::custom)?;
+
+    // support the case of 'collector:4317' where url parses 'collector'
+    // as the scheme instead of the host
+    if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
+        buf = format!("https://{}", buf);
+
+        url = Url::parse(&buf).map_err(serde::de::Error::custom)?;
+    }
+
+    Ok(url)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
