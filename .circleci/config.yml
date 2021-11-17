@@ -225,7 +225,7 @@ commands:
       - restore_cache:
           keys:
             - rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-target-v1-macos-build
+            - rust-target-v1-build-<< parameters.os >>
       - build_all_permutations
       - save_cache:
           key: rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
