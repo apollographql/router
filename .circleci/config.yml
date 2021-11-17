@@ -52,7 +52,9 @@ jobs:
                 version: stable
             - restore_cache:
                 keys:
-                  - rust-target-v1-macos-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-macos-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-macos-main-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-macos-main-
             # Installing this with the curl nvm command was proving difficult,
             # so I've opted to just install the .pkg.  Should be the same net
             # result, even if liked the opportunity for symmetry with Linux.
@@ -77,7 +79,7 @@ jobs:
                 with_cache: false
                 crate: -p xtask
             - save_cache:
-                key: rust-target-v1-macos-{{ checksum "Cargo.lock" }}
+                key: rust-target-v1-macos-{{ .Branch }}-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
                   - ~/.cargo/
@@ -94,7 +96,9 @@ jobs:
                 version: stable
             - restore_cache:
                 keys:
-                  - rust-target-v1-linux-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-linux-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-linux-main-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-linux-main-
             - run:
                 name: Install nvm
                 command: curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
@@ -118,7 +122,7 @@ jobs:
                 with_cache: false
                 crate: -p xtask
             - save_cache:
-                key: rust-target-v1-linux-{{ checksum "Cargo.lock" }}
+                key: rust-target-v1-linux-{{ .Branch }}-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
                   - ~/.cargo
@@ -158,7 +162,9 @@ jobs:
                   "@
             - restore_cache:
                 keys:
-                  - rust-target-v1-windows-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-windows-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-windows-main-{{ checksum "Cargo.lock" }}
+                  - rust-target-v1-windows-main-
             - run:
                 name: Install desired Node.js version with nvm
                 command: |
@@ -196,7 +202,7 @@ jobs:
                 with_cache: false
                 crate: -p xtask
             - save_cache:
-                key: rust-target-v1-windows-{{ checksum "Cargo.lock" }}
+                key: rust-target-v1-windows-{{ .Branch }}-{{ checksum "Cargo.lock" }}
                 paths:
                   - target/
                   - C:\\Users\\circleci\.cargo
