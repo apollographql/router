@@ -1,8 +1,15 @@
-use std::{thread::sleep, time::Duration};
-
 use anyhow::{ensure, Result};
+use std::{thread::sleep, time::Duration};
 use structopt::StructOpt;
 use xtask::*;
+
+const FEATURE_SETS: &[&[&str]] = &[
+    &["otlp-tonic", "tls"],
+    &["otlp-tonic"],
+    &["otlp-http"],
+    &["otlp-grpcio"],
+    &[],
+];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
@@ -22,13 +29,6 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        let features = if cfg!(windows) {
-            // TODO: I couldn't make it build on Windows but it is supposed to build.
-            "otlp-tonic,otlp-http,tls"
-        } else {
-            "otlp-tonic,otlp-http,otlp-grpcio,tls"
-        };
-
         // start building tests, while the subservices are spinning up
         eprintln!("Starting to build tests...");
         let _build = std::process::Command::new(which::which("cargo")?)
@@ -42,7 +42,7 @@ impl Test {
                 "apollo-router-core",
                 "--no-default-features",
                 "--features",
-                features,
+                "otlp-tonic, tls",
             ])
             .spawn()?;
 
@@ -76,18 +76,18 @@ impl Test {
             sleep(Duration::from_secs(2));
         }
 
-        eprintln!("Running tests with features: {}", features);
-        cargo!([
-            "test",
-            "--locked",
-            "-p",
-            "apollo-router",
-            "-p",
-            "apollo-router-core",
-            "--no-default-features",
-            "--features",
-            features
-        ],);
+        for features in FEATURE_SETS {
+            if cfg!(windows) && features.contains(&"otlp-grpcio") {
+                // TODO: I couldn't make it build on Windows but it is supposed to build.
+                continue;
+            }
+
+            eprintln!("Running tests with features: {}", features.join(", "));
+            cargo!(
+                ["test", "--workspace", "--locked", "--no-default-features"],
+                features.iter().flat_map(|feature| ["--features", feature]),
+            );
+        }
 
         Ok(())
     }
