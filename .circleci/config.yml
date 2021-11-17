@@ -205,6 +205,21 @@ commands:
     steps:
       - run: cargo xtask lint
 
+  build_common_permutations:
+    steps:
+      - build_common_permutations
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-tonic,tls -p apollo-router -p apollo-router-core
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-http -p apollo-router -p apollo-router-core
+  build_all_permutations:
+    steps:
+      - build_common_permutations
+      - rust/build:
+          with_cache: false
+          crate: --features otlp-grpcio -p apollo-router -p apollo-router-core
   macos_build_workspace:
     steps:
       - restore_cache:
@@ -212,9 +227,7 @@ commands:
             - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-macos-build
-      - rust/build:
-          with_cache: false
-          crate: --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+      - build_all_permutations
       - save_cache:
           key: rust-target-v1-macos-build-{{ checksum "Cargo.lock" }}
           paths:
@@ -227,9 +240,7 @@ commands:
             - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-linux-build
-      - rust/build:
-          with_cache: false
-          crate: --features otlp-tonic,otlp-http,otlp-grpcio,tls -p apollo-router -p apollo-router-core
+      - build_all_permutations
       - save_cache:
           key: rust-target-v1-linux-build-{{ checksum "Cargo.lock" }}
           paths:
@@ -242,9 +253,7 @@ commands:
             - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
             - rust-target-v1-windows-build
-      - rust/build:
-          with_cache: false
-          crate: --features otlp-tonic,otlp-http,tls -p apollo-router -p apollo-router-core
+      - build_common_permutations
       - save_cache:
           key: rust-target-v1-windows-build-{{ checksum "Cargo.lock" }}
           paths:
