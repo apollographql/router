@@ -63,7 +63,9 @@ warp = { version = "0.3.2", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-apollo-router-core = { path = "../apollo-router-core", features = ["post-processing"] }
+apollo-router-core = { path = "../apollo-router-core", features = [
+    "post-processing",
+] }
 httpmock = "0.6.4"
 insta = "1.8.0"
 maplit = "1.0.2"
