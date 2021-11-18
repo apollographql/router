@@ -74,33 +74,24 @@ impl Configuration {
     pub fn load_subgraphs(&mut self, schema: &Schema) -> Result<(), Vec<ConfigurationError>> {
         let mut errors = Vec::new();
 
-        for (name, url) in schema.subgraphs() {
+        for (name, schema_url) in schema.subgraphs() {
             match self.subgraphs.get(name) {
                 None => {
-                    if url.is_empty() {
+                    if schema_url.is_empty() {
                         errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
                         continue;
                     }
                     self.subgraphs.insert(
                         name.to_owned(),
                         Subgraph {
-                            routing_url: url.to_owned(),
+                            routing_url: schema_url.to_owned(),
                         },
                     );
                 }
                 Some(subgraph) => {
-                    if !url.is_empty() && url != &subgraph.routing_url {
+                    if !schema_url.is_empty() && schema_url != &subgraph.routing_url {
                         tracing::warn!("overriding URL from subgraph {} at {} with URL from the configuration file: {}",
-                name, url, subgraph.routing_url);
-                    }
-
-                    if !url.is_empty() {
-                        self.subgraphs.insert(
-                            name.to_owned(),
-                            Subgraph {
-                                routing_url: url.to_owned(),
-                            },
-                        );
+                name, schema_url, subgraph.routing_url);
                     }
                 }
             }
@@ -413,10 +404,10 @@ mod tests {
                 .get("inventory")
                 .unwrap()
                 .routing_url,
-            "http://localhost:4002/graphql"
+            "http://inventory/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
-        // has an empty one, the schema wins
+        // has an empty one, the configuration wins
         assert_eq!(
             configuration.subgraphs.get("products").unwrap().routing_url,
             "http://products/graphql"

@@ -206,11 +206,11 @@ jobs:
                 background: true
             - run:
                 name: wait for federation demo to start
+
                 command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4000
       - when:
           condition:
             not:
-              # TODO [igni]: figure out how to make this work on windows
               equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - run:
@@ -221,7 +221,7 @@ jobs:
             cargo xtask lint
       - run:
           command: >
-            cargo xtask test
+            cargo xtask test --with-demo
 
   build_release:
     parameters:

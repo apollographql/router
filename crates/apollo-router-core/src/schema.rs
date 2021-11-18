@@ -115,14 +115,15 @@ impl std::str::FromStr for Schema {
                                                         .as_ref()
                                                         .map(|id| id.text().to_owned());
 
-                                                    let arg_value =
-                                                        argument.value().and_then(|s| {
-                                                            s.to_string()
-                                                                .trim_end()
-                                                                .strip_prefix('"')
-                                                                .and_then(|s| s.strip_suffix('"'))
-                                                                .map(|s| s.to_owned())
-                                                        });
+                                                    let arg_value: Option<String> =
+                                                        match argument.value() {
+                                                            // We are currently parsing name or url.
+                                                            // Both have to be strings.
+                                                            Some(ast::Value::StringValue(sv)) => {
+                                                                Some(sv.into())
+                                                            }
+                                                            _ => None,
+                                                        };
 
                                                     match arg_name.as_deref() {
                                                         Some("name") => name = arg_value,
@@ -131,7 +132,6 @@ impl std::str::FromStr for Schema {
                                                     };
                                                 }
                                             }
-
                                             if let (Some(name), Some(url)) = (name, url) {
                                                 // FIXME: return an error on name collisions
                                                 subgraphs.insert(name, url);
@@ -228,8 +228,10 @@ mod tests {
 
       enum join__Graph {
         ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-        INVENTORY @join__graph(name: "inventory" url: "http://localhost:4004/graphql")
-        PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
+        INVENTORY
+          @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+        PRODUCTS
+        @join__graph(name: "products" url: "http://localhost:4003/graphql")
         REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
       }"#
         .parse()
@@ -239,7 +241,26 @@ mod tests {
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
             schema.subgraphs.get("accounts").map(|s| s.as_str()),
-            Some("http://localhost:4001/graphql")
+            Some("http://localhost:4001/graphql"),
+            "Incorrect url for accounts"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("inventory").map(|s| s.as_str()),
+            Some("http://localhost:4004/graphql"),
+            "Incorrect url for inventory"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("products").map(|s| s.as_str()),
+            Some("http://localhost:4003/graphql"),
+            "Incorrect url for products"
+        );
+
+        assert_eq!(
+            schema.subgraphs.get("reviews").map(|s| s.as_str()),
+            Some("http://localhost:4002/graphql"),
+            "Incorrect url for reviews"
         );
 
         assert_eq!(schema.subgraphs.get("test"), None);

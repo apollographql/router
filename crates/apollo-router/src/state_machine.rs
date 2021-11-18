@@ -157,8 +157,9 @@ where
                     UpdateSchema(new_schema),
                 ) => {
                     tracing::debug!("Reloading schema");
-                    let mut new_configuration: Configuration = configuration.as_ref().to_owned();
-                    match new_configuration.load_subgraphs(&new_schema) {
+                    let mut derived_configuration: Configuration =
+                        configuration.as_ref().to_owned();
+                    match derived_configuration.load_subgraphs(&new_schema) {
                         Err(e) => {
                             let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
                             tracing::error!(
@@ -174,12 +175,12 @@ where
                         }
                         Ok(()) => {
                             tracing::info!("Reloading schema");
-                            let configuration = Arc::new(new_configuration);
+                            let derived_configuration = Arc::new(derived_configuration);
 
                             let schema = Arc::new(new_schema);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .create(&configuration, Arc::clone(&schema))
+                                    .create(&derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 
@@ -187,7 +188,7 @@ where
                                 .restart(
                                     &self.http_server_factory,
                                     Arc::clone(&graph),
-                                    Arc::clone(&configuration),
+                                    derived_configuration,
                                 )
                                 .await
                             {
@@ -211,11 +212,12 @@ where
                         graph,
                         server_handle,
                     },
-                    UpdateConfiguration(mut new_configuration),
+                    UpdateConfiguration(new_configuration),
                 ) => {
                     tracing::info!("Reloading configuration");
 
-                    match new_configuration.load_subgraphs(schema.as_ref()) {
+                    let mut derived_configuration = new_configuration.clone();
+                    match derived_configuration.load_subgraphs(schema.as_ref()) {
                         Err(e) => {
                             let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
                             tracing::error!(
@@ -230,10 +232,10 @@ where
                             }
                         }
                         Ok(()) => {
-                            let configuration = Arc::new(new_configuration);
+                            let derived_configuration = Arc::new(derived_configuration);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .create(&configuration, Arc::clone(&schema))
+                                    .create(&derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 
@@ -241,12 +243,12 @@ where
                                 .restart(
                                     &self.http_server_factory,
                                     Arc::clone(&graph),
-                                    Arc::clone(&configuration),
+                                    Arc::clone(&derived_configuration),
                                 )
                                 .await
                             {
                                 Ok(server_handle) => Running {
-                                    configuration,
+                                    configuration: Arc::new(new_configuration),
                                     schema,
                                     graph,
                                     server_handle,
@@ -308,8 +310,8 @@ where
         {
             tracing::debug!("Starting http");
 
-            let mut new_configuration = configuration.clone();
-            match new_configuration.load_subgraphs(&schema) {
+            let mut derived_configuration = configuration.clone();
+            match derived_configuration.load_subgraphs(&schema) {
                 Err(e) => {
                     let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
                     tracing::error!(
@@ -322,24 +324,23 @@ where
                     }
                 }
                 Ok(()) => {
-                    let configuration = new_configuration;
                     let schema = Arc::new(schema);
                     let graph = Arc::new(
                         self.graph_factory
-                            .create(&configuration, Arc::clone(&schema))
+                            .create(&derived_configuration, Arc::clone(&schema))
                             .await,
                     );
-                    let configuration = Arc::new(configuration);
 
                     match self
                         .http_server_factory
-                        .create(Arc::clone(&graph), Arc::clone(&configuration), None)
+                        .create(Arc::clone(&graph), Arc::new(derived_configuration), None)
                         .await
                     {
                         Ok(server_handle) => {
                             tracing::debug!("Started on {}", server_handle.listen_address());
+
                             Running {
-                                configuration,
+                                configuration: Arc::new(configuration),
                                 schema,
                                 graph,
                                 server_handle,
@@ -368,10 +369,10 @@ mod tests {
     use futures::channel::oneshot;
     use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
-    use parking_lot::Mutex;
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
+    use std::sync::Mutex;
     use test_env_log::test;
     use tokio::net::TcpListener;
 
@@ -453,7 +454,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -492,7 +493,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -539,7 +540,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -600,14 +601,35 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 1);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
-    /// if an URL is missing in the schema and the configuration, do not load the schema
     #[test(tokio::test)]
-    async fn extract_routing_urls_empty() {
-        let graph_factory = create_mock_graph_factory(0);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
+    async fn extract_routing_urls_when_updating_configuration() {
+        let mut graph_factory = MockGraphFactory::new();
+        // first call, we take the URL from the configuration
+        graph_factory
+            .expect_create()
+            .withf(
+                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                    configuration.subgraphs.get("accounts").unwrap().routing_url
+                        == "http://accounts/graphql"
+                },
+            )
+            .times(1)
+            .returning(|_, _| MockMyFetcher::new());
+        // second call, configuration is empty, we should take the URL from the graph
+        graph_factory
+            .expect_create()
+            .withf(
+                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                    configuration.subgraphs.get("accounts").unwrap().routing_url
+                        == "http://localhost:4001/graphql"
+                },
+            )
+            .times(1)
+            .returning(|_, _| MockMyFetcher::new());
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
             execute(
@@ -634,19 +656,101 @@ mod tests {
                     UpdateSchema(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                            PRODUCTS @join__graph(name: "products" url: "")
                         }"#.parse().unwrap()),
-                    Shutdown
+                    UpdateConfiguration(
+                            Configuration::builder()
+                                .build()
+                        ),
+                    Shutdown,
                 ],
                 vec![
                     State::Startup,
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                        }"#.to_string()
+                    },
                     State::Stopped
                 ]
             )
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().len(), 0);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+    }
+
+    #[test(tokio::test)]
+    async fn extract_routing_urls_when_updating_schema() {
+        let mut graph_factory = MockGraphFactory::new();
+        // first call, we take the URL from the first supergraph
+        graph_factory
+            .expect_create()
+            .withf(
+                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                    configuration.subgraphs.get("accounts").unwrap().routing_url
+                        == "http://accounts/graphql"
+                },
+            )
+            .times(1)
+            .returning(|_, _| MockMyFetcher::new());
+        // second call, configuration is still empty, we should take the URL from the new supergraph
+        graph_factory
+            .expect_create()
+            .withf(
+                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                    println!("got configuration: {:#?}", configuration);
+                    configuration.subgraphs.get("accounts").unwrap().routing_url
+                        == "http://localhost:4001/graphql"
+                },
+            )
+            .times(1)
+            .returning(|_, _| MockMyFetcher::new());
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert!(matches!(
+            execute(
+                server_factory,
+                graph_factory,
+                vec![
+                    UpdateConfiguration(
+                        Configuration::builder()
+                            .build()
+                    ),
+                    UpdateSchema(r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
+                        }"#.parse().unwrap()),
+                    UpdateSchema(r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                        }"#.parse().unwrap()),
+                    Shutdown,
+                ],
+                vec![
+                    State::Startup,
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
+                        }"#.to_string()
+                    },
+                    State::Running {
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        schema: r#"
+                        enum join__Graph {
+                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+                        }"#.to_string()
+                    },
+                    State::Stopped
+                ]
+            )
+            .await,
+            Ok(()),
+        ));
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     mock! {
@@ -691,7 +795,10 @@ mod tests {
                       configuration: Arc<Configuration>,
                       listener: Option<TcpListener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-                    shutdown_receivers_clone.lock().push(shutdown_receiver);
+                    shutdown_receivers_clone
+                        .lock()
+                        .unwrap()
+                        .push(shutdown_receiver);
 
                     let server = async move {
                         Ok(if let Some(l) = listener {

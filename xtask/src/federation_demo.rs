@@ -33,7 +33,7 @@ impl FederationDemoRunner {
 
         eprintln!("Waiting for service to be ready...");
         loop {
-            match reqwest::blocking::get("http://localhost:4000/graphql") {
+            match reqwest::blocking::get("http://localhost:4100/graphql") {
                 Ok(_) => break,
                 Err(err) => eprintln!("{}", err),
             }

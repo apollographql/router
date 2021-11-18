@@ -59,14 +59,14 @@ checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
 [[package]]
 name = "apollo-parser"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=14bb84337a8bacd5cd27d7d7df429936f104b63b#14bb84337a8bacd5cd27d7d7df429936f104b63b"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=6e8e8a8b23c5489fdb2154029488dfcfe9cba80a#6e8e8a8b23c5489fdb2154029488dfcfe9cba80a"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-prealpha.3"
+version = "0.1.0-alpha.0"
 dependencies = [
  "anyhow",
  "apollo-router-core",
@@ -87,7 +87,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
- "parking_lot",
  "reqwest",
  "reqwest-middleware",
  "reqwest-tracing",
@@ -111,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-prealpha.3"
+version = "0.1.0-alpha.0"
 dependencies = [
  "apollo-parser",
  "async-trait",
@@ -122,7 +121,6 @@ dependencies = [
  "include_dir",
  "mockall",
  "once_cell",
- "parking_lot",
  "router-bridge",
  "serde",
  "serde_json",
@@ -1492,9 +1490,9 @@ checksum = "6456b8a6c8f33fee7d958fcd1b60d55b11940a79e63ae87013e6d22e26034440"
 
 [[package]]
 name = "httpmock"
-version = "0.6.2"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "218c2c3dabf4497c87d042b43984a5fd03bcd8a6adb0056ade7df20f88df225a"
+checksum = "67fc2a6377230dc7cc007c74c34665f92589b4a73ed503f1c91ede8de6df35f0"
 dependencies = [
  "assert-json-diff",
  "async-object-pool",
@@ -1520,9 +1518,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.14"
+version = "0.14.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b91bb1f221b6ea1f1e4371216b70f40748774c2fb5971b450c07773fb92d26b"
+checksum = "436ec0091e4f20e655156a30a0df3770fe2900aa301e548e08446ec794b6953c"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1697,9 +1695,9 @@ checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
 
 [[package]]
 name = "isahc"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ef5402b1791c9fc479ef9871601a2f10e4cc0f14414a5c9c6e043fb51e5a56"
+checksum = "d140e84730d325378912ede32d7cd53ef1542725503b3353e5ec8113c7c6f588"
 dependencies = [
  "async-channel",
  "castaway",
@@ -2834,7 +2832,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation.git?rev=5ebbc140b5e1c86a7f68f61fec96ab261f420d68#5ebbc140b5e1c86a7f68f61fec96ab261f420d68"
+source = "git+https://github.com/apollographql/federation.git?rev=3aa8f3a533f19e31ab984c87a0674ec78c42ebb6#3aa8f3a533f19e31ab984c87a0674ec78c42ebb6"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3042,9 +3040,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.68"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f690853975602e1bfe1ccbf50504d67174e3bcf340f23b5ea9992e0587a52d8"
+checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
 dependencies = [
  "indexmap",
  "itoa",
@@ -3434,9 +3432,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.13.0"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "588b2d10a336da58d877567cd8fb8a14b463e2104910f8132cd054b4b96e29ee"
+checksum = "70e992e41e0d2fb9f755b37446f20900f64446ef54874f40a60c78f021ac6144"
 dependencies = [
  "autocfg",
  "bytes",
@@ -3464,9 +3462,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "114383b041aa6212c579467afa0075fbbdd0718de036100bc0ba7961d8cb9095"
+checksum = "c9efc1aba077437943f7515666aa2b882dfabfbfdf89c819ea75a8d6e9eaba5e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3852,13 +3850,14 @@ dependencies = [
 
 [[package]]
 name = "warp"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "332d47745e9a0c38636dbd454729b147d16bd1ed08ae67b3ab281c4506771054"
+checksum = "3cef4e1e9114a4b7f1ac799f16ce71c14de5778500c5450ec6b7b920c55b587e"
 dependencies = [
  "async-compression",
  "bytes",
- "futures",
+ "futures-channel",
+ "futures-util",
  "headers",
  "http",
  "hyper",

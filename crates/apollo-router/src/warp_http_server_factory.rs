@@ -102,6 +102,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
                                 let (tcp_stream, _) = res.unwrap();
+                                tcp_stream.set_nodelay(true).expect("this should not fail unless the socket is invalid");
 
                                 let connection = Http::new()
                                     .http1_keep_alive(true)

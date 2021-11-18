@@ -1,6 +1,7 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
+use apollo_router::configuration::Configuration;
 use apollo_router::GLOBAL_ENV_FILTER;
 use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
@@ -26,11 +27,11 @@ struct Opt {
 
     /// Configuration location relative to the project directory.
     #[structopt(short, long = "config", parse(from_os_str), env)]
-    configuration_path: PathBuf,
+    configuration_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
-    #[structopt(long = "schema", parse(from_os_str), env)]
-    schema_path: PathBuf,
+    #[structopt(short, long = "supergraph", parse(from_os_str), env)]
+    supergraph_path: Option<PathBuf>,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -83,26 +84,58 @@ async fn main() -> Result<()> {
 
     let current_directory = std::env::current_dir()?;
 
-    let configuration_path = if opt.configuration_path.is_relative() {
-        current_directory.join(opt.configuration_path)
-    } else {
-        opt.configuration_path
-    };
+    let configuration = opt
+        .configuration_path
+        .as_ref()
+        .map(|path| {
+            let path = if path.is_relative() {
+                current_directory.join(path)
+            } else {
+                path.to_path_buf()
+            };
 
-    let configuration = ConfigurationKind::File {
-        path: configuration_path,
-        watch: opt.watch,
-        delay: None,
-    };
+            ConfigurationKind::File {
+                path,
+                watch: opt.watch,
+                delay: None,
+            }
+        })
+        .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build()));
 
-    let schema_path = if opt.schema_path.is_relative() {
-        current_directory.join(opt.schema_path)
+    ensure!(
+        opt.supergraph_path.is_some(),
+        r#"
+💫 Apollo Router requires a supergraph to be set using '--supergraph':
+
+    $ ./router --supergraph <file>`
+  
+🪐 The supergraph can be built or downloaded from the Apollo Registry
+   using the Rover CLI. To find out how, see:
+    
+    https://www.apollographql.com/docs/rover/supergraphs/.
+
+🧪 If you're just experimenting, you can download and use an example
+   supergraph with pre-deployed subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+   Then run the Apollo Router with that supergraph:
+
+    $ ./router --supergraph starstuff.graphql
+
+"#
+    );
+
+    let supergraph_path = opt.supergraph_path.unwrap();
+
+    let supergraph_path = if supergraph_path.is_relative() {
+        current_directory.join(supergraph_path)
     } else {
-        opt.schema_path
+        supergraph_path
     };
 
     let schema = SchemaKind::File {
-        path: schema_path,
+        path: supergraph_path,
         watch: opt.watch,
         delay: None,
     };
