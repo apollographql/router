@@ -13,11 +13,11 @@ const TEST_DEFAULT_ARGS: &[&str] = &[
 ];
 
 const FEATURE_SETS: &[&[&str]] = &[
-    &["otlp-tonic", "tls"],
-    &["otlp-tonic"],
-    &["otlp-http"],
-    &["otlp-grpcio"],
     &[""],
+    &["otlp-http"],
+    &["otlp-tonic"],
+    &["otlp-tonic", "tls"],
+    &["otlp-grpcio"],
 ];
 
 #[derive(Debug, StructOpt)]
@@ -79,11 +79,7 @@ impl Test {
 
             eprintln!(
                 "running {} {}",
-                TEST_DEFAULT_ARGS
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" "),
+                TEST_DEFAULT_ARGS.to_vec().join(" "),
                 features.join(",")
             );
             cargo!(TEST_DEFAULT_ARGS, features.iter(),);
