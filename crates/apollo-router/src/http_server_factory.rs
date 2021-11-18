@@ -65,7 +65,16 @@ impl HttpServerHandle {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        self.server_future.await.map(|_| ())
+        #[allow(unused_variables)]
+        let listener = self.server_future.await?;
+        #[cfg(unix)]
+        {
+            let local_addr = listener.local_addr();
+            if let Ok(ListenAddr::UnixSocket(path)) = local_addr {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn restart<Fetcher, ServerFactory>(
