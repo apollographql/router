@@ -78,11 +78,7 @@ impl Test {
                 continue;
             }
 
-            eprintln!(
-                "running {} {}",
-                TEST_DEFAULT_ARGS.to_vec().join(" "),
-                features.join(",")
-            );
+            eprintln!("Running tests with features: {}", features.join(","));
             cargo!(TEST_DEFAULT_ARGS, features.iter(),);
         }
 
