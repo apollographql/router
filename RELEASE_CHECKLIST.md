@@ -32,6 +32,7 @@ in lieu of an official changelog.
 2.  Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
 3.  Update the version in `crates/*/Cargo.toml`.
+3.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core` and `apollo-router`.
 4.  Run `cargo check` so the lock file gets updated.
 5.  Push up a commit with the `crates/*/Cargo.toml`, `Cargo.lock` and
     `CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
