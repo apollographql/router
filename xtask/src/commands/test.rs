@@ -29,6 +29,10 @@ pub struct Test {
     /// Do start the federation demo (without docker).
     #[structopt(long, conflicts_with = "no-demo")]
     with_demo: bool,
+
+    /// Start compiling the tests while federation demo is booting up.
+    #[structopt(long)]
+    pre_compile: bool,
 }
 
 impl Test {
@@ -37,6 +41,21 @@ impl Test {
             !(self.no_demo && self.with_demo),
             "--no-demo and --with-demo are mutually exclusive",
         );
+
+        let mut maybe_pre_compile = if self.pre_compile {
+            eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
+            Some(
+                std::process::Command::new(which::which("cargo")?)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .args(TEST_DEFAULT_ARGS)
+                    .args(FEATURE_SETS[0])
+                    .arg("--no-run")
+                    .spawn()?,
+            )
+        } else {
+            None
+        };
 
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
@@ -54,23 +73,15 @@ impl Test {
             eprintln!("Not running federation-demo.");
             Box::new(())
         } else {
-            eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
-            let mut pre_compile = std::process::Command::new(which::which("cargo")?)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .args(TEST_DEFAULT_ARGS)
-                .args(FEATURE_SETS[0])
-                .arg("--no-run")
-                .spawn()?;
-
             let demo = FederationDemoRunner::new()?;
             let guard = demo.start_background()?;
-
-            eprintln!("Waiting for background process that pre-compiles the test to finish...");
-            pre_compile.wait()?;
-
             Box::new((demo, guard))
         };
+
+        if let Some(sub_process) = maybe_pre_compile.as_mut() {
+            eprintln!("Waiting for background process that pre-compiles the test to finish...");
+            sub_process.wait()?;
+        }
 
         for features in FEATURE_SETS {
             if cfg!(windows) && features.contains(&"otlp-grpcio") {
