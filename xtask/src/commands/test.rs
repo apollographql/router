@@ -1,14 +1,23 @@
+use std::process::Stdio;
+
 use anyhow::{ensure, Result};
-use std::{thread::sleep, time::Duration};
 use structopt::StructOpt;
 use xtask::*;
+
+const TEST_DEFAULT_ARGS: &[&str] = &[
+    "test",
+    "--workspace",
+    "--locked",
+    "--no-default-features",
+    "--features",
+];
 
 const FEATURE_SETS: &[&[&str]] = &[
     &["otlp-tonic", "tls"],
     &["otlp-tonic"],
     &["otlp-http"],
     &["otlp-grpcio"],
-    &[],
+    &[""],
 ];
 
 #[derive(Debug, StructOpt)]
@@ -29,21 +38,13 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        // start building tests, while the subservices are spinning up
-        eprintln!("Starting to build tests...");
-        let _build = std::process::Command::new(which::which("cargo")?)
-            .args([
-                "test",
-                "--no-run",
-                "--locked",
-                "-p",
-                "apollo-router",
-                "-p",
-                "apollo-router-core",
-                "--no-default-features",
-                "--features",
-                "otlp-tonic, tls",
-            ])
+        eprintln!("Starting background process to pre-compile the tests...");
+        let mut pre_compile = std::process::Command::new(which::which("cargo")?)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .args(TEST_DEFAULT_ARGS)
+            .args(FEATURE_SETS[0])
+            .arg("--no-run")
             .spawn()?;
 
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
@@ -67,14 +68,8 @@ impl Test {
             Box::new((demo, guard))
         };
 
-        eprintln!("Waiting for service to be ready...");
-        loop {
-            match reqwest::blocking::get("http://localhost:4100/graphql") {
-                Ok(_) => break,
-                Err(err) => eprintln!("{}", err),
-            }
-            sleep(Duration::from_secs(2));
-        }
+        eprintln!("Waiting for background process that pre-compiles the test to finish...");
+        pre_compile.wait()?;
 
         for features in FEATURE_SETS {
             if cfg!(windows) && features.contains(&"otlp-grpcio") {
@@ -82,11 +77,16 @@ impl Test {
                 continue;
             }
 
-            eprintln!("Running tests with features: {}", features.join(", "));
-            cargo!(
-                ["test", "--workspace", "--locked", "--no-default-features"],
-                features.iter().flat_map(|feature| ["--features", feature]),
+            eprintln!(
+                "running {} {}",
+                TEST_DEFAULT_ARGS
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                features.join(",")
             );
+            cargo!(TEST_DEFAULT_ARGS, features.iter(),);
         }
 
         Ok(())
