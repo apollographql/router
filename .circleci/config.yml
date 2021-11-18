@@ -179,7 +179,7 @@ commands:
       - rust/install:
           version: stable
 
-  build_tools:
+  xtask_lint:
     parameters:
       os:
         type: string
@@ -187,18 +187,12 @@ commands:
       - restore_cache:
           keys:
             - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-      - rust/build:
-          with_cache: false
-          crate: -p xtask
+      - run: cargo xtask lint
       - save_cache:
           key: rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - ~/.cargo
-
-  xtask_lint:
-    steps:
-      - run: cargo xtask lint
 
   build_common_permutations:
     steps:
@@ -294,9 +288,8 @@ jobs:
             - linux_install_baseline
             - linux_prepare_node_env
             - prepare_rust_env
-            - build_tools:
+            - xtask_lint:
                 os: linux
-            - xtask_lint
   build:
     environment:
       NODE_VERSION: 14.17.5
@@ -351,8 +344,6 @@ jobs:
             - linux_install_baseline
             - linux_prepare_node_env
             - prepare_rust_env
-            - build_tools:
-                os: linux
             - test_workspace:
                 os: linux
       - when:
@@ -362,8 +353,6 @@ jobs:
             - windows_prepare_node_env
             - windows_prepare_test_env
             - windows_prepare_rust_env
-            - build_tools:
-                os: windows
             - windows_test_workspace
       - when:
           condition:
@@ -372,8 +361,6 @@ jobs:
             - macos_install_baseline
             - macos_prepare_node_env
             - prepare_rust_env
-            - build_tools:
-                os: macos
             - test_workspace:
                 os: macos
 
