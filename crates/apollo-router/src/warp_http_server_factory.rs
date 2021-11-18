@@ -6,7 +6,6 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -41,7 +40,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         graph: Arc<F>,
         configuration: Arc<Configuration>,
         listener: Option<Box<dyn Listener>>,
-    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+    ) -> future::BoxFuture<'static, Result<HttpServerHandle, FederatedServerError>>
     where
         F: graphql::Fetcher + 'static,
     {
@@ -299,9 +298,7 @@ where
     stream
         .enumerate()
         .map(|(index, res)| match serde_json::to_string(&res) {
-            Ok(bytes) => {
-                Ok(Bytes::from(bytes))
-            }
+            Ok(bytes) => Ok(Bytes::from(bytes)),
             Err(err) => {
                 // We didn't manage to serialise the response!
                 // Do our best to send some sort of error back.
@@ -406,7 +403,8 @@ mod tests {
         MyFetcher {}
 
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            fn stream(&self, request: graphql::Request)
+                -> future::BoxFuture<'static, graphql::ResponseStream>;
         }
     }
 

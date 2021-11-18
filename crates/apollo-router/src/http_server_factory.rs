@@ -7,7 +7,6 @@ use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::io;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 #[cfg(unix)]
@@ -24,7 +23,7 @@ pub(crate) trait HttpServerFactory {
         graph: Arc<F>,
         configuration: Arc<Configuration>,
         listener: Option<Box<dyn Listener>>,
-    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+    ) -> future::BoxFuture<'static, Result<HttpServerHandle, FederatedServerError>>
     where
         F: graphql::Fetcher + 'static;
 }
@@ -41,9 +40,7 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    #[allow(clippy::type_complexity)]
-    server_future:
-        Pin<Box<dyn Future<Output = Result<Box<dyn Listener>, FederatedServerError>> + Send>>,
+    server_future: future::BoxFuture<'static, Result<Box<dyn Listener>, FederatedServerError>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
@@ -52,12 +49,9 @@ pub(crate) struct HttpServerHandle {
 }
 
 impl HttpServerHandle {
-    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<
-            Box<dyn Future<Output = Result<Box<dyn Listener>, FederatedServerError>> + Send>,
-        >,
+        server_future: future::BoxFuture<'static, Result<Box<dyn Listener>, FederatedServerError>>,
         listen_address: ListenAddr,
     ) -> Self {
         Self {
@@ -122,39 +116,13 @@ impl HttpServerHandle {
     }
 }
 
-#[allow(clippy::type_complexity)]
 pub(crate) trait Listener: Send + Unpin {
-    fn accept<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = io::Result<(
-                        Box<dyn AsyncReadWrite + Send + Unpin + 'static>,
-                        ListenAddr,
-                    )>,
-                > + Send
-                + 'a,
-        >,
-    >;
+    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>>;
     fn local_addr(&self) -> io::Result<ListenAddr>;
 }
 
-#[allow(clippy::type_complexity)]
 impl Listener for TcpListener {
-    fn accept<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = io::Result<(
-                        Box<dyn AsyncReadWrite + Send + Unpin + 'static>,
-                        ListenAddr,
-                    )>,
-                > + Send
-                + 'a,
-        >,
-    > {
+    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>> {
         self.accept()
             .map(|res| {
                 let (stream, addr) = res?;
@@ -168,21 +136,8 @@ impl Listener for TcpListener {
 }
 
 #[cfg(unix)]
-#[allow(clippy::type_complexity)]
 impl Listener for UnixListener {
-    fn accept<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = io::Result<(
-                        Box<dyn AsyncReadWrite + Send + Unpin + 'static>,
-                        ListenAddr,
-                    )>,
-                > + Send
-                + 'a,
-        >,
-    > {
+    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>> {
         self.accept()
             .map(|res| {
                 let (stream, addr) = res?;
@@ -198,6 +153,8 @@ impl Listener for UnixListener {
 pub(crate) trait AsyncReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite {
     fn set_nodelay(&self, nodelay: bool) -> io::Result<()>;
 }
+
+pub(crate) type BoxAsyncReadWrite = Box<dyn AsyncReadWrite + Send + Unpin + 'static>;
 
 impl AsyncReadWrite for TcpStream {
     fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
