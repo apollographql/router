@@ -205,6 +205,7 @@ commands:
       - restore_cache:
           keys:
             - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-xtask-build-<< parameters.os >>
       - run: cargo xtask lint
 
   xtask_check_compliance:
@@ -215,6 +216,7 @@ commands:
       - restore_cache:
           keys:
             - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-target-v1-xtask-build-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       - run: cargo xtask check-compliance
