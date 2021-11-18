@@ -206,11 +206,6 @@ commands:
           keys:
             - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
       - run: cargo xtask lint
-      - save_cache:
-          key: rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-          paths:
-            - target/
-            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
