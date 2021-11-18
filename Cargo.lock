@@ -59,7 +59,7 @@ checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
 [[package]]
 name = "apollo-parser"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=2435c81798502813a7fd26da44e3b6ae6e9ee27e#2435c81798502813a7fd26da44e3b6ae6e9ee27e"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=6e8e8a8b23c5489fdb2154029488dfcfe9cba80a#6e8e8a8b23c5489fdb2154029488dfcfe9cba80a"
 dependencies = [
  "rowan",
 ]
@@ -119,6 +119,7 @@ dependencies = [
  "displaydoc",
  "futures",
  "include_dir",
+ "insta",
  "mockall",
  "once_cell",
  "router-bridge",
@@ -3040,9 +3041,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.70"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e277c495ac6cd1a01a58d0a0c574568b4d1ddf14f59965c6a58b8d96400b54f3"
+checksum = "063bf466a64011ac24040a49009724ee60a57da1b437617ceb32e53ad61bfb19"
 dependencies = [
  "indexmap",
  "itoa",

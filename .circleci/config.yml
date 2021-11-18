@@ -179,6 +179,21 @@ commands:
       - rust/install:
           version: stable
 
+  install_extra_tools:
+    steps:
+      - restore_cache:
+          keys:
+            - rust-v1-extra-tools-<< parameters.os >>
+      - run:
+          name: Install cargo deny
+          command: |
+            set -e -o pipefail
+            cargo deny --version || cargo install cargo-deny
+      - save_cache:
+          key: rust-v1-extra-tools-<< parameters.os >>
+          paths:
+            - ~/.cargo/bin/cargo-deny
+
   xtask_lint:
     parameters:
       os:
@@ -290,6 +305,21 @@ jobs:
             - prepare_rust_env
             - xtask_lint:
                 os: linux
+  check_compliance:
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - when:
+          condition:
+            equal: [*rust_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_install_baseline
+            - prepare_rust_env
+            - xtask_lint:
+                os: linux
   build:
     environment:
       NODE_VERSION: 14.17.5
@@ -325,7 +355,6 @@ jobs:
             - prepare_rust_env
             - build_workspace:
                 os: macos
-
   test:
     environment:
       NODE_VERSION: 14.17.5
@@ -370,9 +399,6 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     environment:
-      # Note: This is a no-op at the second, but bear with me on this.  If this
-      # comment is not removed by 2021-06-30 remove it along with the next line.
-      # renovate: datasource=github-tags depName=nodejs/node versioning=node
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
       RELEASE_BIN: router
@@ -497,6 +523,10 @@ workflows:
   ci_checks:
     jobs:
       - lint:
+          matrix:
+            parameters:
+              platform: [rust_linux]
+      - check_compliance:
           matrix:
             parameters:
               platform: [rust_linux]
