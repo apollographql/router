@@ -103,7 +103,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         res = tcp_listener.accept() => {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
-                            eprintln!("############# 1");
 
                             tokio::task::spawn(async move {
                                 // we unwrap the result of accept() here to avoid stopping
@@ -113,15 +112,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // more file descriptors, network interface is down...)
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
-                                eprintln!("############# 2");
                                 let (tcp_stream, _) = res.unwrap();
-                                eprintln!("############# 3");
                                 tcp_stream.set_nodelay(true).expect("this should not fail unless the socket is invalid");
 
                                 let connection = Http::new()
                                     .http1_keep_alive(true)
                                     .serve_connection(tcp_stream, svc);
-                                eprintln!("############# 4");
 
                                 tokio::pin!(connection);
                                 tokio::select! {
@@ -133,8 +129,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                                 http_err
                                             );
                                         }*/
-                                        eprintln!("############# 5");
-                                        //todo!();
                                     }
                                     // the shutdown receiver was triggered first,
                                     // so we tell the connection to do a graceful shutdown
@@ -195,7 +189,6 @@ where
                   host: Option<Authority>,
                   body: Bytes,
                   header_map: HeaderMap| {
-                eprintln!("############# 6");
                 let configuration = Arc::clone(&configuration);
                 let graph = Arc::clone(&graph);
                 async move {
@@ -254,7 +247,6 @@ where
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            eprintln!("############# 7 {:?}", request);
             let configuration = Arc::clone(&configuration);
             let graph = Arc::clone(&graph);
             async move {
@@ -286,7 +278,6 @@ where
     });
 
     async move {
-        eprintln!("############# 8 {:?}", request);
         let response_stream = stream_request(graph, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
@@ -304,17 +295,14 @@ where
     F: graphql::Fetcher + 'static,
 {
     let stream = graph.stream(request).await;
-    eprintln!("############# 9");
 
     stream
         .enumerate()
         .map(|(index, res)| match serde_json::to_string(&res) {
             Ok(bytes) => {
-                eprintln!("############# 11 {:?}", bytes);
                 Ok(Bytes::from(bytes))
             }
             Err(err) => {
-                eprintln!("############# 10 {:?}", err);
                 // We didn't manage to serialise the response!
                 // Do our best to send some sort of error back.
                 serde_json::to_string(
