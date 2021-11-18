@@ -42,7 +42,6 @@ pub(crate) struct HttpServerHandle {
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
-    #[allow(dead_code)]
     listen_address: ListenAddr,
 }
 
@@ -63,7 +62,15 @@ impl HttpServerHandle {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        self.server_future.await.map(|_| ())
+        #[allow(unused_variables)]
+        let listener = self.server_future.await?;
+        #[cfg(unix)]
+        {
+            if let ListenAddr::UnixSocket(path) = self.listen_address {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn restart<Router, PreparedQuery, ServerFactory>(
