@@ -41,6 +41,7 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
+    #[allow(clippy::type_complexity)]
     server_future:
         Pin<Box<dyn Future<Output = Result<Box<dyn Listener>, FederatedServerError>> + Send>>,
 
@@ -51,6 +52,7 @@ pub(crate) struct HttpServerHandle {
 }
 
 impl HttpServerHandle {
+    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
@@ -120,6 +122,7 @@ impl HttpServerHandle {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) trait Listener: Send + Unpin {
     fn accept<'a>(
         &'a self,
@@ -137,6 +140,7 @@ pub(crate) trait Listener: Send + Unpin {
     fn local_addr(&self) -> io::Result<ListenAddr>;
 }
 
+#[allow(clippy::type_complexity)]
 impl Listener for TcpListener {
     fn accept<'a>(
         &'a self,
@@ -164,6 +168,7 @@ impl Listener for TcpListener {
 }
 
 #[cfg(unix)]
+#[allow(clippy::type_complexity)]
 impl Listener for UnixListener {
     fn accept<'a>(
         &'a self,

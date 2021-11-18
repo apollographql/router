@@ -171,7 +171,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address.into(),
+                actual_listen_address,
             ))
         })
     }
@@ -740,7 +740,7 @@ mod tests {
         stream.ready(Interest::WRITABLE).await.unwrap();
         stream
             .write_all(
-                &format!(
+                format!(
                     "{} / HTTP/1.1\r\nHost: localhost:4100\r\nContent-Length: {}\r\n\r\n{}\n",
                     method,
                     body.len(),
