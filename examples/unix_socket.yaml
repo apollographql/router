@@ -1,0 +1,2 @@
+server:
+  listen: /tmp/router.sock
