@@ -13,11 +13,11 @@ const TEST_DEFAULT_ARGS: &[&str] = &[
 ];
 
 const FEATURE_SETS: &[&[&str]] = &[
-    &[""],
-    &["otlp-http"],
-    &["otlp-tonic"],
     &["otlp-tonic", "tls"],
+    &["otlp-tonic"],
+    &["otlp-http"],
     &["otlp-grpcio"],
+    &[""],
 ];
 
 #[derive(Debug, StructOpt)]
