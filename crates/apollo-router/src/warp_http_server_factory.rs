@@ -74,6 +74,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ) as _,
+                    #[cfg(unix)]
                     ListenAddr::UnixSocket(path) => Box::new(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
