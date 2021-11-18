@@ -80,7 +80,7 @@ impl Test {
             eprintln!(
                 "running {} {}",
                 TEST_DEFAULT_ARGS
-                    .into_iter()
+                    .iter()
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(" "),
