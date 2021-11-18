@@ -202,7 +202,7 @@ impl AsyncReadWrite for TcpStream {
 
 #[cfg(unix)]
 impl AsyncReadWrite for UnixStream {
-    fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+    fn set_nodelay(&self, _nodelay: bool) -> io::Result<()> {
         Ok(())
     }
 }
@@ -237,14 +237,15 @@ mod tests {
     #[test(tokio::test)]
     #[cfg(unix)]
     async fn sanity_unix() {
+        let temp_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        std::fs::remove_file(&temp_path).unwrap();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        // TODO get path from tempfile
-        let listener = Box::new(UnixListener::bind("/tmp/sanity_unix.sock").unwrap()) as Box<_>;
+        let listener = Box::new(UnixListener::bind(&temp_path).unwrap()) as Box<_>;
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(listener)).boxed(),
-            ListenAddr::UnixSocket("/tmp/sanity_unix.sock".into()),
+            ListenAddr::UnixSocket((&temp_path).into()),
         )
         .shutdown()
         .await

@@ -670,6 +670,9 @@ mod tests {
     #[test(tokio::test)]
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
+        let temp_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        std::fs::remove_file(&temp_path).unwrap();
+
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -691,9 +694,7 @@ mod tests {
                     Configuration::builder()
                         .server(
                             crate::configuration::Server::builder()
-                                .listen(ListenAddr::UnixSocket(
-                                    "/tmp/listening_to_unix_socket.sock".into(),
-                                ))
+                                .listen(ListenAddr::UnixSocket(temp_path.to_path_buf()))
                                 .cors(Some(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])
@@ -739,11 +740,7 @@ mod tests {
         stream
             .write_all(
                 &format!(
-                    "{} / HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-
-{}\n",
+                    "{} / HTTP/1.1\r\nHost: localhost:4100\r\nContent-Length: {}\r\n\r\n{}\n",
                     method,
                     body.len(),
                     body
@@ -754,21 +751,19 @@ Content-Length: {}\r
             .unwrap();
         stream.flush().await.unwrap();
         let mut stream = BufReader::new(stream);
-        let mut lines = stream.lines();
-        let mut header_first_line = lines
-            .next_line()
+        let mut header_first_line = String::new();
+        stream
+            .read_line(&mut header_first_line)
             .await
-            .unwrap()
             .expect("no header received");
-        // skip the rest of the headers
+        // read the headers until reaching empty new line \r\n
         let mut headers = String::new();
         loop {
-            if lines.get_mut().read_line(&mut headers).await.unwrap() == 2 {
+            if stream.read_line(&mut headers).await.unwrap() == 2 {
                 break;
             }
         }
-        // read body
-        let mut stream = lines.into_inner();
+        // read body until reaching empty new line \r\n
         let mut body = Vec::new();
         let mut size = String::new();
         loop {

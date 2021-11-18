@@ -95,6 +95,7 @@ dependencies = [
  "serde_yaml",
  "structopt",
  "task-local-extensions",
+ "tempfile",
  "test-env-log",
  "thiserror",
  "tokio",
