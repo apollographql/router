@@ -22,7 +22,7 @@ struct Xtask {
 #[derive(Debug, StructOpt)]
 pub enum Command {
     /// Check the code for licence and security compliance.
-    Check(commands::Check),
+    CheckCompliance(commands::Compliance),
 
     /// Build Router's binaries for distribution.
     Dist(commands::Dist),
@@ -40,7 +40,7 @@ pub enum Command {
 impl Xtask {
     pub fn run(&self) -> Result<()> {
         match &self.command {
-            Command::Check(command) => command.run(),
+            Command::CheckCompliance(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Lint(command) => command.run(),
             Command::Test(command) => command.run(),
