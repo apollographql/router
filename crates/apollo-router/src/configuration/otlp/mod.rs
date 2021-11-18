@@ -60,7 +60,8 @@ impl Tracing {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ExportConfig {
-    pub endpoint: Option<EndpointUrl>,
+    #[serde(deserialize_with = "endpoint_url", default)]
+    pub endpoint: Option<Url>,
     pub protocol: Option<Protocol>,
     pub timeout: Option<u64>,
 }
@@ -68,7 +69,7 @@ pub struct ExportConfig {
 impl ExportConfig {
     pub fn apply<T: WithExportConfig>(&self, mut exporter: T) -> T {
         if let Some(url) = self.endpoint.as_ref() {
-            exporter = exporter.with_endpoint(url.endpoint.as_str());
+            exporter = exporter.with_endpoint(url.as_str());
         }
         if let Some(protocol) = self.protocol {
             exporter = exporter.with_protocol(protocol);
@@ -80,14 +81,7 @@ impl ExportConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct EndpointUrl {
-    #[serde(deserialize_with = "endpoint_url")]
-    endpoint: Url,
-}
-
-fn endpoint_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+fn endpoint_url<'de, D>(deserializer: D) -> Result<Option<Url>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -108,7 +102,7 @@ where
         url = Url::parse(&buf).map_err(serde::de::Error::custom)?;
     }
 
-    Ok(url)
+    Ok(Some(url))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
