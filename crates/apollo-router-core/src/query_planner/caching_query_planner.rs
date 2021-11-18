@@ -2,6 +2,7 @@ use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A cache key.
 ///
@@ -15,7 +16,7 @@ type CacheKey = (String, Option<String>, QueryPlanOptions);
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached: Mutex<HashMap<CacheKey, Result<QueryPlan, QueryPlannerError>>>,
+    cached: Mutex<HashMap<CacheKey, Result<Arc<QueryPlan>, QueryPlannerError>>>,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
@@ -35,7 +36,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<QueryPlan, QueryPlannerError> {
+    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
         if let Some(value) = self
             .cached
             .lock()
@@ -72,7 +73,7 @@ mod tests {
                 query: String,
                 operation: Option<String>,
                 options: QueryPlanOptions,
-            ) -> Result<QueryPlan, QueryPlannerError>;
+            ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
         }
     }
 
@@ -83,7 +84,7 @@ mod tests {
             query: String,
             operation: Option<String>,
             options: QueryPlanOptions,
-        ) -> Result<QueryPlan, QueryPlannerError> {
+        ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
             self.sync_get(query, operation, options)
         }
     }

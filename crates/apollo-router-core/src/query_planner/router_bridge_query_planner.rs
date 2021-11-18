@@ -27,7 +27,7 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<QueryPlan, QueryPlannerError> {
+    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
         let context = plan::OperationalContext {
             schema: self.schema.as_str().to_string(),
             query,
