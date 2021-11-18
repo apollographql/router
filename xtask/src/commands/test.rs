@@ -38,15 +38,6 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        eprintln!("Starting background process to pre-compile the tests...");
-        let mut pre_compile = std::process::Command::new(which::which("cargo")?)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .args(TEST_DEFAULT_ARGS)
-            .args(FEATURE_SETS[0])
-            .arg("--no-run")
-            .spawn()?;
-
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
             .ok()
@@ -63,13 +54,23 @@ impl Test {
             eprintln!("Not running federation-demo.");
             Box::new(())
         } else {
+            eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
+            let mut pre_compile = std::process::Command::new(which::which("cargo")?)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .args(TEST_DEFAULT_ARGS)
+                .args(FEATURE_SETS[0])
+                .arg("--no-run")
+                .spawn()?;
+
             let demo = FederationDemoRunner::new()?;
             let guard = demo.start_background()?;
+
+            eprintln!("Waiting for background process that pre-compiles the test to finish...");
+            pre_compile.wait()?;
+
             Box::new((demo, guard))
         };
-
-        eprintln!("Waiting for background process that pre-compiles the test to finish...");
-        pre_compile.wait()?;
 
         for features in FEATURE_SETS {
             if cfg!(windows) && features.contains(&"otlp-grpcio") {
