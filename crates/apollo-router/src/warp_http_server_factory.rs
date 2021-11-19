@@ -405,11 +405,32 @@ mod tests {
         }
     }
 
+    mock! {
+        #[derive(Debug)]
+        MyRouter {}
+
+        impl graphql::Router<MockMyRoute> for MyRouter {
+            fn create_route(
+                &self,
+                request: graphql::Request,
+            ) -> future::BoxFuture<'static, Result<MockMyRoute, graphql::ResponseStream>>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        MyRoute {}
+
+        impl graphql::Route for MyRoute {
+            fn execute(self) -> future::BoxFuture<'static, graphql::ResponseStream>;
+        }
+    }
+
     macro_rules! init {
-        ($listen_address:expr, $fetcher:ident => $expect_stream:block) => {{
+        ($listen_address:expr, $fetcher:ident => $expect_create_route:block) => {{
             #[allow(unused_mut)]
-            let mut $fetcher = MockMyFetcher::new();
-            $expect_stream;
+            let mut $fetcher = MockMyRouter::new();
+            $expect_create_route;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = Arc::new($fetcher);
             let server = server_factory
@@ -512,11 +533,17 @@ mod tests {
         let example_response = expected_response.clone();
         let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
-                .expect_stream()
+                .expect_create_route()
                 .times(2)
                 .returning(move |_| {
-                    let actual_response = example_response.clone();
-                    future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
+                    let example_response = example_response.clone();
+                    let mut route = MockMyRoute::new();
+                    route.expect_execute()
+                        .times(1)
+                        .return_once(move || {
+                            future::ready(example_response.into()).boxed()
+                        });
+                    future::ready(Ok(route)).boxed()
                 })
         });
         let url = format!("http://{}/graphql", server.listen_address());
@@ -557,15 +584,22 @@ mod tests {
     async fn response_failure() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
-                .expect_stream()
+                .expect_create_route()
                 .times(1)
                 .return_once(|_| {
-                    let expected_response = graphql::FetchError::SubrequestHttpError {
-                        service: "Mock service".to_string(),
-                        reason: "Mock error".to_string(),
-                    }
-                    .to_response(true);
-                    future::ready(futures::stream::iter(vec![expected_response]).boxed()).boxed()
+                    let mut route = MockMyRoute::new();
+                    route.expect_execute()
+                        .times(1)
+                        .return_once(|| {
+                            future::ready(
+                                graphql::FetchError::SubrequestHttpError {
+                                    service: "Mock service".to_string(),
+                                    reason: "Mock error".to_string(),
+                                }
+                                .to_response(true).into()
+                            ).boxed()
+                        });
+                    future::ready(Ok(route)).boxed()
                 })
         });
         let response = client
@@ -579,7 +613,6 @@ mod tests {
             )
             .send()
             .await
-            .ok()
             .unwrap()
             .json::<graphql::Response>()
             .await

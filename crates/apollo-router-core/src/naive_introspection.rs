@@ -32,7 +32,7 @@ pub struct NaiveIntrospection {
 
 impl NaiveIntrospection {
     #[cfg(test)]
-    pub fn from_cache(cache: HashMap<String, serde_json::Value>) -> Self {
+    pub fn from_cache(cache: HashMap<String, Response>) -> Self {
         Self { cache }
     }
 
@@ -90,7 +90,10 @@ mod naive_introspection_tests {
     #[test]
     fn test_plan() {
         let query_to_test = "this is a test query";
-        let expected_data = serde_json::Value::Number(42.into());
+        let mut expected_data = Response::builder().build();
+        expected_data
+            .insert_data(&Path::empty(), serde_json::Value::Number(42.into()))
+            .expect("it is always possible to insert data in root path; qed");
 
         let cache = [(query_to_test.into(), expected_data.clone())]
             .iter()
@@ -98,9 +101,10 @@ mod naive_introspection_tests {
             .collect();
         let naive_introspection = NaiveIntrospection::from_cache(cache);
 
-        let request = Request::builder().query(query_to_test).build();
-
-        assert_eq!(expected_data, naive_introspection.get(&request).unwrap());
+        assert_eq!(
+            expected_data,
+            naive_introspection.get(&query_to_test).unwrap()
+        );
     }
 
     #[test]

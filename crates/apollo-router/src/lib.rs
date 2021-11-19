@@ -10,6 +10,7 @@ pub mod http_subgraph;
 mod state_machine;
 mod warp_http_server_factory;
 
+pub use self::apollo_router::*;
 use crate::graph_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;

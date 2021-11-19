@@ -1,4 +1,4 @@
-use super::graph_factory::GraphFactory;
+use super::graph_factory::RouterFactory;
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
@@ -45,7 +45,7 @@ where
     S: HttpServerFactory,
     Router: graphql::Router<Route>,
     Route: graphql::Route,
-    FA: GraphFactory<Router, Route>,
+    FA: RouterFactory<Router, Route>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
@@ -80,7 +80,7 @@ where
     S: HttpServerFactory,
     Router: graphql::Router<Route> + 'static,
     Route: graphql::Route + 'static,
-    FA: GraphFactory<Router, Route>,
+    FA: RouterFactory<Router, Route>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -381,10 +381,9 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::graph_factory::MockGraphFactory;
+    use crate::graph_factory::RouterFactory;
     use crate::http_server_factory::MockHttpServerFactory;
     use futures::channel::oneshot;
-    use graphql::{Request, ResponseStream};
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
     use std::pin::Pin;
@@ -623,7 +622,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls_when_updating_configuration() {
-        let mut graph_factory = MockGraphFactory::new();
+        let mut graph_factory = MockMyRouterFactory::new();
         // first call, we take the URL from the configuration
         graph_factory
             .expect_create()
@@ -634,7 +633,7 @@ mod tests {
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is empty, we should take the URL from the graph
         graph_factory
             .expect_create()
@@ -645,7 +644,7 @@ mod tests {
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -700,7 +699,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls_when_updating_schema() {
-        let mut graph_factory = MockGraphFactory::new();
+        let mut graph_factory = MockMyRouterFactory::new();
         // first call, we take the URL from the first supergraph
         graph_factory
             .expect_create()
@@ -711,7 +710,7 @@ mod tests {
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is still empty, we should take the URL from the new supergraph
         graph_factory
             .expect_create()
@@ -723,7 +722,7 @@ mod tests {
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -772,21 +771,51 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
+        MyRouterFactory {}
+
+        impl RouterFactory<MockMyRouter, MockMyRoute> for MyRouterFactory {
+            fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>) -> future::BoxFuture<'static, MockMyRouter>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
         MyFetcher {}
 
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>>;
+            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        MyRouter {}
+
+        impl graphql::Router<MockMyRoute> for MyRouter {
+            fn create_route(
+                &self,
+                request: graphql::Request,
+            ) -> future::BoxFuture<'static, Result<MockMyRoute, graphql::ResponseStream>>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        MyRoute {}
+
+        impl graphql::Route for MyRoute {
+            fn execute(self) -> future::BoxFuture<'static, graphql::ResponseStream>;
         }
     }
 
     async fn execute(
         server_factory: MockHttpServerFactory,
-        graph_factory: MockGraphFactory<MockMyFetcher>,
+        router_factory: MockMyRouterFactory,
         events: Vec<Event>,
         expected_states: Vec<State>,
     ) -> Result<(), FederatedServerError> {
         let (state_listener, state_receiver) = mpsc::channel(100);
-        let state_machine = StateMachine::new(server_factory, Some(state_listener), graph_factory);
+        let state_machine = StateMachine::new(server_factory, Some(state_listener), router_factory);
         let result = state_machine
             .process_events(stream::iter(events).boxed())
             .await;
@@ -808,7 +837,7 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<MockMyFetcher>,
+                move |_: Arc<MockMyRouter>,
                       configuration: Arc<Configuration>,
                       listener: Option<TcpListener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
@@ -837,12 +866,12 @@ mod tests {
         (server_factory, shutdown_receivers)
     }
 
-    fn create_mock_graph_factory(expect_times_called: usize) -> MockGraphFactory<MockMyFetcher> {
-        let mut graph_factory = MockGraphFactory::new();
+    fn create_mock_graph_factory(expect_times_called: usize) -> MockMyRouterFactory {
+        let mut graph_factory = MockMyRouterFactory::new();
         graph_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         graph_factory
     }
 }

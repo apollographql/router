@@ -20,6 +20,9 @@ otlp-tonic = [
 otlp-grpcio = ["opentelemetry-otlp/grpc-sys", "opentelemetry-otlp/openssl"]
 otlp-http = ["opentelemetry-otlp/http-proto"]
 tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
+# activates the response post-processing feature. It is deactivated by default
+# until we solve performance issues
+post-processing = []
 
 [dependencies]
 anyhow = "1.0.47"
@@ -64,7 +67,7 @@ warp = { version = "0.3.2", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-apollo-router-core = { path = "../apollo-router-core", features = [
+apollo-router = { path = ".", features = [
     "post-processing",
 ] }
 httpmock = "0.6.4"
@@ -84,4 +87,4 @@ uuid = { version = "0.8.2", features = ["serde", "v4"] }
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"
-required-features = ["apollo-router-core/post-processing"]
+required-features = ["post-processing"]

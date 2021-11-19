@@ -1,6 +1,7 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::http_service_registry::HttpServiceRegistry;
 use apollo_router::http_subgraph::HttpSubgraphFetcher;
+use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
 use futures::prelude::*;
 use maplit::hashmap;
@@ -166,8 +167,14 @@ async fn query_rust(
         &config,
     )));
 
-    let federated = graphql::ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
-    (federated.stream(request).await, registry)
+    let federated = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
+
+    let stream = match federated.create_route(request).await {
+        Ok(route) => route.execute().await,
+        Err(stream) => stream,
+    };
+
+    (stream, registry)
 }
 
 #[derive(Debug)]
