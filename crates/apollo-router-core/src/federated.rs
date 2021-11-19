@@ -50,11 +50,15 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
                 return Err(stream::empty().boxed());
             }
 
+            // TODO query caching
+            let query = Arc::new(Query::from(&request.query));
+
             Ok(FederatedGraphRoute {
                 request,
                 query_plan,
                 service_registry: Arc::clone(&service_registry),
                 schema: Arc::clone(&schema),
+                query,
             })
         }
         .instrument(tracing::info_span!("route_creation"))
@@ -68,6 +72,7 @@ pub struct FederatedGraphRoute {
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+    query: Arc<Query>,
 }
 
 // TODO move to apollo-router
@@ -86,12 +91,10 @@ impl Route for FederatedGraphRoute {
                     )
                     .await;
 
-                // TODO
-                /*
+                // TODO move query parsing to query creation
                 #[cfg(feature = "post-processing")]
                 tracing::debug_span!("format_response")
-                    .in_scope(|| request.query.format_response(&mut response));
-                */
+                    .in_scope(|| self.query.format_response(&mut response));
 
                 response
             }
@@ -190,7 +193,7 @@ impl Fetcher for FederatedGraph {
                 let query_execution_span = tracing::info_span!("execution");
                 stream::once(
                     async move {
-                        let mut response = query_plan
+                        let response = query_plan
                             .node()
                             .expect("we already ensured that the plan is some; qed")
                             .execute(
