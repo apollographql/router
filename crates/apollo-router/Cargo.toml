@@ -15,10 +15,12 @@ otlp-grpc = [
     "opentelemetry-otlp/tonic",
     "opentelemetry-otlp/tonic-build",
     "opentelemetry-otlp/prost",
+    "opentelemetry-otlp/tls",
     "tonic",
+    "tonic/transport",
+    "tonic/tls",
 ]
 otlp-http = ["opentelemetry-otlp/http-proto"]
-tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
 
 [dependencies]
 anyhow = "1.0.48"

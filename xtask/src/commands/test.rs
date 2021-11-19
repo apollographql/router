@@ -12,7 +12,7 @@ const TEST_DEFAULT_ARGS: &[&str] = &[
     "--features",
 ];
 
-const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc", "tls"], &["otlp-grpc"], &["otlp-http"], &[""]];
+const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[""]];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
