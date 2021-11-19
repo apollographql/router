@@ -47,21 +47,6 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        let mut maybe_pre_compile = if self.with_demo && !self.no_pre_compile {
-            eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
-            Some(
-                std::process::Command::new(which::which("cargo")?)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .args(TEST_DEFAULT_ARGS)
-                    .args(FEATURE_SETS[0])
-                    .arg("--no-run")
-                    .spawn()?,
-            )
-        } else {
-            None
-        };
-
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
             .ok()
@@ -78,15 +63,31 @@ impl Test {
             eprintln!("Not running federation-demo.");
             Box::new(())
         } else {
+            let mut maybe_pre_compile = if !self.no_pre_compile {
+                eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
+                Some(
+                    std::process::Command::new(which::which("cargo")?)
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .args(TEST_DEFAULT_ARGS)
+                        .args(FEATURE_SETS[0])
+                        .arg("--no-run")
+                        .spawn()?,
+                )
+            } else {
+                None
+            };
+
             let demo = FederationDemoRunner::new()?;
             let guard = demo.start_background()?;
+
+            if let Some(sub_process) = maybe_pre_compile.as_mut() {
+                eprintln!("Waiting for background process that pre-compiles the test to finish...");
+                sub_process.wait()?;
+            }
+
             Box::new((demo, guard))
         };
-
-        if let Some(sub_process) = maybe_pre_compile.as_mut() {
-            eprintln!("Waiting for background process that pre-compiles the test to finish...");
-            sub_process.wait()?;
-        }
 
         for features in FEATURE_SETS {
             if cfg!(windows) && features.contains(&"otlp-grpcio") {
