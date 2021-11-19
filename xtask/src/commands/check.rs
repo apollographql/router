@@ -3,9 +3,9 @@ use structopt::StructOpt;
 use xtask::*;
 
 #[derive(Debug, StructOpt)]
-pub struct Check {}
+pub struct Compliance {}
 
-impl Check {
+impl Compliance {
     pub fn run(&self) -> Result<()> {
         cargo!(["deny", "-L", "error", "check"]);
 
