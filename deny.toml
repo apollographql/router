@@ -52,13 +52,13 @@ confidence-threshold = 0.8
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]

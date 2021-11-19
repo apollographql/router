@@ -12,6 +12,40 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🛠 Maintenance
 ## 📚 Documentation -->
 
+# [v0.1.0-alpha.1] 2021-11-18
+
+## :rocket::waxing_crescent_moon: Initial public alpha release
+
+> An alpha or beta release is in volatile, active development. The release might not be feature-complete, and breaking API changes are possible between individual versions.
+
+See our [release stages] for more information.
+
+## :sparkles: Features
+
+This release focuses on documentation and bug fixes, stay tuned for the next releases!
+
+## :bug: Fixes
+
+- Handle commas in the @join\_\_graph directive parameters [#101](https://github.com/apollographql/router/pull/101)
+
+There are several accepted syntaxes to define @join\_\_graph parameters. While we did handle whitespace separated parameters such as `@join__graph(name: "accounts" url: "http://accounts/graphql")`for example, we discarded the url in`@join__graph(name: "accounts", url: "http://accounts/graphql")` (notice the comma). This pr fixes that.
+
+- Invert subgraph URL override logic [#135](https://github.com/apollographql/router/pull/135)
+
+Subservices endpoint URLs can both be defined in `supergraph.graphql` and in the subgraphs section of the `configuration.yml` file. The configuration now correctly overrides the supergraph endpoint definition when applicable.
+
+- Parse OTLP endpoint address [#156](https://github.com/apollographql/router/pull/156)
+
+The router OpenTelemetry configuration only supported full URLs (that contain a scheme) while OpenTelemtry collectors support full URLs and endpoints, defaulting to `https`. This pull request fixes that.
+
+## :books: Documentation
+
+A lot of configuration examples and links have been fixed ([#117](https://github.com/apollographql/router/pull/117), [#120](https://github.com/apollographql/router/pull/120), [#133](https://github.com/apollographql/router/pull/133))
+
+## :pray: Thank you!
+
+Special thanks to @sjungling, @hsblhsn, @martin-dd, @Mithras and @vvakame for being pioneers by trying out the router, opening issues and documentation fixes! :rocket:
+
 # [v0.1.0-alpha.0] 2021-11-10
 
 ## :rocket::waxing_crescent_moon: Initial public alpha release
