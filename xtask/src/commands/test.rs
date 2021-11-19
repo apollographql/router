@@ -34,8 +34,8 @@ pub struct Test {
     #[structopt(long, conflicts_with = "no-demo")]
     with_demo: bool,
 
-    /// Do not start compiling the tests while federation demo is booting up.
-    /// Requires --with-demo.
+    /// Do not start the project's compilation in background while federation
+    /// demo is booting up (requires --with-demo).
     #[structopt(long, conflicts_with = "no-demo")]
     no_pre_compile: bool,
 }
