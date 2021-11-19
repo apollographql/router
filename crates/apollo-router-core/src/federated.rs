@@ -40,10 +40,7 @@ fn validate_services_against_plan(
 /// # Arguments
 ///
 ///  *   `plan`: The root query plan node to validate.
-fn validate_request_variables_against_plan(
-    request: Arc<Request>,
-    plan: &PlanNode,
-) -> Vec<FetchError> {
+fn validate_request_variables_against_plan(request: &Request, plan: &PlanNode) -> Vec<FetchError> {
     let required = plan.variable_usage().collect::<HashSet<_>>();
     let provided = request
         .variables
@@ -123,7 +120,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
                         early_errors.push(err.to_graphql_error(None));
                     }
 
-                    for err in validate_request_variables_against_plan(Arc::clone(&request), plan) {
+                    for err in validate_request_variables_against_plan(&request, plan) {
                         early_errors.push(err.to_graphql_error(None));
                     }
 
@@ -275,9 +272,7 @@ impl Fetcher for FederatedGraph {
                             early_errors.push(err.to_graphql_error(None));
                         }
 
-                        for err in
-                            validate_request_variables_against_plan(Arc::clone(&request), plan)
-                        {
+                        for err in validate_request_variables_against_plan(&request, plan) {
                             early_errors.push(err.to_graphql_error(None));
                         }
 
