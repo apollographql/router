@@ -8,29 +8,6 @@ use std::sync::Arc;
 use tracing::Instrument;
 use tracing_futures::WithSubscriber;
 
-/// Recursively validate a query plan node making sure that all services are known before we go
-/// for execution.
-///
-/// This simplifies processing later as we can always guarantee that services are configured for
-/// the plan.
-///
-/// # Arguments
-///
-///  *   `plan`: The root query plan node to validate.
-fn validate_services_against_plan(
-    service_registry: Arc<dyn ServiceRegistry>,
-    plan: &PlanNode,
-) -> Vec<FetchError> {
-    plan.service_usage()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .filter(|service| !service_registry.has(service))
-        .map(|service| FetchError::ValidationUnknownServiceError {
-            service: service.to_string(),
-        })
-        .collect::<Vec<_>>()
-}
-
 /// Recursively validate a query plan node making sure that all variable usages are known before we
 /// go for execution.
 ///
@@ -116,7 +93,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
 
                 let early_errors_response = tracing::info_span!("validation").in_scope(|| {
                     let mut early_errors = Vec::new();
-                    for err in validate_services_against_plan(Arc::clone(&service_registry), plan) {
+                    for err in plan.validate_services_against_plan(Arc::clone(&service_registry)) {
                         early_errors.push(err.to_graphql_error(None));
                     }
 
@@ -267,7 +244,7 @@ impl Fetcher for FederatedGraph {
                     let early_errors_response = tracing::info_span!("validation").in_scope(|| {
                         let mut early_errors = Vec::new();
                         for err in
-                            validate_services_against_plan(Arc::clone(&service_registry), plan)
+                            plan.validate_services_against_plan(Arc::clone(&service_registry))
                         {
                             early_errors.push(err.to_graphql_error(None));
                         }

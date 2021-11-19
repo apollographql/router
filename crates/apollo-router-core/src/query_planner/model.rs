@@ -5,6 +5,8 @@
 
 use crate::prelude::graphql::*;
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 /// The root query plan container.
 #[derive(Debug, PartialEq, Deserialize)]
@@ -70,6 +72,30 @@ impl PlanNode {
             Self::Flatten(flatten) => Box::new(flatten.node.service_usage()),
         }
     }
+
+    /// Recursively validate a query plan node making sure that all services are known before we go
+    /// for execution.
+    ///
+    /// This simplifies processing later as we can always guarantee that services are configured for
+    /// the plan.
+    ///
+    /// # Arguments
+    ///
+    ///  *   `plan`: The root query plan node to validate.
+    pub fn validate_services_against_plan(
+        &self,
+        service_registry: Arc<dyn ServiceRegistry>,
+    ) -> Vec<FetchError> {
+        self.service_usage()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|service| !service_registry.has(service))
+            .map(|service| FetchError::ValidationUnknownServiceError {
+                service: service.to_string(),
+            })
+            .collect::<Vec<_>>()
+    }
+
 }
 
 /// A fetch node.
