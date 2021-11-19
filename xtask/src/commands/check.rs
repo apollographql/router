@@ -12,7 +12,7 @@ impl Compliance {
     pub fn run(&self) -> Result<()> {
         cargo!(["deny", "-L", "error", "check"]);
 
-        eprintln!("checking generated licenses.html file");
+        eprintln!("Checking generated licenses.html file...");
 
         let licenses_html_before = read_to_string(LICENSES_HTML_PATH)?;
 
