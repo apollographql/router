@@ -14,7 +14,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq)]
 pub struct Request {
     /// The graphql query.
-    pub query: Query,
+    pub query: String,
 
     /// The optional graphql operation.
     #[serde(skip_serializing_if = "Option::is_none", default)]

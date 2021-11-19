@@ -27,12 +27,12 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 /// A cache containing our well known introspection queries.
 #[derive(Debug)]
 pub struct NaiveIntrospection {
-    cache: HashMap<Query, serde_json::Value>,
+    cache: HashMap<String, serde_json::Value>,
 }
 
 impl NaiveIntrospection {
     #[cfg(test)]
-    pub fn from_cache(cache: HashMap<Query, serde_json::Value>) -> Self {
+    pub fn from_cache(cache: HashMap<String, serde_json::Value>) -> Self {
         Self { cache }
     }
 
