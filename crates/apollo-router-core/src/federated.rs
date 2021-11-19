@@ -44,29 +44,19 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
         let request = Arc::new(request);
 
         async move {
-            let query_plan = {
-                match query_planner
-                    .get(
-                        request.query.as_str().to_owned(),
-                        request.operation_name.to_owned(),
-                        Default::default(),
-                    )
-                    .instrument(tracing::info_span!("plan"))
-                    .await
-                {
-                    Ok(query_plan) => query_plan,
-                    Err(err) => {
-                        return Err(
-                            stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
-                        );
-                    }
-                }
-            };
+            let query_plan = query_planner
+                .get(
+                    request.query.as_str().to_owned(),
+                    request.operation_name.to_owned(),
+                    Default::default(),
+                )
+                .await?;
 
             if let Some(plan) = query_plan.node() {
                 tracing::debug!("query plan\n{:#?}", plan);
                 plan.validate_request(&request, Arc::clone(&service_registry))?;
             } else {
+                // TODO this should probably log something
                 return Err(stream::empty().boxed());
             }
 
