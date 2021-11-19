@@ -84,7 +84,7 @@ impl Response {
         ))
     }
 
-    pub fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
+    pub fn insert_data(&mut self, path: &Path, value: &Value) -> Result<(), FetchError> {
         let nodes =
             self.data
                 .get_at_path_mut(path)
@@ -93,7 +93,7 @@ impl Response {
                 })?;
 
         for node in nodes {
-            node.deep_merge(&value);
+            node.deep_merge(value);
         }
 
         Ok(())
@@ -275,14 +275,10 @@ mod tests {
                 "job": {},
             }))
             .build();
-        response
-            .insert_data(
-                &Path::from("job"),
-                json!({
-                    "name": "cook",
-                }),
-            )
-            .unwrap();
+        let data = json!({
+            "name": "cook",
+        });
+        response.insert_data(&Path::from("job"), &data).unwrap();
         assert_eq!(
             response.data,
             json!({
