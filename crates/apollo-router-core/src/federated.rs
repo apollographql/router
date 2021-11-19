@@ -25,17 +25,8 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
         &self,
         request: Request,
     ) -> future::BoxFuture<'static, Result<FederatedGraphRoute, ResponseStream>> {
-        let federated_query_span = tracing::info_span!("federated");
-        tracing::trace!("Request received:\n{:#?}", request);
-
-        if let Some(introspection_response) =
-            federated_query_span.in_scope(|| self.naive_introspection.get(&request.query))
-        {
-            let mut response = Response::builder().build();
-            response
-                .insert_data(&Path::empty(), introspection_response)
-                .expect("it is always possible to insert data in root path; qed");
-            return future::ready(Err(stream::iter(vec![response]).boxed())).boxed();
+        if let Some(response) = self.naive_introspection.get(&request.query) {
+            return future::ready(Err(response.into())).boxed();
         }
 
         let query_planner = Arc::clone(&self.query_planner);
@@ -67,7 +58,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
                 schema: Arc::clone(&schema),
             })
         }
-        .instrument(federated_query_span)
+        .instrument(tracing::info_span!("route_creation"))
         .boxed()
     }
 }
@@ -147,11 +138,7 @@ impl Fetcher for FederatedGraph {
         if let Some(introspection_response) =
             federated_query_span.in_scope(|| self.naive_introspection.get(&request.query))
         {
-            let mut response = Response::builder().build();
-            response
-                .insert_data(&Path::empty(), introspection_response)
-                .expect("it is always possible to insert data in root path; qed");
-            return Box::pin(async { stream::iter(vec![response]).boxed() });
+            return Box::pin(async { stream::iter(vec![introspection_response]).boxed() });
         }
 
         let query_planner = Arc::clone(&self.query_planner);

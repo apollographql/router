@@ -27,7 +27,7 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 /// A cache containing our well known introspection queries.
 #[derive(Debug)]
 pub struct NaiveIntrospection {
-    cache: HashMap<String, serde_json::Value>,
+    cache: HashMap<String, Response>,
 }
 
 impl NaiveIntrospection {
@@ -53,7 +53,13 @@ impl NaiveIntrospection {
                 .iter()
                 .zip(responses)
                 .filter_map(|(cache_key, response)| match response.into_result() {
-                    Ok(introspection_value) => Some((cache_key.into(), introspection_value)),
+                    Ok(value) => {
+                        let mut response = Response::builder().build();
+                        response
+                            .insert_data(&Path::empty(), value)
+                            .expect("it is always possible to insert data in root path; qed");
+                        Some((cache_key.into(), response))
+                    }
                     Err(e) => {
                         let errors = e
                             .iter()
@@ -71,9 +77,8 @@ impl NaiveIntrospection {
         Self { cache }
     }
 
-    pub fn get(&self, query: &str) -> Option<serde_json::Value> {
-        let span = tracing::info_span!("introspection_cache");
-        let _guard = span.enter();
+    /// TODO
+    pub fn get(&self, query: &str) -> Option<Response> {
         self.cache.get(query).map(std::clone::Clone::clone)
     }
 }
