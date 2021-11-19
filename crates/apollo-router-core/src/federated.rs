@@ -1,6 +1,5 @@
 use crate::prelude::graphql::*;
 use derivative::Derivative;
-use futures::lock::Mutex;
 use futures::prelude::*;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -74,29 +73,18 @@ pub struct FederatedGraphRoute {
 // TODO move to apollo-router
 impl Route for FederatedGraphRoute {
     fn execute(self) -> ResponseStream {
-        let query_execution_span = tracing::info_span!("execution");
         stream::once(
             async move {
-                let response = Arc::new(Mutex::new(Response::builder().build()));
-                let root = Path::empty();
-
-                self.query_plan
+                let mut response = self
+                    .query_plan
                     .node()
                     .expect("we already ensured that the plan is some; qed")
                     .execute(
-                        Arc::clone(&response),
-                        &root,
                         Arc::clone(&self.request),
                         Arc::clone(&self.service_registry),
                         Arc::clone(&self.schema),
                     )
-                    .instrument(query_execution_span)
                     .await;
-
-                // TODO: this is not great but there is no other way
-                let mut response = Arc::try_unwrap(response)
-                    .expect("todo: how to prove?")
-                    .into_inner();
 
                 // TODO
                 /*
@@ -202,26 +190,16 @@ impl Fetcher for FederatedGraph {
                 let query_execution_span = tracing::info_span!("execution");
                 stream::once(
                     async move {
-                        let response = Arc::new(Mutex::new(Response::builder().build()));
-                        let root = Path::empty();
-
-                        query_plan
+                        let mut response = query_plan
                             .node()
                             .expect("we already ensured that the plan is some; qed")
                             .execute(
-                                Arc::clone(&response),
-                                &root,
                                 request.clone(),
                                 Arc::clone(&service_registry),
                                 Arc::clone(&schema),
                             )
                             .instrument(query_execution_span)
                             .await;
-
-                        // TODO: this is not great but there is no other way
-                        let mut response = Arc::try_unwrap(response)
-                            .expect("todo: how to prove?")
-                            .into_inner();
 
                         // TODO
                         /*

@@ -146,8 +146,7 @@ impl PlanNode {
         }
     }
 
-    /// TODO
-    pub fn execute<'a>(
+    fn execute_inner<'a>(
         &'a self,
         response: Arc<Mutex<Response>>,
         current_dir: &'a Path,
@@ -161,7 +160,7 @@ impl PlanNode {
             match self {
                 PlanNode::Sequence { nodes } => {
                     for node in nodes {
-                        node.execute(
+                        node.execute_inner(
                             Arc::clone(&response),
                             current_dir,
                             Arc::clone(&request),
@@ -174,7 +173,7 @@ impl PlanNode {
                 }
                 PlanNode::Parallel { nodes } => {
                     future::join_all(nodes.iter().map(|plan| {
-                        plan.execute(
+                        plan.execute_inner(
                             Arc::clone(&response),
                             current_dir,
                             Arc::clone(&request),
@@ -215,7 +214,7 @@ impl PlanNode {
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // this is the only command that actually changes the "current dir"
                     let current_dir = current_dir.join(path);
-                    node.execute(
+                    node.execute_inner(
                         Arc::clone(&response),
                         // a path can go over multiple json node!
                         &current_dir,
@@ -228,6 +227,32 @@ impl PlanNode {
                 }
             }
         })
+    }
+
+    /// TODO
+    pub async fn execute<'a>(
+        &'a self,
+        request: Arc<Request>,
+        service_registry: Arc<dyn ServiceRegistry>,
+        schema: Arc<Schema>,
+    ) -> Response {
+        let response = Arc::new(Mutex::new(Response::builder().build()));
+        let root = Path::empty();
+
+        self.execute_inner(
+            Arc::clone(&response),
+            &root,
+            Arc::clone(&request),
+            Arc::clone(&service_registry),
+            Arc::clone(&schema),
+        )
+        .instrument(tracing::info_span!("execution"))
+        .await;
+
+        // TODO: this is not great but there is no other way
+        Arc::try_unwrap(response)
+            .expect("todo: how to prove?")
+            .into_inner()
     }
 }
 
