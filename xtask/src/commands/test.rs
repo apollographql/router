@@ -27,12 +27,15 @@ pub struct Test {
     no_demo: bool,
 
     /// Do start the federation demo (without docker).
+    /// Xtask will pre compile the first test run while federation-demo is booting up.
+    /// If you want to disable pre_compile, use the --no-pre-compile flag.
     #[structopt(long, conflicts_with = "no-demo")]
     with_demo: bool,
 
-    /// Start compiling the tests while federation demo is booting up.
+    /// Do not start compiling the tests while federation demo is booting up.
+    /// Requires --with-demo.
     #[structopt(long, conflicts_with = "no-demo")]
-    pre_compile: bool,
+    no_pre_compile: bool,
 }
 
 impl Test {
@@ -42,7 +45,7 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        let mut maybe_pre_compile = if self.pre_compile && self.with_demo {
+        let mut maybe_pre_compile = if self.with_demo && !self.no_pre_compile {
             eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
             Some(
                 std::process::Command::new(which::which("cargo")?)

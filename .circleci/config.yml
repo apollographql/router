@@ -278,7 +278,7 @@ commands:
             - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
             - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}
             - rust-target-v1-test-windows
-      - run: cargo xtask test --with-demo --pre-compile
+      - run: cargo xtask test --with-demo
       - save_cache:
           key: rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
@@ -294,7 +294,7 @@ commands:
             - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
             - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-v1-test-<< parameters.os >>
-      - run: cargo xtask test --with-demo --pre-compile
+      - run: cargo xtask test --with-demo
       - save_cache:
           key: rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
