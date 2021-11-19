@@ -1,3 +1,4 @@
+use crate::apollo_router::{ApolloRoute, ApolloRouter};
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::{graphql::*, *};
@@ -8,7 +9,7 @@ use std::sync::Arc;
 
 /// Factory for creating graphs.
 ///
-/// This trait enables us to test that `StateMachine` correctly recreates the FederatedGraph when
+/// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -21,18 +22,18 @@ where
 }
 
 #[derive(Default)]
-pub(crate) struct FederatedGraphFactory;
+pub(crate) struct ApolloRouterFactory;
 
 #[async_trait]
-impl GraphFactory<graphql::FederatedGraph, graphql::FederatedGraphRoute> for FederatedGraphFactory {
+impl GraphFactory<ApolloRouter, ApolloRoute> for ApolloRouterFactory {
     async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-    ) -> graphql::FederatedGraph {
+    ) -> ApolloRouter {
         let service_registry = HttpServiceRegistry::new(configuration);
         tokio::task::spawn_blocking(|| {
-            graphql::FederatedGraph::new(
+            ApolloRouter::new(
                 Arc::new(
                     graphql::RouterBridgeQueryPlanner::new(Arc::clone(&schema)).with_caching(),
                 ),
@@ -41,6 +42,6 @@ impl GraphFactory<graphql::FederatedGraph, graphql::FederatedGraphRoute> for Fed
             )
         })
         .await
-        .expect("FederatedGraph::new() is infallible; qed")
+        .expect("ApolloRouter::new() is infallible; qed")
     }
 }

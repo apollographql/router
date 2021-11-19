@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::prelude::*;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use tracing_futures::WithSubscriber;
 /// A federated graph that can be queried.
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct FederatedGraph {
+pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
     query_planner: Arc<dyn QueryPlanner>,
@@ -18,11 +18,11 @@ pub struct FederatedGraph {
 }
 
 // TODO move to apollo-router
-impl Router<FederatedGraphRoute> for FederatedGraph {
+impl Router<ApolloRoute> for ApolloRouter {
     fn create_route(
         &self,
         request: Request,
-    ) -> future::BoxFuture<'static, Result<FederatedGraphRoute, ResponseStream>> {
+    ) -> future::BoxFuture<'static, Result<ApolloRoute, ResponseStream>> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return future::ready(Err(response.into())).boxed();
         }
@@ -52,7 +52,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
             // TODO query caching
             let query = Arc::new(Query::from(&request.query));
 
-            Ok(FederatedGraphRoute {
+            Ok(ApolloRoute {
                 request,
                 query_plan,
                 service_registry: Arc::clone(&service_registry),
@@ -66,19 +66,23 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
 }
 
 // TODO move to apollo-router
-pub struct FederatedGraphRoute {
+pub struct ApolloRoute {
     request: Arc<Request>,
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+    // TODO
+    #[allow(dead_code)]
     query: Arc<Query>,
 }
 
 // TODO move to apollo-router
-impl Route for FederatedGraphRoute {
+impl Route for ApolloRoute {
     fn execute(self) -> ResponseStream {
         stream::once(
             async move {
+                // TODO
+                #[allow(unused_mut)]
                 let mut response = self
                     .query_plan
                     .node()
@@ -103,8 +107,8 @@ impl Route for FederatedGraphRoute {
     }
 }
 
-impl FederatedGraph {
-    /// Create a `FederatedGraph` instance used to execute a GraphQL query.
+impl ApolloRouter {
+    /// Create a `ApolloRouter` instance used to execute a GraphQL query.
     pub fn new(
         query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,

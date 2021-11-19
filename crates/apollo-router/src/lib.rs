@@ -1,5 +1,6 @@
 //! Starts a server that will handle http graphql requests.
 
+mod apollo_router;
 pub mod configuration;
 mod files;
 mod graph_factory;
@@ -9,7 +10,7 @@ pub mod http_subgraph;
 mod state_machine;
 mod warp_http_server_factory;
 
-use crate::graph_factory::FederatedGraphFactory;
+use crate::graph_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -551,7 +552,7 @@ impl FederatedServer {
         let state_machine = StateMachine::new(
             server_factory,
             Some(state_listener),
-            FederatedGraphFactory::default(),
+            ApolloRouterFactory::default(),
         );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async {

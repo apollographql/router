@@ -23,7 +23,6 @@ macro_rules! failfast_error {
 }
 
 mod error;
-mod federated;
 mod json_ext;
 mod naive_introspection;
 mod query_planner;
@@ -33,7 +32,6 @@ mod schema;
 mod traits;
 
 pub use error::*;
-pub use federated::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
 pub use query_planner::*;
