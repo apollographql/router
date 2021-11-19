@@ -14,20 +14,20 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(Debug)]
-enum PrivateState<F, R>
+enum PrivateState<Router, Route>
 where
-    F: graphql::Router<R>,
-    R: graphql::Route,
+    Router: graphql::Router<Route>,
+    Route: graphql::Route,
 {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<(F, R)>,
+        phantom: PhantomData<(Router, Route)>,
     },
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        graph: Arc<F>,
+        router: Arc<Router>,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -40,25 +40,25 @@ where
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, F, R, FA>
+pub(crate) struct StateMachine<S, Router, Route, FA>
 where
     S: HttpServerFactory,
-    F: graphql::Router<R>,
-    R: graphql::Route,
-    FA: GraphFactory<F, R>,
+    Router: graphql::Router<Route>,
+    Route: graphql::Route,
+    FA: GraphFactory<Router, Route>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     graph_factory: FA,
-    phantom: PhantomData<(F, R)>,
+    phantom: PhantomData<(Router, Route)>,
 }
 
-impl<F, R> From<&PrivateState<F, R>> for State
+impl<Router, Route> From<&PrivateState<Router, Route>> for State
 where
-    F: graphql::Router<R>,
-    R: graphql::Route,
+    Router: graphql::Router<Route>,
+    Route: graphql::Route,
 {
-    fn from(private_state: &PrivateState<F, R>) -> Self {
+    fn from(private_state: &PrivateState<Router, Route>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -75,12 +75,12 @@ where
     }
 }
 
-impl<S, F, R, FA> StateMachine<S, F, R, FA>
+impl<S, Router, Route, FA> StateMachine<S, Router, Route, FA>
 where
     S: HttpServerFactory,
-    F: graphql::Router<R> + 'static,
-    R: graphql::Route + 'static,
-    FA: GraphFactory<F, R>,
+    Router: graphql::Router<Route> + 'static,
+    Route: graphql::Route + 'static,
+    FA: GraphFactory<Router, Route>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -107,8 +107,11 @@ where
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, F, R, FA>>::notify_state_listener(&mut state_listener, initial_state)
-            .await;
+        <StateMachine<S, Router, Route, FA>>::notify_state_listener(
+            &mut state_listener,
+            initial_state,
+        )
+        .await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -160,7 +163,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        graph,
+                        router,
                         server_handle,
                     },
                     UpdateSchema(new_schema),
@@ -178,7 +181,7 @@ where
                             Running {
                                 configuration,
                                 schema,
-                                graph,
+                                router,
                                 server_handle,
                             }
                         }
@@ -204,7 +207,7 @@ where
                                 Ok(server_handle) => Running {
                                     configuration,
                                     schema,
-                                    graph,
+                                    router,
                                     server_handle,
                                 },
                                 Err(err) => Errored(err),
@@ -218,7 +221,7 @@ where
                     Running {
                         configuration,
                         schema,
-                        graph,
+                        router,
                         server_handle,
                     },
                     UpdateConfiguration(new_configuration),
@@ -236,7 +239,7 @@ where
                             Running {
                                 configuration,
                                 schema,
-                                graph,
+                                router,
                                 server_handle,
                             }
                         }
@@ -259,7 +262,7 @@ where
                                 Ok(server_handle) => Running {
                                     configuration: Arc::new(new_configuration),
                                     schema,
-                                    graph,
+                                    router,
                                     server_handle,
                                 },
                                 Err(err) => Errored(err),
@@ -277,7 +280,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, F, R, FA>>::notify_state_listener(
+                <StateMachine<S, Router, Route, FA>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -311,7 +314,10 @@ where
         }
     }
 
-    async fn maybe_transition_to_running(&self, state: PrivateState<F, R>) -> PrivateState<F, R> {
+    async fn maybe_transition_to_running(
+        &self,
+        state: PrivateState<Router, Route>,
+    ) -> PrivateState<Router, Route> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -336,7 +342,7 @@ where
                 }
                 Ok(()) => {
                     let schema = Arc::new(schema);
-                    let graph = Arc::new(
+                    let router = Arc::new(
                         self.graph_factory
                             .create(&derived_configuration, Arc::clone(&schema))
                             .await,
@@ -344,7 +350,7 @@ where
 
                     match self
                         .http_server_factory
-                        .create(Arc::clone(&graph), Arc::new(derived_configuration), None)
+                        .create(Arc::clone(&router), Arc::new(derived_configuration), None)
                         .await
                     {
                         Ok(server_handle) => {
@@ -353,7 +359,7 @@ where
                             Running {
                                 configuration: Arc::new(configuration),
                                 schema,
-                                graph,
+                                router,
                                 server_handle,
                             }
                         }

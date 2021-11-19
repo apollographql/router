@@ -17,15 +17,15 @@ use tokio::net::TcpListener;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<F, R>(
+    fn create<Router, Route>(
         &self,
-        graph: Arc<F>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        F: graphql::Router<R> + 'static,
-        R: graphql::Route + 'static;
+        Router: graphql::Router<Route> + 'static,
+        Route: graphql::Route + 'static;
 }
 
 /// A handle with with a client can shut down the server gracefully.

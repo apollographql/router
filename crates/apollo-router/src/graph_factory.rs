@@ -13,12 +13,12 @@ use std::sync::Arc;
 /// necessary e.g. when schema changes.
 #[cfg_attr(test, automock)]
 #[async_trait]
-pub(crate) trait GraphFactory<F, R>
+pub(crate) trait GraphFactory<Router, Route>
 where
-    F: graphql::Router<R>,
-    R: graphql::Route,
+    Router: graphql::Router<Route>,
+    Route: graphql::Route,
 {
-    async fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>) -> F;
+    async fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>) -> Router;
 }
 
 #[derive(Default)]
