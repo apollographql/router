@@ -31,7 +31,7 @@ pub struct Test {
     with_demo: bool,
 
     /// Start compiling the tests while federation demo is booting up.
-    #[structopt(long)]
+    #[structopt(long, conflicts_with = "no-demo")]
     pre_compile: bool,
 }
 
@@ -42,7 +42,7 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        let mut maybe_pre_compile = if self.pre_compile {
+        let mut maybe_pre_compile = if self.pre_compile && self.with_demo {
             eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
             Some(
                 std::process::Command::new(which::which("cargo")?)
@@ -90,7 +90,7 @@ impl Test {
             }
 
             eprintln!("Running tests with features: {}", features.join(","));
-            cargo!(TEST_DEFAULT_ARGS, features.iter(),);
+            cargo!(TEST_DEFAULT_ARGS, features.iter());
         }
 
         Ok(())
