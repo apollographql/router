@@ -71,10 +71,10 @@ impl NaiveIntrospection {
         Self { cache }
     }
 
-    pub fn get(&self, request: &Request) -> Option<serde_json::Value> {
+    pub fn get(&self, request: &Request) -> Option<&serde_json::Value> {
         let span = tracing::info_span!("introspection_cache");
         let _guard = span.enter();
-        self.cache.get(&request.query).map(std::clone::Clone::clone)
+        self.cache.get(&request.query)
     }
 }
 
@@ -95,7 +95,7 @@ mod naive_introspection_tests {
 
         let request = Request::builder().query(query_to_test).build();
 
-        assert_eq!(expected_data, naive_introspection.get(&request).unwrap());
+        assert_eq!(&expected_data, naive_introspection.get(&request).unwrap());
     }
 
     #[test]
