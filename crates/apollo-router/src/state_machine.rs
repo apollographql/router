@@ -6,6 +6,7 @@ use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
+use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
@@ -13,14 +14,18 @@ use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(Debug)]
-enum PrivateState<F>
+#[derive(Derivative)]
+#[derivative(Debug)]
+enum PrivateState<F, R>
 where
-    F: graphql::Fetcher,
+    F: graphql::Router<R>,
+    R: graphql::Route,
 {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
+        #[derivative(Debug = "ignore")]
+        phantom: PhantomData<(F, R)>,
     },
     Running {
         configuration: Arc<Configuration>,
@@ -38,23 +43,25 @@ where
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, F, FA>
+pub(crate) struct StateMachine<S, F, R, FA>
 where
     S: HttpServerFactory,
-    F: graphql::Fetcher + 'static,
-    FA: GraphFactory<F>,
+    F: graphql::Router<R>,
+    R: graphql::Route,
+    FA: GraphFactory<F, R>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     graph_factory: FA,
-    phantom: PhantomData<F>,
+    phantom: PhantomData<(F, R)>,
 }
 
-impl<F> From<&PrivateState<F>> for State
+impl<F, R> From<&PrivateState<F, R>> for State
 where
-    F: graphql::Fetcher,
+    F: graphql::Router<R>,
+    R: graphql::Route,
 {
-    fn from(private_state: &PrivateState<F>) -> Self {
+    fn from(private_state: &PrivateState<F, R>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -71,11 +78,12 @@ where
     }
 }
 
-impl<S, F, FA> StateMachine<S, F, FA>
+impl<S, F, R, FA> StateMachine<S, F, R, FA>
 where
     S: HttpServerFactory,
-    F: graphql::Fetcher,
-    FA: GraphFactory<F>,
+    F: graphql::Router<R> + 'static,
+    R: graphql::Route + 'static,
+    FA: GraphFactory<F, R>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -98,10 +106,12 @@ where
         let mut state = Startup {
             configuration: None,
             schema: None,
+            phantom: PhantomData,
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, F, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
+        <StateMachine<S, F, R, FA>>::notify_state_listener(&mut state_listener, initial_state)
+            .await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -110,6 +120,7 @@ where
                     self.maybe_transition_to_running(Startup {
                         configuration,
                         schema: Some(new_schema),
+                        phantom: PhantomData,
                     })
                     .await
                 }
@@ -118,6 +129,7 @@ where
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(new_configuration),
                         schema,
+                        phantom: PhantomData,
                     })
                     .await
                 }
@@ -268,7 +280,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, F, FA>>::notify_state_listener(
+                <StateMachine<S, F, R, FA>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -302,10 +314,11 @@ where
         }
     }
 
-    async fn maybe_transition_to_running(&self, state: PrivateState<F>) -> PrivateState<F> {
+    async fn maybe_transition_to_running(&self, state: PrivateState<F, R>) -> PrivateState<F, R> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
+            phantom: _,
         } = state
         {
             tracing::debug!("Starting http");
@@ -321,6 +334,7 @@ where
                     Startup {
                         configuration: Some(configuration),
                         schema: Some(schema),
+                        phantom: PhantomData,
                     }
                 }
                 Ok(()) => {

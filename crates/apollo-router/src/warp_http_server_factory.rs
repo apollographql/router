@@ -34,14 +34,15 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<F>(
+    fn create<Router, Route>(
         &self,
-        graph: Arc<F>,
+        graph: Arc<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        F: graphql::Fetcher + 'static,
+        Router: graphql::Router<Route> + 'static,
+        Route: graphql::Route + 'static,
     {
         Box::pin(async {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -160,12 +161,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-fn get_graphql_request_or_redirect<F>(
-    graph: Arc<F>,
+fn get_graphql_request_or_redirect<Router, Route>(
+    graph: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<Route> + 'static,
+    Route: graphql::Route + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -224,12 +226,13 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
     }
 }
 
-fn post_graphql_request<F>(
-    graph: Arc<F>,
+fn post_graphql_request<Router, Route>(
+    graph: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<Route> + 'static,
+    Route: graphql::Route + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -246,14 +249,15 @@ where
         })
 }
 
-fn run_graphql_request<F>(
+fn run_graphql_request<Router, Route>(
     configuration: Arc<Configuration>,
-    graph: Arc<F>,
+    graph: Arc<Router>,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>>
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<Route> + 'static,
+    Route: graphql::Route + 'static,
 {
     let dispatcher = configuration
         .subscriber
@@ -276,14 +280,18 @@ where
     .with_subscriber(dispatcher)
 }
 
-async fn stream_request<F>(
-    graph: Arc<F>,
+async fn stream_request<Router, Route>(
+    graph: Arc<Router>,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<Route> + 'static,
+    Route: graphql::Route,
 {
-    let stream = graph.stream(request).await;
+    let stream = match graph.create_route(request).await {
+        Ok(route) => route.execute(),
+        Err(stream) => stream,
+    };
 
     stream
         .enumerate()

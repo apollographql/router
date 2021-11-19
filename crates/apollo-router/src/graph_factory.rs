@@ -12,9 +12,10 @@ use std::sync::Arc;
 /// necessary e.g. when schema changes.
 #[cfg_attr(test, automock)]
 #[async_trait]
-pub(crate) trait GraphFactory<F>
+pub(crate) trait GraphFactory<F, R>
 where
-    F: graphql::Fetcher,
+    F: graphql::Router<R>,
+    R: graphql::Route,
 {
     async fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>) -> F;
 }
@@ -23,7 +24,7 @@ where
 pub(crate) struct FederatedGraphFactory;
 
 #[async_trait]
-impl GraphFactory<graphql::FederatedGraph> for FederatedGraphFactory {
+impl GraphFactory<graphql::FederatedGraph, graphql::FederatedGraphRoute> for FederatedGraphFactory {
     async fn create(
         &self,
         configuration: &Configuration,
