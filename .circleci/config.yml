@@ -217,9 +217,16 @@ commands:
           keys:
             - rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-v1-xtask-build-<< parameters.os >>
+      - run:
+          name: Install cargo sweep
+          command: |
+            set -e -o pipefail
+            cargo sweep --version || cargo install cargo-sweep
+      - run: cargo sweep -s
       - install_extra_tools:
           os: << parameters.os >>
       - run: cargo xtask check-compliance
+      - run: cargo sweep -f
       - save_cache:
           key: rust-target-v1-xtask-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
@@ -252,7 +259,14 @@ commands:
           keys:
             - rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-v1-build-<< parameters.os >>
+      - run:
+          name: Install cargo sweep
+          command: |
+            set -e -o pipefail
+            cargo sweep --version || cargo install cargo-sweep
+      - run: cargo sweep -s
       - build_all_permutations
+      - run: cargo sweep -f
       - save_cache:
           key: rust-target-v1-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
@@ -264,7 +278,14 @@ commands:
           keys:
             - rust-target-v1-build-windows-{{ checksum "Cargo.lock" }}
             - rust-target-v1-build-windows
+      - run:
+          name: Install cargo sweep
+          command: |
+            set -e -o pipefail
+            cargo sweep --version || cargo install cargo-sweep
+      - run: cargo sweep -s
       - build_common_permutations
+      - run: cargo sweep -f
       - save_cache:
           key: rust-target-v1-build-windows-{{ checksum "Cargo.lock" }}
           paths:
@@ -278,7 +299,14 @@ commands:
             - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
             - rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}
             - rust-target-v1-test-windows
+      - run:
+          name: Install cargo sweep
+          command: |
+            set -e -o pipefail
+            cargo sweep --version || cargo install cargo-sweep
+      - run: cargo sweep -s
       - run: cargo xtask test --with-demo
+      - run: cargo sweep -f
       - save_cache:
           key: rust-target-v1-test-windows-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
@@ -294,7 +322,14 @@ commands:
             - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
             - rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-v1-test-<< parameters.os >>
+      - run:
+          name: Install cargo sweep
+          command: |
+            set -e -o pipefail
+            cargo sweep --version || cargo install cargo-sweep
+      - run: cargo sweep -s
       - run: cargo xtask test --with-demo
+      - run: cargo sweep -f
       - save_cache:
           key: rust-target-v1-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
