@@ -6,7 +6,6 @@ use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
-use derivative::Derivative;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
@@ -14,8 +13,7 @@ use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(Derivative)]
-#[derivative(Debug)]
+#[derive(Debug)]
 enum PrivateState<F, R>
 where
     F: graphql::Router<R>,
@@ -24,7 +22,6 @@ where
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        #[derivative(Debug = "ignore")]
         phantom: PhantomData<(F, R)>,
     },
     Running {

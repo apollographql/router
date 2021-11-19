@@ -64,8 +64,8 @@ pub trait Router<T: Route>: Send + Sync + Debug {
 }
 
 /// An object that can be executed to return a [`ResponseStream`].
-pub trait Route {
-    fn execute(self) -> ResponseStream;
+pub trait Route: Send + Debug {
+    fn execute(self) -> future::BoxFuture<'static, ResponseStream>;
 }
 
 #[cfg(test)]

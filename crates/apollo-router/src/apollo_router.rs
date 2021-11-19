@@ -80,6 +80,7 @@ impl Router<ApolloRoute> for ApolloRouter {
 }
 
 // The default route used with [`ApolloRouter`], suitable for most use cases.
+#[derive(Debug)]
 pub struct ApolloRoute {
     request: Arc<Request>,
     query_plan: Arc<QueryPlan>,
@@ -91,30 +92,33 @@ pub struct ApolloRoute {
 }
 
 impl Route for ApolloRoute {
-    fn execute(self) -> ResponseStream {
-        stream::once(
-            async move {
-                // TODO
-                #[allow(unused_mut)]
-                let mut response = self
-                    .query_plan
-                    .node()
-                    .expect("we already ensured that the plan is some; qed")
-                    .execute(
-                        Arc::clone(&self.request),
-                        Arc::clone(&self.service_registry),
-                        Arc::clone(&self.schema),
-                    )
-                    .await;
+    fn execute(self) -> future::BoxFuture<'static, ResponseStream> {
+        future::ready(
+            stream::once(
+                async move {
+                    // TODO
+                    #[allow(unused_mut)]
+                    let mut response = self
+                        .query_plan
+                        .node()
+                        .expect("we already ensured that the plan is some; qed")
+                        .execute(
+                            Arc::clone(&self.request),
+                            Arc::clone(&self.service_registry),
+                            Arc::clone(&self.schema),
+                        )
+                        .await;
 
-                // TODO move query parsing to query creation
-                #[cfg(feature = "post-processing")]
-                tracing::debug_span!("format_response")
-                    .in_scope(|| self.query.format_response(&mut response));
+                    // TODO move query parsing to query creation
+                    #[cfg(feature = "post-processing")]
+                    tracing::debug_span!("format_response")
+                        .in_scope(|| self.query.format_response(&mut response));
 
-                response
-            }
-            .with_current_subscriber(),
+                    response
+                }
+                .with_current_subscriber(),
+            )
+            .boxed(),
         )
         .boxed()
     }

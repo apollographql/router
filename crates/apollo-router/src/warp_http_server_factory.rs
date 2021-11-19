@@ -289,7 +289,7 @@ where
     Route: graphql::Route,
 {
     let stream = match graph.create_route(request).await {
-        Ok(route) => route.execute(),
+        Ok(route) => route.execute().await,
         Err(stream) => stream,
     };
 
