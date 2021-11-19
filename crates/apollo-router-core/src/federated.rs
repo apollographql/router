@@ -80,18 +80,18 @@ impl Route for FederatedGraphRoute {
                 let response = Arc::new(Mutex::new(Response::builder().build()));
                 let root = Path::empty();
 
-                execute(
-                    Arc::clone(&response),
-                    &root,
-                    self.query_plan
-                        .node()
-                        .expect("we already ensured that the plan is some; qed"),
-                    Arc::clone(&self.request),
-                    Arc::clone(&self.service_registry),
-                    Arc::clone(&self.schema),
-                )
-                .instrument(query_execution_span)
-                .await;
+                self.query_plan
+                    .node()
+                    .expect("we already ensured that the plan is some; qed")
+                    .execute(
+                        Arc::clone(&response),
+                        &root,
+                        Arc::clone(&self.request),
+                        Arc::clone(&self.service_registry),
+                        Arc::clone(&self.schema),
+                    )
+                    .instrument(query_execution_span)
+                    .await;
 
                 // TODO: this is not great but there is no other way
                 let mut response = Arc::try_unwrap(response)
@@ -205,18 +205,18 @@ impl Fetcher for FederatedGraph {
                         let response = Arc::new(Mutex::new(Response::builder().build()));
                         let root = Path::empty();
 
-                        execute(
-                            Arc::clone(&response),
-                            &root,
-                            query_plan
-                                .node()
-                                .expect("we already ensured that the plan is some; qed"),
-                            request.clone(),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                        .instrument(query_execution_span)
-                        .await;
+                        query_plan
+                            .node()
+                            .expect("we already ensured that the plan is some; qed")
+                            .execute(
+                                Arc::clone(&response),
+                                &root,
+                                request.clone(),
+                                Arc::clone(&service_registry),
+                                Arc::clone(&schema),
+                            )
+                            .instrument(query_execution_span)
+                            .await;
 
                         // TODO: this is not great but there is no other way
                         let mut response = Arc::try_unwrap(response)
@@ -238,251 +238,5 @@ impl Fetcher for FederatedGraph {
             }
             .instrument(federated_query_span),
         )
-    }
-}
-
-fn execute<'a>(
-    response: Arc<Mutex<Response>>,
-    current_dir: &'a Path,
-    plan: &'a PlanNode,
-    request: Arc<Request>,
-    service_registry: Arc<dyn ServiceRegistry>,
-    schema: Arc<Schema>,
-) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-    Box::pin(async move {
-        tracing::trace!("Executing plan:\n{:#?}", plan);
-
-        match plan {
-            PlanNode::Sequence { nodes } => {
-                for node in nodes {
-                    execute(
-                        Arc::clone(&response),
-                        current_dir,
-                        node,
-                        Arc::clone(&request),
-                        Arc::clone(&service_registry),
-                        Arc::clone(&schema),
-                    )
-                    .instrument(tracing::info_span!("sequence"))
-                    .await;
-                }
-            }
-            PlanNode::Parallel { nodes } => {
-                future::join_all(nodes.iter().map(|plan| {
-                    execute(
-                        Arc::clone(&response),
-                        current_dir,
-                        plan,
-                        Arc::clone(&request),
-                        Arc::clone(&service_registry),
-                        Arc::clone(&schema),
-                    )
-                }))
-                .instrument(tracing::info_span!("parallel"))
-                .await;
-            }
-            PlanNode::Fetch(info) => {
-                match fetch_node(
-                    Arc::clone(&response),
-                    current_dir,
-                    info,
-                    Arc::clone(&request),
-                    Arc::clone(&service_registry),
-                    Arc::clone(&schema),
-                )
-                .instrument(tracing::info_span!("fetch"))
-                .await
-                {
-                    Ok(()) => {
-                        let received =
-                            serde_json::to_string_pretty(&response.lock().await.data).unwrap();
-                        tracing::trace!("New data:\n{}", received,);
-                    }
-                    Err(err) => {
-                        failfast_error!("Fetch error: {}", err);
-                        response
-                            .lock()
-                            .await
-                            .errors
-                            .push(err.to_graphql_error(Some(current_dir.to_owned())));
-                    }
-                }
-            }
-            PlanNode::Flatten(FlattenNode { path, node }) => {
-                // this is the only command that actually changes the "current dir"
-                let current_dir = current_dir.join(path);
-                execute(
-                    Arc::clone(&response),
-                    // a path can go over multiple json node!
-                    &current_dir,
-                    node,
-                    Arc::clone(&request),
-                    Arc::clone(&service_registry),
-                    Arc::clone(&schema),
-                )
-                .instrument(tracing::trace_span!("flatten"))
-                .await;
-            }
-        }
-    })
-}
-
-async fn fetch_node<'a>(
-    response: Arc<Mutex<Response>>,
-    current_dir: &'a Path,
-    FetchNode {
-        variable_usages,
-        requires,
-        operation,
-        service_name,
-    }: &'a FetchNode,
-    request: Arc<Request>,
-    service_registry: Arc<dyn ServiceRegistry>,
-    schema: Arc<Schema>,
-) -> Result<(), FetchError> {
-    let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
-
-    if let Some(requires) = requires {
-        // We already checked that the service exists during planning
-        let fetcher = service_registry.get(service_name).unwrap();
-
-        let mut variables = Object::with_capacity(1 + variable_usages.len());
-        variables.extend(variable_usages.iter().filter_map(|key| {
-            request.variables.as_ref().map(|v| {
-                v.get(key)
-                    .map(|value| (key.clone(), value.clone()))
-                    .unwrap_or_default()
-            })
-        }));
-
-        {
-            let response = response.lock().await;
-            tracing::trace!(
-                "Creating representations at path '{}' for selections={:?} using data={}",
-                current_dir,
-                requires,
-                serde_json::to_string(&response.data).unwrap(),
-            );
-            let representations = response.select(current_dir, requires, &schema)?;
-            variables.insert("representations".into(), representations);
-        }
-
-        let (res, _tail) = fetcher
-            .stream(
-                Request::builder()
-                    .query(operation)
-                    .variables(Some(Arc::new(variables)))
-                    .build(),
-            )
-            .await
-            .into_future()
-            .instrument(query_span)
-            .await;
-
-        match res {
-            Some(response) if !response.is_primary() => {
-                Err(FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_owned(),
-                })
-            }
-            Some(Response {
-                data, mut errors, ..
-            }) => {
-                if let Some(entities) = data.get("_entities") {
-                    tracing::trace!(
-                        "Received entities: {}",
-                        serde_json::to_string(entities).unwrap(),
-                    );
-                    if let Some(array) = entities.as_array() {
-                        let mut response = response
-                            .lock()
-                            .instrument(tracing::trace_span!("response_lock_wait"))
-                            .await;
-
-                        let span = tracing::trace_span!("response_insert");
-                        let _guard = span.enter();
-                        for (i, entity) in array.iter().enumerate() {
-                            response.insert_data(
-                                &current_dir.join(Path::from(i.to_string())),
-                                entity.to_owned(),
-                            )?;
-                        }
-
-                        Ok(())
-                    } else {
-                        Err(FetchError::ExecutionInvalidContent {
-                            reason: "Received invalid type for key `_entities`!".to_string(),
-                        })
-                    }
-                } else {
-                    let mut response = response
-                        .lock()
-                        .instrument(tracing::trace_span!("response_lock_wait"))
-                        .await;
-
-                    response.append_errors(&mut errors);
-                    Err(FetchError::ExecutionInvalidContent {
-                        reason: "Missing key `_entities`!".to_string(),
-                    })
-                }
-            }
-            None => Err(FetchError::SubrequestNoResponse {
-                service: service_name.to_string(),
-            }),
-        }
-    } else {
-        let variables = Arc::new(
-            variable_usages
-                .iter()
-                .filter_map(|key| {
-                    request
-                        .variables
-                        .as_ref()
-                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                        .unwrap_or_default()
-                })
-                .collect::<Object>(),
-        );
-
-        // We already validated that the service exists during planning
-        let fetcher = service_registry.get(service_name).unwrap();
-
-        let (res, _tail) = fetcher
-            .stream(
-                Request::builder()
-                    .query(operation.clone())
-                    .variables(Arc::clone(&variables))
-                    .build(),
-            )
-            .await
-            .into_future()
-            .instrument(query_span)
-            .await;
-
-        match res {
-            Some(response) if !response.is_primary() => {
-                Err(FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_owned(),
-                })
-            }
-            Some(Response {
-                data, mut errors, ..
-            }) => {
-                let mut response = response
-                    .lock()
-                    .instrument(tracing::trace_span!("response_lock_wait"))
-                    .await;
-
-                let span = tracing::trace_span!("response_insert");
-                let _guard = span.enter();
-                response.append_errors(&mut errors);
-                response.insert_data(current_dir, data)?;
-
-                Ok(())
-            }
-            None => Err(FetchError::SubrequestNoResponse {
-                service: service_name.to_string(),
-            }),
-        }
     }
 }
