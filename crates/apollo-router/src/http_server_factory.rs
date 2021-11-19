@@ -73,7 +73,7 @@ impl HttpServerHandle {
     pub(crate) async fn restart<Router, Route, ServerFactory>(
         self,
         factory: &ServerFactory,
-        graph: Arc<Router>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, FederatedServerError>
     where
@@ -107,7 +107,7 @@ impl HttpServerHandle {
         };
 
         let handle = factory
-            .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
+            .create(Arc::clone(&router), Arc::clone(&configuration), listener)
             .await?;
         tracing::debug!("Restarted on {}", handle.listen_address());
 

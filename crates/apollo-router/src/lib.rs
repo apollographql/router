@@ -3,15 +3,15 @@
 mod apollo_router;
 pub mod configuration;
 mod files;
-mod graph_factory;
 mod http_server_factory;
 pub mod http_service_registry;
 pub mod http_subgraph;
+mod router_factory;
 mod state_machine;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
-use crate::graph_factory::ApolloRouterFactory;
+use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};

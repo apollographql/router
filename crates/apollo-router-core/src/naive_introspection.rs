@@ -103,7 +103,7 @@ mod naive_introspection_tests {
 
         assert_eq!(
             expected_data,
-            naive_introspection.get(&query_to_test).unwrap()
+            naive_introspection.get(query_to_test).unwrap()
         );
     }
 

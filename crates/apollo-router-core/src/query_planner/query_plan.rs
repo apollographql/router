@@ -135,7 +135,7 @@ impl PlanNode {
             early_errors.push(err.to_graphql_error(None));
         }
 
-        for err in self.validate_request_variables_against_plan(&request) {
+        for err in self.validate_request_variables_against_plan(request) {
             early_errors.push(err.to_graphql_error(None));
         }
 
@@ -230,8 +230,8 @@ impl PlanNode {
     }
 
     /// Execute the plan and return a [`Response`].
-    pub async fn execute<'a>(
-        &'a self,
+    pub async fn execute(
+        &self,
         request: Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,

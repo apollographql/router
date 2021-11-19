@@ -1,5 +1,5 @@
-use super::graph_factory::RouterFactory;
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use super::router_factory::RouterFactory;
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
@@ -49,7 +49,7 @@ where
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
-    graph_factory: FA,
+    router_factory: FA,
     phantom: PhantomData<(Router, Route)>,
 }
 
@@ -85,12 +85,12 @@ where
     pub(crate) fn new(
         http_server_factory: S,
         state_listener: Option<mpsc::Sender<State>>,
-        graph_factory: FA,
+        router_factory: FA,
     ) -> Self {
         Self {
             http_server_factory,
             state_listener,
-            graph_factory,
+            router_factory,
             phantom: Default::default(),
         }
     }
@@ -190,8 +190,8 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
 
                             let schema = Arc::new(new_schema);
-                            let graph = Arc::new(
-                                self.graph_factory
+                            let router = Arc::new(
+                                self.router_factory
                                     .create(&derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
@@ -199,7 +199,7 @@ where
                             match server_handle
                                 .restart(
                                     &self.http_server_factory,
-                                    Arc::clone(&graph),
+                                    Arc::clone(&router),
                                     derived_configuration,
                                 )
                                 .await
@@ -245,8 +245,8 @@ where
                         }
                         Ok(()) => {
                             let derived_configuration = Arc::new(derived_configuration);
-                            let graph = Arc::new(
-                                self.graph_factory
+                            let router = Arc::new(
+                                self.router_factory
                                     .create(&derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
@@ -254,7 +254,7 @@ where
                             match server_handle
                                 .restart(
                                     &self.http_server_factory,
-                                    Arc::clone(&graph),
+                                    Arc::clone(&router),
                                     Arc::clone(&derived_configuration),
                                 )
                                 .await
@@ -343,7 +343,7 @@ where
                 Ok(()) => {
                     let schema = Arc::new(schema);
                     let router = Arc::new(
-                        self.graph_factory
+                        self.router_factory
                             .create(&derived_configuration, Arc::clone(&schema))
                             .await,
                     );
@@ -381,8 +381,8 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::graph_factory::RouterFactory;
     use crate::http_server_factory::MockHttpServerFactory;
+    use crate::router_factory::RouterFactory;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
@@ -394,12 +394,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn no_configuration() {
-        let graph_factory = create_mock_graph_factory(0);
+        let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![NoMoreConfiguration],
                 vec![State::Startup, State::Errored]
             )
@@ -410,12 +410,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn no_schema() {
-        let graph_factory = create_mock_graph_factory(0);
+        let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![NoMoreSchema],
                 vec![State::Startup, State::Errored]
             )
@@ -426,12 +426,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn shutdown_during_startup() {
-        let graph_factory = create_mock_graph_factory(0);
+        let router_factory = create_mock_router_factory(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![Shutdown],
                 vec![State::Startup, State::Stopped]
             )
@@ -442,13 +442,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_shutdown() {
-        let graph_factory = create_mock_graph_factory(1);
+        let router_factory = create_mock_router_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -475,14 +475,14 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_schema() {
-        let graph_factory = create_mock_graph_factory(2);
+        let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let schema = include_str!("testdata/supergraph.graphql");
 
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -514,13 +514,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let graph_factory = create_mock_graph_factory(2);
+        let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -561,13 +561,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls() {
-        let graph_factory = create_mock_graph_factory(1);
+        let router_factory = create_mock_router_factory(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -622,9 +622,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls_when_updating_configuration() {
-        let mut graph_factory = MockMyRouterFactory::new();
+        let mut router_factory = MockMyRouterFactory::new();
         // first call, we take the URL from the configuration
-        graph_factory
+        router_factory
             .expect_create()
             .withf(
                 |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
@@ -635,7 +635,7 @@ mod tests {
             .times(1)
             .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is empty, we should take the URL from the graph
-        graph_factory
+        router_factory
             .expect_create()
             .withf(
                 |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
@@ -650,7 +650,7 @@ mod tests {
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -699,9 +699,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn extract_routing_urls_when_updating_schema() {
-        let mut graph_factory = MockMyRouterFactory::new();
+        let mut router_factory = MockMyRouterFactory::new();
         // first call, we take the URL from the first supergraph
-        graph_factory
+        router_factory
             .expect_create()
             .withf(
                 |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
@@ -712,7 +712,7 @@ mod tests {
             .times(1)
             .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is still empty, we should take the URL from the new supergraph
-        graph_factory
+        router_factory
             .expect_create()
             .withf(
                 |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
@@ -728,7 +728,7 @@ mod tests {
         assert!(matches!(
             execute(
                 server_factory,
-                graph_factory,
+                router_factory,
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
@@ -866,12 +866,12 @@ mod tests {
         (server_factory, shutdown_receivers)
     }
 
-    fn create_mock_graph_factory(expect_times_called: usize) -> MockMyRouterFactory {
-        let mut graph_factory = MockMyRouterFactory::new();
-        graph_factory
+    fn create_mock_router_factory(expect_times_called: usize) -> MockMyRouterFactory {
+        let mut router_factory = MockMyRouterFactory::new();
+        router_factory
             .expect_create()
             .times(expect_times_called)
             .returning(|_, _| future::ready(MockMyRouter::new()).boxed());
-        graph_factory
+        router_factory
     }
 }

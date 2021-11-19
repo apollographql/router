@@ -36,7 +36,7 @@ impl WarpHttpServerFactory {
 impl HttpServerFactory for WarpHttpServerFactory {
     fn create<Router, Route>(
         &self,
-        graph: Arc<Router>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
@@ -56,8 +56,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
             let routes =
-                get_graphql_request_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
-                    .or(post_graphql_request(graph, configuration))
+                get_graphql_request_or_redirect(Arc::clone(&router), Arc::clone(&configuration))
+                    .or(post_graphql_request(router, configuration))
                     .with(cors);
 
             // generate a hyper service from warp routes
@@ -162,7 +162,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
 }
 
 fn get_graphql_request_or_redirect<Router, Route>(
-    graph: Arc<Router>,
+    router: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
@@ -181,12 +181,12 @@ where
                   body: Bytes,
                   header_map: HeaderMap| {
                 let configuration = Arc::clone(&configuration);
-                let graph = Arc::clone(&graph);
+                let router = Arc::clone(&router);
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
-                        run_graphql_request(configuration, graph, request, header_map).await
+                        run_graphql_request(configuration, router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -227,7 +227,7 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
 }
 
 fn post_graphql_request<Router, Route>(
-    graph: Arc<Router>,
+    router: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
@@ -240,9 +240,9 @@ where
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
             let configuration = Arc::clone(&configuration);
-            let graph = Arc::clone(&graph);
+            let router = Arc::clone(&router);
             async move {
-                let reply = run_graphql_request(configuration, graph, request, header_map).await;
+                let reply = run_graphql_request(configuration, router, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
             .boxed()
@@ -251,7 +251,7 @@ where
 
 fn run_graphql_request<Router, Route>(
     configuration: Arc<Configuration>,
-    graph: Arc<Router>,
+    router: Arc<Router>,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>>
@@ -271,7 +271,7 @@ where
     });
 
     async move {
-        let response_stream = stream_request(graph, request)
+        let response_stream = stream_request(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -281,14 +281,14 @@ where
 }
 
 async fn stream_request<Router, Route>(
-    graph: Arc<Router>,
+    router: Arc<Router>,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
     Router: graphql::Router<Route> + 'static,
     Route: graphql::Route,
 {
-    let stream = match graph.create_route(request).await {
+    let stream = match router.create_route(request).await {
         Ok(route) => route.execute().await,
         Err(stream) => stream,
     };

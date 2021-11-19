@@ -167,9 +167,9 @@ async fn query_rust(
         &config,
     )));
 
-    let federated = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
+    let router = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
 
-    let stream = match federated.create_route(request).await {
+    let stream = match router.create_route(request).await {
         Ok(route) => route.execute().await,
         Err(stream) => stream,
     };
