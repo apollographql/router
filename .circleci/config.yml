@@ -281,8 +281,12 @@ commands:
       - run:
           name: Install cargo sweep
           command: |
-            set -e -o pipefail
-            cargo sweep --version || cargo install cargo-sweep
+            cargo sweep --version
+            if(-Not ($?))
+            {
+              cargo install cargo-sweep
+            }
+            exit $LASTEXITCODE
       - run: cargo sweep -s
       - build_common_permutations
       - run: cargo sweep -f
@@ -302,8 +306,12 @@ commands:
       - run:
           name: Install cargo sweep
           command: |
-            set -e -o pipefail
-            cargo sweep --version || cargo install cargo-sweep
+            cargo sweep --version
+            if(-Not ($?))
+            {
+              cargo install cargo-sweep
+            }
+            exit $LASTEXITCODE
       - run: cargo sweep -s
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
