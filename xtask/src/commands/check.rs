@@ -24,7 +24,7 @@ impl Compliance {
             "--workspace",
             "-o",
             "licenses.html",
-            "about.hbs"
+            "about.hbs",
         ]);
 
         let licences_html_after = read_to_string(LICENSES_HTML_PATH)?;
