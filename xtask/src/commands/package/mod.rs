@@ -7,7 +7,7 @@ use std::path::Path;
 use structopt::StructOpt;
 use xtask::*;
 
-const INCLUDE: &[&str] = &["README.md", "LICENSE"];
+const INCLUDE: &[&str] = &["README.md", "LICENSE", "licenses.html"];
 
 #[derive(Debug, StructOpt)]
 pub struct Package {
