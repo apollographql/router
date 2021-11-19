@@ -31,9 +31,8 @@ impl Compliance {
 
         ensure!(
             licenses_html_before == licences_html_after,
-            r#"🚨🚨🚨 licenses.html file is not up to date. 🚨🚨🚨
-please run `cargo about generate --workspace -o licenses.html about.hbs` to generate an up to date licenses list, and check the file in to the repository. 
-        "#
+            r#"🚨 licenses.html file is not up to date. 🚨\n\
+            Please run `cargo about generate --workspace -o licenses.html about.hbs` to generate an up to date licenses list, and check the file in to the repository."#
         );
         Ok(())
     }
