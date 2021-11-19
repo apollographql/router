@@ -5,8 +5,7 @@ use std::sync::Arc;
 use tracing::Instrument;
 use tracing_futures::WithSubscriber;
 
-// TODO move to apollo-router
-/// A federated graph that can be queried.
+/// The default router of Apollo, suitable for most use cases.
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct ApolloRouter {
@@ -17,7 +16,22 @@ pub struct ApolloRouter {
     schema: Arc<Schema>,
 }
 
-// TODO move to apollo-router
+impl ApolloRouter {
+    /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
+    pub fn new(
+        query_planner: Arc<dyn QueryPlanner>,
+        service_registry: Arc<dyn ServiceRegistry>,
+        schema: Arc<Schema>,
+    ) -> Self {
+        Self {
+            naive_introspection: NaiveIntrospection::from_schema(&schema),
+            query_planner,
+            service_registry,
+            schema,
+        }
+    }
+}
+
 impl Router<ApolloRoute> for ApolloRouter {
     fn create_route(
         &self,
@@ -65,7 +79,7 @@ impl Router<ApolloRoute> for ApolloRouter {
     }
 }
 
-// TODO move to apollo-router
+// The default route used with [`ApolloRouter`], suitable for most use cases.
 pub struct ApolloRoute {
     request: Arc<Request>,
     query_plan: Arc<QueryPlan>,
@@ -76,7 +90,6 @@ pub struct ApolloRoute {
     query: Arc<Query>,
 }
 
-// TODO move to apollo-router
 impl Route for ApolloRoute {
     fn execute(self) -> ResponseStream {
         stream::once(
@@ -104,21 +117,5 @@ impl Route for ApolloRoute {
             .with_current_subscriber(),
         )
         .boxed()
-    }
-}
-
-impl ApolloRouter {
-    /// Create a `ApolloRouter` instance used to execute a GraphQL query.
-    pub fn new(
-        query_planner: Arc<dyn QueryPlanner>,
-        service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
-    ) -> Self {
-        Self {
-            naive_introspection: NaiveIntrospection::from_schema(&schema),
-            query_planner,
-            service_registry,
-            schema,
-        }
     }
 }

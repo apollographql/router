@@ -55,7 +55,7 @@ where
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
 
-/// TODO
+/// An object that accepts a [`Request`] and allow creating [`Route`]'s.
 pub trait Router<T: Route>: Send + Sync + Debug {
     fn create_route(
         &self,
@@ -63,7 +63,7 @@ pub trait Router<T: Route>: Send + Sync + Debug {
     ) -> future::BoxFuture<'static, Result<T, ResponseStream>>;
 }
 
-/// TODO doc
+/// An object that can be executed to return a [`ResponseStream`].
 pub trait Route {
     fn execute(self) -> ResponseStream;
 }

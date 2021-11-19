@@ -123,7 +123,7 @@ impl PlanNode {
             .collect::<Vec<_>>()
     }
 
-    /// TODO
+    /// Validate the entire request for variables and services used.
     #[tracing::instrument(name = "validation")]
     pub fn validate_request(
         &self,
@@ -229,7 +229,7 @@ impl PlanNode {
         })
     }
 
-    /// TODO
+    /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
         request: Arc<Request>,

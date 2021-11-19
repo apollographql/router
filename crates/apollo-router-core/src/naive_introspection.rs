@@ -77,7 +77,7 @@ impl NaiveIntrospection {
         Self { cache }
     }
 
-    /// TODO
+    /// Get a cached response for a query.
     pub fn get(&self, query: &str) -> Option<Response> {
         self.cache.get(query).map(std::clone::Clone::clone)
     }
