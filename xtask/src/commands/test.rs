@@ -27,8 +27,10 @@ pub struct Test {
     no_demo: bool,
 
     /// Do start the federation demo (without docker).
-    /// Xtask will pre compile the first test run while federation-demo is booting up.
-    /// If you want to disable pre_compile, use the --no-pre-compile flag.
+    ///
+    /// To speed up the process, the project will be compiled in background
+    /// while federation-demo is booting up. If you want to disable this,
+    /// use the --no-pre-compile flag.
     #[structopt(long, conflicts_with = "no-demo")]
     with_demo: bool,
 
