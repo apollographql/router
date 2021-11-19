@@ -1,6 +1,6 @@
 //! Logic for loading configuration in to an object model
 
-#[cfg(any(feature = "otlp-tonic", feature = "otlp-http"))]
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
 use apollo_router_core::prelude::*;
@@ -199,7 +199,7 @@ impl Cors {
 #[allow(clippy::large_enum_variant)]
 pub enum OpenTelemetry {
     Jaeger(Option<Jaeger>),
-    #[cfg(any(feature = "otlp-tonic", feature = "otlp-http"))]
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     Otlp(otlp::Otlp),
 }
 
@@ -312,7 +312,7 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_jaeger_full.yml");
     }
 
-    #[cfg(any(feature = "otlp-tonic", feature = "otlp-http"))]
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn ensure_configuration_api_does_not_change_common() {
         // NOTE: don't take a snapshot here because the optional fields appear with ~ and they vary
@@ -324,18 +324,18 @@ mod tests {
         ))
         .unwrap();
 
-        #[cfg(feature = "otlp-tonic")]
+        #[cfg(feature = "otlp-grpc")]
         serde_yaml::from_str::<Configuration>(include_str!(
-            "testdata/config_opentelemetry_otlp_tracing_tonic_common.yml"
+            "testdata/config_opentelemetry_otlp_tracing_grpc_common.yml"
         ))
         .unwrap();
     }
 
-    #[cfg(feature = "otlp-tonic")]
+    #[cfg(feature = "otlp-grpc")]
     #[test]
-    fn ensure_configuration_api_does_not_change_tonic() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_tonic_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_tonic_full.yml");
+    fn ensure_configuration_api_does_not_change_grpc() {
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_basic.yml");
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_full.yml");
     }
 
     #[cfg(feature = "otlp-http")]
@@ -345,10 +345,10 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_full.yml");
     }
 
-    #[cfg(all(feature = "tls", feature = "otlp-tonic"))]
+    #[cfg(all(feature = "tls", feature = "otlp-grpc"))]
     #[test]
     fn ensure_configuration_api_does_not_change_tls_config() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_tonic_tls.yml");
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_tls.yml");
     }
 
     #[test]

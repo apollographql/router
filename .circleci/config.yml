@@ -233,10 +233,10 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --features otlp-tonic,tls -p apollo-router -p apollo-router-core
+          crate: --features otlp-grpc,tls -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false
-          crate: --features otlp-tonic -p apollo-router -p apollo-router-core
+          crate: --features otlp-grpc -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false
           crate: --no-default-features --features otlp-http -p apollo-router -p apollo-router-core

@@ -13,10 +13,6 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        http:
-          endpoint: ~
-          headers: ~
-          protocol: ~
-          timeout: ~
+        http: ~
       trace_config: ~
 

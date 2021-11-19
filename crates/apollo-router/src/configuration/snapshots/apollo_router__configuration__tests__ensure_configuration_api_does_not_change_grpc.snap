@@ -13,11 +13,6 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        grpc:
-          endpoint: ~
-          metadata: ~
-          protocol: ~
-          timeout: ~
-          tls_config: ~
+        grpc: ~
       trace_config: ~
 

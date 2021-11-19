@@ -4,7 +4,7 @@ use opentelemetry_otlp::WithExportConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct HttpExporter {
     #[serde(flatten)]
