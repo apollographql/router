@@ -2,35 +2,10 @@ use crate::prelude::graphql::*;
 use derivative::Derivative;
 use futures::lock::Mutex;
 use futures::prelude::*;
-use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use tracing::Instrument;
 use tracing_futures::WithSubscriber;
-
-/// Recursively validate a query plan node making sure that all variable usages are known before we
-/// go for execution.
-///
-/// This simplifies processing later as we can always guarantee that the variable usages are
-/// available for the plan.
-///
-/// # Arguments
-///
-///  *   `plan`: The root query plan node to validate.
-fn validate_request_variables_against_plan(request: &Request, plan: &PlanNode) -> Vec<FetchError> {
-    let required = plan.variable_usage().collect::<HashSet<_>>();
-    let provided = request
-        .variables
-        .as_ref()
-        .map(|v| v.keys().map(|x| x.as_str()).collect::<HashSet<_>>())
-        .unwrap_or_default();
-    required
-        .difference(&provided)
-        .map(|x| FetchError::ValidationMissingVariable {
-            name: x.to_string(),
-        })
-        .collect::<Vec<_>>()
-}
 
 // TODO move to apollo-router
 /// A federated graph that can be queried.
@@ -97,7 +72,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
                         early_errors.push(err.to_graphql_error(None));
                     }
 
-                    for err in validate_request_variables_against_plan(&request, plan) {
+                    for err in plan.validate_request_variables_against_plan(&request) {
                         early_errors.push(err.to_graphql_error(None));
                     }
 
@@ -249,7 +224,7 @@ impl Fetcher for FederatedGraph {
                             early_errors.push(err.to_graphql_error(None));
                         }
 
-                        for err in validate_request_variables_against_plan(&request, plan) {
+                        for err in plan.validate_request_variables_against_plan(&request) {
                             early_errors.push(err.to_graphql_error(None));
                         }
 

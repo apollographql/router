@@ -96,6 +96,29 @@ impl PlanNode {
             .collect::<Vec<_>>()
     }
 
+    /// Recursively validate a query plan node making sure that all variable usages are known before we
+    /// go for execution.
+    ///
+    /// This simplifies processing later as we can always guarantee that the variable usages are
+    /// available for the plan.
+    ///
+    /// # Arguments
+    ///
+    ///  *   `plan`: The root query plan node to validate.
+    pub fn validate_request_variables_against_plan(&self, request: &Request) -> Vec<FetchError> {
+        let required = self.variable_usage().collect::<HashSet<_>>();
+        let provided = request
+            .variables
+            .as_ref()
+            .map(|v| v.keys().map(|x| x.as_str()).collect::<HashSet<_>>())
+            .unwrap_or_default();
+        required
+            .difference(&provided)
+            .map(|x| FetchError::ValidationMissingVariable {
+                name: x.to_string(),
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 /// A fetch node.
