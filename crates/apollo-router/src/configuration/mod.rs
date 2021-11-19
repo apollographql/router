@@ -258,8 +258,8 @@ pub struct TlsConfig {
     key: Option<Secret>,
 }
 
+#[cfg(feature = "otlp-grpc")]
 impl TlsConfig {
-    #[cfg(feature = "tls")]
     pub fn tls_config(
         &self,
     ) -> Result<tonic::transport::channel::ClientTlsConfig, ConfigurationError> {
@@ -274,12 +274,9 @@ impl TlsConfig {
             config = config.ca_certificate(certificate);
         }
 
-        match (self.cert.as_ref(), self.key.as_ref()) {
-            (Some(cert), Some(key)) => {
-                let identity = tonic::transport::Identity::from_pem(cert.read()?, key.read()?);
-                config = config.identity(identity);
-            }
-            _ => {}
+        if let (Some(cert), Some(key)) = (self.cert.as_ref(), self.key.as_ref()) {
+            let identity = tonic::transport::Identity::from_pem(cert.read()?, key.read()?);
+            config = config.identity(identity);
         }
 
         Ok(config)
@@ -345,7 +342,7 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_full.yml");
     }
 
-    #[cfg(all(feature = "tls", feature = "otlp-grpc"))]
+    #[cfg(all(feature = "otlp-grpc"))]
     #[test]
     fn ensure_configuration_api_does_not_change_tls_config() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_tls.yml");
