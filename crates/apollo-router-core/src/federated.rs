@@ -92,7 +92,7 @@ impl Fetcher for FederatedGraph {
         tracing::trace!("Request received:\n{:#?}", request);
 
         if let Some(introspection_response) =
-            federated_query_span.in_scope(|| self.naive_introspection.get(&request))
+            federated_query_span.in_scope(|| self.naive_introspection.get(&request.query))
         {
             let mut response = Response::builder().build();
             response
