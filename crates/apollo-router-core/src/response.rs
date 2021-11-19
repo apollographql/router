@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use typed_builder::TypedBuilder;
@@ -102,6 +103,12 @@ impl Response {
     /// append_errors default the errors `path` with the one provided.
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
+    }
+}
+
+impl From<Response> for ResponseStream {
+    fn from(response: Response) -> Self {
+        stream::once(future::ready(response)).boxed()
     }
 }
 

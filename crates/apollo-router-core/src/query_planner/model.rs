@@ -119,6 +119,29 @@ impl PlanNode {
             })
             .collect::<Vec<_>>()
     }
+
+    /// TODO
+    #[tracing::instrument(name = "validation")]
+    pub fn validate_request(
+        &self,
+        request: &Request,
+        service_registry: Arc<dyn ServiceRegistry>,
+    ) -> Result<(), Response> {
+        let mut early_errors = Vec::new();
+        for err in self.validate_services_against_plan(Arc::clone(&service_registry)) {
+            early_errors.push(err.to_graphql_error(None));
+        }
+
+        for err in self.validate_request_variables_against_plan(&request) {
+            early_errors.push(err.to_graphql_error(None));
+        }
+
+        if !early_errors.is_empty() {
+            Err(Response::builder().errors(early_errors).build())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// A fetch node.

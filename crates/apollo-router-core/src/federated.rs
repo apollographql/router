@@ -65,31 +65,7 @@ impl Router<FederatedGraphRoute> for FederatedGraph {
 
             if let Some(plan) = query_plan.node() {
                 tracing::debug!("query plan\n{:#?}", plan);
-
-                let early_errors_response = tracing::info_span!("validation").in_scope(|| {
-                    let mut early_errors = Vec::new();
-                    for err in plan.validate_services_against_plan(Arc::clone(&service_registry)) {
-                        early_errors.push(err.to_graphql_error(None));
-                    }
-
-                    for err in plan.validate_request_variables_against_plan(&request) {
-                        early_errors.push(err.to_graphql_error(None));
-                    }
-
-                    // If we have any errors so far then let's abort the query
-                    // Planning/validation/variables are candidates to abort.
-                    if !early_errors.is_empty() {
-                        tracing::error!(errors = format!("{:?}", early_errors).as_str());
-                        let response = Response::builder().errors(early_errors).build();
-                        Some(stream::once(async move { response }).boxed())
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(response) = early_errors_response {
-                    return Err(response);
-                }
+                plan.validate_request(&request, Arc::clone(&service_registry))?;
             } else {
                 return Err(stream::empty().boxed());
             }
