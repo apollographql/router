@@ -58,6 +58,7 @@ fn validate_request_variables_against_plan(
         .collect::<Vec<_>>()
 }
 
+// TODO move to apollo-router
 /// A federated graph that can be queried.
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -67,6 +68,143 @@ pub struct FederatedGraph {
     query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+}
+
+// TODO move to apollo-router
+impl Router<FederatedGraphRoute> for FederatedGraph {
+    fn create_route(
+        &self,
+        request: Request,
+    ) -> future::BoxFuture<'static, Result<FederatedGraphRoute, ResponseStream>> {
+        let federated_query_span = tracing::info_span!("federated");
+        tracing::trace!("Request received:\n{:#?}", request);
+
+        if let Some(introspection_response) =
+            federated_query_span.in_scope(|| self.naive_introspection.get(&request.query))
+        {
+            let mut response = Response::builder().build();
+            response
+                .insert_data(&Path::empty(), introspection_response)
+                .expect("it is always possible to insert data in root path; qed");
+            return future::ready(Err(stream::iter(vec![response]).boxed())).boxed();
+        }
+
+        let query_planner = Arc::clone(&self.query_planner);
+        let service_registry = Arc::clone(&self.service_registry);
+        let schema = Arc::clone(&self.schema);
+        let request = Arc::new(request);
+
+        async move {
+            let query_plan = {
+                match query_planner
+                    .get(
+                        request.query.as_str().to_owned(),
+                        request.operation_name.to_owned(),
+                        Default::default(),
+                    )
+                    .instrument(tracing::info_span!("plan"))
+                    .await
+                {
+                    Ok(query_plan) => query_plan,
+                    Err(err) => {
+                        return Err(
+                            stream::iter(vec![FetchError::from(err).to_response(true)]).boxed()
+                        );
+                    }
+                }
+            };
+
+            if let Some(plan) = query_plan.node() {
+                tracing::debug!("query plan\n{:#?}", plan);
+
+                let early_errors_response = tracing::info_span!("validation").in_scope(|| {
+                    let mut early_errors = Vec::new();
+                    for err in validate_services_against_plan(Arc::clone(&service_registry), plan) {
+                        early_errors.push(err.to_graphql_error(None));
+                    }
+
+                    for err in validate_request_variables_against_plan(Arc::clone(&request), plan) {
+                        early_errors.push(err.to_graphql_error(None));
+                    }
+
+                    // If we have any errors so far then let's abort the query
+                    // Planning/validation/variables are candidates to abort.
+                    if !early_errors.is_empty() {
+                        tracing::error!(errors = format!("{:?}", early_errors).as_str());
+                        let response = Response::builder().errors(early_errors).build();
+                        Some(stream::once(async move { response }).boxed())
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(response) = early_errors_response {
+                    return Err(response);
+                }
+            } else {
+                return Err(stream::empty().boxed());
+            }
+
+            Ok(FederatedGraphRoute {
+                request,
+                query_plan,
+                service_registry: Arc::clone(&service_registry),
+                schema: Arc::clone(&schema),
+            })
+        }
+        .instrument(federated_query_span)
+        .boxed()
+    }
+}
+
+// TODO move to apollo-router
+pub struct FederatedGraphRoute {
+    request: Arc<Request>,
+    query_plan: Arc<QueryPlan>,
+    service_registry: Arc<dyn ServiceRegistry>,
+    schema: Arc<Schema>,
+}
+
+// TODO move to apollo-router
+impl Route for FederatedGraphRoute {
+    fn execute(self) -> ResponseStream {
+        let query_execution_span = tracing::info_span!("execution");
+        stream::once(
+            async move {
+                let response = Arc::new(Mutex::new(Response::builder().build()));
+                let root = Path::empty();
+
+                execute(
+                    Arc::clone(&response),
+                    &root,
+                    self.query_plan
+                        .node()
+                        .expect("we already ensured that the plan is some; qed"),
+                    Arc::clone(&self.request),
+                    Arc::clone(&self.service_registry),
+                    Arc::clone(&self.schema),
+                )
+                .instrument(query_execution_span)
+                .await;
+
+                // TODO: this is not great but there is no other way
+                let mut response = Arc::try_unwrap(response)
+                    .expect("todo: how to prove?")
+                    .into_inner();
+
+                // TODO
+                /*
+                #[cfg(feature = "post-processing")]
+                tracing::debug_span!("format_response")
+                    .in_scope(|| request.query.format_response(&mut response));
+                */
+
+                response
+            }
+            .with_current_subscriber(),
+        )
+        .boxed()
+    }
 }
 
 impl FederatedGraph {

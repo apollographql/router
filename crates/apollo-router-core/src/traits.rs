@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use futures::Future;
+use futures::prelude::*;
 use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
@@ -54,6 +54,19 @@ where
 }
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
+
+/// TODO
+pub trait Router<T: Route>: Send + Sync + Debug {
+    fn create_route(
+        &self,
+        request: Request,
+    ) -> future::BoxFuture<'static, Result<T, ResponseStream>>;
+}
+
+/// TODO doc
+pub trait Route {
+    fn execute(self) -> ResponseStream;
+}
 
 #[cfg(test)]
 mod tests {
