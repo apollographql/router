@@ -1,14 +1,8 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use futures::lock::Mutex;
-use std::collections::HashMap;
+use lru::LruCache;
 use std::sync::Arc;
-
-/// A cache key.
-///
-/// This type consists of a query string, an optional operation string and the
-/// [`QueryPlanOptions`].
-type CacheKey = (String, Option<String>, QueryPlanOptions);
 
 /// A query planner wrapper that caches results.
 ///
@@ -16,7 +10,7 @@ type CacheKey = (String, Option<String>, QueryPlanOptions);
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached: Mutex<HashMap<CacheKey, Result<Arc<QueryPlan>, QueryPlannerError>>>,
+    cached: Mutex<LruCache<QueryKey, Result<Arc<QueryPlan>, QueryPlannerError>>>,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
@@ -24,7 +18,7 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
     pub fn new(delegate: T) -> CachingQueryPlanner<T> {
         Self {
             delegate,
-            cached: Default::default(),
+            cached: Mutex::new(LruCache::new(100)), //XXX 100 must be configurable
         }
     }
 }
@@ -37,25 +31,28 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
-        if let Some(value) = self
-            .cached
-            .lock()
-            .await
-            .get(&(query.clone(), operation.clone(), options.clone()))
-            .cloned()
-        {
+        let mut locked_cache = self.cached.lock().await;
+        let key = (query.clone(), operation.clone(), options.clone());
+        if let Some(value) = locked_cache.get(&key).cloned() {
             return value;
         }
 
         let value = self
             .delegate
-            .get(query.clone(), operation.clone(), options.clone())
+            .get(key.0.clone(), key.1.clone(), key.2.clone())
             .await;
-        self.cached
-            .lock()
-            .await
-            .insert((query, operation, options), value.clone());
+        locked_cache.put(key, value.clone());
         value
+    }
+
+    async fn get_hot_keys(&self) -> Vec<QueryKey> {
+        let locked_cache = self.cached.lock().await;
+        let mut results = vec![];
+        //XXX 10 must be configurable
+        for (key, _value) in locked_cache.iter().take(10) {
+            results.push(key.clone());
+        }
+        results
     }
 }
 
@@ -88,6 +85,10 @@ mod tests {
             options: QueryPlanOptions,
         ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
             self.sync_get(query, operation, options)
+        }
+
+        async fn get_hot_keys(&self) -> Vec<QueryKey> {
+            vec![]
         }
     }
 

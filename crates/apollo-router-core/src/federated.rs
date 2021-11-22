@@ -64,7 +64,7 @@ fn validate_request_variables_against_plan(
 pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Arc<dyn QueryPlanner>,
+    pub query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 }

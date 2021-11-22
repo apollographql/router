@@ -180,7 +180,7 @@ where
                             let schema = Arc::new(new_schema);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .create(&derived_configuration, Arc::clone(&schema))
+                                    .recreate(graph, &derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 
@@ -235,7 +235,7 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .create(&derived_configuration, Arc::clone(&schema))
+                                    .recreate(graph, &derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 

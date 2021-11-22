@@ -40,6 +40,10 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         })
         .await?
     }
+
+    async fn get_hot_keys(&self) -> Vec<QueryKey> {
+        vec![]
+    }
 }
 
 impl From<QueryPlanOptions> for plan::QueryPlanOptions {

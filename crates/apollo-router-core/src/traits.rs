@@ -4,6 +4,12 @@ use futures::Future;
 use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
+/// A planner key.
+///
+/// This type consists of a query string, an optional operation string and the
+/// [`QueryPlanOptions`].
+pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
+
 /// Maintains a map of services to fetchers.
 pub trait ServiceRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
@@ -37,6 +43,8 @@ pub trait QueryPlanner: Send + Sync + Debug {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
+
+    async fn get_hot_keys(&self) -> Vec<QueryKey>;
 }
 
 /// With caching trait.
