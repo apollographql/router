@@ -1,5 +1,5 @@
 ---
-source: crates/apollo-router-core/src/query_planner/query_plan.rs
+source: crates/apollo-router-core/src/query_planner/model.rs
 expression: query_plan
 
 ---
