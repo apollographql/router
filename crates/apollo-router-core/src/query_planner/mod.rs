@@ -1,9 +1,9 @@
 mod caching_query_planner;
-mod query_plan;
+mod model;
 mod router_bridge_query_planner;
 
 pub use caching_query_planner::*;
-pub use query_plan::*;
+pub use model::*;
 pub use router_bridge_query_planner::*;
 
 /// Query planning options.
