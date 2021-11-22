@@ -4077,6 +4077,7 @@ dependencies = [
  "platforms",
  "regex",
  "reqwest",
+ "ring",
  "semver 1.0.4",
  "serde_json",
  "serde_json_traversal",

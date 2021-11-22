@@ -39,14 +39,24 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "LicenseRef-ELv2",
     "ISC",
+    "LicenseRef-ELv2",
+    "LicenseRef-ring",
     "MIT",
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"
 default = "deny"
 confidence-threshold = 0.8
+
+# ring has a rather complicated LICENSE file due to reasons spelled out
+# in said LICENSE file, but is basically OpenSSL for older parts, and ISC
+# for newer parts
+[[licenses.clarify]]
+name = "ring"
+expression = "LicenseRef-ring"
+version = "0.16.20"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 # TODO: remove this if / once there is an SPDX entry for ELv2
 [[licenses.clarify]]

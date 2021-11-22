@@ -4,8 +4,9 @@ accepted = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "LicenseRef-ELv2",
     "ISC",
+    "LicenseRef-ELv2",
+    "LicenseRef-ring",
     "MIT",
 ]
 
@@ -37,3 +38,10 @@ license = "LicenseRef-ELv2"
 path = 'LICENSE'
 license = 'LicenseRef-ELv2'
 checksum = 'f527cb71b36ad7d828d0d1198ee0ab60db4170521a405661c0893f31b9962a6c'
+
+[ring.clarify]
+license = "LicenseRef-ring"
+[[ring.clarify.files]]
+path = "LICENSE"
+license = "LicenseRef-ring"
+checksum = '76b39f9b371688eac9d8323f96ee80b3aef5ecbc2217f25377bd4e4a615296a9'
