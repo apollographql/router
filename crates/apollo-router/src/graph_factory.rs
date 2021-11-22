@@ -2,6 +2,7 @@ use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::{graphql::*, *};
 use async_trait::async_trait;
+use futures::future::join_all;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::sync::Arc;
@@ -65,11 +66,13 @@ impl GraphFactory<graphql::FederatedGraph> for FederatedGraphFactory {
         // our new graph
         let hot_keys = graph.query_planner.get_hot_keys().await;
         let new_graph = self.create(configuration, schema).await;
+        let mut futs = vec![];
         for key in hot_keys {
             // We can ignore errors, since we are just warming up the
             // cache
-            let _ = new_graph.query_planner.get(key.0, key.1, key.2);
+            futs.push(new_graph.query_planner.get(key.0, key.1, key.2));
         }
+        join_all(futs).await;
         new_graph
     }
 }
