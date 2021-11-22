@@ -1,6 +1,7 @@
 use crate::prelude::graphql::*;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::map::Entry;
 use std::pin::Pin;
 use typed_builder::TypedBuilder;
 
@@ -86,16 +87,18 @@ impl Response {
     }
 
     pub fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
-        let nodes =
+        let mut nodes =
             self.data
                 .get_at_path_mut(path)
                 .map_err(|err| FetchError::ExecutionPathNotFound {
                     reason: err.to_string(),
                 })?;
 
-        for node in nodes {
-            node.deep_merge(&value);
-        }
+        //FIXME: are there cases where we could write at multiple paths?
+        //for node in nodes {
+        let node = nodes.get_mut(0).unwrap();
+        node.deep_merge(value);
+        //}
 
         Ok(())
     }
@@ -122,10 +125,12 @@ fn select_object(
         match selection {
             Selection::Field(field) => {
                 if let Some(value) = select_field(content, field, schema)? {
-                    output
-                        .entry(field.name.to_owned())
-                        .and_modify(|existing| existing.deep_merge(&value))
-                        .or_insert(value);
+                    match output.entry(field.name.to_owned()) {
+                        Entry::Occupied(mut existing) => existing.get_mut().deep_merge(value),
+                        Entry::Vacant(vacant) => {
+                            vacant.insert(value);
+                        }
+                    }
                 }
             }
             Selection::InlineFragment(fragment) => {
