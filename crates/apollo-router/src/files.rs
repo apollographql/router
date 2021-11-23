@@ -51,7 +51,7 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
     #[cfg(not(target_os = "macos"))]
-    use test_env_log::test;
+    use test_log::test;
 
     #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]

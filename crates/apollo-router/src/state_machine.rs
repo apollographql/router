@@ -373,7 +373,7 @@ mod tests {
     use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
-    use test_env_log::test;
+    use test_log::test;
     use tokio::net::TcpListener;
 
     #[test(tokio::test)]
