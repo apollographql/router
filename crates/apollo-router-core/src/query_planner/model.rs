@@ -90,9 +90,9 @@ impl PlanNode {
         service_registry: Arc<dyn ServiceRegistry>,
     ) -> Vec<FetchError> {
         self.service_usage()
+            .filter(|service| !service_registry.has(service))
             .collect::<HashSet<_>>()
             .into_iter()
-            .filter(|service| !service_registry.has(service))
             .map(|service| FetchError::ValidationUnknownServiceError {
                 service: service.to_string(),
             })
