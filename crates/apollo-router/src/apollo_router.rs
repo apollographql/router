@@ -33,21 +33,17 @@ impl ApolloRouter {
 }
 
 impl Router<ApolloRoute> for ApolloRouter {
-    fn create_route(
-        &self,
-        request: Request,
-    ) -> future::BoxFuture<'static, Result<ApolloRoute, ResponseStream>> {
+    fn create_route<'a>(
+        &'a self,
+        request: &'a Request,
+    ) -> future::BoxFuture<'a, Result<ApolloRoute, ResponseStream>> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return future::ready(Err(response.into())).boxed();
         }
 
-        let query_planner = Arc::clone(&self.query_planner);
-        let service_registry = Arc::clone(&self.service_registry);
-        let schema = Arc::clone(&self.schema);
-        let request = Arc::new(request);
-
         async move {
-            let query_plan = query_planner
+            let query_plan = self
+                .query_planner
                 .get(
                     request.query.as_str().to_owned(),
                     request.operation_name.to_owned(),
@@ -57,7 +53,7 @@ impl Router<ApolloRoute> for ApolloRouter {
 
             if let Some(plan) = query_plan.node() {
                 tracing::debug!("query plan\n{:#?}", plan);
-                plan.validate_request(&request, Arc::clone(&service_registry))?;
+                plan.validate_request(request, Arc::clone(&self.service_registry))?;
             } else {
                 // TODO this should probably log something
                 return Err(stream::empty().boxed());
@@ -67,10 +63,9 @@ impl Router<ApolloRoute> for ApolloRouter {
             let query = Arc::new(Query::from(&request.query));
 
             Ok(ApolloRoute {
-                request,
                 query_plan,
-                service_registry: Arc::clone(&service_registry),
-                schema: Arc::clone(&schema),
+                service_registry: Arc::clone(&self.service_registry),
+                schema: Arc::clone(&self.schema),
                 query,
             })
         }
@@ -82,7 +77,6 @@ impl Router<ApolloRoute> for ApolloRouter {
 // The default route used with [`ApolloRouter`], suitable for most use cases.
 #[derive(Debug)]
 pub struct ApolloRoute {
-    request: Arc<Request>,
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
@@ -92,7 +86,7 @@ pub struct ApolloRoute {
 }
 
 impl Route for ApolloRoute {
-    fn execute(self) -> future::BoxFuture<'static, ResponseStream> {
+    fn execute(self, request: Arc<Request>) -> future::BoxFuture<'static, ResponseStream> {
         future::ready(
             stream::once(
                 async move {
@@ -103,7 +97,7 @@ impl Route for ApolloRoute {
                         .node()
                         .expect("we already ensured that the plan is some; qed")
                         .execute(
-                            Arc::clone(&self.request),
+                            request,
                             Arc::clone(&self.service_registry),
                             Arc::clone(&self.schema),
                         )
