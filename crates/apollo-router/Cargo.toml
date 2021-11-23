@@ -10,19 +10,20 @@ name = "router"
 path = "src/main.rs"
 
 [features]
-default = ["otlp-tonic"]
-otlp-tonic = [
+default = ["otlp-grpc"]
+otlp-grpc = [
     "opentelemetry-otlp/tonic",
     "opentelemetry-otlp/tonic-build",
     "opentelemetry-otlp/prost",
+    "opentelemetry-otlp/tls",
     "tonic",
+    "tonic/transport",
+    "tonic/tls",
 ]
-otlp-grpcio = ["opentelemetry-otlp/grpc-sys", "opentelemetry-otlp/openssl"]
 otlp-http = ["opentelemetry-otlp/http-proto"]
-tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
 
 [dependencies]
-anyhow = "1.0.47"
+anyhow = "1.0.48"
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.51"
 bytes = "1.1.0"

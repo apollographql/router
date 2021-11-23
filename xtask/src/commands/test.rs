@@ -12,13 +12,7 @@ const TEST_DEFAULT_ARGS: &[&str] = &[
     "--features",
 ];
 
-const FEATURE_SETS: &[&[&str]] = &[
-    &["otlp-tonic", "tls"],
-    &["otlp-tonic"],
-    &["otlp-http"],
-    &["otlp-grpcio"],
-    &[""],
-];
+const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[""]];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
@@ -90,11 +84,6 @@ impl Test {
         };
 
         for features in FEATURE_SETS {
-            if cfg!(windows) && features.contains(&"otlp-grpcio") {
-                // TODO: I couldn't make it build on Windows but it is supposed to build.
-                continue;
-            }
-
             eprintln!("Running tests with features: {}", features.join(","));
             cargo!(TEST_DEFAULT_ARGS, features.iter());
         }

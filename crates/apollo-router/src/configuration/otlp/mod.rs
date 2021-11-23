@@ -1,16 +1,12 @@
-#[cfg(feature = "otlp-grpcio")]
-mod grpcio;
+#[cfg(feature = "otlp-grpc")]
+mod grpc;
 #[cfg(feature = "otlp-http")]
 mod http;
-#[cfg(feature = "otlp-tonic")]
-mod tonic;
 
-#[cfg(feature = "otlp-grpcio")]
-pub use self::grpcio::*;
+#[cfg(feature = "otlp-grpc")]
+pub use self::grpc::*;
 #[cfg(feature = "otlp-http")]
 pub use self::http::*;
-#[cfg(feature = "otlp-tonic")]
-pub use self::tonic::*;
 use crate::configuration::ConfigurationError;
 use opentelemetry::sdk::resource::Resource;
 use opentelemetry::sdk::trace::{Sampler, Tracer};
@@ -33,11 +29,56 @@ pub struct Tracing {
     trace_config: Option<TraceConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum Exporter {
+    #[cfg(feature = "otlp-grpc")]
+    Grpc(Option<GrpcExporter>),
+    #[cfg(feature = "otlp-http")]
+    Http(Option<HttpExporter>),
+}
+
+impl Exporter {
+    pub fn exporter(&self) -> Result<opentelemetry_otlp::SpanExporterBuilder, ConfigurationError> {
+        match &self {
+            #[cfg(feature = "otlp-grpc")]
+            Exporter::Grpc(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
+            #[cfg(feature = "otlp-http")]
+            Exporter::Http(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
+        }
+    }
+
+    pub fn exporter_from_env() -> Result<opentelemetry_otlp::SpanExporterBuilder, ConfigurationError>
+    {
+        match std::env::var("ROUTER_TRACING").as_deref() {
+            #[cfg(feature = "otlp-http")]
+            Ok("http") => Ok(HttpExporter::exporter_from_env().into()),
+            #[cfg(feature = "otlp-grpc")]
+            Ok("tonic") => Ok(GrpcExporter::exporter_from_env().into()),
+            #[cfg(not(any(feature = "otlp-http", feature = "otlp-grpc")))]
+            Ok(val) => Err(ConfigurationError::InvalidEnvironmentVariable(format!(
+                "unrecognized value for ROUTER_TRACING: {} - this router is built without support for OpenTelemetry",
+                val
+            ))),
+            #[cfg(any(feature = "otlp-http", feature = "otlp-grpc"))]
+            Ok(val) => Err(ConfigurationError::InvalidEnvironmentVariable(format!(
+                "unrecognized value for ROUTER_TRACING: {}",
+                val
+            ))),
+            Err(e) => Err(ConfigurationError::MissingEnvironmentVariable(format!(
+                "could not read ROUTER_TRACING environment variable: {}",
+                e
+            ))),
+        }
+    }
+}
+
 impl Tracing {
     pub fn tracer(&self) -> Result<Tracer, ConfigurationError> {
         let mut pipeline = opentelemetry_otlp::new_pipeline().tracing();
 
         pipeline = pipeline.with_exporter(self.exporter.exporter()?);
+
         if let Some(config) = self.trace_config.as_ref() {
             pipeline = pipeline.with_trace_config(config.trace_config());
         }
@@ -48,16 +89,17 @@ impl Tracing {
     }
 
     pub fn tracer_from_env() -> Result<Tracer, ConfigurationError> {
-        let exporter = Exporter::exporter_from_env();
-        opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(exporter)
+        let mut pipeline = opentelemetry_otlp::new_pipeline().tracing();
+
+        pipeline = pipeline.with_exporter(Exporter::exporter_from_env()?);
+
+        pipeline
             .install_batch(opentelemetry::runtime::Tokio)
             .map_err(ConfigurationError::OtlpTracing)
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ExportConfig {
     #[serde(deserialize_with = "endpoint_url", default)]

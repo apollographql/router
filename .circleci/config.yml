@@ -144,16 +144,6 @@ commands:
 
   windows_prepare_rust_env:
     steps:
-      #            - run:
-      #                # TODO compiling grpcio on Windows is still not working
-      #                #      using boringssl gives an error message
-      #                #      using openssl hangs indefinitely
-      #                name: Install grpcio build dependencies
-      #                command: |
-      #                  choco install activeperl -y
-      #                  choco install cmake -y --installargs 'ADD_CMAKE_TO_PATH=System'
-      #                  choco install yasm -y
-      #                  choco install openssl -y
       - run:
           name: Install rustup
           environment:
@@ -192,10 +182,16 @@ commands:
           command: |
             set -e -o pipefail
             cargo deny --version || cargo install cargo-deny
+      - run:
+          name: Install cargo about if not present
+          command: |
+            set -e -o pipefail
+            cargo about --version || cargo install cargo-about
       - save_cache:
           key: rust-v2-extra-tools-<< parameters.os >>
           paths:
             - ~/.cargo/bin/cargo-deny
+            - ~/.cargo/bin/cargo-about
 
   xtask_lint:
     parameters:
@@ -237,10 +233,7 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --features otlp-tonic,tls -p apollo-router -p apollo-router-core
-      - rust/build:
-          with_cache: false
-          crate: --features otlp-tonic -p apollo-router -p apollo-router-core
+          crate: --features otlp-grpc -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false
           crate: --no-default-features --features otlp-http -p apollo-router -p apollo-router-core
@@ -249,7 +242,7 @@ commands:
       - build_common_permutations
       - rust/build:
           with_cache: false
-          crate: --no-default-features --features otlp-grpcio -p apollo-router -p apollo-router-core
+          crate: --no-default-features -p apollo-router -p apollo-router-core
   build_workspace:
     parameters:
       os:
