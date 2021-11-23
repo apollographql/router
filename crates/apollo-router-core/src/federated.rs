@@ -64,7 +64,7 @@ fn validate_request_variables_against_plan(
 pub struct FederatedGraph {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    pub query_planner: Arc<dyn QueryPlanner>,
+    query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
 }
@@ -82,6 +82,10 @@ impl FederatedGraph {
             service_registry,
             schema,
         }
+    }
+
+    pub fn get_query_planner(&self) -> Arc<dyn QueryPlanner> {
+        self.query_planner.clone()
     }
 }
 

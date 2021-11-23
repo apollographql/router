@@ -2,6 +2,7 @@ use crate::prelude::graphql::*;
 use displaydoc::Display;
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
+use std::sync::mpsc::RecvError;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -166,6 +167,9 @@ pub enum QueryPlannerError {
 
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
+
+    /// Query planning cache failed: {0}
+    CacheError(RecvError),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {

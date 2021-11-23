@@ -2,7 +2,6 @@ use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::{graphql::*, *};
 use async_trait::async_trait;
-use futures::future::join_all;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::sync::Arc;
@@ -58,15 +57,17 @@ impl GraphFactory<graphql::FederatedGraph> for FederatedGraphFactory {
     ) -> graphql::FederatedGraph {
         // Use the "hot" entries in the supplied graph to pre-populate
         // our new graph
-        let hot_keys = graph.query_planner.get_hot_keys().await;
+        let hot_keys = graph.get_query_planner().get_hot_keys().await;
         let new_graph = self.create(configuration, schema).await;
-        let mut futs = vec![];
+        // It would be nice to get these keys concurrently by spawning
+        // futures in our loop. However, these calls to get call the
+        // v8 based query planner and running too many of these
+        // concurrently is a bad idea. One for the future...
         for key in hot_keys {
             // We can ignore errors, since we are just warming up the
             // cache
-            futs.push(new_graph.query_planner.get(key.0, key.1, key.2));
+            let _ = new_graph.get_query_planner().get(key.0, key.1, key.2).await;
         }
-        join_all(futs).await;
         new_graph
     }
 }

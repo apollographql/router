@@ -125,6 +125,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "apollo-parser",
  "async-trait",
+ "bus",
  "criterion",
  "derivative",
  "displaydoc",
@@ -309,7 +310,7 @@ dependencies = [
  "async-io",
  "async-lock",
  "async-process",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -363,6 +364,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "atomic-option"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0db678acb667b525ac40a324fc5f7d3390e29239b31c7327bb8157f5b4fff593"
 
 [[package]]
 name = "atomic-waker"
@@ -516,6 +523,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1e260c3a9040a7c19a12468758f4c16f31a81a1fe087482be9570ec864bb6c"
 
 [[package]]
+name = "bus"
+version = "2.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1e66e1779f5b1440f1a58220ba3b3ded4427175f0a9fb8d7066521f8b4e8f2b"
+dependencies = [
+ "atomic-option",
+ "crossbeam-channel 0.4.4",
+ "num_cpus",
+ "parking_lot_core 0.7.2",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -645,6 +664,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cloudabi"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -761,12 +789,22 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b153fe7cbef478c567df0f972e02e6d736db11affe43dfc9c56a9374d1adfb87"
+dependencies = [
+ "crossbeam-utils 0.7.2",
+ "maybe-uninit",
+]
+
+[[package]]
+name = "crossbeam-channel"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ed27e177f16d65f0f0c22a213e17c696ace5dd64b14258b52f9417ccb52db4"
 dependencies = [
  "cfg-if 1.0.0",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
 ]
 
 [[package]]
@@ -777,7 +815,7 @@ checksum = "6455c0ca19f0d2fbf751b908d5c55c1f5cbc65e03c4225427254b46890bdde1e"
 dependencies = [
  "cfg-if 1.0.0",
  "crossbeam-epoch",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
 ]
 
 [[package]]
@@ -787,10 +825,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ec02e091aa634e2c3ada4a392989e7c3116673ef0ac5b72232439094d73b7fd"
 dependencies = [
  "cfg-if 1.0.0",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "lazy_static",
  "memoffset",
  "scopeguard",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c7c73a2d1e9fc0886a08b93e98eb643461230d5f1925e4036204d5f2e261a8"
+dependencies = [
+ "autocfg",
+ "cfg-if 0.1.10",
+ "lazy_static",
 ]
 
 [[package]]
@@ -1066,7 +1115,7 @@ checksum = "975ccf83d8d9d0d84682850a38c8169027be83368805971cc4f238c2b245bc98"
 dependencies = [
  "cfg-if 1.0.0",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.2.10",
  "winapi 0.3.9",
 ]
 
@@ -1515,7 +1564,7 @@ dependencies = [
  "async-trait",
  "base64",
  "basic-cookies",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "difference",
  "form_urlencoded",
  "futures-util",
@@ -1598,7 +1647,7 @@ version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "713f1b139373f96a2e0ce3ac931cd01ee973c3c5dd7c40c0c2efe96ad2b6751d"
 dependencies = [
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "globset",
  "lazy_static",
  "log",
@@ -1717,7 +1766,7 @@ checksum = "d140e84730d325378912ede32d7cd53ef1542725503b3353e5ec8113c7c6f588"
 dependencies = [
  "async-channel",
  "castaway",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "curl",
  "curl-sys",
  "encoding_rs",
@@ -1921,6 +1970,12 @@ name = "matches"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
+
+[[package]]
+name = "maybe-uninit"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
 
 [[package]]
 name = "memchr"
@@ -2225,7 +2280,7 @@ version = "0.16.0"
 source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=414b3f459#414b3f459f3de52ecba5d03278b4ce25421e610a"
 dependencies = [
  "async-trait",
- "crossbeam-channel",
+ "crossbeam-channel 0.5.1",
  "futures",
  "js-sys",
  "lazy_static",
@@ -2332,7 +2387,21 @@ checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
 dependencies = [
  "instant",
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.8.5",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d58c7c768d4ba344e3e8d72518ac13e259d7c7ade24167003b8488e10b6740a3"
+dependencies = [
+ "cfg-if 0.1.10",
+ "cloudabi",
+ "libc",
+ "redox_syscall 0.1.57",
+ "smallvec",
+ "winapi 0.3.9",
 ]
 
 [[package]]
@@ -2344,7 +2413,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "instant",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.2.10",
  "smallvec",
  "winapi 0.3.9",
 ]
@@ -2710,12 +2779,18 @@ version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d78120e2c850279833f1dd3582f730c4ab53ed95aeaaaa862a2a5c71b1656d8e"
 dependencies = [
- "crossbeam-channel",
+ "crossbeam-channel 0.5.1",
  "crossbeam-deque",
- "crossbeam-utils",
+ "crossbeam-utils 0.8.5",
  "lazy_static",
  "num_cpus",
 ]
+
+[[package]]
+name = "redox_syscall"
+version = "0.1.57"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 
 [[package]]
 name = "redox_syscall"
@@ -2733,7 +2808,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "528532f3d801c87aec9def2add9ca802fe569e44a544afe633765267840abe64"
 dependencies = [
  "getrandom",
- "redox_syscall",
+ "redox_syscall 0.2.10",
 ]
 
 [[package]]
@@ -3312,7 +3387,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "libc",
  "rand",
- "redox_syscall",
+ "redox_syscall 0.2.10",
  "remove_dir_all",
  "winapi 0.3.9",
 ]
