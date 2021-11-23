@@ -146,7 +146,7 @@ impl PlanNode {
         }
     }
 
-    fn execute_inner<'a>(
+    fn execute_recursively<'a>(
         &'a self,
         response: Arc<Mutex<Response>>,
         current_dir: &'a Path,
@@ -160,7 +160,7 @@ impl PlanNode {
             match self {
                 PlanNode::Sequence { nodes } => {
                     for node in nodes {
-                        node.execute_inner(
+                        node.execute_recursively(
                             Arc::clone(&response),
                             current_dir,
                             Arc::clone(&request),
@@ -173,7 +173,7 @@ impl PlanNode {
                 }
                 PlanNode::Parallel { nodes } => {
                     future::join_all(nodes.iter().map(|plan| {
-                        plan.execute_inner(
+                        plan.execute_recursively(
                             Arc::clone(&response),
                             current_dir,
                             Arc::clone(&request),
@@ -214,7 +214,7 @@ impl PlanNode {
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // this is the only command that actually changes the "current dir"
                     let current_dir = current_dir.join(path);
-                    node.execute_inner(
+                    node.execute_recursively(
                         Arc::clone(&response),
                         // a path can go over multiple json node!
                         &current_dir,
@@ -239,7 +239,7 @@ impl PlanNode {
         let response = Arc::new(Mutex::new(Response::builder().build()));
         let root = Path::empty();
 
-        self.execute_inner(
+        self.execute_recursively(
             Arc::clone(&response),
             &root,
             Arc::clone(&request),
