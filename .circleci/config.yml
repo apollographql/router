@@ -192,10 +192,16 @@ commands:
           command: |
             set -e -o pipefail
             cargo deny --version || cargo install cargo-deny
+      - run:
+          name: Install cargo about if not present
+          command: |
+            set -e -o pipefail
+            cargo about --version || cargo install cargo-about
       - save_cache:
           key: rust-v2-extra-tools-<< parameters.os >>
           paths:
             - ~/.cargo/bin/cargo-deny
+            - ~/.cargo/bin/cargo-about
 
   xtask_lint:
     parameters:

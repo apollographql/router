@@ -80,13 +80,19 @@ cargo run -- -s ./examples/local.graphql
 Go to https://studio.apollographql.com/sandbox/explorer to make queries and
 http://localhost:16686/ to reach Jaeger.
 
-### Strict linting
+### Strict linting and license compliance
 
 While developing locally doc warnings and other lint checks are disabled.
 This limits the noise generated while exploration is taking place.
 
-When you are ready to create a PR, run a build with strict checking enabled.
-Use `scripts/ci-build.sh` to perform such a build.
+When you are ready to create a PR, run a build with strict checking enabled,
+and check for license compliance.
+
+Use `cargo xtask lint` and `cargo xtask check-compliance` to check this.
+
+Compliance checks require `cargo-deny` and `cargo-about` which can both be installed by running:
+- `cargo install cargo-deny`
+- `cargo install cargo-about`
 
 ## Project maintainers
 

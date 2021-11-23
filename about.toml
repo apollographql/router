@@ -1,0 +1,47 @@
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "LicenseRef-ELv2",
+    "LicenseRef-ring",
+    "MIT",
+]
+
+# apollographql licenses
+[xtask.clarify]
+license = "LicenseRef-ELv2"
+[[xtask.clarify.files]]
+path = 'LICENSE'
+license = 'LicenseRef-ELv2'
+checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
+
+[apollo-router.clarify]
+license = "LicenseRef-ELv2"
+[[apollo-router.clarify.files]]
+path = 'LICENSE'
+license = 'LicenseRef-ELv2'
+checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
+
+[apollo-router-core.clarify]
+license = "LicenseRef-ELv2"
+[[apollo-router-core.clarify.files]]
+path = 'LICENSE'
+license = 'LicenseRef-ELv2'
+checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
+
+[router-bridge.clarify]
+license = "LicenseRef-ELv2"
+[[router-bridge.clarify.files]]
+path = 'LICENSE'
+license = 'LicenseRef-ELv2'
+checksum = 'f527cb71b36ad7d828d0d1198ee0ab60db4170521a405661c0893f31b9962a6c'
+
+[ring.clarify]
+license = "LicenseRef-ring"
+[[ring.clarify.files]]
+path = "LICENSE"
+license = "LicenseRef-ring"
+checksum = '76b39f9b371688eac9d8323f96ee80b3aef5ecbc2217f25377bd4e4a615296a9'
