@@ -1,5 +1,6 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
+use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -187,6 +188,47 @@ pub enum SchemaError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     /// Parsing error(s).
-    #[error("parse errors {0:#?}")]
-    ParseErrors(Vec<apollo_parser::Error>),
+    #[error("parse errors {0}")]
+    Parse(ParseErrors),
+}
+
+#[derive(Debug)]
+pub struct ParseErrors {
+    raw_schema: String,
+    errors: Vec<apollo_parser::Error>,
+}
+
+impl SchemaError {
+    pub fn from_parse_errors(raw_schema: String, errors: Vec<apollo_parser::Error>) -> Self {
+        Self::Parse(ParseErrors { raw_schema, errors })
+    }
+}
+
+// If your application is using a bunch of other thiserror errors,
+// `ApolloParserError` can live within that enum and be responsible for just
+// `apollo-parser` errors. It should work really nicely together!
+#[derive(Error, Debug, Diagnostic)]
+#[error("{}", self.ty)]
+#[diagnostic(code("apollo-parser parsing error."))]
+struct ParserError {
+    ty: String,
+    #[source_code]
+    src: NamedSource,
+    #[label("{}", self.ty)]
+    span: SourceSpan,
+}
+
+impl std::fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for err in self.errors.iter() {
+            let report = Report::new(ParserError {
+                src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
+                span: (err.index(), err.data().len()).into(),
+                ty: err.message().into(),
+            });
+            writeln!(f, "{:?}", report)?;
+        }
+
+        Ok(())
+    }
 }
