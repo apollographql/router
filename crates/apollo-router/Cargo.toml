@@ -31,7 +31,7 @@ derivative = "2.2.0"
 derive_more = "0.99.16"
 directories = "4.0.1"
 displaydoc = "0.2"
-futures = { version = "0.3.17", features = ["thread-pool"] }
+futures = { version = "0.3.18", features = ["thread-pool"] }
 hotwatch = "0.4.6"
 hyper = { version = "0.14.15", features = ["server"] }
 once_cell = "1.8.0"
