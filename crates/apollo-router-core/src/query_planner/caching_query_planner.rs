@@ -52,17 +52,18 @@ impl<T: QueryPlanner + 'static> QueryPlanner for CachingQueryPlanner<T> {
             return value;
         }
 
-        // Holding a lock across this call is a bad idea, because the
-        // delegate get calls into v8 for processing of the plan.
-        // This would block all other get requests for a potentially
+        // Holding a lock across the delegated get is a bad idea because
+        // the delegate get() calls into v8 for processing of the plan.
+        // This would block all other get() requests for a potentially
         // long time.
-        // Alternatively, if we don't hold the lock, then there is a
-        // risk that we will do the work multiple times, which is also
+        // Alternatively, if we don't hold the lock, there is a risk
+        // that we will do the work multiple times. This is also
         // sub-optimal.
 
         // To work around this, we keep a list of keys we are currently
-        // processing. If we try to get a key that is being processed,
-        // we block and wait for it to complete and retry.
+        // processing in the delegate. If we try to get a key on this
+        // list, we block and wait for it to complete and then retry.
+        //
         // This is more complex than either of the two simple
         // alternatives but succeeds in providing a mechanism where each
         // client only waits for uncached QueryPlans they are going to
@@ -97,6 +98,7 @@ impl<T: QueryPlanner + 'static> QueryPlanner for CachingQueryPlanner<T> {
         } else {
             locked_wait_list.push(key.clone());
             drop(locked_wait_list);
+            // This is the potentially high duration operation
             let value = self
                 .delegate
                 .get(key.0.clone(), key.1.clone(), key.2.clone())
