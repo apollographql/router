@@ -60,16 +60,15 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
 /// The call to the function will either succeeds and return a [`Route`] or it will fail and return
 /// a [`ResponseStream`] that can be returned immediately to the user. This is because GraphQL does
 /// not use the HTTP error codes, therefore it always return a response even if it fails.
+#[async_trait::async_trait]
 pub trait Router<T: Route>: Send + Sync + Debug {
-    fn create_route<'a>(
-        &'a self,
-        request: &'a Request,
-    ) -> future::BoxFuture<'a, Result<T, ResponseStream>>;
+    async fn create_route(&self, request: &Request) -> Result<T, ResponseStream>;
 }
 
 /// An object that can be executed to return a [`ResponseStream`].
+#[async_trait::async_trait]
 pub trait Route: Send + Debug {
-    fn execute(self, request: Arc<Request>) -> future::BoxFuture<'static, ResponseStream>;
+    async fn execute(self, request: Arc<Request>) -> ResponseStream;
 }
 
 #[cfg(test)]

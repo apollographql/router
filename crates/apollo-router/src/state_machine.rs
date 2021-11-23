@@ -791,11 +791,12 @@ mod tests {
         #[derive(Debug)]
         MyRouter {}
 
+        #[async_trait::async_trait]
         impl graphql::Router<MockMyRoute> for MyRouter {
-            fn create_route(
+            async fn create_route(
                 &self,
-                request: graphql::Request,
-            ) -> future::BoxFuture<'static, Result<MockMyRoute, graphql::ResponseStream>>;
+                request: &graphql::Request,
+            ) -> Result<MockMyRoute, graphql::ResponseStream>;
         }
     }
 
@@ -803,8 +804,9 @@ mod tests {
         #[derive(Debug)]
         MyRoute {}
 
+        #[async_trait::async_trait]
         impl graphql::Route for MyRoute {
-            fn execute(self) -> future::BoxFuture<'static, graphql::ResponseStream>;
+            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
         }
     }
 

@@ -409,11 +409,12 @@ mod tests {
         #[derive(Debug)]
         MyRouter {}
 
+        #[async_trait::async_trait]
         impl graphql::Router<MockMyRoute> for MyRouter {
-            fn create_route(
+            async fn create_route(
                 &self,
-                request: graphql::Request,
-            ) -> future::BoxFuture<'static, Result<MockMyRoute, graphql::ResponseStream>>;
+                request: &graphql::Request,
+            ) -> Result<MockMyRoute, graphql::ResponseStream>;
         }
     }
 
@@ -421,8 +422,9 @@ mod tests {
         #[derive(Debug)]
         MyRoute {}
 
+        #[async_trait::async_trait]
         impl graphql::Route for MyRoute {
-            fn execute(self) -> future::BoxFuture<'static, graphql::ResponseStream>;
+            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
         }
     }
 
@@ -540,10 +542,10 @@ mod tests {
                     let mut route = MockMyRoute::new();
                     route.expect_execute()
                         .times(1)
-                        .return_once(move || {
-                            future::ready(example_response.into()).boxed()
+                        .return_once(move |_| {
+                            example_response.into()
                         });
-                    future::ready(Ok(route)).boxed()
+                    Ok(route)
                 })
         });
         let url = format!("http://{}/graphql", server.listen_address());
@@ -590,16 +592,14 @@ mod tests {
                     let mut route = MockMyRoute::new();
                     route.expect_execute()
                         .times(1)
-                        .return_once(|| {
-                            future::ready(
-                                graphql::FetchError::SubrequestHttpError {
-                                    service: "Mock service".to_string(),
-                                    reason: "Mock error".to_string(),
-                                }
-                                .to_response(true).into()
-                            ).boxed()
+                        .return_once(|_| {
+                            graphql::FetchError::SubrequestHttpError {
+                                service: "Mock service".to_string(),
+                                reason: "Mock error".to_string(),
+                            }
+                            .to_response(true).into()
                         });
-                    future::ready(Ok(route)).boxed()
+                    Ok(route)
                 })
         });
         let response = client
