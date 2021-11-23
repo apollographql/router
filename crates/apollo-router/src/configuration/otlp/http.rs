@@ -4,15 +4,15 @@ use opentelemetry_otlp::WithExportConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct Exporter {
+pub struct HttpExporter {
     #[serde(flatten)]
     export_config: ExportConfig,
     headers: Option<HashMap<String, String>>,
 }
 
-impl Exporter {
+impl HttpExporter {
     pub fn exporter(&self) -> Result<opentelemetry_otlp::HttpExporterBuilder, ConfigurationError> {
         let mut exporter = opentelemetry_otlp::new_exporter().http();
         exporter = self.export_config.apply(exporter);

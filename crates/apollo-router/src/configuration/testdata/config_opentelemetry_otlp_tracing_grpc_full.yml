@@ -1,11 +1,5 @@
----
-source: crates/apollo-router/src/configuration/mod.rs
-expression: config
-
----
 server:
-  listen: "1.2.3.4:5"
-  cors: ~
+  listen: 1.2.3.4:5
 subgraphs:
   example:
     routing_url: foo
@@ -13,14 +7,14 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        endpoint: "http://example.org/"
-        metadata:
-          - foo: bar
-          - foo: baz
-          - bar: baz
-        protocol: Grpc
-        timeout: 42
-        tls_config: ~
+        grpc:
+          endpoint: http://example.org
+          protocol: Grpc
+          timeout: 42
+          metadata:
+            - foo: bar
+            - foo: baz
+            - bar: baz
       trace_config:
         sampler:
           ParentBased:
@@ -45,4 +39,3 @@ opentelemetry:
                 String:
                   - value1
                   - value2
-

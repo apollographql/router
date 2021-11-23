@@ -306,7 +306,7 @@ fn try_initialize_subscriber(
             opentelemetry::global::set_error_handler(handle_error)?;
             return Ok(Some(Arc::new(subscriber.with(telemetry))));
         }
-        #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
+        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         Some(OpenTelemetry::Otlp(configuration::otlp::Otlp::Tracing(tracing))) => {
             let tracer = if let Some(tracing) = tracing.as_ref() {
                 tracing.tracer()?

@@ -6,3 +6,5 @@ subgraphs:
 opentelemetry:
   otlp:
     tracing:
+      exporter:
+        grpc:

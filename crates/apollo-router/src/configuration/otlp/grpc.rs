@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tonic::metadata::{KeyAndValueRef, MetadataKey, MetadataMap};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct Exporter {
+pub struct GrpcExporter {
     #[serde(flatten)]
     export_config: ExportConfig,
     tls_config: Option<TlsConfig>,
@@ -15,7 +15,7 @@ pub struct Exporter {
     metadata: Option<MetadataMap>,
 }
 
-impl Exporter {
+impl GrpcExporter {
     pub fn exporter(&self) -> Result<opentelemetry_otlp::TonicExporterBuilder, ConfigurationError> {
         let mut exporter = opentelemetry_otlp::new_exporter().tonic();
         exporter = self.export_config.apply(exporter);
