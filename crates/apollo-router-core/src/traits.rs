@@ -56,6 +56,10 @@ where
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
 
 /// An object that accepts a [`Request`] and allow creating [`Route`]'s.
+///
+/// The call to the function will either succeeds and return a [`Route`] or it will fail and return
+/// a [`ResponseStream`] that can be returned immediately to the user. This is because GraphQL does
+/// not use the HTTP error codes, therefore it always return a response even if it fails.
 pub trait Router<T: Route>: Send + Sync + Debug {
     fn create_route(
         &self,
