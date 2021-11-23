@@ -39,7 +39,7 @@ impl<T: QueryPlanner> CachingQueryPlanner<T> {
 }
 
 #[async_trait]
-impl<T: QueryPlanner + 'static> QueryPlanner for CachingQueryPlanner<T> {
+impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     async fn get(
         &self,
         query: String,
