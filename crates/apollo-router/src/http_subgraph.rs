@@ -149,7 +149,7 @@ mod tests {
     use httpmock::Method::POST;
     use httpmock::{MockServer, Regex};
     use serde_json::json;
-    use test_env_log::test;
+    use test_log::test;
 
     #[test(tokio::test)]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
