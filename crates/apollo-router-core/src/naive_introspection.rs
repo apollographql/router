@@ -54,10 +54,7 @@ impl NaiveIntrospection {
                 .zip(responses)
                 .filter_map(|(cache_key, response)| match response.into_result() {
                     Ok(value) => {
-                        let mut response = Response::builder().build();
-                        response
-                            .insert_data(&Path::empty(), value)
-                            .expect("it is always possible to insert data in root path; qed");
+                        let response = Response::builder().data(value).build();
                         Some((cache_key.into(), response))
                     }
                     Err(e) => {
