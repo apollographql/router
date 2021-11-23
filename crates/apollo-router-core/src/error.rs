@@ -202,9 +202,6 @@ impl SchemaError {
     }
 }
 
-// If your application is using a bunch of other thiserror errors,
-// `ApolloParserError` can live within that enum and be responsible for just
-// `apollo-parser` errors. It should work really nicely together!
 #[derive(Error, Debug, Diagnostic)]
 #[error("{}", self.ty)]
 #[diagnostic(code("apollo-parser parsing error."))]
