@@ -122,7 +122,7 @@ mod tests {
     use super::*;
     use futures::channel::oneshot;
     use std::str::FromStr;
-    use test_env_log::test;
+    use test_log::test;
 
     #[test(tokio::test)]
     async fn sanity() {
