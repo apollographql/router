@@ -88,9 +88,9 @@ This limits the noise generated while exploration is taking place.
 When you are ready to create a PR, run a build with strict checking enabled,
 and check for license compliance.
 
-Use `cargo xtask lint` and `cargo xtask check-compliance` to check this.
+Use `cargo xtask all` to run all of the checks the CI will run.
 
-Compliance checks require `cargo-deny` and `cargo-about` which can both be installed by running:
+The CI checks require `cargo-deny` and `cargo-about` which can both be installed by running:
 - `cargo install cargo-deny`
 - `cargo install cargo-about`
 

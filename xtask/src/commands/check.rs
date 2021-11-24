@@ -1,5 +1,6 @@
 use anyhow::{ensure, Result};
-use ring::digest::Digest;
+use sha2::{Digest, Sha256};
+use std::{fs::File, io};
 use structopt::StructOpt;
 use xtask::*;
 
@@ -14,7 +15,7 @@ impl Compliance {
 
         eprintln!("Checking generated licenses.html file...");
 
-        let licenses_html_before = Self::digest_for_license_file();
+        let licenses_html_before = Self::digest_for_license_file()?;
 
         cargo!([
             "about",
@@ -27,25 +28,19 @@ impl Compliance {
             "about.hbs",
         ]);
 
-        let licences_html_after = Self::digest_for_license_file();
+        let licences_html_after = Self::digest_for_license_file()?;
 
         ensure!(
-            licenses_html_before.as_ref() == licences_html_after.as_ref(),
+            licenses_html_before == licences_html_after,
             r#"🚨 licenses.html file is not up to date. 🚨\n\
             Please run `cargo about generate --workspace -o licenses.html about.hbs` to generate an up to date licenses list, and check the file in to the repository."#
         );
         Ok(())
     }
 
-    fn digest_for_license_file() -> Digest {
-        let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
-
-        ctx.update(
-            std::fs::read(LICENSES_HTML_PATH)
-                .expect("couldn't read file contents")
-                .as_slice(),
-        );
-
-        ctx.finish()
+    fn digest_for_license_file() -> Result<Vec<u8>> {
+        let mut digest = Sha256::default();
+        io::copy(&mut File::open(LICENSES_HTML_PATH)?, &mut digest)?;
+        Ok(digest.finalize().to_vec())
     }
 }
