@@ -22,7 +22,7 @@ struct Xtask {
 #[derive(Debug, StructOpt)]
 pub enum Command {
     /// Locally run all the checks the CI will perform.
-    All(All),
+    All(commands::All),
     /// Check the code for licence and security compliance.
     CheckCompliance(commands::Compliance),
 
@@ -39,20 +39,10 @@ pub enum Command {
     Package(commands::Package),
 }
 
-#[derive(Debug, StructOpt)]
-pub struct All {
-    #[structopt(flatten)]
-    compliance: commands::Compliance,
-    #[structopt(flatten)]
-    lint: commands::Lint,
-    #[structopt(flatten)]
-    test: commands::Test,
-}
-
 impl Xtask {
     pub fn run(&self) -> Result<()> {
         match &self.command {
-            Command::All(All {
+            Command::All(commands::All {
                 compliance,
                 lint,
                 test,
@@ -61,7 +51,7 @@ impl Xtask {
                 lint.run()?;
                 eprintln!("Checking licenses...");
                 compliance.run()?;
-                eprintln!("Running tests");
+                eprintln!("Running tests...");
                 test.run()
             }
             Command::CheckCompliance(command) => command.run(),
