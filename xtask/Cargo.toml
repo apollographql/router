@@ -4,6 +4,7 @@ version = "0.1.0-prealpha.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2018"
 license = "LicenseRef-ELv2"
+publish = false
 
 [dependencies]
 ansi_term = "0.12"
