@@ -10,16 +10,13 @@ license-file = "./LICENSE"
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
-# activates the response post-processing feature. It is deactivated by default
-# until we solve performance issues
-post-processing = []
 
 [dependencies]
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "93d8ae8c69239969c77a31c1628a9618089e3c5d" }
 async-trait = "0.1.51"
 derivative = "2.2.0"
 displaydoc = "0.2"
-futures = "0.3.17"
+futures = "0.3.18"
 include_dir = "0.6.2"
 miette = { version = "3.2.0", features = ["fancy"] }
 once_cell = "1.8.0"

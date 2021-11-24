@@ -78,6 +78,7 @@ name = "apollo-router"
 version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
+ "apollo-router",
  "apollo-router-core",
  "async-trait",
  "bytes",
@@ -109,6 +110,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "typed-builder",

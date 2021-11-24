@@ -1,5 +1,6 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
+use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
@@ -178,6 +179,12 @@ impl From<PlanningErrors> for QueryPlannerError {
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
         QueryPlannerError::JoinError(Arc::new(err))
+    }
+}
+
+impl From<QueryPlannerError> for ResponseStream {
+    fn from(err: QueryPlannerError) -> Self {
+        stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
     }
 }
 
