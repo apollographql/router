@@ -22,6 +22,7 @@ impl FederationDemoRunner {
     }
 
     pub fn start_background(&self) -> Result<BackgroundTask> {
+        // https://stackoverflow.com/questions/52499617/what-is-the-difference-between-npm-install-and-npm-ci#53325242
         npm!(&self.path => ["clean-install", "--no-progress"]);
 
         eprintln!("Running federation-demo in background...");

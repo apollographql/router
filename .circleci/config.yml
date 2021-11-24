@@ -233,16 +233,16 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --features otlp-grpc -p apollo-router -p apollo-router-core
+          crate: --locked --features otlp-grpc -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false
-          crate: --no-default-features --features otlp-http -p apollo-router -p apollo-router-core
+          crate: --locked --no-default-features --features otlp-http -p apollo-router -p apollo-router-core
   build_all_permutations:
     steps:
       - build_common_permutations
       - rust/build:
           with_cache: false
-          crate: --no-default-features -p apollo-router -p apollo-router-core
+          crate: --locked --no-default-features -p apollo-router -p apollo-router-core
   build_workspace:
     parameters:
       os:
