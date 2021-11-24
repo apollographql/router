@@ -233,9 +233,6 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --features otlp-grpc,tls -p apollo-router -p apollo-router-core
-      - rust/build:
-          with_cache: false
           crate: --features otlp-grpc -p apollo-router -p apollo-router-core
       - rust/build:
           with_cache: false

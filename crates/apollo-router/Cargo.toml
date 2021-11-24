@@ -15,10 +15,12 @@ otlp-grpc = [
     "opentelemetry-otlp/tonic",
     "opentelemetry-otlp/tonic-build",
     "opentelemetry-otlp/prost",
+    "opentelemetry-otlp/tls",
     "tonic",
+    "tonic/transport",
+    "tonic/tls",
 ]
 otlp-http = ["opentelemetry-otlp/http-proto"]
-tls = ["opentelemetry-otlp/tls", "tonic/transport", "tonic/tls"]
 # activates the response post-processing feature. It is deactivated by default
 # until we solve performance issues
 post-processing = []
