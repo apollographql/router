@@ -169,7 +169,7 @@ async fn query_rust(
 
     let router = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
 
-    let stream = match router.create_route(&request).await {
+    let stream = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,
         Err(stream) => stream,
     };

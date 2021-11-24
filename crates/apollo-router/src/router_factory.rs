@@ -10,10 +10,10 @@ use std::sync::Arc;
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
 //#[cfg_attr(test, automock)]
-pub(crate) trait RouterFactory<Router, Route>
+pub(crate) trait RouterFactory<Router, PreparedQuery>
 where
-    Router: graphql::Router<Route>,
-    Route: graphql::Route,
+    Router: graphql::Router<PreparedQuery>,
+    PreparedQuery: graphql::PreparedQuery,
 {
     fn create(
         &self,

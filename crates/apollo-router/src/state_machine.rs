@@ -14,15 +14,15 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(Debug)]
-enum PrivateState<Router, Route>
+enum PrivateState<Router, PreparedQuery>
 where
-    Router: graphql::Router<Route>,
-    Route: graphql::Route,
+    Router: graphql::Router<PreparedQuery>,
+    PreparedQuery: graphql::PreparedQuery,
 {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<(Router, Route)>,
+        phantom: PhantomData<(Router, PreparedQuery)>,
     },
     Running {
         configuration: Arc<Configuration>,
@@ -40,25 +40,25 @@ where
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, Router, Route, FA>
+pub(crate) struct StateMachine<S, Router, PreparedQuery, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<Route>,
-    Route: graphql::Route,
-    FA: RouterFactory<Router, Route>,
+    Router: graphql::Router<PreparedQuery>,
+    PreparedQuery: graphql::PreparedQuery,
+    FA: RouterFactory<Router, PreparedQuery>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<(Router, Route)>,
+    phantom: PhantomData<(Router, PreparedQuery)>,
 }
 
-impl<Router, Route> From<&PrivateState<Router, Route>> for State
+impl<Router, PreparedQuery> From<&PrivateState<Router, PreparedQuery>> for State
 where
-    Router: graphql::Router<Route>,
-    Route: graphql::Route,
+    Router: graphql::Router<PreparedQuery>,
+    PreparedQuery: graphql::PreparedQuery,
 {
-    fn from(private_state: &PrivateState<Router, Route>) -> Self {
+    fn from(private_state: &PrivateState<Router, PreparedQuery>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -75,12 +75,12 @@ where
     }
 }
 
-impl<S, Router, Route, FA> StateMachine<S, Router, Route, FA>
+impl<S, Router, PreparedQuery, FA> StateMachine<S, Router, PreparedQuery, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<Route> + 'static,
-    Route: graphql::Route + 'static,
-    FA: RouterFactory<Router, Route>,
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery + 'static,
+    FA: RouterFactory<Router, PreparedQuery>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -107,7 +107,7 @@ where
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, Router, Route, FA>>::notify_state_listener(
+        <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
             &mut state_listener,
             initial_state,
         )
@@ -280,7 +280,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, Router, Route, FA>>::notify_state_listener(
+                <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -316,8 +316,8 @@ where
 
     async fn maybe_transition_to_running(
         &self,
-        state: PrivateState<Router, Route>,
-    ) -> PrivateState<Router, Route> {
+        state: PrivateState<Router, PreparedQuery>,
+    ) -> PrivateState<Router, PreparedQuery> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -793,7 +793,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::Router<MockMyRoute> for MyRouter {
-            async fn create_route(
+            async fn prepare_query(
                 &self,
                 request: &graphql::Request,
             ) -> Result<MockMyRoute, graphql::ResponseStream>;
@@ -805,7 +805,7 @@ mod tests {
         MyRoute {}
 
         #[async_trait::async_trait]
-        impl graphql::Route for MyRoute {
+        impl graphql::PreparedQuery for MyRoute {
             async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
         }
     }

@@ -34,7 +34,7 @@ impl ApolloRouter {
 #[async_trait::async_trait]
 impl Router<ApolloRoute> for ApolloRouter {
     #[tracing::instrument]
-    async fn create_route(&self, request: &Request) -> Result<ApolloRoute, ResponseStream> {
+    async fn prepare_query(&self, request: &Request) -> Result<ApolloRoute, ResponseStream> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response.into());
         }
@@ -80,7 +80,7 @@ pub struct ApolloRoute {
 }
 
 #[async_trait::async_trait]
-impl Route for ApolloRoute {
+impl PreparedQuery for ApolloRoute {
     #[tracing::instrument]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         stream::once(
