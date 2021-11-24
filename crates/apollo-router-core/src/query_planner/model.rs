@@ -402,7 +402,7 @@ async fn fetch_node<'a>(
                         for (i, entity) in array.iter().enumerate() {
                             response.insert_data(
                                 &current_dir.join(Path::from(i.to_string())),
-                                entity.to_owned(),
+                                entity,
                             )?;
                         }
 
@@ -474,7 +474,7 @@ async fn fetch_node<'a>(
                 let span = tracing::trace_span!("response_insert");
                 let _guard = span.enter();
                 response.append_errors(&mut errors);
-                response.insert_data(current_dir, data)?;
+                response.insert_data(current_dir, &data)?;
 
                 Ok(())
             }

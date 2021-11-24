@@ -89,7 +89,7 @@ mod naive_introspection_tests {
         let query_to_test = "this is a test query";
         let mut expected_data = Response::builder().build();
         expected_data
-            .insert_data(&Path::empty(), serde_json::Value::Number(42.into()))
+            .insert_data(&Path::empty(), &serde_json::Value::Number(42.into()))
             .expect("it is always possible to insert data in root path; qed");
 
         let cache = [(query_to_test.into(), expected_data.clone())]
