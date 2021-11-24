@@ -22,7 +22,7 @@ impl FederationDemoRunner {
     }
 
     pub fn start_background(&self) -> Result<BackgroundTask> {
-        npm!(&self.path => ["install", "--no-progress"]);
+        npm!(&self.path => ["clean-install", "--no-progress"]);
 
         eprintln!("Running federation-demo in background...");
         let mut command = Command::new(which::which("npm")?);
