@@ -10,6 +10,11 @@ accepted = [
     "MIT",
 ]
 
+# Ignore non plublished crates, such as xtask for example
+private = { ignore = true }
+# Ignore dependencies used in tests only, test-log for example
+ignore-dev-dependencies = true
+
 # apollographql licenses
 [xtask.clarify]
 license = "LicenseRef-ELv2"
