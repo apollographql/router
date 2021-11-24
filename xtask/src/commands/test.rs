@@ -34,16 +34,6 @@ pub struct Test {
     no_pre_compile: bool,
 }
 
-impl Default for Test {
-    fn default() -> Self {
-        Self {
-            no_demo: Default::default(),
-            with_demo: true,
-            no_pre_compile: Default::default(),
-        }
-    }
-}
-
 impl Test {
     pub fn run(&self) -> Result<()> {
         ensure!(
