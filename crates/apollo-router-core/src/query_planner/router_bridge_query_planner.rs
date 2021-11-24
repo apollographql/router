@@ -22,6 +22,7 @@ impl RouterBridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for RouterBridgeQueryPlanner {
+    #[tracing::instrument(name = "plan")]
     async fn get(
         &self,
         query: String,
@@ -55,7 +56,7 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_env_log::test;
+    use test_log::test;
 
     #[test(tokio::test)]
     async fn test_plan() {

@@ -115,7 +115,7 @@ mod tests {
     use mockall::{mock, predicate::*};
     use router_bridge::plan::PlanningErrors;
     use std::sync::Arc;
-    use test_env_log::test;
+    use test_log::test;
 
     mock! {
         #[derive(Debug)]

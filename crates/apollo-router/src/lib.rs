@@ -1,15 +1,17 @@
 //! Starts a server that will handle http graphql requests.
 
+mod apollo_router;
 pub mod configuration;
 mod files;
-mod graph_factory;
 mod http_server_factory;
 pub mod http_service_registry;
 pub mod http_subgraph;
+mod router_factory;
 mod state_machine;
 mod warp_http_server_factory;
 
-use crate::graph_factory::FederatedGraphFactory;
+pub use self::apollo_router::*;
+use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -555,7 +557,7 @@ impl FederatedServer {
         let state_machine = StateMachine::new(
             server_factory,
             Some(state_listener),
-            FederatedGraphFactory::new(self.query_cache_limit),
+            ApolloRouterFactory::new(self.query_cache_limit),
         );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async {
@@ -605,7 +607,7 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
-    use test_env_log::test;
+    use test_log::test;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =

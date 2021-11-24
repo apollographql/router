@@ -1,6 +1,7 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::http_service_registry::HttpServiceRegistry;
 use apollo_router::http_subgraph::HttpSubgraphFetcher;
+use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
 use futures::prelude::*;
 use maplit::hashmap;
@@ -8,7 +9,7 @@ use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use test_env_log::test;
+use test_log::test;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -166,8 +167,14 @@ async fn query_rust(
         &config,
     )));
 
-    let federated = graphql::FederatedGraph::new(Arc::new(planner), registry.clone(), schema);
-    (federated.stream(request).await, registry)
+    let router = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
+
+    let stream = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(Arc::new(request)).await,
+        Err(stream) => stream,
+    };
+
+    (stream, registry)
 }
 
 #[derive(Debug)]

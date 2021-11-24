@@ -14,7 +14,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq)]
 pub struct Request {
     /// The graphql query.
-    pub query: Query,
+    pub query: String,
 
     /// The optional graphql operation.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -48,6 +48,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
+    #[tracing::instrument]
     pub fn format_response(&self, response: &mut Response) {
         fn apply_selection_set(
             selection_set: &ast::SelectionSet,
@@ -223,7 +224,7 @@ impl<T: Into<String>> From<T> for Query {
 mod tests {
     use super::*;
     use serde_json::json;
-    use test_env_log::test;
+    use test_log::test;
 
     #[test]
     fn test_request() {

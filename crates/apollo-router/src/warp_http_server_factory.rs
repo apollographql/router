@@ -34,14 +34,15 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<F>(
+    fn create<Router, PreparedQuery>(
         &self,
-        graph: Arc<F>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        F: graphql::Fetcher + 'static,
+        Router: graphql::Router<PreparedQuery> + 'static,
+        PreparedQuery: graphql::PreparedQuery + 'static,
     {
         Box::pin(async {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -55,8 +56,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
             let routes =
-                get_graphql_request_or_redirect(Arc::clone(&graph), Arc::clone(&configuration))
-                    .or(post_graphql_request(graph, configuration))
+                get_graphql_request_or_redirect(Arc::clone(&router), Arc::clone(&configuration))
+                    .or(post_graphql_request(router, configuration))
                     .with(cors);
 
             // generate a hyper service from warp routes
@@ -160,12 +161,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-fn get_graphql_request_or_redirect<F>(
-    graph: Arc<F>,
+fn get_graphql_request_or_redirect<Router, PreparedQuery>(
+    router: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -179,12 +181,12 @@ where
                   body: Bytes,
                   header_map: HeaderMap| {
                 let configuration = Arc::clone(&configuration);
-                let graph = Arc::clone(&graph);
+                let router = Arc::clone(&router);
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
-                        run_graphql_request(configuration, graph, request, header_map).await
+                        run_graphql_request(configuration, router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -224,12 +226,13 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
     }
 }
 
-fn post_graphql_request<F>(
-    graph: Arc<F>,
+fn post_graphql_request<Router, PreparedQuery>(
+    router: Arc<Router>,
     configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -237,23 +240,24 @@ where
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
             let configuration = Arc::clone(&configuration);
-            let graph = Arc::clone(&graph);
+            let router = Arc::clone(&router);
             async move {
-                let reply = run_graphql_request(configuration, graph, request, header_map).await;
+                let reply = run_graphql_request(configuration, router, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
             .boxed()
         })
 }
 
-fn run_graphql_request<F>(
+fn run_graphql_request<Router, PreparedQuery>(
     configuration: Arc<Configuration>,
-    graph: Arc<F>,
+    router: Arc<Router>,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>>
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery + 'static,
 {
     let dispatcher = configuration
         .subscriber
@@ -267,7 +271,7 @@ where
     });
 
     async move {
-        let response_stream = stream_request(graph, request)
+        let response_stream = stream_request(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -276,14 +280,18 @@ where
     .with_subscriber(dispatcher)
 }
 
-async fn stream_request<F>(
-    graph: Arc<F>,
+async fn stream_request<Router, PreparedQuery>(
+    router: Arc<Router>,
     request: graphql::Request,
 ) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
 where
-    F: graphql::Fetcher + 'static,
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery,
 {
-    let stream = graph.stream(request).await;
+    let stream = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(Arc::new(request)).await,
+        Err(stream) => stream,
+    };
 
     stream
         .enumerate()
@@ -347,7 +355,7 @@ mod tests {
     use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
-    use test_env_log::test;
+    use test_log::test;
 
     macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -397,11 +405,34 @@ mod tests {
         }
     }
 
+    mock! {
+        #[derive(Debug)]
+        MyRouter {}
+
+        #[async_trait::async_trait]
+        impl graphql::Router<MockMyRoute> for MyRouter {
+            async fn prepare_query(
+                &self,
+                request: &graphql::Request,
+            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+        }
+    }
+
+    mock! {
+        #[derive(Debug)]
+        MyRoute {}
+
+        #[async_trait::async_trait]
+        impl graphql::PreparedQuery for MyRoute {
+            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+        }
+    }
+
     macro_rules! init {
-        ($listen_address:expr, $fetcher:ident => $expect_stream:block) => {{
+        ($listen_address:expr, $fetcher:ident => $expect_prepare_query:block) => {{
             #[allow(unused_mut)]
-            let mut $fetcher = MockMyFetcher::new();
-            $expect_stream;
+            let mut $fetcher = MockMyRouter::new();
+            $expect_prepare_query;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = Arc::new($fetcher);
             let server = server_factory
@@ -504,11 +535,17 @@ mod tests {
         let example_response = expected_response.clone();
         let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
-                .expect_stream()
+                .expect_prepare_query()
                 .times(2)
                 .returning(move |_| {
-                    let actual_response = example_response.clone();
-                    future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
+                    let example_response = example_response.clone();
+                    let mut route = MockMyRoute::new();
+                    route.expect_execute()
+                        .times(1)
+                        .return_once(move |_| {
+                            example_response.into()
+                        });
+                    Ok(route)
                 })
         });
         let url = format!("http://{}/graphql", server.listen_address());
@@ -549,15 +586,20 @@ mod tests {
     async fn response_failure() -> Result<(), FederatedServerError> {
         let (server, client) = init!("127.0.0.1:0", fetcher => {
             fetcher
-                .expect_stream()
+                .expect_prepare_query()
                 .times(1)
                 .return_once(|_| {
-                    let expected_response = graphql::FetchError::SubrequestHttpError {
-                        service: "Mock service".to_string(),
-                        reason: "Mock error".to_string(),
-                    }
-                    .to_response(true);
-                    future::ready(futures::stream::iter(vec![expected_response]).boxed()).boxed()
+                    let mut route = MockMyRoute::new();
+                    route.expect_execute()
+                        .times(1)
+                        .return_once(|_| {
+                            graphql::FetchError::SubrequestHttpError {
+                                service: "Mock service".to_string(),
+                                reason: "Mock error".to_string(),
+                            }
+                            .to_response(true).into()
+                        });
+                    Ok(route)
                 })
         });
         let response = client
@@ -571,7 +613,6 @@ mod tests {
             )
             .send()
             .await
-            .ok()
             .unwrap()
             .json::<graphql::Response>()
             .await

@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use futures::Future;
+use futures::prelude::*;
 use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
@@ -62,6 +62,22 @@ where
 }
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
+
+/// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
+///
+/// The call to the function will either succeeds and return a [`PreparedQuery`] or it will fail and return
+/// a [`ResponseStream`] that can be returned immediately to the user. This is because GraphQL does
+/// not use the HTTP error codes, therefore it always return a response even if it fails.
+#[async_trait::async_trait]
+pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
+    async fn prepare_query(&self, request: &Request) -> Result<T, ResponseStream>;
+}
+
+/// An object that can be executed to return a [`ResponseStream`].
+#[async_trait::async_trait]
+pub trait PreparedQuery: Send + Debug {
+    async fn execute(self, request: Arc<Request>) -> ResponseStream;
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,5 +1,6 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
+use futures::prelude::*;
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -196,6 +197,12 @@ impl From<RecvError> for QueryPlannerError {
 impl<T> From<SendError<T>> for QueryPlannerError {
     fn from(err: SendError<T>) -> Self {
         QueryPlannerError::CacheSendError(err.to_string())
+    }
+}
+
+impl From<QueryPlannerError> for ResponseStream {
+    fn from(err: QueryPlannerError) -> Self {
+        stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
     }
 }
 

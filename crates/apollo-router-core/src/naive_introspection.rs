@@ -27,12 +27,12 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 /// A cache containing our well known introspection queries.
 #[derive(Debug)]
 pub struct NaiveIntrospection {
-    cache: HashMap<Query, serde_json::Value>,
+    cache: HashMap<String, Response>,
 }
 
 impl NaiveIntrospection {
     #[cfg(test)]
-    pub fn from_cache(cache: HashMap<Query, serde_json::Value>) -> Self {
+    pub fn from_cache(cache: HashMap<String, Response>) -> Self {
         Self { cache }
     }
 
@@ -53,7 +53,10 @@ impl NaiveIntrospection {
                 .iter()
                 .zip(responses)
                 .filter_map(|(cache_key, response)| match response.into_result() {
-                    Ok(introspection_value) => Some((cache_key.into(), introspection_value)),
+                    Ok(value) => {
+                        let response = Response::builder().data(value).build();
+                        Some((cache_key.into(), response))
+                    }
                     Err(e) => {
                         let errors = e
                             .iter()
@@ -71,10 +74,9 @@ impl NaiveIntrospection {
         Self { cache }
     }
 
-    pub fn get(&self, request: &Request) -> Option<&serde_json::Value> {
-        let span = tracing::info_span!("introspection_cache");
-        let _guard = span.enter();
-        self.cache.get(&request.query)
+    /// Get a cached response for a query.
+    pub fn get(&self, query: &str) -> Option<Response> {
+        self.cache.get(query).map(std::clone::Clone::clone)
     }
 }
 
@@ -85,7 +87,10 @@ mod naive_introspection_tests {
     #[test]
     fn test_plan() {
         let query_to_test = "this is a test query";
-        let expected_data = serde_json::Value::Number(42.into());
+        let mut expected_data = Response::builder().build();
+        expected_data
+            .insert_data(&Path::empty(), &serde_json::Value::Number(42.into()))
+            .expect("it is always possible to insert data in root path; qed");
 
         let cache = [(query_to_test.into(), expected_data.clone())]
             .iter()
@@ -93,9 +98,10 @@ mod naive_introspection_tests {
             .collect();
         let naive_introspection = NaiveIntrospection::from_cache(cache);
 
-        let request = Request::builder().query(query_to_test).build();
-
-        assert_eq!(&expected_data, naive_introspection.get(&request).unwrap());
+        assert_eq!(
+            expected_data,
+            naive_introspection.get(query_to_test).unwrap()
+        );
     }
 
     #[test]
