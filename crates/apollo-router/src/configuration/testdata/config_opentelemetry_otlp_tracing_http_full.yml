@@ -7,11 +7,12 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        endpoint: http://example.org
-        protocol: Grpc
-        timeout: 42
-        headers:
-          foo: bar
+        http:
+          endpoint: http://example.org
+          protocol: Grpc
+          timeout: 42
+          headers:
+            foo: bar
       trace_config:
         sampler:
           ParentBased:

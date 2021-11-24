@@ -136,16 +136,18 @@ opentelemetry:
   otlp:
     tracing:
       exporter:
-        # URL of the exporter
-        endpoint:
-        # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-        protocol: Grpc
-        # timmeout in seconds
-        timeout: 60
-        metadata:
-          - foo: bar
-          - foo: baz
-          - bar: baz
+        # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
+        http:
+          # URL of the exporter
+          endpoint:
+          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+          protocol: Grpc
+          # timmeout in seconds
+          timeout: 60
+          metadata:
+            - foo: bar
+            - foo: baz
+            - bar: baz
       trace_config:
         sampler:
           ParentBased:

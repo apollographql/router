@@ -1,15 +1,6 @@
 //! Logic for loading configuration in to an object model
 
-#[cfg(any(
-    all(
-        feature = "otlp-tonic",
-        any(feature = "otlp-grpcio", feature = "otlp-http")
-    ),
-    all(feature = "otlp-grpcio", feature = "otlp-http")
-))]
-compile_error!("you can select only one feature otlp-*!");
-
-#[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
 use apollo_router_core::prelude::*;
@@ -32,6 +23,10 @@ pub enum ConfigurationError {
     CannotReadSecretFromFile(std::io::Error),
     /// Could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
+    /// Missing environment variable: {0}
+    MissingEnvironmentVariable(String),
+    /// Invalid environment variable: {0}
+    InvalidEnvironmentVariable(String),
     /// Could not setup OTLP tracing: {0}
     OtlpTracing(opentelemetry::trace::TraceError),
     /// The configuration could not be loaded because it requires the feature {0:?}
@@ -204,7 +199,7 @@ impl Cors {
 #[allow(clippy::large_enum_variant)]
 pub enum OpenTelemetry {
     Jaeger(Option<Jaeger>),
-    #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     Otlp(otlp::Otlp),
 }
 
@@ -317,29 +312,30 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_jaeger_full.yml");
     }
 
-    #[cfg(any(feature = "otlp-tonic", feature = "otlp-grpcio", feature = "otlp-http"))]
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn ensure_configuration_api_does_not_change_common() {
         // NOTE: don't take a snapshot here because the optional fields appear with ~ and they vary
         // per implementation
+
+        #[cfg(feature = "otlp-http")]
         serde_yaml::from_str::<Configuration>(include_str!(
-            "testdata/config_opentelemetry_otlp_tracing_common.yml"
+            "testdata/config_opentelemetry_otlp_tracing_http_common.yml"
+        ))
+        .unwrap();
+
+        #[cfg(feature = "otlp-grpc")]
+        serde_yaml::from_str::<Configuration>(include_str!(
+            "testdata/config_opentelemetry_otlp_tracing_grpc_common.yml"
         ))
         .unwrap();
     }
 
-    #[cfg(feature = "otlp-tonic")]
+    #[cfg(feature = "otlp-grpc")]
     #[test]
-    fn ensure_configuration_api_does_not_change_tonic() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_tonic_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_tonic_full.yml");
-    }
-
-    #[cfg(feature = "otlp-grpcio")]
-    #[test]
-    fn ensure_configuration_api_does_not_change_grpcio() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpcio_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpcio_full.yml");
+    fn ensure_configuration_api_does_not_change_grpc() {
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_basic.yml");
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_full.yml");
     }
 
     #[cfg(feature = "otlp-http")]
@@ -349,10 +345,10 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_full.yml");
     }
 
-    #[cfg(all(feature = "tls", feature = "otlp-tonic"))]
+    #[cfg(all(feature = "tls", feature = "otlp-grpc"))]
     #[test]
     fn ensure_configuration_api_does_not_change_tls_config() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tls.yml");
+        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_tls.yml");
     }
 
     #[test]

@@ -10,7 +10,6 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 /// Options for the router
@@ -77,7 +76,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?)
-        .finish()
+        .json()
         .init();
 
     GLOBAL_ENV_FILTER.set(opt.env_filter.clone()).unwrap();
