@@ -1,4 +1,4 @@
-use crate::apollo_router::{ApolloRoute, ApolloRouter};
+use crate::apollo_router::{ApolloPreparedQuery, ApolloRouter};
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::{graphql::*, *};
@@ -25,7 +25,7 @@ where
 #[derive(Default)]
 pub(crate) struct ApolloRouterFactory;
 
-impl RouterFactory<ApolloRouter, ApolloRoute> for ApolloRouterFactory {
+impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
     fn create(
         &self,
         configuration: &Configuration,

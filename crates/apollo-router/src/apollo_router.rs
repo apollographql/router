@@ -32,9 +32,12 @@ impl ApolloRouter {
 }
 
 #[async_trait::async_trait]
-impl Router<ApolloRoute> for ApolloRouter {
+impl Router<ApolloPreparedQuery> for ApolloRouter {
     #[tracing::instrument]
-    async fn prepare_query(&self, request: &Request) -> Result<ApolloRoute, ResponseStream> {
+    async fn prepare_query(
+        &self,
+        request: &Request,
+    ) -> Result<ApolloPreparedQuery, ResponseStream> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response.into());
         }
@@ -59,7 +62,7 @@ impl Router<ApolloRoute> for ApolloRouter {
         // TODO query caching
         let query = Arc::new(Query::from(&request.query));
 
-        Ok(ApolloRoute {
+        Ok(ApolloPreparedQuery {
             query_plan,
             service_registry: Arc::clone(&self.service_registry),
             schema: Arc::clone(&self.schema),
@@ -70,7 +73,7 @@ impl Router<ApolloRoute> for ApolloRouter {
 
 // The default route used with [`ApolloRouter`], suitable for most use cases.
 #[derive(Debug)]
-pub struct ApolloRoute {
+pub struct ApolloPreparedQuery {
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
@@ -80,7 +83,7 @@ pub struct ApolloRoute {
 }
 
 #[async_trait::async_trait]
-impl PreparedQuery for ApolloRoute {
+impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         stream::once(
