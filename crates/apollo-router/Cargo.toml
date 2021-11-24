@@ -56,11 +56,11 @@ structopt = "0.3.25"
 task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.14.0", features = ["full"] }
-tonic = { version = "0.5.2", optional = true }
+tonic = { version = "0.6.1", optional = true }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
-tracing-opentelemetry = "0.15.0"
-tracing-subscriber = "0.2.25"
+tracing-opentelemetry = "0.16.0"
+tracing-subscriber = "0.3.2"
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
 warp = { version = "0.3.2", default-features = false, features = [
@@ -77,7 +77,7 @@ maplit = "1.0.2"
 mockall = "0.10.2"
 reqwest = { version = "0.11.6", features = ["json", "stream"] }
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
-tracing-subscriber = { version = "0.2.25", default-features = false, features = [
+tracing-subscriber = { version = "0.3.2", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }
