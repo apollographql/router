@@ -17,14 +17,15 @@ use tokio::net::TcpListener;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<F>(
+    fn create<Router, PreparedQuery>(
         &self,
-        graph: Arc<F>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        F: graphql::Fetcher + 'static;
+        Router: graphql::Router<PreparedQuery> + 'static,
+        PreparedQuery: graphql::PreparedQuery + 'static;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -69,14 +70,15 @@ impl HttpServerHandle {
         self.server_future.await.map(|_| ())
     }
 
-    pub(crate) async fn restart<Fetcher, ServerFactory>(
+    pub(crate) async fn restart<Router, PreparedQuery, ServerFactory>(
         self,
         factory: &ServerFactory,
-        graph: Arc<Fetcher>,
+        router: Arc<Router>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, FederatedServerError>
     where
-        Fetcher: graphql::Fetcher + 'static,
+        Router: graphql::Router<PreparedQuery> + 'static,
+        PreparedQuery: graphql::PreparedQuery + 'static,
         ServerFactory: HttpServerFactory,
     {
         // we tell the currently running server to stop
@@ -105,7 +107,7 @@ impl HttpServerHandle {
         };
 
         let handle = factory
-            .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
+            .create(Arc::clone(&router), Arc::clone(&configuration), listener)
             .await?;
         tracing::debug!("Restarted on {}", handle.listen_address());
 

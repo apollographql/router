@@ -1,5 +1,5 @@
 use apollo_router_core::{
-    FederatedGraph, Fetcher, Request, Response, ResponseStream, RouterBridgeQueryPlanner,
+    ApolloRouter, Fetcher, Request, Response, ResponseStream, RouterBridgeQueryPlanner,
     ServiceRegistry,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -109,7 +109,7 @@ generate_service!(Products =>
         r#"{"data":{"topProducts":[{"upc":"1","name":"Table","__typename":"Product"},{"upc":"2","name":"Couch","__typename":"Product"},{"upc":"3","name":"Chair","__typename":"Product"}]}}"#,
 );
 
-async fn basic_composition_benchmark(federated: &FederatedGraph) {
+async fn basic_composition_benchmark(federated: &ApolloRouter) {
     let query = r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#;
     let request = Request::builder()
         .query(query)
@@ -132,7 +132,7 @@ fn from_elem(c: &mut Criterion) {
         include_str!("fixtures/supergraph.graphql").parse().unwrap(),
     ));
     let registry = Arc::new(MockRegistry::new());
-    let federated = FederatedGraph::new(Box::new(planner), registry.clone());
+    let federated = ApolloRouter::new(Box::new(planner), registry.clone());
 
     c.bench_function("basic_composition_benchmark", |b| {
         //let runtime = tokio::runtime::Runtime::new().unwrap();
