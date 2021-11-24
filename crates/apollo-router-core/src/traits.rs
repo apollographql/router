@@ -56,8 +56,8 @@ where
 {
     /// Wrap this query planner in a caching decorator.
     /// The original query planner is consumed.
-    fn with_caching(self) -> CachingQueryPlanner<Self> {
-        CachingQueryPlanner::new(self)
+    fn with_caching(self, query_cache_limit: usize) -> CachingQueryPlanner<Self> {
+        CachingQueryPlanner::new(self, query_cache_limit)
     }
 }
 

@@ -180,7 +180,12 @@ where
                             let schema = Arc::new(new_schema);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .recreate(graph, &derived_configuration, Arc::clone(&schema))
+                                    .recreate(
+                                        graph,
+                                        &derived_configuration,
+                                        Arc::clone(&schema),
+                                        self.graph_factory.get_query_cache_limit(),
+                                    )
                                     .await,
                             );
 
@@ -235,7 +240,12 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
                             let graph = Arc::new(
                                 self.graph_factory
-                                    .recreate(graph, &derived_configuration, Arc::clone(&schema))
+                                    .recreate(
+                                        graph,
+                                        &derived_configuration,
+                                        Arc::clone(&schema),
+                                        self.graph_factory.get_query_cache_limit(),
+                                    )
                                     .await,
                             );
 
@@ -327,7 +337,11 @@ where
                     let schema = Arc::new(schema);
                     let graph = Arc::new(
                         self.graph_factory
-                            .create(&derived_configuration, Arc::clone(&schema))
+                            .create(
+                                &derived_configuration,
+                                Arc::clone(&schema),
+                                self.graph_factory.get_query_cache_limit(),
+                            )
                             .await,
                     );
 
@@ -459,7 +473,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_schema() {
-        let graph_factory = create_mock_graph_factory(2);
+        let graph_factory = recreate_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let schema = include_str!("testdata/supergraph.graphql");
 
@@ -498,7 +512,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let graph_factory = create_mock_graph_factory(2);
+        let graph_factory = recreate_mock_graph_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -611,24 +625,32 @@ mod tests {
         graph_factory
             .expect_create()
             .withf(
-                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                |configuration: &Configuration,
+                 _schema: &Arc<graphql::Schema>,
+                 _query_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://accounts/graphql"
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _, _| MockMyFetcher::new());
         // second call, configuration is empty, we should take the URL from the graph
         graph_factory
-            .expect_create()
+            .expect_recreate()
             .withf(
-                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                |_graph: &Arc<MockMyFetcher>,
+                 configuration: &Configuration,
+                 _schema: &Arc<graphql::Schema>,
+                 _query_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://localhost:4001/graphql"
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _, _, _| MockMyFetcher::new());
+        graph_factory
+            .expect_get_query_cache_limit()
+            .return_const(10usize);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -688,25 +710,33 @@ mod tests {
         graph_factory
             .expect_create()
             .withf(
-                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                |configuration: &Configuration,
+                 _schema: &Arc<graphql::Schema>,
+                 _query_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://accounts/graphql"
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _, _| MockMyFetcher::new());
         // second call, configuration is still empty, we should take the URL from the new supergraph
         graph_factory
-            .expect_create()
+            .expect_recreate()
             .withf(
-                |configuration: &Configuration, _schema: &Arc<graphql::Schema>| {
+                |_graph: &Arc<MockMyFetcher>,
+                 configuration: &Configuration,
+                 _schema: &Arc<graphql::Schema>,
+                 _query_cache_limit: &usize| {
                     println!("got configuration: {:#?}", configuration);
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://localhost:4001/graphql"
                 },
             )
             .times(1)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _, _, _| MockMyFetcher::new());
+        graph_factory
+            .expect_get_query_cache_limit()
+            .return_const(10usize);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -825,7 +855,26 @@ mod tests {
         graph_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _| MockMyFetcher::new());
+            .returning(|_, _, _| MockMyFetcher::new());
+        graph_factory
+            .expect_get_query_cache_limit()
+            .return_const(10usize);
+        graph_factory
+    }
+
+    fn recreate_mock_graph_factory(expect_times_called: usize) -> MockGraphFactory<MockMyFetcher> {
+        let mut graph_factory = MockGraphFactory::new();
+        graph_factory
+            .expect_create()
+            .times(1)
+            .returning(|_, _, _| MockMyFetcher::new());
+        graph_factory
+            .expect_recreate()
+            .times(expect_times_called - 1)
+            .returning(|_, _, _, _| MockMyFetcher::new());
+        graph_factory
+            .expect_get_query_cache_limit()
+            .return_const(10usize);
         graph_factory
     }
 }

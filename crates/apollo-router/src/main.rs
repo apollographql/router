@@ -31,6 +31,10 @@ struct Opt {
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
+
+    /// Query cache size (number of entries)
+    #[structopt(long, default_value = "100")]
+    query_cache_limit: usize,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -152,6 +156,7 @@ async fn main() -> Result<()> {
     let server = FederatedServer::builder()
         .configuration(configuration)
         .schema(schema)
+        .query_cache_limit(opt.query_cache_limit)
         .shutdown(ShutdownKind::CtrlC)
         .build();
     let mut server_handle = server.serve();

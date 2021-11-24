@@ -1,39 +1,30 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use bus::Bus;
 use futures::lock::Mutex;
 use lru::LruCache;
-use std::fmt;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::broadcast::{self, Sender};
 
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
+#[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
     cached: Mutex<LruCache<QueryKey, Result<Arc<QueryPlan>, QueryPlannerError>>>,
-    wait_list: Mutex<Vec<QueryKey>>,
-    bus: Mutex<Bus<QueryKey>>,
-}
-
-impl<T: QueryPlanner> fmt::Debug for CachingQueryPlanner<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CachingQueryPlanner")
-            .field("delegate", &self.delegate)
-            .field("cached", &self.cached)
-            .field("wait_list", &self.wait_list)
-            .finish()
-    }
+    wait_map: Mutex<HashMap<QueryKey, Sender<QueryKey>>>,
+    query_cache_limit: usize,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
     /// Creates a new query planner that cache the results of another [`QueryPlanner`].
-    pub fn new(delegate: T) -> CachingQueryPlanner<T> {
+    pub fn new(delegate: T, query_cache_limit: usize) -> CachingQueryPlanner<T> {
         Self {
             delegate,
-            cached: Mutex::new(LruCache::new(100)), //XXX 100 must be configurable
-            wait_list: Mutex::new(vec![]),
-            bus: Mutex::new(Bus::new(1000)),
+            cached: Mutex::new(LruCache::new(query_cache_limit)),
+            wait_map: Mutex::new(HashMap::new()),
+            query_cache_limit,
         }
     }
 }
@@ -71,56 +62,47 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
 
         drop(locked_cache);
 
-        let mut locked_wait_list = self.wait_list.lock().await;
+        let mut locked_wait_map = self.wait_map.lock().await;
 
-        if locked_wait_list.contains(&key) {
-            // Register interest on bus
-            let mut locked_bus = self.bus.lock().await;
-            let rx = Arc::new(StdMutex::new(locked_bus.add_rx()));
-            drop(locked_bus);
-            drop(locked_wait_list); // Drop wait list lock after registering
-            loop {
-                let my_rx = rx.clone();
-                // Have to spawn a blocking task or we will deadlock
-                let msg = tokio::task::spawn_blocking(move || {
-                    let mut locked_rx = my_rx.lock().unwrap();
-                    locked_rx.recv().map_err(QueryPlannerError::CacheError)
-                })
-                .await??;
-                if msg == key {
-                    let mut locked_cache = self.cached.lock().await;
-                    if let Some(value) = locked_cache.get(&key).cloned() {
-                        return value;
-                    }
-                    drop(locked_cache);
+        match locked_wait_map.get_mut(&key) {
+            Some(waiter) => {
+                // Register interest in key
+                let mut receiver = waiter.subscribe();
+                drop(locked_wait_map);
+                let msg = receiver.recv().await?;
+                assert_eq!(msg, key);
+                let mut locked_cache = self.cached.lock().await;
+                if let Some(value) = locked_cache.get(&key).cloned() {
+                    return value;
                 }
+                unreachable!();
             }
-        } else {
-            locked_wait_list.push(key.clone());
-            drop(locked_wait_list);
-            // This is the potentially high duration operation
-            let value = self
-                .delegate
-                .get(key.0.clone(), key.1.clone(), key.2.clone())
-                .await;
-            // Update our cache
-            let mut locked_cache = self.cached.lock().await;
-            locked_cache.put(key.clone(), value.clone());
-            // Update our wait list
-            let mut locked_wait_list = self.wait_list.lock().await;
-            locked_wait_list.retain(|x| x != &key);
-            // Let our waiters know
-            let mut locked_bus = self.bus.lock().await;
-            locked_bus.broadcast(key);
-            value
+            None => {
+                let (tx, _rx) = broadcast::channel(10);
+                locked_wait_map.insert(key.clone(), tx.clone());
+                drop(locked_wait_map);
+                // This is the potentially high duration operation
+                let value = self
+                    .delegate
+                    .get(key.0.clone(), key.1.clone(), key.2.clone())
+                    .await;
+                // Update our cache
+                let mut locked_cache = self.cached.lock().await;
+                locked_cache.put(key.clone(), value.clone());
+                // Update our wait list
+                let mut locked_wait_map = self.wait_map.lock().await;
+                locked_wait_map.remove(&key);
+                // Let our waiters know
+                tokio::task::spawn_blocking(move || tx.send(key)).await??;
+                value
+            }
         }
     }
 
     async fn get_hot_keys(&self) -> Vec<QueryKey> {
         let locked_cache = self.cached.lock().await;
         let mut results = vec![];
-        //XXX 10 must be configurable
-        for (key, _value) in locked_cache.iter().take(10) {
+        for (key, _value) in locked_cache.iter().take(self.query_cache_limit / 5) {
             results.push(key.clone());
         }
         results
@@ -173,7 +155,7 @@ mod tests {
                 PlanningErrors { errors: Vec::new() },
             ))));
 
-        let planner = delegate.with_caching();
+        let planner = delegate.with_caching(10);
 
         for _ in 0..5 {
             assert!(planner
