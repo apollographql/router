@@ -603,7 +603,7 @@ mod tests {
     use crate::http_subgraph::HttpSubgraphFetcher;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
-    use test_env_log::test;
+    use test_log::test;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =

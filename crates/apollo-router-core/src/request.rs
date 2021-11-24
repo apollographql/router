@@ -224,7 +224,7 @@ impl<T: Into<String>> From<T> for Query {
 mod tests {
     use super::*;
     use serde_json::json;
-    use test_env_log::test;
+    use test_log::test;
 
     #[test]
     fn test_request() {

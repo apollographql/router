@@ -16,7 +16,7 @@ apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = 
 async-trait = "0.1.51"
 derivative = "2.2.0"
 displaydoc = "0.2"
-futures = "0.3.17"
+futures = "0.3.18"
 include_dir = "0.6.2"
 once_cell = "1.8.0"
 router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "3aa8f3a533f19e31ab984c87a0674ec78c42ebb6" }
@@ -34,9 +34,7 @@ insta = "1.8.0"
 mockall = "0.10.2"
 once_cell = "1"
 static_assertions = "1"
-test-env-log = { version = "0.2.7", default-features = false, features = [
-    "trace",
-] }
+test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.2.25", default-features = false, features = [
     "env-filter",
