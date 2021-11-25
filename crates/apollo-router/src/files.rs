@@ -20,9 +20,9 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
         Hotwatch::new_with_custom_delay(delay.unwrap_or_else(|| Duration::from_secs(2)))
             .expect("Failed to initialise file watching.");
     watcher
-        .watch(path, move |event: hotwatch::Event| {
-            eprintln!("received event {:?}", event);
-            if let hotwatch::Event::Write(_path) = event {
+        .watch(path, move |event: hotwatch::Event| match event {
+            hotwatch::Event::Write(_) => {
+                eprintln!("received write event {:?}", event);
                 if let Err(_err) = watch_sender.try_send(()) {
                     tracing::error!(
                         "Failed to process file watch notification. {}",
@@ -30,6 +30,10 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
                     )
                 }
             }
+            hotwatch::Event::NoticeWrite(_) => {
+                eprintln!("received noticewrite event {:?}", event);
+            }
+            _ => {}
         })
         .expect("Failed to watch file.");
     stream::once(future::ready(()))
