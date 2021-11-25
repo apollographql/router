@@ -21,6 +21,7 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
             .expect("Failed to initialise file watching.");
     watcher
         .watch(path, move |event: hotwatch::Event| {
+            eprintln!("received event {:?}", event);
             if let hotwatch::Event::Write(_path) = event {
                 if let Err(_err) = watch_sender.try_send(()) {
                     tracing::error!(
@@ -50,21 +51,18 @@ pub(crate) mod tests {
     use std::env::temp_dir;
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    #[cfg(not(target_os = "macos"))]
     use test_log::test;
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
         let mut watch = watch(path, Some(Duration::from_millis(10)));
+        // watch creates a stream, and its first item is a future::ready(), marking the watcher has started.
         watch.next().await;
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
-        watch.next().await;
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
-        watch.next().await;
         assert!(futures::poll!(watch.next()).is_pending())
     }
 
