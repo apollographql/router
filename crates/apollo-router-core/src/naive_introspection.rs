@@ -8,9 +8,8 @@ use std::collections::HashMap;
 ///
 /// If you would like to add one, put it in the "well_known_introspection_queries" folder.
 static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
-    include_dir!("./well_known_introspection_queries")
+    include_dir!("$CARGO_MANIFEST_DIR/well_known_introspection_queries")
         .files()
-        .iter()
         .map(|file| {
             file.contents_utf8()
                 .unwrap_or_else(|| {
