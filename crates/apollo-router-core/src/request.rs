@@ -174,6 +174,7 @@ impl Query {
                 })
                 .collect()
         }
+        tracing::error!("TEST ERROR format_response");
 
         let parser = apollo_parser::Parser::new(self.as_str());
         let tree = parser.parse();

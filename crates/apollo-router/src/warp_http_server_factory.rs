@@ -288,6 +288,8 @@ where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
+    tracing::error!("TEST ERROR stream_request");
+
     let stream = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,
         Err(stream) => stream,

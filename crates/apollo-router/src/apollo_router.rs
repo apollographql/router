@@ -106,6 +106,8 @@ impl PreparedQuery for ApolloPreparedQuery {
                 tracing::debug_span!("format_response")
                     .in_scope(|| self.query.format_response(&mut response));
 
+                tracing::error!("TEST ERROR");
+
                 response
             }
             .with_current_subscriber(),

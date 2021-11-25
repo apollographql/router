@@ -25,8 +25,10 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::sdk::trace::{
+    self, BatchSpanProcessor, SamplingDecision, SamplingResult, ShouldSample,
+};
+use opentelemetry::trace::{TraceContextExt, TraceState, TracerProvider};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -252,6 +254,34 @@ impl ConfigurationKind {
     }
 }
 
+#[derive(Debug)]
+struct CustomSampler;
+
+impl ShouldSample for CustomSampler {
+    fn should_sample(
+        &self,
+        parent_context: Option<&opentelemetry::Context>,
+        trace_id: opentelemetry::trace::TraceId,
+        name: &str,
+        span_kind: &opentelemetry::trace::SpanKind,
+        attributes: &[opentelemetry::KeyValue],
+        links: &[opentelemetry::trace::Link],
+    ) -> trace::SamplingResult {
+        println!("should_sample:\nparent context: {:?}\ntrace id: {:?}\nname:{}\nspan_kind: {:?}\nattributes: {:#?}\nlinks: {:#?}\n",
+    parent_context, trace_id, name, span_kind, attributes, links);
+        SamplingResult {
+            decision: SamplingDecision::RecordAndSample,
+            // No extra attributes ever set by the SDK samplers.
+            attributes: Vec::new(),
+            // all sampler in SDK will not modify trace state.
+            trace_state: match parent_context {
+                Some(ctx) => ctx.span().span_context().trace_state().clone(),
+                None => TraceState::default(),
+            },
+        }
+    }
+}
+
 fn try_initialize_subscriber(
     config: &Configuration,
 ) -> Result<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>, Box<dyn std::error::Error>>
@@ -297,6 +327,7 @@ fn try_initialize_subscriber(
             .build();
 
             let provider = opentelemetry::sdk::trace::TracerProvider::builder()
+                .with_config(trace::config().with_sampler(CustomSampler))
                 .with_span_processor(batch)
                 .build();
 
