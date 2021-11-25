@@ -42,8 +42,8 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
             }
         })
         .expect("Failed to watch file.");
-    // Tell watchers once they should fetch the data once,
-    // then start sending fs events.
+    // Tell watchers once they should read the file once,
+    // then listen to fs events.
     stream::once(future::ready(()))
         .chain(watch_receiver)
         .chain(stream::once(async move {
@@ -69,8 +69,9 @@ pub(crate) mod tests {
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
         let mut watch = watch(path, Some(Duration::from_millis(10)));
-        // Signal telling us ot fetch the data.
+        // Signal telling us to read the file once, and then poll.
         assert!(futures::poll!(watch.next()).is_ready());
+
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
         assert!(futures::poll!(watch.next()).is_pending());
