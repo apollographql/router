@@ -18,6 +18,3 @@ crates/*/Cargo.lock
 .idea
 *.iml
 .vscode
-
-# tags
-**/rusty-tags.vi
