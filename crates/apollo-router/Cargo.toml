@@ -57,7 +57,7 @@ task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.14.0", features = ["full"] }
 # don't bump it to 0.6 until opentelemetry-otlp does
-tonic = { version = "0.5.2", optional = true }
+tonic = { version = "0.6.1", optional = true }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.16.0"
