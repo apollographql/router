@@ -1,6 +1,6 @@
 [workspace]
 default-members = ["crates/apollo-router", "crates/apollo-router-core"]
-members = ["crates/apollo-router", "crates/apollo-router-core", "xtask"]
+members = ["crates/apollo-router", "crates/apollo-router-core", "crates/apollo-router-benchmarks", "xtask"]
 
 [patch.crates-io]
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6b3aa02aa" }

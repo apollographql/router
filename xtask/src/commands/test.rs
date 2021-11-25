@@ -4,13 +4,7 @@ use anyhow::{ensure, Result};
 use structopt::StructOpt;
 use xtask::*;
 
-const TEST_DEFAULT_ARGS: &[&str] = &[
-    "test",
-    "--workspace",
-    "--locked",
-    "--no-default-features",
-    "--features",
-];
+const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked", "--no-default-features", "--features"];
 
 const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[""]];
 
