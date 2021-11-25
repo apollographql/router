@@ -29,6 +29,10 @@ impl ApolloRouter {
             schema,
         }
     }
+
+    pub fn get_query_planner(&self) -> Arc<dyn QueryPlanner> {
+        self.query_planner.clone()
+    }
 }
 
 #[async_trait::async_trait]
