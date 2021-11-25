@@ -11,7 +11,7 @@ license = "LicenseRef-ELv2"
 apollo-router = { path = "../apollo-router", features = ["post-processing"] }
 apollo-router-core = { path = "../apollo-router-core" }
 criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
-futures = "0.3.17"
+futures = "0.3.18"
 once_cell = "1"
 serde_json = { version = "1.0.70", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
