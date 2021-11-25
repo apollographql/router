@@ -6,25 +6,27 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast::{self, Sender};
 
+type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
+
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     delegate: T,
-    cached: Mutex<LruCache<QueryKey, Result<Arc<QueryPlan>, QueryPlannerError>>>,
-    wait_map: Mutex<HashMap<QueryKey, Sender<QueryKey>>>,
-    query_cache_limit: usize,
+    cached: Mutex<LruCache<QueryKey, PlanResult>>,
+    wait_map: Mutex<HashMap<QueryKey, Sender<(QueryKey, PlanResult)>>>,
+    plan_cache_limit: usize,
 }
 
 impl<T: QueryPlanner> CachingQueryPlanner<T> {
     /// Creates a new query planner that cache the results of another [`QueryPlanner`].
-    pub fn new(delegate: T, query_cache_limit: usize) -> CachingQueryPlanner<T> {
+    pub fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
         Self {
             delegate,
-            cached: Mutex::new(LruCache::new(query_cache_limit)),
+            cached: Mutex::new(LruCache::new(plan_cache_limit)),
             wait_map: Mutex::new(HashMap::new()),
-            query_cache_limit,
+            plan_cache_limit,
         }
     }
 }
@@ -36,9 +38,9 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         query: String,
         operation: Option<String>,
         options: QueryPlanOptions,
-    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
+    ) -> PlanResult {
         let mut locked_cache = self.cached.lock().await;
-        let key = (query.clone(), operation.clone(), options.clone());
+        let key = (query, operation, options);
         if let Some(value) = locked_cache.get(&key).cloned() {
             return value;
         }
@@ -70,12 +72,8 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
                 let mut receiver = waiter.subscribe();
                 drop(locked_wait_map);
                 let msg = receiver.recv().await?;
-                assert_eq!(msg, key);
-                let mut locked_cache = self.cached.lock().await;
-                if let Some(value) = locked_cache.get(&key).cloned() {
-                    return value;
-                }
-                unreachable!();
+                assert_eq!(msg.0, key);
+                msg.1
             }
             None => {
                 let (tx, _rx) = broadcast::channel(10);
@@ -93,7 +91,8 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
                 let mut locked_wait_map = self.wait_map.lock().await;
                 locked_wait_map.remove(&key);
                 // Let our waiters know
-                tokio::task::spawn_blocking(move || tx.send(key)).await??;
+                let broadcast_value = value.clone();
+                tokio::task::spawn_blocking(move || tx.send((key, broadcast_value))).await??;
                 value
             }
         }
@@ -101,11 +100,11 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
 
     async fn get_hot_keys(&self) -> Vec<QueryKey> {
         let locked_cache = self.cached.lock().await;
-        let mut results = vec![];
-        for (key, _value) in locked_cache.iter().take(self.query_cache_limit / 5) {
-            results.push(key.clone());
-        }
-        results
+        locked_cache
+            .iter()
+            .take(self.plan_cache_limit / 5)
+            .map(|(key, _value)| key.clone())
+            .collect()
     }
 }
 
@@ -125,7 +124,7 @@ mod tests {
                 query: String,
                 operation: Option<String>,
                 options: QueryPlanOptions,
-            ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
+            ) -> PlanResult;
         }
     }
 
@@ -136,7 +135,7 @@ mod tests {
             query: String,
             operation: Option<String>,
             options: QueryPlanOptions,
-        ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
+        ) -> PlanResult {
             self.sync_get(query, operation, options)
         }
 

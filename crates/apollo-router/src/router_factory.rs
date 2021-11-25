@@ -19,25 +19,25 @@ where
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
+        plan_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
     fn recreate(
         &self,
         graph: Arc<Router>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
+        plan_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
-    fn get_query_cache_limit(&self) -> usize;
+    fn get_plan_cache_limit(&self) -> usize;
 }
 
 #[derive(Default)]
 pub(crate) struct ApolloRouterFactory {
-    query_cache_limit: usize,
+    plan_cache_limit: usize,
 }
 impl ApolloRouterFactory {
-    pub fn new(query_cache_limit: usize) -> Self {
-        Self { query_cache_limit }
+    pub fn new(plan_cache_limit: usize) -> Self {
+        Self { plan_cache_limit }
     }
 }
 
@@ -46,14 +46,14 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
+        plan_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
         tokio::task::spawn_blocking(move || {
             ApolloRouter::new(
                 Arc::new(
                     graphql::RouterBridgeQueryPlanner::new(Arc::clone(&schema))
-                        .with_caching(query_cache_limit),
+                        .with_caching(plan_cache_limit),
                 ),
                 Arc::new(service_registry),
                 schema,
@@ -68,9 +68,9 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         graph: Arc<ApolloRouter>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
+        plan_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
-        let factory = self.create(configuration, schema, query_cache_limit);
+        let factory = self.create(configuration, schema, plan_cache_limit);
 
         tokio::task::spawn(async move {
             // Use the "hot" entries in the supplied graph to pre-populate
@@ -92,7 +92,7 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         .boxed()
     }
 
-    fn get_query_cache_limit(&self) -> usize {
-        self.query_cache_limit
+    fn get_plan_cache_limit(&self) -> usize {
+        self.plan_cache_limit
     }
 }

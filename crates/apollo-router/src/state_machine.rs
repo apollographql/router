@@ -196,7 +196,7 @@ where
                                         router,
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        self.router_factory.get_query_cache_limit(),
+                                        self.router_factory.get_plan_cache_limit(),
                                     )
                                     .await,
                             );
@@ -256,7 +256,7 @@ where
                                         router,
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        self.router_factory.get_query_cache_limit(),
+                                        self.router_factory.get_plan_cache_limit(),
                                     )
                                     .await,
                             );
@@ -357,7 +357,7 @@ where
                             .create(
                                 &derived_configuration,
                                 Arc::clone(&schema),
-                                self.router_factory.get_query_cache_limit(),
+                                self.router_factory.get_plan_cache_limit(),
                             )
                             .await,
                     );
@@ -643,7 +643,7 @@ mod tests {
             .withf(
                 |configuration: &Configuration,
                  _schema: &Arc<graphql::Schema>,
-                 _query_cache_limit: &usize| {
+                 _plan_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://accounts/graphql"
                 },
@@ -657,7 +657,7 @@ mod tests {
                 |_graph: &Arc<MockMyRouter>,
                  configuration: &Configuration,
                  _schema: &Arc<graphql::Schema>,
-                 _query_cache_limit: &usize| {
+                 _plan_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://localhost:4001/graphql"
                 },
@@ -665,7 +665,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
         router_factory
-            .expect_get_query_cache_limit()
+            .expect_get_plan_cache_limit()
             .return_const(10usize);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
@@ -728,7 +728,7 @@ mod tests {
             .withf(
                 |configuration: &Configuration,
                  _schema: &Arc<graphql::Schema>,
-                 _query_cache_limit: &usize| {
+                 _plan_cache_limit: &usize| {
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://accounts/graphql"
                 },
@@ -742,7 +742,7 @@ mod tests {
                 |_graph: &Arc<MockMyRouter>,
                  configuration: &Configuration,
                  _schema: &Arc<graphql::Schema>,
-                 _query_cache_limit: &usize| {
+                 _plan_cache_limit: &usize| {
                     println!("got configuration: {:#?}", configuration);
                     configuration.subgraphs.get("accounts").unwrap().routing_url
                         == "http://localhost:4001/graphql"
@@ -751,7 +751,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
         router_factory
-            .expect_get_query_cache_limit()
+            .expect_get_plan_cache_limit()
             .return_const(10usize);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
@@ -804,9 +804,9 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory<MockMyRouter, MockMyRoute> for MyRouterFactory {
-            fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>, query_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
-            fn recreate(&self, graph: Arc<MockMyRouter>, configuration: &Configuration, schema: Arc<graphql::Schema>, query_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
-            fn get_query_cache_limit(&self) -> usize;
+            fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>, plan_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
+            fn recreate(&self, graph: Arc<MockMyRouter>, configuration: &Configuration, schema: Arc<graphql::Schema>, plan_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
+            fn get_plan_cache_limit(&self) -> usize;
         }
     }
 
@@ -907,7 +907,7 @@ mod tests {
             .times(expect_times_called)
             .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         router_factory
-            .expect_get_query_cache_limit()
+            .expect_get_plan_cache_limit()
             .return_const(10usize);
         router_factory
     }
@@ -923,7 +923,7 @@ mod tests {
             .times(expect_times_called - 1)
             .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
         router_factory
-            .expect_get_query_cache_limit()
+            .expect_get_plan_cache_limit()
             .return_const(10usize);
         router_factory
     }
