@@ -94,11 +94,16 @@ impl Response {
                     reason: err.to_string(),
                 })?;
 
+        let len = nodes.len();
         //FIXME: are there cases where we could write at multiple paths?
-        //for node in nodes {
-        let node = nodes.get_mut(0).unwrap();
-        node.deep_merge(value);
-        //}
+        for (i, node) in nodes.iter_mut().enumerate() {
+            if i == len {
+                (*node).deep_merge(value);
+                break;
+            } else {
+                (*node).deep_merge(value.clone());
+            }
+        }
 
         Ok(())
     }
