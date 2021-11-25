@@ -42,18 +42,7 @@ pub enum Command {
 impl Xtask {
     pub fn run(&self) -> Result<()> {
         match &self.command {
-            Command::All(commands::All {
-                compliance,
-                lint,
-                test,
-            }) => {
-                eprintln!("Checking format and clippy...");
-                lint.run()?;
-                eprintln!("Checking licenses...");
-                compliance.run()?;
-                eprintln!("Running tests...");
-                test.run()
-            }
+            Command::All(command) => command.run(),
             Command::CheckCompliance(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Lint(command) => command.run(),

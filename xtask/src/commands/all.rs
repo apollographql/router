@@ -1,3 +1,4 @@
+use anyhow::Result;
 use structopt::StructOpt;
 
 use super::{Compliance, Lint, Test};
@@ -5,9 +6,20 @@ use super::{Compliance, Lint, Test};
 #[derive(Debug, StructOpt)]
 pub struct All {
     #[structopt(flatten)]
-    pub compliance: Compliance,
+    compliance: Compliance,
     #[structopt(flatten)]
-    pub lint: Lint,
+    lint: Lint,
     #[structopt(flatten)]
-    pub test: Test,
+    test: Test,
+}
+
+impl All {
+    pub fn run(&self) -> Result<()> {
+        eprintln!("Checking format and clippy...");
+        self.lint.run()?;
+        eprintln!("Checking licenses...");
+        self.compliance.run()?;
+        eprintln!("Running tests...");
+        self.test.run()
+    }
 }
