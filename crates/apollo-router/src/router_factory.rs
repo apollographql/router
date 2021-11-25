@@ -23,7 +23,7 @@ where
     ) -> future::BoxFuture<'static, Router>;
     fn recreate(
         &self,
-        graph: Arc<Router>,
+        router: Arc<Router>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
         plan_cache_limit: usize,
@@ -65,7 +65,7 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
 
     fn recreate(
         &self,
-        graph: Arc<ApolloRouter>,
+        router: Arc<ApolloRouter>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
         plan_cache_limit: usize,
@@ -73,10 +73,10 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         let factory = self.create(configuration, schema, plan_cache_limit);
 
         Box::pin(async move {
-            // Use the "hot" entries in the supplied graph to pre-populate
-            // our new graph
-            let new_graph = factory.await;
-            let hot_keys = graph.get_query_planner().get_hot_keys().await;
+            // Use the "hot" entries in the supplied router to pre-populate
+            // our new router
+            let new_router = factory.await;
+            let hot_keys = router.get_query_planner().get_hot_keys().await;
             // It would be nice to get these keys concurrently by spawning
             // futures in our loop. However, these calls to get call the
             // v8 based query planner and running too many of these
@@ -84,9 +84,12 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
             for key in hot_keys {
                 // We can ignore errors, since we are just warming up the
                 // cache
-                let _ = new_graph.get_query_planner().get(key.0, key.1, key.2).await;
+                let _ = new_router
+                    .get_query_planner()
+                    .get(key.0, key.1, key.2)
+                    .await;
             }
-            new_graph
+            new_router
         })
     }
 

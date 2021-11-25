@@ -76,7 +76,9 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
                 drop(locked_wait_map);
                 // Our use case is very specific, so we are sure
                 // that we won't get any errors here.
-                let (recv_key, recv_plan) = receiver.recv().await.expect("recv() cannot fail here");
+                let (recv_key, recv_plan) = receiver.recv().await.expect(
+                    "the sender won't ever be dropped before all the receivers finish; qed",
+                );
                 debug_assert_eq!(recv_key, key);
                 recv_plan
             }
@@ -102,7 +104,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
                 // we won't get any errors here.
                 tokio::task::spawn_blocking(move || {
                     tx.send((key, broadcast_value))
-                        .expect("send() cannot fail here")
+                        .expect("there is always at least one receiver alive, the _rx guard; qed")
                 })
                 .await?;
                 value

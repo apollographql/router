@@ -805,7 +805,7 @@ mod tests {
 
         impl RouterFactory<MockMyRouter, MockMyRoute> for MyRouterFactory {
             fn create(&self, configuration: &Configuration, schema: Arc<graphql::Schema>, plan_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
-            fn recreate(&self, graph: Arc<MockMyRouter>, configuration: &Configuration, schema: Arc<graphql::Schema>, plan_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
+            fn recreate(&self, router: Arc<MockMyRouter>, configuration: &Configuration, schema: Arc<graphql::Schema>, plan_cache_limit: usize) -> future::BoxFuture<'static, MockMyRouter>;
             fn get_plan_cache_limit(&self) -> usize;
         }
     }
