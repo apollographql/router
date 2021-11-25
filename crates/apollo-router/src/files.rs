@@ -83,6 +83,5 @@ pub(crate) mod tests {
         file.seek(SeekFrom::Start(0)).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
