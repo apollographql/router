@@ -14,7 +14,7 @@ use std::time::Duration;
 ///
 /// returns: impl Stream<Item=()>
 ///
-pub(crate) async fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item = ()> {
+pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item = ()> {
     let (mut watch_sender, watch_receiver) = mpsc::channel(1);
     let mut watcher =
         Hotwatch::new_with_custom_delay(delay.unwrap_or_else(|| Duration::from_secs(2)))
@@ -42,7 +42,10 @@ pub(crate) async fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream
             }
         })
         .expect("Failed to watch file.");
-    watch_receiver
+    // Tell watchers once they should fetch the data once,
+    // then start sending fs events.
+    stream::once(future::ready(()))
+        .chain(watch_receiver)
         .chain(stream::once(async move {
             // This exists to give the stream ownership of the hotwatcher.
             // Without it hotwatch will get dropped and the stream will terminate.
@@ -65,7 +68,9 @@ pub(crate) mod tests {
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
-        let mut watch = watch(path, Some(Duration::from_millis(10))).await;
+        let mut watch = watch(path, Some(Duration::from_millis(10)));
+        // Signal telling us ot fetch the data.
+        assert!(futures::poll!(watch.next()).is_ready());
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
         assert!(futures::poll!(watch.next()).is_pending());
