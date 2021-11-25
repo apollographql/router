@@ -169,7 +169,7 @@ pub enum QueryPlannerError {
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
-    /// Query planning cache receivefailed: {0}
+    /// Query planning cache receive failed: {0}
     CacheRecvError(Arc<RecvError>),
 
     /// Query planning cache send failed: {0}
