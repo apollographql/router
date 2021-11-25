@@ -14,30 +14,35 @@ use std::time::Duration;
 ///
 /// returns: impl Stream<Item=()>
 ///
-pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item = ()> {
+pub(crate) async fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item = ()> {
     let (mut watch_sender, watch_receiver) = mpsc::channel(1);
     let mut watcher =
         Hotwatch::new_with_custom_delay(delay.unwrap_or_else(|| Duration::from_secs(2)))
             .expect("Failed to initialise file watching.");
     watcher
-        .watch(path, move |event: hotwatch::Event| match event {
-            hotwatch::Event::Write(_) => {
-                eprintln!("received write event {:?}", event);
-                if let Err(_err) = watch_sender.try_send(()) {
-                    tracing::error!(
-                        "Failed to process file watch notification. {}",
-                        _err.to_string()
-                    )
+        .watch(path, move |event: hotwatch::Event| {
+            tracing::debug!("file watcher: received event: {:?}", &event);
+            match event {
+                // https://github.com/notify-rs/notify/blob/ded07f442a96f33c6b7fefe3195396a33a28ddc3/src/lib.rs#L413
+                //
+                // `Create` events have a higher priority than `Write` and `Chmod`. These events will not be
+                // emitted if they are detected before the `Create` event has been emitted.
+                //
+                // Hotwatch will sometimes send a Create event instead of a Write event,
+                // if the write occured immediately after the file creation.
+                hotwatch::Event::Write(_) | hotwatch::Event::Create(_) => {
+                    if let Err(_err) = watch_sender.try_send(()) {
+                        tracing::error!(
+                            "Failed to process file watch notification. {}",
+                            _err.to_string()
+                        )
+                    }
                 }
+                _ => {}
             }
-            hotwatch::Event::NoticeWrite(_) => {
-                eprintln!("received noticewrite event {:?}", event);
-            }
-            _ => {}
         })
         .expect("Failed to watch file.");
-    stream::once(future::ready(()))
-        .chain(watch_receiver)
+    watch_receiver
         .chain(stream::once(async move {
             // This exists to give the stream ownership of the hotwatcher.
             // Without it hotwatch will get dropped and the stream will terminate.
@@ -60,9 +65,7 @@ pub(crate) mod tests {
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
-        let mut watch = watch(path, Some(Duration::from_millis(10)));
-        // watch creates a stream, and its first item is a future::ready(), marking the watcher has started.
-        watch.next().await;
+        let mut watch = watch(path, Some(Duration::from_millis(10))).await;
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
         assert!(futures::poll!(watch.next()).is_pending());

@@ -111,7 +111,7 @@ pub enum SchemaKind {
 
 impl SchemaKind {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
-    fn into_stream(self) -> impl Stream<Item = Event> {
+    async fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             SchemaKind::Instance(instance) => stream::iter(vec![UpdateSchema(instance)]).boxed(),
             SchemaKind::Stream(stream) => stream.map(UpdateSchema).boxed(),
@@ -129,6 +129,7 @@ impl SchemaKind {
                         Ok(schema) => {
                             if watch {
                                 files::watch(path.to_owned(), delay)
+                                    .await
                                     .filter_map(move |_| {
                                         future::ready(ConfigurationKind::read_schema(&path).ok())
                                     })
@@ -184,7 +185,7 @@ pub enum ConfigurationKind {
 
 impl ConfigurationKind {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
-    fn into_stream(self) -> impl Stream<Item = Event> {
+    async fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             ConfigurationKind::Instance(instance) => {
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
@@ -203,7 +204,9 @@ impl ConfigurationKind {
                         Ok(configuration) => {
                             if watch {
                                 files::watch(path.to_owned(), delay)
+                                    .await
                                     .filter_map(move |_| {
+                                        eprintln!("received something!");
                                         future::ready(ConfigurationKind::read_config(&path).ok())
                                     })
                                     .map(UpdateConfiguration)
@@ -558,7 +561,7 @@ impl FederatedServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async {
             state_machine
-                .process_events(self.generate_event_stream(shutdown_receiver))
+                .process_events(self.generate_event_stream(shutdown_receiver).await)
                 .await
         })
         .map(|r| match r {
@@ -578,15 +581,15 @@ impl FederatedServer {
     /// Create the unified event stream.
     /// This merges all contributing streams and sets up shutdown handling.
     /// When a shutdown message is received no more events are emitted.
-    fn generate_event_stream(
+    async fn generate_event_stream(
         self,
         shutdown_receiver: oneshot::Receiver<()>,
     ) -> impl Stream<Item = Event> {
         // Chain is required so that the final shutdown message is sent.
         let messages = stream::select_all(vec![
             self.shutdown.into_stream().boxed(),
-            self.configuration.into_stream().boxed(),
-            self.schema.into_stream().boxed(),
+            self.configuration.into_stream().await.boxed(),
+            self.schema.into_stream().await.boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
         .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
@@ -640,7 +643,6 @@ mod tests {
             .await
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn config_by_file_watching() {
         let (path, mut file) = create_temp_file();
@@ -652,6 +654,7 @@ mod tests {
             delay: Some(Duration::from_millis(10)),
         }
         .into_stream()
+        .await
         .boxed();
 
         // First update is guaranteed
@@ -681,7 +684,8 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream();
+        .into_stream()
+        .await;
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -694,7 +698,8 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream();
+        .into_stream()
+        .await;
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -711,7 +716,8 @@ mod tests {
             watch: false,
             delay: None,
         }
-        .into_stream();
+        .into_stream()
+        .await;
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -719,7 +725,6 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn schema_by_file_watching() {
         let (path, mut file) = create_temp_file();
@@ -731,6 +736,7 @@ mod tests {
             delay: Some(Duration::from_millis(10)),
         }
         .into_stream()
+        .await
         .boxed();
 
         // First update is guaranteed
@@ -748,7 +754,8 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream();
+        .into_stream()
+        .await;
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
@@ -765,7 +772,8 @@ mod tests {
             watch: false,
             delay: None,
         }
-        .into_stream();
+        .into_stream()
+        .await;
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
