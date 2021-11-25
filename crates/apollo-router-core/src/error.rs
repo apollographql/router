@@ -5,7 +5,6 @@ pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::broadcast::error::{RecvError, SendError};
 use tokio::task::JoinError;
 
 /// Error types for execution.
@@ -168,12 +167,6 @@ pub enum QueryPlannerError {
 
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
-
-    /// Query planning cache receive failed: {0}
-    CacheRecvError(Arc<RecvError>),
-
-    /// Query planning cache send failed: {0}
-    CacheSendError(String),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {
@@ -185,18 +178,6 @@ impl From<PlanningErrors> for QueryPlannerError {
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
         QueryPlannerError::JoinError(Arc::new(err))
-    }
-}
-
-impl From<RecvError> for QueryPlannerError {
-    fn from(err: RecvError) -> Self {
-        QueryPlannerError::CacheRecvError(Arc::new(err))
-    }
-}
-
-impl<T> From<SendError<T>> for QueryPlannerError {
-    fn from(err: SendError<T>) -> Self {
-        QueryPlannerError::CacheSendError(err.to_string())
     }
 }
 

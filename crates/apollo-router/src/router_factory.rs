@@ -72,7 +72,7 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
     ) -> future::BoxFuture<'static, ApolloRouter> {
         let factory = self.create(configuration, schema, plan_cache_limit);
 
-        tokio::task::spawn(async move {
+        Box::pin(async move {
             // Use the "hot" entries in the supplied graph to pre-populate
             // our new graph
             let new_graph = factory.await;
@@ -88,8 +88,6 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
             }
             new_graph
         })
-        .map(|res| res.expect("recreate() is infallible; qed"))
-        .boxed()
     }
 
     fn get_plan_cache_limit(&self) -> usize {

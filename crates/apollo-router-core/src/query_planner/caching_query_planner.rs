@@ -62,24 +62,30 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         // client only waits for uncached QueryPlans they are going to
         // use AND avoids generating the plan multiple times.
 
-        drop(locked_cache);
-
         let mut locked_wait_map = self.wait_map.lock().await;
+
+        // We must only drop the locked cache after we have locked the
+        // wait map. Otherwise,we might get a race that causes us to
+        // miss a broadcast.
+        drop(locked_cache);
 
         match locked_wait_map.get_mut(&key) {
             Some(waiter) => {
                 // Register interest in key
                 let mut receiver = waiter.subscribe();
                 drop(locked_wait_map);
-                let msg = receiver.recv().await?;
-                assert_eq!(msg.0, key);
-                msg.1
+                // Our use case is very specific, so we are sure
+                // that we won't get any errors here.
+                let (recv_key, recv_plan) = receiver.recv().await.expect("recv() cannot fail here");
+                debug_assert_eq!(recv_key, key);
+                recv_plan
             }
             None => {
-                let (tx, _rx) = broadcast::channel(10);
+                let (tx, _rx) = broadcast::channel(1);
                 locked_wait_map.insert(key.clone(), tx.clone());
                 drop(locked_wait_map);
                 // This is the potentially high duration operation
+                // No locks are held here
                 let value = self
                     .delegate
                     .get(key.0.clone(), key.1.clone(), key.2.clone())
@@ -92,7 +98,13 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
                 locked_wait_map.remove(&key);
                 // Let our waiters know
                 let broadcast_value = value.clone();
-                tokio::task::spawn_blocking(move || tx.send((key, broadcast_value))).await??;
+                // Our use case is very specific, so we are sure that
+                // we won't get any errors here.
+                tokio::task::spawn_blocking(move || {
+                    tx.send((key, broadcast_value))
+                        .expect("send() cannot fail here")
+                })
+                .await?;
                 value
             }
         }
