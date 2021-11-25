@@ -204,7 +204,6 @@ impl ConfigurationKind {
                             if watch {
                                 files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        eprintln!("received something!");
                                         future::ready(ConfigurationKind::read_config(&path).ok())
                                     })
                                     .map(UpdateConfiguration)
