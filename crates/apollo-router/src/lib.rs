@@ -644,7 +644,6 @@ mod tests {
             .await
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn config_by_file_watching() {
         let (path, mut file) = create_temp_file();
@@ -723,7 +722,6 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn schema_by_file_watching() {
         let (path, mut file) = create_temp_file();
