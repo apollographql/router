@@ -35,6 +35,10 @@ struct Opt {
     /// Query Plan cache size (number of entries).
     #[structopt(long, default_value = "100")]
     plan_cache_limit: usize,
+
+    /// Query parser cache size (number of entries).
+    #[structopt(long, default_value = "100")]
+    query_cache_limit: usize,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -160,6 +164,7 @@ async fn main() -> Result<()> {
         .configuration(configuration)
         .schema(schema)
         .plan_cache_limit(opt.plan_cache_limit)
+        .query_cache_limit(opt.query_cache_limit)
         .shutdown(ShutdownKind::CtrlC)
         .build();
     let mut server_handle = server.serve();

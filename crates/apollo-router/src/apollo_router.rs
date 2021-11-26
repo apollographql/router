@@ -13,6 +13,7 @@ pub struct ApolloRouter {
     query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+    query_cache: QueryCache,
 }
 
 impl ApolloRouter {
@@ -21,12 +22,14 @@ impl ApolloRouter {
         query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
+        query_cache_limit: usize,
     ) -> Self {
         Self {
             naive_introspection: NaiveIntrospection::from_schema(&schema),
             query_planner,
             service_registry,
             schema,
+            query_cache: QueryCache::new(query_cache_limit),
         }
     }
 

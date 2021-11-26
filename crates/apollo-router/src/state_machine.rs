@@ -197,6 +197,7 @@ where
                                         &derived_configuration,
                                         Arc::clone(&schema),
                                         self.router_factory.get_plan_cache_limit(),
+                                        self.router_factory.get_query_cache_limit(),
                                     )
                                     .await,
                             );
@@ -257,6 +258,7 @@ where
                                         &derived_configuration,
                                         Arc::clone(&schema),
                                         self.router_factory.get_plan_cache_limit(),
+                                        self.router_factory.get_query_cache_limit(),
                                     )
                                     .await,
                             );
@@ -358,6 +360,7 @@ where
                                 &derived_configuration,
                                 Arc::clone(&schema),
                                 self.router_factory.get_plan_cache_limit(),
+                                self.router_factory.get_query_cache_limit(),
                             )
                             .await,
                     );
