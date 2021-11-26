@@ -25,35 +25,14 @@ impl Query {
     /// query.
     #[tracing::instrument]
     pub fn format_response(&self, response: &mut Response) {
-        let parser = apollo_parser::Parser::new(self.as_str());
-        let tree = parser.parse();
-
-        if !tree.errors().is_empty() {
-            let errors = tree
-                .errors()
-                .iter()
-                .map(|err| format!("{:?}", err))
-                .collect::<Vec<_>>();
-            failfast_debug!("Parsing error(s): {}", errors.join(", "));
-            return;
-        }
-
-        let document = tree.document();
-
-        for definition in document.definitions() {
-            // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-            if let ast::Definition::OperationDefinition(operation) = definition {
-                let selection_set = operation
-                    .selection_set()
-                    .expect("the node SelectionSet is not optional in the spec; qed");
-                if let Some(data) = response.data.as_object_mut() {
-                    let mut output = Object::default();
-                    self.apply_selection_set(&selection_set, data, &mut output);
-                    response.data = output.into();
-                    return;
-                } else {
-                    failfast_debug!("Invalid type for data in response.");
-                }
+        for operation in self.operations.iter() {
+            if let Some(data) = response.data.as_object_mut() {
+                let mut output = Object::default();
+                self.apply_selection_set(&operation.selection_set, data, &mut output);
+                response.data = output.into();
+                return;
+            } else {
+                failfast_debug!("Invalid type for data in response.");
             }
         }
 
@@ -86,35 +65,27 @@ impl Query {
 
     fn apply_selection_set(
         &self,
-        selection_set: &ast::SelectionSet,
+        selection_set: &[Selection],
         input: &mut Object,
         output: &mut Object,
     ) {
-        /*
-        for selection in selection_set.selections() {
+        for selection in selection_set {
             match selection {
-                // Spec: https://spec.graphql.org/draft/#Field
-                ast::Selection::Field(field) => {
-                    let name = field
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string();
-                    let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                    let name = alias.unwrap_or(name);
-
-                    if let Some(input_value) = input.remove(&name) {
-                        if let Some(selection_set) = field.selection_set() {
+                Selection::Field {
+                    name,
+                    selection_set,
+                } => {
+                    if let Some(input_value) = input.remove(name) {
+                        if let Some(selection_set) = selection_set {
                             match input_value {
                                 Value::Object(mut input_object) => {
                                     let mut output_object = Object::default();
-                                    apply_selection_set(
+                                    self.apply_selection_set(
                                         &selection_set,
                                         &mut input_object,
                                         &mut output_object,
-                                        fragments,
                                     );
-                                    output.insert(name, output_object.into());
+                                    output.insert(name.to_string(), output_object.into());
                                 }
                                 Value::Array(input_array) => {
                                     let output_array = input_array
@@ -123,11 +94,10 @@ impl Query {
                                         .map(|(i, mut element)| {
                                             if let Some(input_object) = element.as_object_mut() {
                                                 let mut output_object = Object::default();
-                                                apply_selection_set(
+                                                self.apply_selection_set(
                                                     &selection_set,
                                                     input_object,
                                                     &mut output_object,
-                                                    fragments,
                                                 );
                                                 output_object.into()
                                             } else {
@@ -140,7 +110,7 @@ impl Query {
                                             }
                                         })
                                         .collect::<Value>();
-                                    output.insert(name, output_array);
+                                    output.insert(name.to_string(), output_array);
                                 }
                                 _ => {
                                     output.insert(name.clone(), input_value);
@@ -151,40 +121,24 @@ impl Query {
                                 }
                             }
                         } else {
-                            output.insert(name, input_value);
+                            output.insert(name.to_string(), input_value);
                         }
                     } else {
                         failfast_debug!("Missing field: {}", name);
                     }
                 }
-                // Spec: https://spec.graphql.org/draft/#InlineFragment
-                ast::Selection::InlineFragment(inline_fragment) => {
-                    let selection_set = inline_fragment
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed");
-
-                    apply_selection_set(&selection_set, input, output, fragments);
+                Selection::InlineFragment { selection_set } => {
+                    self.apply_selection_set(&selection_set, input, output);
                 }
-                // Spec: https://spec.graphql.org/draft/#FragmentSpread
-                ast::Selection::FragmentSpread(fragment_spread) => {
-                    let name = fragment_spread
-                        .fragment_name()
-                        .expect("the node FragmentName is not optional in the spec; qed")
-                        .name()
-                        .unwrap()
-                        .text()
-                        .to_string();
-
-                    if let Some(selection_set) = fragments.get(&name) {
-                        apply_selection_set(selection_set, input, output, fragments);
+                Selection::FragmentSpread { name } => {
+                    if let Some(selection_set) = self.fragments.get(name) {
+                        self.apply_selection_set(selection_set, input, output);
                     } else {
                         failfast_debug!("Missing fragment named: {}", name);
                     }
                 }
             }
         }
-        */
-        todo!()
     }
 }
 
@@ -210,7 +164,6 @@ impl<T: Into<String>> From<T> for Query {
         let operations = document
             .definitions()
             .filter_map(|definition| {
-                // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
                 if let ast::Definition::OperationDefinition(operation) = definition {
                     Some(operation.into())
                 } else {
@@ -231,7 +184,7 @@ impl<T: Into<String>> From<T> for Query {
 enum Selection {
     Field {
         name: String,
-        selection_set: Vec<Selection>,
+        selection_set: Option<Vec<Selection>>,
     },
     InlineFragment {
         selection_set: Vec<Selection>,
@@ -255,11 +208,7 @@ impl From<ast::Selection> for Selection {
                 let name = alias.unwrap_or(name);
                 let selection_set = field
                     .selection_set()
-                    .into_iter()
-                    .flat_map(|x| x.selections())
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
+                    .map(|x| x.selections().into_iter().map(Into::into).collect());
 
                 Self::Field {
                     name,
@@ -301,6 +250,7 @@ struct Operation {
 
 impl From<ast::OperationDefinition> for Operation {
     fn from(operation: ast::OperationDefinition) -> Self {
+        // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
         let selection_set = operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
