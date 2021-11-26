@@ -283,9 +283,9 @@ mod tests {
         };
     }
 
-    #[test]
-    fn reformat_response_data_field() {
-        let query = Query::from(
+    #[test(tokio::test)]
+    async fn reformat_response_data_field() {
+        let query = Query::parse(
             r#"{
                 foo
                 stuff{bar}
@@ -295,7 +295,10 @@ mod tests {
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
             }"#,
-        );
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let mut response = Response::builder()
             .data(json! {{
                 "foo": "1",
@@ -333,9 +336,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reformat_response_data_inline_fragment() {
-        let query = Query::from(r#"{... on Stuff { stuff{bar}}}"#);
+    #[test(tokio::test)]
+    async fn reformat_response_data_inline_fragment() {
+        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#)
+            .await
+            .unwrap()
+            .unwrap();
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
@@ -350,10 +356,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reformat_response_data_fragment_spread() {
+    #[test(tokio::test)]
+    async fn reformat_response_data_fragment_spread() {
         let query =
-            Query::from(r#"{...foo ...bar} fragment foo on Foo {foo} fragment bar on Bar {bar}"#);
+            Query::parse(r#"{...foo ...bar} fragment foo on Foo {foo} fragment bar on Bar {bar}"#)
+                .await
+                .unwrap()
+                .unwrap();
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2"}})
             .build();
@@ -367,9 +376,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reformat_response_data_best_effort() {
-        let query = Query::from(r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#);
+    #[test(tokio::test)]
+    async fn reformat_response_data_best_effort() {
+        let query = Query::parse(r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#)
+            .await
+            .unwrap()
+            .unwrap();
         let mut response = Response::builder()
             .data(json! {{
                 "foo": "1",
