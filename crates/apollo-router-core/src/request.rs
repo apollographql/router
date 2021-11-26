@@ -48,7 +48,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace")]
     pub fn format_response(&self, response: &mut Response) {
         fn apply_selection_set(
             selection_set: &ast::SelectionSet,
