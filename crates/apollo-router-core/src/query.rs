@@ -9,6 +9,8 @@ pub struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: HashMap<String, Vec<Selection>>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    operations: Vec<Operation>,
 }
 
 impl Query {
@@ -23,107 +25,6 @@ impl Query {
     /// query.
     #[tracing::instrument]
     pub fn format_response(&self, response: &mut Response) {
-        fn apply_selection_set(
-            selection_set: &ast::SelectionSet,
-            input: &mut Object,
-            output: &mut Object,
-            fragments: &HashMap<String, ast::SelectionSet>,
-        ) {
-            for selection in selection_set.selections() {
-                match selection {
-                    // Spec: https://spec.graphql.org/draft/#Field
-                    ast::Selection::Field(field) => {
-                        let name = field
-                            .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string();
-                        let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                        let name = alias.unwrap_or(name);
-
-                        if let Some(input_value) = input.remove(&name) {
-                            if let Some(selection_set) = field.selection_set() {
-                                match input_value {
-                                    Value::Object(mut input_object) => {
-                                        let mut output_object = Object::default();
-                                        apply_selection_set(
-                                            &selection_set,
-                                            &mut input_object,
-                                            &mut output_object,
-                                            fragments,
-                                        );
-                                        output.insert(name, output_object.into());
-                                    }
-                                    Value::Array(input_array) => {
-                                        let output_array = input_array
-                                            .into_iter()
-                                            .enumerate()
-                                            .map(|(i, mut element)| {
-                                                if let Some(input_object) = element.as_object_mut()
-                                                {
-                                                    let mut output_object = Object::default();
-                                                    apply_selection_set(
-                                                        &selection_set,
-                                                        input_object,
-                                                        &mut output_object,
-                                                        fragments,
-                                                    );
-                                                    output_object.into()
-                                                } else {
-                                                    failfast_debug!(
-                                                        "Array element is not an object: {}[{}]",
-                                                        name,
-                                                        i,
-                                                    );
-                                                    element
-                                                }
-                                            })
-                                            .collect::<Value>();
-                                        output.insert(name, output_array);
-                                    }
-                                    _ => {
-                                        output.insert(name.clone(), input_value);
-                                        failfast_debug!(
-                                            "Field is not an object nor an array of object: {}",
-                                            name,
-                                        );
-                                    }
-                                }
-                            } else {
-                                output.insert(name, input_value);
-                            }
-                        } else {
-                            failfast_debug!("Missing field: {}", name);
-                        }
-                    }
-                    // Spec: https://spec.graphql.org/draft/#InlineFragment
-                    ast::Selection::InlineFragment(inline_fragment) => {
-                        let selection_set = inline_fragment
-                            .selection_set()
-                            .expect("the node SelectionSet is not optional in the spec; qed");
-
-                        apply_selection_set(&selection_set, input, output, fragments);
-                    }
-                    // Spec: https://spec.graphql.org/draft/#FragmentSpread
-                    ast::Selection::FragmentSpread(fragment_spread) => {
-                        let name = fragment_spread
-                            .fragment_name()
-                            .expect("the node FragmentName is not optional in the spec; qed")
-                            .name()
-                            .unwrap()
-                            .text()
-                            .to_string();
-
-                        if let Some(selection_set) = fragments.get(&name) {
-                            apply_selection_set(selection_set, input, output, fragments);
-                        } else {
-                            failfast_debug!("Missing fragment named: {}", name);
-                        }
-                    }
-                }
-            }
-        }
-
         let parser = apollo_parser::Parser::new(self.as_str());
         let tree = parser.parse();
 
@@ -138,7 +39,6 @@ impl Query {
         }
 
         let document = tree.document();
-        let fragments = todo!(); //fragments(&document);
 
         for definition in document.definitions() {
             // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
@@ -148,7 +48,7 @@ impl Query {
                     .expect("the node SelectionSet is not optional in the spec; qed");
                 if let Some(data) = response.data.as_object_mut() {
                     let mut output = Object::default();
-                    apply_selection_set(&selection_set, data, &mut output, &fragments);
+                    self.apply_selection_set(&selection_set, data, &mut output);
                     response.data = output.into();
                     return;
                 } else {
@@ -183,6 +83,109 @@ impl Query {
             })
             .collect()
     }
+
+    fn apply_selection_set(
+        &self,
+        selection_set: &ast::SelectionSet,
+        input: &mut Object,
+        output: &mut Object,
+    ) {
+        /*
+        for selection in selection_set.selections() {
+            match selection {
+                // Spec: https://spec.graphql.org/draft/#Field
+                ast::Selection::Field(field) => {
+                    let name = field
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string();
+                    let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
+                    let name = alias.unwrap_or(name);
+
+                    if let Some(input_value) = input.remove(&name) {
+                        if let Some(selection_set) = field.selection_set() {
+                            match input_value {
+                                Value::Object(mut input_object) => {
+                                    let mut output_object = Object::default();
+                                    apply_selection_set(
+                                        &selection_set,
+                                        &mut input_object,
+                                        &mut output_object,
+                                        fragments,
+                                    );
+                                    output.insert(name, output_object.into());
+                                }
+                                Value::Array(input_array) => {
+                                    let output_array = input_array
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(i, mut element)| {
+                                            if let Some(input_object) = element.as_object_mut() {
+                                                let mut output_object = Object::default();
+                                                apply_selection_set(
+                                                    &selection_set,
+                                                    input_object,
+                                                    &mut output_object,
+                                                    fragments,
+                                                );
+                                                output_object.into()
+                                            } else {
+                                                failfast_debug!(
+                                                    "Array element is not an object: {}[{}]",
+                                                    name,
+                                                    i,
+                                                );
+                                                element
+                                            }
+                                        })
+                                        .collect::<Value>();
+                                    output.insert(name, output_array);
+                                }
+                                _ => {
+                                    output.insert(name.clone(), input_value);
+                                    failfast_debug!(
+                                        "Field is not an object nor an array of object: {}",
+                                        name,
+                                    );
+                                }
+                            }
+                        } else {
+                            output.insert(name, input_value);
+                        }
+                    } else {
+                        failfast_debug!("Missing field: {}", name);
+                    }
+                }
+                // Spec: https://spec.graphql.org/draft/#InlineFragment
+                ast::Selection::InlineFragment(inline_fragment) => {
+                    let selection_set = inline_fragment
+                        .selection_set()
+                        .expect("the node SelectionSet is not optional in the spec; qed");
+
+                    apply_selection_set(&selection_set, input, output, fragments);
+                }
+                // Spec: https://spec.graphql.org/draft/#FragmentSpread
+                ast::Selection::FragmentSpread(fragment_spread) => {
+                    let name = fragment_spread
+                        .fragment_name()
+                        .expect("the node FragmentName is not optional in the spec; qed")
+                        .name()
+                        .unwrap()
+                        .text()
+                        .to_string();
+
+                    if let Some(selection_set) = fragments.get(&name) {
+                        apply_selection_set(selection_set, input, output, fragments);
+                    } else {
+                        failfast_debug!("Missing fragment named: {}", name);
+                    }
+                }
+            }
+        }
+        */
+        todo!()
+    }
 }
 
 impl<T: Into<String>> From<T> for Query {
@@ -204,7 +207,23 @@ impl<T: Into<String>> From<T> for Query {
         let document = tree.document();
         let fragments = Self::fragments(&document);
 
-        Query { string, fragments }
+        let operations = document
+            .definitions()
+            .filter_map(|definition| {
+                // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
+                if let ast::Definition::OperationDefinition(operation) = definition {
+                    Some(operation.into())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Query {
+            string,
+            fragments,
+            operations,
+        }
     }
 }
 
@@ -272,6 +291,24 @@ impl From<ast::Selection> for Selection {
                 Self::FragmentSpread { name }
             }
         }
+    }
+}
+
+#[derive(Debug)]
+struct Operation {
+    selection_set: Vec<Selection>,
+}
+
+impl From<ast::OperationDefinition> for Operation {
+    fn from(operation: ast::OperationDefinition) -> Self {
+        let selection_set = operation
+            .selection_set()
+            .expect("the node SelectionSet is not optional in the spec; qed")
+            .selections()
+            .map(Into::into)
+            .collect();
+
+        Operation { selection_set }
     }
 }
 
