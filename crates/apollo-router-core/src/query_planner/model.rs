@@ -196,11 +196,7 @@ impl PlanNode {
                     .instrument(tracing::info_span!("fetch"))
                     .await
                     {
-                        Ok(()) => {
-                            let received =
-                                serde_json::to_string_pretty(&response.lock().await.data).unwrap();
-                            tracing::trace!("New data:\n{}", received,);
-                        }
+                        Ok(()) => {}
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
                             response
