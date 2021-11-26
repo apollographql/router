@@ -40,7 +40,7 @@ impl ApolloRouter {
 
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
-    #[tracing::instrument]
+    #[tracing::instrument(level = "debug")]
     async fn prepare_query(
         &self,
         request: &Request,
@@ -86,7 +86,7 @@ pub struct ApolloPreparedQuery {
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
-    #[tracing::instrument]
+    #[tracing::instrument(level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         stream::once(
             async move {
