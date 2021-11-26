@@ -25,18 +25,20 @@ impl Query {
     /// query.
     #[tracing::instrument]
     pub fn format_response(&self, response: &mut Response) {
-        for operation in self.operations.iter() {
-            if let Some(data) = response.data.as_object_mut() {
-                let mut output = Object::default();
-                self.apply_selection_set(&operation.selection_set, data, &mut output);
+        let data = std::mem::take(&mut response.data);
+        match data {
+            Value::Object(init) => {
+                let output = self.operations.iter().fold(init, |mut input, operation| {
+                    let mut output = Object::default();
+                    self.apply_selection_set(&operation.selection_set, &mut input, &mut output);
+                    output
+                });
                 response.data = output.into();
-                return;
-            } else {
+            }
+            _ => {
                 failfast_debug!("Invalid type for data in response.");
             }
         }
-
-        failfast_debug!("No suitable definition found. This is a bug.");
     }
 
     pub fn parse(
