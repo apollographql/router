@@ -12,15 +12,17 @@ pub struct QueryCache {
     #[allow(clippy::type_complexity)]
     wait_map: Mutex<HashMap<String, broadcast::Sender<(String, Option<Arc<Query>>)>>>,
     cache_limit: usize,
+    schema: Arc<Schema>,
 }
 
 impl QueryCache {
     /// TODO
-    pub fn new(cache_limit: usize) -> Self {
+    pub fn new(cache_limit: usize, schema: Arc<Schema>) -> Self {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
             wait_map: Mutex::new(HashMap::new()),
             cache_limit,
+            schema,
         }
     }
 
@@ -69,7 +71,7 @@ impl QueryCache {
                 drop(locked_wait_map);
                 // This is the potentially high duration operation
                 // No locks are held here
-                let parsed_query = match Query::parse(query.as_ref()).await {
+                let parsed_query = match Query::parse(query.as_ref(), &self.schema).await {
                     Ok(res) => res.map(Arc::new),
                     // Silently ignore cancelled tasks (never happen for blocking tasks).
                     Err(err) if err.is_cancelled() => None,

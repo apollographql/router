@@ -28,8 +28,8 @@ impl ApolloRouter {
             naive_introspection: NaiveIntrospection::from_schema(&schema),
             query_planner,
             service_registry,
+            query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
-            query_cache: Arc::new(QueryCache::new(query_cache_limit)),
         }
     }
 
