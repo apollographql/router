@@ -121,7 +121,7 @@ impl Query {
                                 Value::Object(mut input_object) => {
                                     let mut output_object = Object::default();
                                     self.apply_selection_set(
-                                        &selection_set,
+                                        selection_set,
                                         &mut input_object,
                                         &mut output_object,
                                     );
@@ -135,7 +135,7 @@ impl Query {
                                             if let Some(input_object) = element.as_object_mut() {
                                                 let mut output_object = Object::default();
                                                 self.apply_selection_set(
-                                                    &selection_set,
+                                                    selection_set,
                                                     input_object,
                                                     &mut output_object,
                                                 );
@@ -168,7 +168,7 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment { selection_set } => {
-                    self.apply_selection_set(&selection_set, input, output);
+                    self.apply_selection_set(selection_set, input, output);
                 }
                 Selection::FragmentSpread { name } => {
                     if let Some(selection_set) = self.fragments.get(name) {

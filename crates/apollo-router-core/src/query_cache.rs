@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 #[derive(Debug)]
 pub struct QueryCache {
     cached: Mutex<LruCache<String, Option<Arc<Query>>>>,
+    #[allow(clippy::type_complexity)]
     wait_map: Mutex<HashMap<String, broadcast::Sender<(String, Option<Arc<Query>>)>>>,
     cache_limit: usize,
 }
