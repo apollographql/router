@@ -66,9 +66,6 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             return Err(stream::empty().boxed());
         }
 
-        // Pre-emptively parse the query to populate caching
-        let _ = self.query_cache.get_query(&request.query).await;
-
         Ok(ApolloPreparedQuery {
             query_plan,
             service_registry: Arc::clone(&self.service_registry),
@@ -93,7 +90,7 @@ impl PreparedQuery for ApolloPreparedQuery {
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         stream::once(
             async move {
-                let mut response = self
+                let response_task = self
                     .query_plan
                     .node()
                     .expect("we already ensured that the plan is some; qed")
@@ -101,10 +98,12 @@ impl PreparedQuery for ApolloPreparedQuery {
                         Arc::clone(&request),
                         Arc::clone(&self.service_registry),
                         Arc::clone(&self.schema),
-                    )
-                    .await;
+                    );
+                let query_task = self.query_cache.get_query(&request.query);
 
-                if let Some(query) = self.query_cache.get_query(&request.query).await {
+                let (mut response, query) = tokio::join!(response_task, query_task);
+
+                if let Some(query) = query {
                     tracing::debug_span!("format_response")
                         .in_scope(|| query.format_response(&mut response));
                 }
