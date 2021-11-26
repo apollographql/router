@@ -25,6 +25,7 @@ macro_rules! failfast_error {
 mod error;
 mod json_ext;
 mod naive_introspection;
+mod query;
 mod query_planner;
 mod request;
 mod response;
@@ -34,6 +35,7 @@ mod traits;
 pub use error::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
+pub use query::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;
