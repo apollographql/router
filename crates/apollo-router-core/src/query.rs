@@ -1,12 +1,17 @@
 use crate::prelude::graphql::*;
 use apollo_parser::ast;
+use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Derivative)]
+#[derivative(PartialEq, Hash, Eq)]
 #[serde(transparent)]
 pub struct Query {
     string: String,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    #[serde(skip)]
+    fragments: HashMap<String, Vec<Selection>>,
 }
 
 impl Query {
@@ -122,30 +127,6 @@ impl Query {
             }
         }
 
-        fn fragments(document: &ast::Document) -> HashMap<String, ast::SelectionSet> {
-            document
-                .definitions()
-                .filter_map(|definition| match definition {
-                    // Spec: https://spec.graphql.org/draft/#FragmentDefinition
-                    ast::Definition::FragmentDefinition(fragment_definition) => {
-                        let name = fragment_definition
-                            .fragment_name()
-                            .expect("the node FragmentName is not optional in the spec; qed")
-                            .name()
-                            .unwrap()
-                            .text()
-                            .to_string();
-                        let selection_set = fragment_definition
-                            .selection_set()
-                            .expect("the node SelectionSet is not optional in the spec; qed");
-
-                        Some((name, selection_set))
-                    }
-                    _ => None,
-                })
-                .collect()
-        }
-
         let parser = apollo_parser::Parser::new(self.as_str());
         let tree = parser.parse();
 
@@ -160,7 +141,7 @@ impl Query {
         }
 
         let document = tree.document();
-        let fragments = fragments(&document);
+        let fragments = todo!(); //fragments(&document);
 
         for definition in document.definitions() {
             // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
@@ -181,14 +162,70 @@ impl Query {
 
         failfast_debug!("No suitable definition found. This is a bug.");
     }
+
+    fn fragments(document: &ast::Document) -> HashMap<String, Vec<Selection>> {
+        /*
+        document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
+                ast::Definition::FragmentDefinition(fragment_definition) => {
+                    let name = fragment_definition
+                        .fragment_name()
+                        .expect("the node FragmentName is not optional in the spec; qed")
+                        .name()
+                        .unwrap()
+                        .text()
+                        .to_string();
+                    let selection_set = fragment_definition
+                        .selection_set()
+                        .expect("the node SelectionSet is not optional in the spec; qed");
+
+                    Some((name, selection_set))
+                }
+                _ => None,
+            })
+            .collect()
+        */
+        todo!()
+    }
 }
 
 impl<T: Into<String>> From<T> for Query {
     fn from(string: T) -> Self {
-        Query {
-            string: string.into(),
+        let string = string.into();
+        let parser = apollo_parser::Parser::new(string.as_str());
+        let tree = parser.parse();
+
+        if !tree.errors().is_empty() {
+            let errors = tree
+                .errors()
+                .iter()
+                .map(|err| format!("{:?}", err))
+                .collect::<Vec<_>>();
+            failfast_debug!("Parsing error(s): {}", errors.join(", "));
+            todo!();
         }
+
+        let document = tree.document();
+        let fragments = Self::fragments(&document);
+
+        Query { string, fragments }
     }
+}
+
+#[derive(Debug, Clone)]
+enum Selection {
+    Field {
+        name: String,
+        selection_set: Vec<Selection>,
+    },
+    InlineFragment {
+        selection_set: Vec<Selection>,
+    },
+    FragmentSpread {
+        name: String,
+    },
 }
 
 #[cfg(test)]
