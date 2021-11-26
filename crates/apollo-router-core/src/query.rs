@@ -1,16 +1,13 @@
 use crate::prelude::graphql::*;
 use apollo_parser::ast;
 use derivative::Derivative;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Derivative)]
+#[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
-#[serde(transparent)]
 pub struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    #[serde(skip)]
     fragments: HashMap<String, Vec<Selection>>,
 }
 
@@ -214,7 +211,7 @@ impl<T: Into<String>> From<T> for Query {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum Selection {
     Field {
         name: String,
