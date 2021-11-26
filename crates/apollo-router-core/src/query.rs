@@ -24,14 +24,18 @@ impl Query {
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument]
-    pub fn format_response(&self, response: &mut Response) {
+    pub fn format_response(&self, response: &mut Response, operation_name: Option<&str>) {
         let data = std::mem::take(&mut response.data);
         match data {
             Value::Object(init) => {
                 let output = self.operations.iter().fold(init, |mut input, operation| {
-                    let mut output = Object::default();
-                    self.apply_selection_set(&operation.selection_set, &mut input, &mut output);
-                    output
+                    if operation.name.as_deref() == operation_name {
+                        let mut output = Object::default();
+                        self.apply_selection_set(&operation.selection_set, &mut input, &mut output);
+                        output
+                    } else {
+                        input
+                    }
                 });
                 response.data = output.into();
             }
@@ -257,12 +261,14 @@ impl From<ast::Selection> for Selection {
 
 #[derive(Debug)]
 struct Operation {
+    name: Option<String>,
     selection_set: Vec<Selection>,
 }
 
 impl From<ast::OperationDefinition> for Operation {
+    // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
     fn from(operation: ast::OperationDefinition) -> Self {
-        // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
+        let name = operation.name().map(|x| x.text().to_string());
         let selection_set = operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
@@ -270,7 +276,10 @@ impl From<ast::OperationDefinition> for Operation {
             .map(Into::into)
             .collect();
 
-        Operation { selection_set }
+        Operation {
+            selection_set,
+            name,
+        }
     }
 }
 

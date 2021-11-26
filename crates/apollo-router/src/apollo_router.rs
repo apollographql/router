@@ -104,8 +104,9 @@ impl PreparedQuery for ApolloPreparedQuery {
                 let (mut response, query) = tokio::join!(response_task, query_task);
 
                 if let Some(query) = query {
-                    tracing::debug_span!("format_response")
-                        .in_scope(|| query.format_response(&mut response));
+                    tracing::debug_span!("format_response").in_scope(|| {
+                        query.format_response(&mut response, request.operation_name.as_deref())
+                    });
                 }
 
                 response
