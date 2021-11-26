@@ -29,7 +29,7 @@ impl Query {
         match data {
             Value::Object(init) => {
                 let output = self.operations.iter().fold(init, |mut input, operation| {
-                    if operation.name.as_deref() == operation_name {
+                    if operation_name.is_none() || operation.name.as_deref() == operation_name {
                         let mut output = Object::default();
                         self.apply_selection_set(&operation.selection_set, &mut input, &mut output);
                         output
@@ -332,7 +332,7 @@ mod tests {
                 "other": "13",
             }})
             .build();
-        query.format_response(&mut response);
+        query.format_response(&mut response, None);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -367,7 +367,7 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
-        query.format_response(&mut response);
+        query.format_response(&mut response, None);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -391,7 +391,7 @@ mod tests {
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2", "baz": "3"}})
             .build();
-        query.format_response(&mut response);
+        query.format_response(&mut response, None);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -424,7 +424,7 @@ mod tests {
                 "other": "6",
             }})
             .build();
-        query.format_response(&mut response);
+        query.format_response(&mut response, None);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -440,5 +440,30 @@ mod tests {
                 "other": "6",
             }},
         );
+    }
+
+    #[test(tokio::test)]
+    async fn reformat_matching_operation() {
+        let schema: Schema = "".parse().unwrap();
+        let query = Query::parse(
+            r#"query MyOperation {
+                foo
+            }"#,
+            &schema,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let mut response = Response::builder()
+            .data(json! {{
+                "foo": "1",
+                "other": "2",
+            }})
+            .build();
+        let untouched = response.clone();
+        query.format_response(&mut response, Some("OtherOperation"));
+        assert_eq_and_ordered!(response.data, untouched.data);
+        query.format_response(&mut response, Some("MyOperation"));
+        assert_eq_and_ordered!(response.data, json! {{ "foo": "1" }});
     }
 }
