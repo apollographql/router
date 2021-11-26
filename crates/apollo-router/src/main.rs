@@ -77,11 +77,10 @@ impl fmt::Display for ProjectDir {
 #[tokio::main]
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let term = console::Term::stdout();
 
     let builder = tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?);
-    if term.features().is_attended() {
+    if atty::is(atty::Stream::Stdout) {
         builder.init();
     } else {
         builder.json().init();
