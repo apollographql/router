@@ -39,20 +39,24 @@ impl Query {
         failfast_debug!("No suitable definition found. This is a bug.");
     }
 
-    pub fn parse(query: impl Into<String>) -> tokio::task::JoinHandle<Self> {
+    pub fn parse(
+        query: impl Into<String>,
+    ) -> tokio::task::JoinHandle<Result<Self, Vec<apollo_parser::Error>>> {
         let string = query.into();
         tokio::task::spawn_blocking(move || {
             let parser = apollo_parser::Parser::new(string.as_str());
             let tree = parser.parse();
 
             if !tree.errors().is_empty() {
-                let errors = tree
-                    .errors()
-                    .iter()
-                    .map(|err| format!("{:?}", err))
-                    .collect::<Vec<_>>();
-                failfast_debug!("Parsing error(s): {}", errors.join(", "));
-                todo!();
+                failfast_debug!(
+                    "Parsing error(s): {}",
+                    tree.errors()
+                        .iter()
+                        .map(|err| format!("{:?}", err))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                return Err(tree.errors().iter().cloned().collect());
             }
 
             let document = tree.document();
@@ -69,11 +73,11 @@ impl Query {
                 })
                 .collect();
 
-            Query {
+            Ok(Query {
                 string,
                 fragments,
                 operations,
-            }
+            })
         })
     }
 
