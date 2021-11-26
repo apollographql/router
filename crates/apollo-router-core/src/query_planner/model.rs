@@ -386,6 +386,8 @@ async fn fetch_node<'a>(
             Some(Response {
                 data, mut errors, ..
             }) => {
+                // we have to nest conditions and do early returns here
+                // because we need to take ownership of the inner value
                 if let Value::Object(mut map) = data {
                     if let Some(entities) = map.remove("_entities") {
                         tracing::trace!(
@@ -393,7 +395,7 @@ async fn fetch_node<'a>(
                             serde_json::to_string(&entities).unwrap(),
                         );
 
-                        if let Value::Array(mut array) = entities {
+                        if let Value::Array(array) = entities {
                             let mut response = response
                                 .lock()
                                 .instrument(tracing::trace_span!("response_lock_wait"))
@@ -401,7 +403,7 @@ async fn fetch_node<'a>(
 
                             let span = tracing::trace_span!("response_insert");
                             let _guard = span.enter();
-                            for (i, entity) in array.drain(..).enumerate() {
+                            for (i, entity) in array.into_iter().enumerate() {
                                 response.insert_data(
                                     &current_dir.join(Path::from(i.to_string())),
                                     entity,
