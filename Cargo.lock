@@ -84,6 +84,7 @@ dependencies = [
  "apollo-router-core",
  "async-trait",
  "bytes",
+ "console",
  "derivative",
  "derive_more",
  "directories",

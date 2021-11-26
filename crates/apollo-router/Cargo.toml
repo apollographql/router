@@ -30,6 +30,7 @@ anyhow = "1.0.48"
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.51"
 bytes = "1.1.0"
+console = { version = "0.14.1", default-features = false } # NOTE: keeping this at 0.14 to match the version used by insta
 derivative = "2.2.0"
 derive_more = "0.99.16"
 directories = "4.0.1"
