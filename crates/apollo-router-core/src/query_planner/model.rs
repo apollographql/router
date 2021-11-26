@@ -124,7 +124,7 @@ impl PlanNode {
     }
 
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(name = "validation")]
+    #[tracing::instrument(name = "validation", level = "debug")]
     pub fn validate_request(
         &self,
         request: &Request,
