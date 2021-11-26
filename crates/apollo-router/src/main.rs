@@ -78,10 +78,13 @@ impl fmt::Display for ProjectDir {
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?)
-        .json()
-        .init();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?);
+    if atty::is(atty::Stream::Stdout) {
+        builder.init();
+    } else {
+        builder.json().init();
+    }
 
     GLOBAL_ENV_FILTER.set(opt.env_filter.clone()).unwrap();
 

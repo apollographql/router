@@ -29,6 +29,7 @@ post-processing = []
 anyhow = "1.0.48"
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.51"
+atty = "0.2.14"
 bytes = "1.1.0"
 derivative = "2.2.0"
 derive_more = "0.99.16"
