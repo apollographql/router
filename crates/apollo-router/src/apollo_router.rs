@@ -64,7 +64,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
         }
 
         // TODO query caching
-        let query = Arc::new(Query::from(&request.query));
+        let query = Arc::new(Query::parse(&request.query).await.expect("todo"));
 
         Ok(ApolloPreparedQuery {
             query_plan,

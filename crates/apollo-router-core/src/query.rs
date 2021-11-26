@@ -39,6 +39,44 @@ impl Query {
         failfast_debug!("No suitable definition found. This is a bug.");
     }
 
+    pub fn parse(query: impl Into<String>) -> tokio::task::JoinHandle<Self> {
+        let string = query.into();
+        tokio::task::spawn_blocking(move || {
+            let parser = apollo_parser::Parser::new(string.as_str());
+            let tree = parser.parse();
+
+            if !tree.errors().is_empty() {
+                let errors = tree
+                    .errors()
+                    .iter()
+                    .map(|err| format!("{:?}", err))
+                    .collect::<Vec<_>>();
+                failfast_debug!("Parsing error(s): {}", errors.join(", "));
+                todo!();
+            }
+
+            let document = tree.document();
+            let fragments = Self::fragments(&document);
+
+            let operations = document
+                .definitions()
+                .filter_map(|definition| {
+                    if let ast::Definition::OperationDefinition(operation) = definition {
+                        Some(operation.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            Query {
+                string,
+                fragments,
+                operations,
+            }
+        })
+    }
+
     fn fragments(document: &ast::Document) -> HashMap<String, Vec<Selection>> {
         document
             .definitions()
@@ -138,44 +176,6 @@ impl Query {
                     }
                 }
             }
-        }
-    }
-}
-
-impl<T: Into<String>> From<T> for Query {
-    fn from(string: T) -> Self {
-        let string = string.into();
-        let parser = apollo_parser::Parser::new(string.as_str());
-        let tree = parser.parse();
-
-        if !tree.errors().is_empty() {
-            let errors = tree
-                .errors()
-                .iter()
-                .map(|err| format!("{:?}", err))
-                .collect::<Vec<_>>();
-            failfast_debug!("Parsing error(s): {}", errors.join(", "));
-            todo!();
-        }
-
-        let document = tree.document();
-        let fragments = Self::fragments(&document);
-
-        let operations = document
-            .definitions()
-            .filter_map(|definition| {
-                if let ast::Definition::OperationDefinition(operation) = definition {
-                    Some(operation.into())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        Query {
-            string,
-            fragments,
-            operations,
         }
     }
 }
