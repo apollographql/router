@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// TODO
+/// A cache for parsed GraphQL queries.
 #[derive(Debug)]
 pub struct QueryCache {
     cached: Mutex<LruCache<String, Option<Arc<Query>>>>,
@@ -16,7 +16,7 @@ pub struct QueryCache {
 }
 
 impl QueryCache {
-    /// TODO
+    /// Instantiate a new cache for parsed GraphQL queries.
     pub fn new(cache_limit: usize, schema: Arc<Schema>) -> Self {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
@@ -26,7 +26,7 @@ impl QueryCache {
         }
     }
 
-    /// TODO
+    /// Attempt to parse a string to a [`Query`] using cache if possible.
     pub async fn get_query(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
         let mut locked_cache = self.cached.lock().await;
         let key = query.as_ref().to_string();
