@@ -26,7 +26,7 @@ otlp-http = ["opentelemetry-otlp/http-proto"]
 post-processing = []
 
 [dependencies]
-anyhow = "1.0.49"
+anyhow = "1.0.50"
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.51"
 atty = "0.2.14"
