@@ -13,6 +13,7 @@ pub struct ApolloRouter {
     query_planner: Arc<dyn QueryPlanner>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+    query_cache: Arc<QueryCache>,
 }
 
 impl ApolloRouter {
@@ -21,11 +22,13 @@ impl ApolloRouter {
         query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
+        query_cache_limit: usize,
     ) -> Self {
         Self {
             naive_introspection: NaiveIntrospection::from_schema(&schema),
             query_planner,
             service_registry,
+            query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
         }
     }
@@ -63,14 +66,11 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             return Err(stream::empty().boxed());
         }
 
-        // TODO query caching
-        let query = Arc::new(Query::from(&request.query));
-
         Ok(ApolloPreparedQuery {
             query_plan,
             service_registry: Arc::clone(&self.service_registry),
             schema: Arc::clone(&self.schema),
-            query,
+            query_cache: Arc::clone(&self.query_cache),
         })
     }
 }
@@ -81,9 +81,7 @@ pub struct ApolloPreparedQuery {
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
-    // TODO
-    #[allow(dead_code)]
-    query: Arc<Query>,
+    query_cache: Arc<QueryCache>,
 }
 
 #[async_trait::async_trait]
@@ -92,23 +90,24 @@ impl PreparedQuery for ApolloPreparedQuery {
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         stream::once(
             async move {
-                // TODO
-                #[allow(unused_mut)]
-                let mut response = self
+                let response_task = self
                     .query_plan
                     .node()
                     .expect("we already ensured that the plan is some; qed")
                     .execute(
-                        request,
+                        Arc::clone(&request),
                         Arc::clone(&self.service_registry),
                         Arc::clone(&self.schema),
-                    )
-                    .await;
+                    );
+                let query_task = self.query_cache.get_query(&request.query);
 
-                // TODO move query parsing to query creation
-                #[cfg(feature = "post-processing")]
-                tracing::debug_span!("format_response")
-                    .in_scope(|| self.query.format_response(&mut response));
+                let (mut response, query) = tokio::join!(response_task, query_task);
+
+                if let Some(query) = query {
+                    tracing::debug_span!("format_response").in_scope(|| {
+                        query.format_response(&mut response, request.operation_name.as_deref())
+                    });
+                }
 
                 response
             }

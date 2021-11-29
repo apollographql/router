@@ -8,7 +8,7 @@ license = "LicenseRef-ELv2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dev-dependencies]
-apollo-router = { path = "../apollo-router", features = ["post-processing"] }
+apollo-router = { path = "../apollo-router" }
 apollo-router-core = { path = "../apollo-router-core" }
 criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
 futures = "0.3.18"

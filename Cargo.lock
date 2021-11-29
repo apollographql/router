@@ -80,7 +80,6 @@ name = "apollo-router"
 version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
- "apollo-router",
  "apollo-router-core",
  "async-trait",
  "atty",
