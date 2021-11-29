@@ -242,7 +242,6 @@ impl PlanNode {
             Arc::clone(&service_registry),
             Arc::clone(&schema),
         )
-        .instrument(tracing::info_span!("execution"))
         .await;
 
         // TODO: this is not great but there is no other way
