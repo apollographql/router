@@ -1,6 +1,6 @@
-pub(crate) mod caching_query_planner;
+mod caching_query_planner;
 pub(crate) mod model;
-pub(crate) mod router_bridge_query_planner;
+mod router_bridge_query_planner;
 
 pub use caching_query_planner::*;
 pub use model::*;
