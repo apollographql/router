@@ -8,9 +8,8 @@ use std::collections::HashMap;
 ///
 /// If you would like to add one, put it in the "well_known_introspection_queries" folder.
 static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
-    include_dir!("./well_known_introspection_queries")
+    include_dir!("$CARGO_MANIFEST_DIR/well_known_introspection_queries")
         .files()
-        .iter()
         .map(|file| {
             file.contents_utf8()
                 .unwrap_or_else(|| {
@@ -89,7 +88,7 @@ mod naive_introspection_tests {
         let query_to_test = "this is a test query";
         let mut expected_data = Response::builder().build();
         expected_data
-            .insert_data(&Path::empty(), &serde_json::Value::Number(42.into()))
+            .insert_data(&Path::empty(), serde_json::Value::Number(42.into()))
             .expect("it is always possible to insert data in root path; qed");
 
         let cache = [(query_to_test.into(), expected_data.clone())]

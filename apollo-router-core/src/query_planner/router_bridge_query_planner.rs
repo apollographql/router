@@ -22,7 +22,7 @@ impl RouterBridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for RouterBridgeQueryPlanner {
-    #[tracing::instrument(name = "plan")]
+    #[tracing::instrument(name = "plan", level = "debug")]
     async fn get(
         &self,
         query: String,
@@ -40,6 +40,10 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
                 .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
         })
         .await?
+    }
+
+    async fn get_hot_keys(&self) -> Vec<QueryKey> {
+        vec![]
     }
 }
 

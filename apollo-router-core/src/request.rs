@@ -48,7 +48,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument]
+    #[tracing::instrument(level = "trace")]
     pub fn format_response(&self, response: &mut Response) {
         fn apply_selection_set(
             selection_set: &ast::SelectionSet,
@@ -178,10 +178,9 @@ impl Query {
         let parser = apollo_parser::Parser::new(self.as_str());
         let tree = parser.parse();
 
-        if !tree.errors().is_empty() {
+        if tree.errors().len() != 0 {
             let errors = tree
                 .errors()
-                .iter()
                 .map(|err| format!("{:?}", err))
                 .collect::<Vec<_>>();
             failfast_debug!("Parsing error(s): {}", errors.join(", "));

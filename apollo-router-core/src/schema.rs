@@ -16,10 +16,10 @@ impl std::str::FromStr for Schema {
         let parser = apollo_parser::Parser::new(s);
         let tree = parser.parse();
 
-        if !tree.errors().is_empty() {
+        if tree.errors().len() != 0 {
             return Err(SchemaError::from_parse_errors(
                 s.to_string(),
-                tree.errors().to_vec(),
+                tree.errors().cloned().collect(),
             ));
         }
 

@@ -31,6 +31,10 @@ struct Opt {
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
+
+    /// Query Plan cache size (number of entries).
+    #[structopt(long, default_value = "100")]
+    plan_cache_limit: usize,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -74,10 +78,13 @@ impl fmt::Display for ProjectDir {
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?)
-        .json()
-        .init();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?);
+    if atty::is(atty::Stream::Stdout) {
+        builder.init();
+    } else {
+        builder.json().init();
+    }
 
     GLOBAL_ENV_FILTER.set(opt.env_filter.clone()).unwrap();
 
@@ -152,6 +159,7 @@ async fn main() -> Result<()> {
     let server = FederatedServer::builder()
         .configuration(configuration)
         .schema(schema)
+        .plan_cache_limit(opt.plan_cache_limit)
         .shutdown(ShutdownKind::CtrlC)
         .build();
     let mut server_handle = server.serve();

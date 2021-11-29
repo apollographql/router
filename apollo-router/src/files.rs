@@ -21,16 +21,29 @@ pub(crate) fn watch(path: PathBuf, delay: Option<Duration>) -> impl Stream<Item 
             .expect("Failed to initialise file watching.");
     watcher
         .watch(path, move |event: hotwatch::Event| {
-            if let hotwatch::Event::Write(_path) = event {
-                if let Err(_err) = watch_sender.try_send(()) {
-                    tracing::error!(
-                        "Failed to process file watch notification. {}",
-                        _err.to_string()
-                    )
+            tracing::debug!("file watcher: received event: {:?}", &event);
+            match event {
+                // https://github.com/notify-rs/notify/blob/ded07f442a96f33c6b7fefe3195396a33a28ddc3/src/lib.rs#L413
+                //
+                // `Create` events have a higher priority than `Write` and `Chmod`. These events will not be
+                // emitted if they are detected before the `Create` event has been emitted.
+                //
+                // Hotwatch will sometimes send a Create event instead of a Write event,
+                // if the write occured immediately after the file creation.
+                hotwatch::Event::Write(_) | hotwatch::Event::Create(_) => {
+                    if let Err(_err) = watch_sender.try_send(()) {
+                        tracing::error!(
+                            "Failed to process file watch notification. {}",
+                            _err.to_string()
+                        )
+                    }
                 }
+                _ => {}
             }
         })
         .expect("Failed to watch file.");
+    // Tell watchers once they should read the file once,
+    // then listen to fs events.
     stream::once(future::ready(()))
         .chain(watch_receiver)
         .chain(stream::once(async move {
@@ -50,21 +63,19 @@ pub(crate) mod tests {
     use std::env::temp_dir;
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
-    #[cfg(not(target_os = "macos"))]
     use test_log::test;
 
-    #[cfg(not(target_os = "macos"))]
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
         let mut watch = watch(path, Some(Duration::from_millis(10)));
-        watch.next().await;
+        // Signal telling us to read the file once, and then poll.
+        assert!(futures::poll!(watch.next()).is_ready());
+
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
-        watch.next().await;
         assert!(futures::poll!(watch.next()).is_pending());
         write_and_flush(&mut file, "Some data").await;
-        watch.next().await;
         assert!(futures::poll!(watch.next()).is_pending())
     }
 
@@ -81,6 +92,5 @@ pub(crate) mod tests {
         file.seek(SeekFrom::Start(0)).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
