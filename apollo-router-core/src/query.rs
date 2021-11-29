@@ -45,51 +45,46 @@ impl Query {
         }
     }
 
-    pub fn parse(
-        query: impl Into<String>,
-        schema: &Schema,
-    ) -> tokio::task::JoinHandle<Option<Self>> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
         let mut fragments = schema
             .fragments()
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect::<HashMap<String, Vec<_>>>();
 
-        tokio::task::spawn_blocking(move || {
-            let parser = apollo_parser::Parser::new(string.as_str());
-            let tree = parser.parse();
+        let parser = apollo_parser::Parser::new(string.as_str());
+        let tree = parser.parse();
 
-            if !tree.errors().is_empty() {
-                failfast_debug!(
-                    "Parsing error(s): {}",
-                    tree.errors()
-                        .iter()
-                        .map(|err| format!("{:?}", err))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                );
-                return None;
-            }
+        if !tree.errors().is_empty() {
+            failfast_debug!(
+                "Parsing error(s): {}",
+                tree.errors()
+                    .iter()
+                    .map(|err| format!("{:?}", err))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            return None;
+        }
 
-            let document = tree.document();
-            fragments.extend(Self::fragments(&document));
+        let document = tree.document();
+        fragments.extend(Self::fragments(&document));
 
-            let operations = document
-                .definitions()
-                .filter_map(|definition| {
-                    if let ast::Definition::OperationDefinition(operation) = definition {
-                        Some(operation.into())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            Some(Query {
-                string,
-                fragments,
-                operations,
+        let operations = document
+            .definitions()
+            .filter_map(|definition| {
+                if let ast::Definition::OperationDefinition(operation) = definition {
+                    Some(operation.into())
+                } else {
+                    None
+                }
             })
+            .collect();
+
+        Some(Query {
+            string,
+            fragments,
+            operations,
         })
     }
 
@@ -302,8 +297,8 @@ mod tests {
         };
     }
 
-    #[test(tokio::test)]
-    async fn reformat_response_data_field() {
+    #[test]
+    fn reformat_response_data_field() {
         let schema: Schema = "".parse().unwrap();
         let query = Query::parse(
             r#"{
@@ -317,8 +312,6 @@ mod tests {
             }"#,
             &schema,
         )
-        .await
-        .unwrap()
         .unwrap();
         let mut response = Response::builder()
             .data(json! {{
@@ -357,13 +350,10 @@ mod tests {
         );
     }
 
-    #[test(tokio::test)]
-    async fn reformat_response_data_inline_fragment() {
+    #[test]
+    fn reformat_response_data_inline_fragment() {
         let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#, &schema)
-            .await
-            .unwrap()
-            .unwrap();
+        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#, &schema).unwrap();
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
@@ -378,15 +368,13 @@ mod tests {
         );
     }
 
-    #[test(tokio::test)]
-    async fn reformat_response_data_fragment_spread() {
+    #[test]
+    fn reformat_response_data_fragment_spread() {
         let schema: Schema = "fragment baz on Baz {baz}".parse().unwrap();
         let query = Query::parse(
             r#"{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}"#,
             &schema,
         )
-        .await
-        .unwrap()
         .unwrap();
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2", "baz": "3"}})
@@ -402,15 +390,13 @@ mod tests {
         );
     }
 
-    #[test(tokio::test)]
-    async fn reformat_response_data_best_effort() {
+    #[test]
+    fn reformat_response_data_best_effort() {
         let schema: Schema = "".parse().unwrap();
         let query = Query::parse(
             r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#,
             &schema,
         )
-        .await
-        .unwrap()
         .unwrap();
         let mut response = Response::builder()
             .data(json! {{
@@ -442,8 +428,8 @@ mod tests {
         );
     }
 
-    #[test(tokio::test)]
-    async fn reformat_matching_operation() {
+    #[test]
+    fn reformat_matching_operation() {
         let schema: Schema = "".parse().unwrap();
         let query = Query::parse(
             r#"query MyOperation {
@@ -451,8 +437,6 @@ mod tests {
             }"#,
             &schema,
         )
-        .await
-        .unwrap()
         .unwrap();
         let mut response = Response::builder()
             .data(json! {{

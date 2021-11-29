@@ -71,7 +71,12 @@ impl QueryCache {
                 drop(locked_wait_map);
                 // This is the potentially high duration operation
                 // No locks are held here
-                let parsed_query = match Query::parse(query.as_ref(), &self.schema).await {
+                let query_parsing_future = {
+                    let query = query.as_ref().to_string();
+                    let schema = Arc::clone(&self.schema);
+                    tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+                };
+                let parsed_query = match query_parsing_future.await {
                     Ok(res) => res.map(Arc::new),
                     // Silently ignore cancelled tasks (never happen for blocking tasks).
                     Err(err) if err.is_cancelled() => None,
