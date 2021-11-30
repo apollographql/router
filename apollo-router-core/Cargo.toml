@@ -36,7 +36,7 @@ static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 tokio = { version = "1", features = ["full"] }
 # don't bump to 0.3 until we bump tracing-opentelemetry to 0.16
-tracing-subscriber = { version = "0.2.25", default-features = false, features = [
+tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }
