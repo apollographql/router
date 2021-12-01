@@ -15,7 +15,7 @@ where
     Router: graphql::Router<PreparedQuery>,
     PreparedQuery: graphql::PreparedQuery,
 {
-    fn create<'a>(
+    fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
