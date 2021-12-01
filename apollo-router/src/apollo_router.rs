@@ -11,7 +11,7 @@ use tracing_futures::WithSubscriber;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Arc<dyn QueryPlanner>,
+    query_planner: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
@@ -20,11 +20,19 @@ pub struct ApolloRouter {
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
     pub fn new(
-        query_planner: Arc<dyn QueryPlanner>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
         query_cache_limit: usize,
     ) -> Self {
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_planner = Arc::new(CachingQueryPlanner::new(
+            RouterBridgeQueryPlanner::new(Arc::clone(&schema)),
+            plan_cache_limit,
+        ));
+
         Self {
             naive_introspection: NaiveIntrospection::from_schema(&schema),
             query_planner,

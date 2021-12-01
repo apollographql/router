@@ -32,10 +32,6 @@ struct Opt {
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
 
-    /// Query Plan cache size (number of entries).
-    #[structopt(long, default_value = "100")]
-    plan_cache_limit: usize,
-
     /// Query parser cache size (number of entries).
     #[structopt(long, default_value = "100")]
     query_cache_limit: usize,
@@ -163,7 +159,6 @@ async fn main() -> Result<()> {
     let server = FederatedServer::builder()
         .configuration(configuration)
         .schema(schema)
-        .plan_cache_limit(opt.plan_cache_limit)
         .query_cache_limit(opt.query_cache_limit)
         .shutdown(ShutdownKind::CtrlC)
         .build();

@@ -47,22 +47,6 @@ pub trait QueryPlanner: Send + Sync + Debug {
     async fn get_hot_keys(&self) -> Vec<QueryKey>;
 }
 
-/// With caching trait.
-///
-/// Adds with_caching to any query planner.
-pub trait WithCaching: QueryPlanner
-where
-    Self: Sized + QueryPlanner,
-{
-    /// Wrap this query planner in a caching decorator.
-    /// The original query planner is consumed.
-    fn with_caching(self, plan_cache_limit: usize) -> CachingQueryPlanner<Self> {
-        CachingQueryPlanner::new(self, plan_cache_limit)
-    }
-}
-
-impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
-
 /// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
 ///
 /// The call to the function will either succeeds and return a [`PreparedQuery`] or it will fail and return

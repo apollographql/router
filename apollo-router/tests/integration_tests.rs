@@ -161,7 +161,6 @@ async fn query_rust(
     request: graphql::Request,
 ) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
-    let planner = graphql::RouterBridgeQueryPlanner::new(Arc::clone(&schema));
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
@@ -169,12 +168,7 @@ async fn query_rust(
         &config,
     )));
 
-    let router = ApolloRouter::new(
-        Arc::new(planner),
-        registry.clone(),
-        schema,
-        QUERY_CACHE_LIMIT,
-    );
+    let router = ApolloRouter::new(registry.clone(), schema, QUERY_CACHE_LIMIT);
 
     let stream = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,

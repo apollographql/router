@@ -1,7 +1,7 @@
 use crate::apollo_router::{ApolloPreparedQuery, ApolloRouter};
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
-use apollo_router_core::prelude::{graphql::*, *};
+use apollo_router_core::prelude::*;
 use futures::prelude::*;
 use std::sync::Arc;
 
@@ -19,7 +19,6 @@ where
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        plan_cache_limit: usize,
         query_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
     fn recreate(
@@ -27,24 +26,18 @@ where
         router: Arc<Router>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        plan_cache_limit: usize,
         query_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
-    fn get_plan_cache_limit(&self) -> usize;
     fn get_query_cache_limit(&self) -> usize;
 }
 
 #[derive(Default)]
 pub(crate) struct ApolloRouterFactory {
-    plan_cache_limit: usize,
     query_cache_limit: usize,
 }
 impl ApolloRouterFactory {
-    pub fn new(plan_cache_limit: usize, query_cache_limit: usize) -> Self {
-        Self {
-            plan_cache_limit,
-            query_cache_limit,
-        }
+    pub fn new(query_cache_limit: usize) -> Self {
+        Self { query_cache_limit }
     }
 }
 
@@ -53,20 +46,11 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        plan_cache_limit: usize,
         query_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
         tokio::task::spawn_blocking(move || {
-            ApolloRouter::new(
-                Arc::new(
-                    graphql::RouterBridgeQueryPlanner::new(Arc::clone(&schema))
-                        .with_caching(plan_cache_limit),
-                ),
-                Arc::new(service_registry),
-                schema,
-                query_cache_limit,
-            )
+            ApolloRouter::new(Arc::new(service_registry), schema, query_cache_limit)
         })
         .map(|res| res.expect("ApolloRouter::new() is infallible; qed"))
         .boxed()
@@ -77,10 +61,9 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         router: Arc<ApolloRouter>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        plan_cache_limit: usize,
         query_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
-        let factory = self.create(configuration, schema, plan_cache_limit, query_cache_limit);
+        let factory = self.create(configuration, schema, query_cache_limit);
 
         Box::pin(async move {
             // Use the "hot" entries in the supplied router to pre-populate
@@ -101,10 +84,6 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
             }
             new_router
         })
-    }
-
-    fn get_plan_cache_limit(&self) -> usize {
-        self.plan_cache_limit
     }
 
     fn get_query_cache_limit(&self) -> usize {

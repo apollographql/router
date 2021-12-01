@@ -196,7 +196,6 @@ where
                                         router,
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        self.router_factory.get_plan_cache_limit(),
                                         self.router_factory.get_query_cache_limit(),
                                     )
                                     .await,
@@ -257,7 +256,6 @@ where
                                         router,
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        self.router_factory.get_plan_cache_limit(),
                                         self.router_factory.get_query_cache_limit(),
                                     )
                                     .await,
@@ -359,7 +357,6 @@ where
                             .create(
                                 &derived_configuration,
                                 Arc::clone(&schema),
-                                self.router_factory.get_plan_cache_limit(),
                                 self.router_factory.get_query_cache_limit(),
                             )
                             .await,
@@ -821,17 +818,14 @@ mod tests {
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
-                plan_cache_limit: usize,
                 query_cache_limit: usize,
             ) -> future::BoxFuture<'static, MockMyRouter>;
             fn recreate(&self,
                 router: Arc<MockMyRouter>,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
-                plan_cache_limit: usize,
                 query_cache_limit: usize,
             ) -> future::BoxFuture<'static, MockMyRouter>;
-            fn get_plan_cache_limit(&self) -> usize;
             fn get_query_cache_limit(&self) -> usize;
         }
     }

@@ -561,7 +561,7 @@ impl FederatedServer {
         let state_machine = StateMachine::new(
             server_factory,
             Some(state_listener),
-            ApolloRouterFactory::new(self.plan_cache_limit, self.query_cache_limit),
+            ApolloRouterFactory::new(self.query_cache_limit),
         );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async {
