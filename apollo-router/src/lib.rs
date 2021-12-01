@@ -225,7 +225,7 @@ impl ConfigurationKind {
             UpdateConfiguration(mut config) => {
                 match trace::try_initialize_subscriber(&config) {
                     Ok(subscriber) => {
-                        config.subscriber = subscriber;
+                        config.subscriber = Some(subscriber);
                     }
                     Err(err) => {
                         tracing::error!("Could not initialize tracing subscriber: {}", err,)

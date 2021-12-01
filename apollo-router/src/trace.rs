@@ -12,8 +12,7 @@ use crate::{
 
 pub(crate) fn try_initialize_subscriber(
     config: &Configuration,
-) -> Result<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>, Box<dyn std::error::Error>>
-{
+) -> Result<Arc<dyn tracing::Subscriber + Send + Sync + 'static>, Box<dyn std::error::Error>> {
     let subscriber = tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::new(
             GLOBAL_ENV_FILTER
@@ -64,7 +63,7 @@ pub(crate) fn try_initialize_subscriber(
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
             opentelemetry::global::set_error_handler(handle_error)?;
-            return Ok(Some(Arc::new(subscriber.with(telemetry))));
+            Ok(Arc::new(subscriber.with(telemetry)))
         }
         #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         Some(OpenTelemetry::Otlp(configuration::otlp::Otlp::Tracing(tracing))) => {
@@ -75,12 +74,10 @@ pub(crate) fn try_initialize_subscriber(
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
             opentelemetry::global::set_error_handler(handle_error)?;
-            return Ok(Some(Arc::new(subscriber.with(telemetry))));
+            Ok(Arc::new(subscriber.with(telemetry)))
         }
-        None => {}
+        None => Ok(Arc::new(subscriber)),
     }
-
-    Ok(None)
 }
 
 pub fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
