@@ -8,6 +8,7 @@ pub mod http_service_registry;
 pub mod http_subgraph;
 mod router_factory;
 mod state_machine;
+mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
@@ -16,7 +17,7 @@ use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use configuration::{Configuration, OpenTelemetry};
+use configuration::Configuration;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -25,19 +26,13 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::trace::TracerProvider;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::str::FromStr;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 use typed_builder::TypedBuilder;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
@@ -228,7 +223,7 @@ impl ConfigurationKind {
         }
         .map(|event| match event {
             UpdateConfiguration(mut config) => {
-                match try_initialize_subscriber(&config) {
+                match trace::try_initialize_subscriber(&config) {
                     Ok(subscriber) => {
                         config.subscriber = subscriber;
                     }
@@ -254,93 +249,6 @@ impl ConfigurationKind {
 
     fn read_schema(path: &Path) -> Result<graphql::Schema, FederatedServerError> {
         graphql::Schema::read(path).map_err(FederatedServerError::ReadSchemaError)
-    }
-}
-
-fn try_initialize_subscriber(
-    config: &Configuration,
-) -> Result<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>, Box<dyn std::error::Error>>
-{
-    let subscriber = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::new(
-            GLOBAL_ENV_FILTER
-                .get()
-                .map(|x| x.as_str())
-                .unwrap_or("info"),
-        ))
-        .finish();
-
-    match config.opentelemetry.as_ref() {
-        Some(OpenTelemetry::Jaeger(config)) => {
-            let default_config = Default::default();
-            let config = config.as_ref().unwrap_or(&default_config);
-            let mut pipeline =
-                opentelemetry_jaeger::new_pipeline().with_service_name(&config.service_name);
-            if let Some(url) = config.collector_endpoint.as_ref() {
-                pipeline = pipeline.with_collector_endpoint(url.as_str());
-            }
-            if let Some(username) = config.username.as_ref() {
-                pipeline = pipeline.with_collector_username(username);
-            }
-            if let Some(password) = config.password.as_ref() {
-                pipeline = pipeline.with_collector_password(password);
-            }
-
-            let batch_size = std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
-                .ok()
-                .and_then(|batch_size| usize::from_str(&batch_size).ok());
-
-            let exporter = pipeline.init_async_exporter(opentelemetry::runtime::Tokio)?;
-
-            let batch = BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_scheduled_delay(std::time::Duration::from_secs(1));
-            let batch = if let Some(size) = batch_size {
-                batch.with_max_export_batch_size(size)
-            } else {
-                batch
-            }
-            .build();
-
-            let provider = opentelemetry::sdk::trace::TracerProvider::builder()
-                .with_span_processor(batch)
-                .build();
-
-            let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
-            let _ = opentelemetry::global::set_tracer_provider(provider);
-
-            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-            opentelemetry::global::set_error_handler(handle_error)?;
-            return Ok(Some(Arc::new(subscriber.with(telemetry))));
-        }
-        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-        Some(OpenTelemetry::Otlp(configuration::otlp::Otlp::Tracing(tracing))) => {
-            let tracer = if let Some(tracing) = tracing.as_ref() {
-                tracing.tracer()?
-            } else {
-                configuration::otlp::Tracing::tracer_from_env()?
-            };
-            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-            opentelemetry::global::set_error_handler(handle_error)?;
-            return Ok(Some(Arc::new(subscriber.with(telemetry))));
-        }
-        None => {}
-    }
-
-    Ok(None)
-}
-
-pub fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
-    match err.into() {
-        opentelemetry::global::Error::Trace(err) => {
-            tracing::error!("OpenTelemetry trace error occurred: {}", err)
-        }
-        opentelemetry::global::Error::Other(err_msg) => {
-            tracing::error!("OpenTelemetry error occurred: {}", err_msg)
-        }
-        other => {
-            tracing::error!("OpenTelemetry error occurred: {:?}", other)
-        }
     }
 }
 
