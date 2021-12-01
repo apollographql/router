@@ -11,6 +11,8 @@ pub struct Query {
     fragments: HashMap<String, Vec<Selection>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    object_types: HashMap<String, ObjectType>,
 }
 
 impl Query {
@@ -81,10 +83,23 @@ impl Query {
             })
             .collect();
 
+        let object_types = document
+            .definitions()
+            .filter_map(|definition| {
+                if let ast::Definition::ObjectTypeDefinition(object_type) = definition {
+                    let object_type = ObjectType::from(object_type);
+                    Some((object_type.name.clone(), object_type))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Some(Query {
             string,
             fragments,
             operations,
+            object_types,
         })
     }
 
@@ -274,6 +289,123 @@ impl From<ast::OperationDefinition> for Operation {
         Operation {
             selection_set,
             name,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ObjectType {
+    name: String,
+    fields: HashMap<String, FieldType>,
+    interfaces: Vec<String>,
+}
+
+impl From<ast::ObjectTypeDefinition> for ObjectType {
+    // Spec: https://spec.graphql.org/draft/#sec-Objects
+    fn from(object_type: ast::ObjectTypeDefinition) -> Self {
+        let name = object_type
+            .name()
+            .expect("the node Name is not optional in the spec; qed")
+            .text()
+            .to_string();
+        let fields = object_type
+            .fields_definition()
+            .iter()
+            .flat_map(|x| x.field_definitions())
+            .map(|x| {
+                let name = x
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let ty = x
+                    .ty()
+                    .expect("the node Type is not optional in the spec; qed")
+                    .into();
+                (name, ty)
+            })
+            .collect();
+        let interfaces = object_type
+            .implements_interfaces()
+            .iter()
+            .flat_map(|x| x.named_types())
+            .map(|x| {
+                x.name()
+                    .expect("neither Name neither NamedType are optionals; qed")
+                    .text()
+                    .to_string()
+            })
+            .collect();
+
+        ObjectType {
+            name,
+            fields,
+            interfaces,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum FieldType {
+    Named(String),
+    List(Box<FieldType>),
+    NonNull(Box<FieldType>),
+    String,
+    Int,
+    Float,
+    Id,
+}
+
+impl From<ast::Type> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#sec-Type-References
+    fn from(ty: ast::Type) -> Self {
+        match ty {
+            ast::Type::NamedType(named) => named.into(),
+            ast::Type::ListType(list) => list.into(),
+            ast::Type::NonNullType(non_null) => non_null.into(),
+        }
+    }
+}
+
+impl From<ast::NamedType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NamedType
+    fn from(named: ast::NamedType) -> Self {
+        let name = named
+            .name()
+            .expect("the node Name is not optional in the spec; qed")
+            .text()
+            .to_string()
+            .to_lowercase();
+        match name.as_str() {
+            "string" => Self::String,
+            "int" => Self::Int,
+            "float" => Self::Float,
+            "id" => Self::Id,
+            _ => Self::Named(name),
+        }
+    }
+}
+
+impl From<ast::ListType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#ListType
+    fn from(list: ast::ListType) -> Self {
+        Self::List(Box::new(
+            list.ty()
+                .expect("the node Type is not optional in the spec; qed")
+                .into(),
+        ))
+    }
+}
+
+impl From<ast::NonNullType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NonNullType
+    fn from(non_null: ast::NonNullType) -> Self {
+        if let Some(list) = non_null.list_type() {
+            Self::NonNull(Box::new(list.into()))
+        } else if let Some(named) = non_null.named_type() {
+            Self::NonNull(Box::new(named.into()))
+        } else {
+            unreachable!("either the NamedType node is provider, either the ListType node; qed")
         }
     }
 }
