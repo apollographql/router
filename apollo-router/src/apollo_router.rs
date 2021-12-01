@@ -42,7 +42,7 @@ impl ApolloRouter {
         }
     }
 
-    pub fn get_query_planner(&self) -> Arc<dyn QueryPlanner> {
+    pub fn get_query_planner(&self) -> Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>> {
         self.query_planner.clone()
     }
 }

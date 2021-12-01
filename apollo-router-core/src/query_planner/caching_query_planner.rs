@@ -111,8 +111,10 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
             }
         }
     }
+}
 
-    async fn get_hot_keys(&self) -> Vec<QueryKey> {
+impl<T: QueryPlanner> CachingQueryPlanner<T> {
+    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
         let locked_cache = self.cached.lock().await;
         locked_cache
             .iter()

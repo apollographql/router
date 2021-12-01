@@ -43,8 +43,6 @@ pub trait QueryPlanner: Send + Sync + Debug {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> Result<Arc<QueryPlan>, QueryPlannerError>;
-
-    async fn get_hot_keys(&self) -> Vec<QueryKey>;
 }
 
 /// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
