@@ -483,7 +483,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_schema() {
-        let router_factory = recreate_mock_router_factory(2);
+        let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let schema = include_str!("testdata/supergraph.graphql");
 
@@ -522,7 +522,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
-        let router_factory = recreate_mock_router_factory(2);
+        let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -634,38 +634,21 @@ mod tests {
         // first call, we take the URL from the configuration
         router_factory
             .expect_create()
-            .withf(
-                |configuration: &Configuration,
-                 _schema: &Arc<graphql::Schema>,
-                 _plan_cache_limit: &usize,
-                 _query_cache_limit: &usize| {
-                    configuration.subgraphs.get("accounts").unwrap().routing_url
-                        == "http://accounts/graphql"
-                },
-            )
+            .withf(|configuration, _schema, _previous_router| {
+                configuration.subgraphs.get("accounts").unwrap().routing_url
+                    == "http://accounts/graphql"
+            })
             .times(1)
-            .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is empty, we should take the URL from the graph
         router_factory
-            .expect_recreate()
-            .withf(
-                |_graph: &Arc<MockMyRouter>,
-                 configuration: &Configuration,
-                 _schema: &Arc<graphql::Schema>,
-                 _plan_cache_limit: &usize,
-                 _query_cache_limit: &usize| {
-                    configuration.subgraphs.get("accounts").unwrap().routing_url
-                        == "http://localhost:4001/graphql"
-                },
-            )
+            .expect_create()
+            .withf(|configuration, _schema, _previous_router| {
+                configuration.subgraphs.get("accounts").unwrap().routing_url
+                    == "http://localhost:4001/graphql"
+            })
             .times(1)
-            .returning(|_, _, _, _, _| future::ready(MockMyRouter::new()).boxed());
-        router_factory
-            .expect_get_plan_cache_limit()
-            .return_const(10usize);
-        router_factory
-            .expect_get_query_cache_limit()
-            .return_const(10usize);
+            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -724,39 +707,22 @@ mod tests {
         // first call, we take the URL from the first supergraph
         router_factory
             .expect_create()
-            .withf(
-                |configuration: &Configuration,
-                 _schema: &Arc<graphql::Schema>,
-                 _plan_cache_limit: &usize,
-                 _query_cache_limit: &usize| {
-                    configuration.subgraphs.get("accounts").unwrap().routing_url
-                        == "http://accounts/graphql"
-                },
-            )
+            .withf(|configuration, _schema, _previous_router| {
+                configuration.subgraphs.get("accounts").unwrap().routing_url
+                    == "http://accounts/graphql"
+            })
             .times(1)
-            .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         // second call, configuration is still empty, we should take the URL from the new supergraph
         router_factory
-            .expect_recreate()
-            .withf(
-                |_graph: &Arc<MockMyRouter>,
-                 configuration: &Configuration,
-                 _schema: &Arc<graphql::Schema>,
-                 _plan_cache_limit: &usize,
-                 _query_cache_limit: &usize| {
-                    println!("got configuration: {:#?}", configuration);
-                    configuration.subgraphs.get("accounts").unwrap().routing_url
-                        == "http://localhost:4001/graphql"
-                },
-            )
+            .expect_create()
+            .withf(|configuration, _schema, _previous_router| {
+                println!("got configuration: {:#?}", configuration);
+                configuration.subgraphs.get("accounts").unwrap().routing_url
+                    == "http://localhost:4001/graphql"
+            })
             .times(1)
-            .returning(|_, _, _, _, _| future::ready(MockMyRouter::new()).boxed());
-        router_factory
-            .expect_get_plan_cache_limit()
-            .return_const(10usize);
-        router_factory
-            .expect_get_query_cache_limit()
-            .return_const(10usize);
+            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -812,15 +778,8 @@ mod tests {
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
-                query_cache_limit: usize,
+                previous_router: Option<Arc<MockMyRouter>>,
             ) -> future::BoxFuture<'static, MockMyRouter>;
-            fn recreate(&self,
-                router: Arc<MockMyRouter>,
-                configuration: &Configuration,
-                schema: Arc<graphql::Schema>,
-                query_cache_limit: usize,
-            ) -> future::BoxFuture<'static, MockMyRouter>;
-            fn get_query_cache_limit(&self) -> usize;
         }
     }
 
@@ -919,32 +878,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
-        router_factory
-            .expect_get_plan_cache_limit()
-            .return_const(10usize);
-        router_factory
-            .expect_get_query_cache_limit()
-            .return_const(10usize);
-        router_factory
-    }
-
-    fn recreate_mock_router_factory(expect_times_called: usize) -> MockMyRouterFactory {
-        let mut router_factory = MockMyRouterFactory::new();
-        router_factory
-            .expect_create()
-            .times(1)
-            .returning(|_, _, _, _| future::ready(MockMyRouter::new()).boxed());
-        router_factory
-            .expect_recreate()
-            .times(expect_times_called - 1)
-            .returning(|_, _, _, _, _| future::ready(MockMyRouter::new()).boxed());
-        router_factory
-            .expect_get_plan_cache_limit()
-            .return_const(10usize);
-        router_factory
-            .expect_get_query_cache_limit()
-            .return_const(10usize);
+            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
         router_factory
     }
 }
