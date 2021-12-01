@@ -2,25 +2,24 @@ use crate::apollo_router::{ApolloPreparedQuery, ApolloRouter};
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::*;
-use futures::prelude::*;
 use std::sync::Arc;
 
 /// Factory for creating graphs.
 ///
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
-//#[cfg_attr(test, automock)]
+#[async_trait::async_trait]
 pub(crate) trait RouterFactory<Router, PreparedQuery>
 where
     Router: graphql::Router<PreparedQuery>,
     PreparedQuery: graphql::PreparedQuery,
 {
-    fn create(
+    async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
         previous_router: Option<Arc<Router>>,
-    ) -> future::BoxFuture<'static, Router>;
+    ) -> Router;
 }
 
 #[derive(Default)]
@@ -32,14 +31,15 @@ impl ApolloRouterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
-    fn create(
+    async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
         previous_router: Option<Arc<ApolloRouter>>,
-    ) -> future::BoxFuture<'static, ApolloRouter> {
+    ) -> ApolloRouter {
         let service_registry = HttpServiceRegistry::new(configuration);
-        ApolloRouter::new(Arc::new(service_registry), schema, previous_router).boxed()
+        ApolloRouter::new(Arc::new(service_registry), schema, previous_router).await
     }
 }

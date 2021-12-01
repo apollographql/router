@@ -639,7 +639,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| MockMyRouter::new());
         // second call, configuration is empty, we should take the URL from the graph
         router_factory
             .expect_create()
@@ -648,7 +648,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| MockMyRouter::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -712,7 +712,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| MockMyRouter::new());
         // second call, configuration is still empty, we should take the URL from the new supergraph
         router_factory
             .expect_create()
@@ -722,7 +722,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| MockMyRouter::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -773,13 +773,14 @@ mod tests {
         #[derive(Debug)]
         MyRouterFactory {}
 
+        #[async_trait::async_trait]
         impl RouterFactory<MockMyRouter, MockMyRoute> for MyRouterFactory {
-            fn create(
+            async fn create(
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<Arc<MockMyRouter>>,
-            ) -> future::BoxFuture<'static, MockMyRouter>;
+            ) -> MockMyRouter;
         }
     }
 
@@ -878,7 +879,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _| future::ready(MockMyRouter::new()).boxed());
+            .returning(|_, _, _| MockMyRouter::new());
         router_factory
     }
 }
