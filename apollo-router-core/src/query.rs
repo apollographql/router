@@ -354,6 +354,7 @@ enum FieldType {
     Int,
     Float,
     Id,
+    Boolean,
 }
 
 impl From<ast::Type> for FieldType {
@@ -380,6 +381,7 @@ impl From<ast::NamedType> for FieldType {
             "Int" => Self::Int,
             "Float" => Self::Float,
             "ID" => Self::Id,
+            "Boolean" => Self::Boolean,
             _ => Self::Named(name),
         }
     }
