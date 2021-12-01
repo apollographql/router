@@ -53,8 +53,8 @@ impl ApolloRouter {
                     for (query, operation, options) in
                         previous_router.query_planner.get_hot_keys().await
                     {
-                        // We can ignore errors, since we are just warming up the
-                        // cache
+                        // We can ignore errors because some of the queries that were previously in
+                        // the cache might not work with the new schema
                         let _ = query_planner.get(query, operation, options).await;
                     }
                 }
