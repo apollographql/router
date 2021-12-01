@@ -192,12 +192,7 @@ where
                             let schema = Arc::new(new_schema);
                             let router = Arc::new(
                                 self.router_factory
-                                    .recreate(
-                                        router,
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        self.router_factory.get_query_cache_limit(),
-                                    )
+                                    .recreate(router, &derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 
@@ -252,12 +247,7 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
                             let router = Arc::new(
                                 self.router_factory
-                                    .recreate(
-                                        router,
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        self.router_factory.get_query_cache_limit(),
-                                    )
+                                    .recreate(router, &derived_configuration, Arc::clone(&schema))
                                     .await,
                             );
 
@@ -354,11 +344,7 @@ where
                     let schema = Arc::new(schema);
                     let router = Arc::new(
                         self.router_factory
-                            .create(
-                                &derived_configuration,
-                                Arc::clone(&schema),
-                                self.router_factory.get_query_cache_limit(),
-                            )
+                            .create(&derived_configuration, Arc::clone(&schema))
                             .await,
                     );
 

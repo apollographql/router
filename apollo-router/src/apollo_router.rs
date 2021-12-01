@@ -19,12 +19,12 @@ pub struct ApolloRouter {
 
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
-    pub fn new(
-        service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
-        query_cache_limit: usize,
-    ) -> Self {
+    pub fn new(service_registry: Arc<dyn ServiceRegistry>, schema: Arc<Schema>) -> Self {
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);

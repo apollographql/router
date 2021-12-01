@@ -19,25 +19,21 @@ where
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
     fn recreate(
         &self,
         router: Arc<Router>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
     ) -> future::BoxFuture<'static, Router>;
-    fn get_query_cache_limit(&self) -> usize;
 }
 
 #[derive(Default)]
-pub(crate) struct ApolloRouterFactory {
-    query_cache_limit: usize,
-}
+pub(crate) struct ApolloRouterFactory {}
+
 impl ApolloRouterFactory {
-    pub fn new(query_cache_limit: usize) -> Self {
-        Self { query_cache_limit }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -46,14 +42,11 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
-        tokio::task::spawn_blocking(move || {
-            ApolloRouter::new(Arc::new(service_registry), schema, query_cache_limit)
-        })
-        .map(|res| res.expect("ApolloRouter::new() is infallible; qed"))
-        .boxed()
+        tokio::task::spawn_blocking(move || ApolloRouter::new(Arc::new(service_registry), schema))
+            .map(|res| res.expect("ApolloRouter::new() is infallible; qed"))
+            .boxed()
     }
 
     fn recreate(
@@ -61,9 +54,8 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         router: Arc<ApolloRouter>,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        query_cache_limit: usize,
     ) -> future::BoxFuture<'static, ApolloRouter> {
-        let factory = self.create(configuration, schema, query_cache_limit);
+        let factory = self.create(configuration, schema);
 
         Box::pin(async move {
             // Use the "hot" entries in the supplied router to pre-populate
@@ -84,9 +76,5 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
             }
             new_router
         })
-    }
-
-    fn get_query_cache_limit(&self) -> usize {
-        self.query_cache_limit
     }
 }
