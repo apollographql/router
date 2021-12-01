@@ -45,20 +45,21 @@ impl ApolloRouter {
                 .expect("NaiveIntrospection instantiation panicked")
         };
 
-        // Start warming up the cache in a background task
-        {
-            let query_planner = Arc::clone(&query_planner);
-            tokio::spawn(async move {
-                if let Some(previous_router) = previous_router {
-                    for (query, operation, options) in
-                        previous_router.query_planner.get_hot_keys().await
-                    {
-                        // We can ignore errors because some of the queries that were previously in
-                        // the cache might not work with the new schema
-                        let _ = query_planner.get(query, operation, options).await;
-                    }
-                }
-            });
+        // Start warming up the cache
+        //
+        // We don't need to do this in background because the old server will keep running until
+        // this one is ready.
+        //
+        // We might lose the benefit of warming the cache up, since it could immediately get some
+        // queries that could have been precalculated. If we block on warming up, starting the
+        // router is slightly slower, but when reloading configuration there's no delay, we create
+        // the router before restarting the server
+        if let Some(previous_router) = previous_router {
+            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
+                // We can ignore errors because some of the queries that were previously in the
+                // cache might not work with the new schema
+                let _ = query_planner.get(query, operation, options).await;
+            }
         }
 
         Self {
