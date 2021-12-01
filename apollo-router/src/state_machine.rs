@@ -27,7 +27,6 @@ where
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        // TODO not sure why this is in an Arc...
         router: Arc<Router>,
         server_handle: HttpServerHandle,
     },
