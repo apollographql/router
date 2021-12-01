@@ -27,6 +27,7 @@ where
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
+        // TODO not sure why this is in an Arc...
         router: Arc<Router>,
         server_handle: HttpServerHandle,
     },
@@ -192,7 +193,11 @@ where
                             let schema = Arc::new(new_schema);
                             let router = Arc::new(
                                 self.router_factory
-                                    .recreate(router, &derived_configuration, Arc::clone(&schema))
+                                    .create(
+                                        &derived_configuration,
+                                        Arc::clone(&schema),
+                                        Some(&router),
+                                    )
                                     .await,
                             );
 
@@ -247,7 +252,11 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
                             let router = Arc::new(
                                 self.router_factory
-                                    .recreate(router, &derived_configuration, Arc::clone(&schema))
+                                    .create(
+                                        &derived_configuration,
+                                        Arc::clone(&schema),
+                                        Some(&router),
+                                    )
                                     .await,
                             );
 
@@ -344,7 +353,7 @@ where
                     let schema = Arc::new(schema);
                     let router = Arc::new(
                         self.router_factory
-                            .create(&derived_configuration, Arc::clone(&schema))
+                            .create(&derived_configuration, Arc::clone(&schema), None)
                             .await,
                     );
 

@@ -19,7 +19,11 @@ pub struct ApolloRouter {
 
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
-    pub fn new(service_registry: Arc<dyn ServiceRegistry>, schema: Arc<Schema>) -> Self {
+    pub async fn new(
+        service_registry: Arc<dyn ServiceRegistry>,
+        schema: Arc<Schema>,
+        previous_router: Option<&ApolloRouter>,
+    ) -> Self {
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
@@ -33,17 +37,32 @@ impl ApolloRouter {
             plan_cache_limit,
         ));
 
+        let naive_introspection = {
+            let schema = Arc::clone(&schema);
+            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
+                .map(|res| res.expect("todo"))
+                .await
+        };
+
+        if let Some(previous_router) = previous_router {
+            // It would be nice to get these keys concurrently by spawning
+            // futures in our loop. However, these calls to get call the
+            // v8 based query planner and running too many of these
+            // concurrently is a bad idea. One for the future...
+            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
+                // We can ignore errors, since we are just warming up the
+                // cache
+                let _ = query_planner.get(query, operation, options).await;
+            }
+        }
+
         Self {
-            naive_introspection: NaiveIntrospection::from_schema(&schema),
+            naive_introspection,
             query_planner,
             service_registry,
             query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
         }
-    }
-
-    pub fn get_query_planner(&self) -> Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>> {
-        self.query_planner.clone()
     }
 }
 

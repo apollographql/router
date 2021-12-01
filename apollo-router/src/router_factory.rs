@@ -15,17 +15,12 @@ where
     Router: graphql::Router<PreparedQuery>,
     PreparedQuery: graphql::PreparedQuery,
 {
-    fn create(
+    fn create<'a>(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-    ) -> future::BoxFuture<'static, Router>;
-    fn recreate(
-        &self,
-        router: Arc<Router>,
-        configuration: &Configuration,
-        schema: Arc<graphql::Schema>,
-    ) -> future::BoxFuture<'static, Router>;
+        previous_router: Option<&'a Router>,
+    ) -> future::BoxFuture<'a, Router>;
 }
 
 #[derive(Default)]
@@ -38,43 +33,13 @@ impl ApolloRouterFactory {
 }
 
 impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
-    fn create(
+    fn create<'a>(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-    ) -> future::BoxFuture<'static, ApolloRouter> {
+        previous_router: Option<&'a ApolloRouter>,
+    ) -> future::BoxFuture<'a, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
-        tokio::task::spawn_blocking(move || ApolloRouter::new(Arc::new(service_registry), schema))
-            .map(|res| res.expect("ApolloRouter::new() is infallible; qed"))
-            .boxed()
-    }
-
-    fn recreate(
-        &self,
-        router: Arc<ApolloRouter>,
-        configuration: &Configuration,
-        schema: Arc<graphql::Schema>,
-    ) -> future::BoxFuture<'static, ApolloRouter> {
-        let factory = self.create(configuration, schema);
-
-        Box::pin(async move {
-            // Use the "hot" entries in the supplied router to pre-populate
-            // our new router
-            let new_router = factory.await;
-            let hot_keys = router.get_query_planner().get_hot_keys().await;
-            // It would be nice to get these keys concurrently by spawning
-            // futures in our loop. However, these calls to get call the
-            // v8 based query planner and running too many of these
-            // concurrently is a bad idea. One for the future...
-            for key in hot_keys {
-                // We can ignore errors, since we are just warming up the
-                // cache
-                let _ = new_router
-                    .get_query_planner()
-                    .get(key.0, key.1, key.2)
-                    .await;
-            }
-            new_router
-        })
+        ApolloRouter::new(Arc::new(service_registry), schema, previous_router).boxed()
     }
 }
