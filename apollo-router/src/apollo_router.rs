@@ -37,11 +37,12 @@ impl ApolloRouter {
             plan_cache_limit,
         ));
 
+        // NaiveIntrospection instantiation can potentially block for some time
         let naive_introspection = {
             let schema = Arc::clone(&schema);
             tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
-                .map(|res| res.expect("todo"))
                 .await
+                .expect("NaiveIntrospection instantiation panicked")
         };
 
         // Start warming up the cache in a background task
