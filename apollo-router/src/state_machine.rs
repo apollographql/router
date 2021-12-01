@@ -195,7 +195,7 @@ where
                                     .create(
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        Some(&router),
+                                        Some(router),
                                     )
                                     .await,
                             );
@@ -254,7 +254,7 @@ where
                                     .create(
                                         &derived_configuration,
                                         Arc::clone(&schema),
-                                        Some(&router),
+                                        Some(router),
                                     )
                                     .await,
                             );

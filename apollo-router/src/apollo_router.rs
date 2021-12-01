@@ -22,7 +22,7 @@ impl ApolloRouter {
     pub async fn new(
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
-        previous_router: Option<&ApolloRouter>,
+        previous_router: Option<Arc<ApolloRouter>>,
     ) -> Self {
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
@@ -44,16 +44,20 @@ impl ApolloRouter {
                 .await
         };
 
-        if let Some(previous_router) = previous_router {
-            // It would be nice to get these keys concurrently by spawning
-            // futures in our loop. However, these calls to get call the
-            // v8 based query planner and running too many of these
-            // concurrently is a bad idea. One for the future...
-            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
-                // We can ignore errors, since we are just warming up the
-                // cache
-                let _ = query_planner.get(query, operation, options).await;
-            }
+        // Start warming up the cache in a background task
+        {
+            let query_planner = Arc::clone(&query_planner);
+            tokio::spawn(async move {
+                if let Some(previous_router) = previous_router {
+                    for (query, operation, options) in
+                        previous_router.query_planner.get_hot_keys().await
+                    {
+                        // We can ignore errors, since we are just warming up the
+                        // cache
+                        let _ = query_planner.get(query, operation, options).await;
+                    }
+                }
+            });
         }
 
         Self {

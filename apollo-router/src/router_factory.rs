@@ -19,8 +19,8 @@ where
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<&'a Router>,
-    ) -> future::BoxFuture<'a, Router>;
+        previous_router: Option<Arc<Router>>,
+    ) -> future::BoxFuture<'static, Router>;
 }
 
 #[derive(Default)]
@@ -33,12 +33,12 @@ impl ApolloRouterFactory {
 }
 
 impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
-    fn create<'a>(
+    fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<&'a ApolloRouter>,
-    ) -> future::BoxFuture<'a, ApolloRouter> {
+        previous_router: Option<Arc<ApolloRouter>>,
+    ) -> future::BoxFuture<'static, ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
         ApolloRouter::new(Arc::new(service_registry), schema, previous_router).boxed()
     }
