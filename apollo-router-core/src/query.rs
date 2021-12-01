@@ -374,13 +374,12 @@ impl From<ast::NamedType> for FieldType {
             .name()
             .expect("the node Name is not optional in the spec; qed")
             .text()
-            .to_string()
-            .to_lowercase();
+            .to_string();
         match name.as_str() {
-            "string" => Self::String,
-            "int" => Self::Int,
-            "float" => Self::Float,
-            "id" => Self::Id,
+            "String" => Self::String,
+            "Int" => Self::Int,
+            "Float" => Self::Float,
+            "ID" => Self::Id,
             _ => Self::Named(name),
         }
     }
