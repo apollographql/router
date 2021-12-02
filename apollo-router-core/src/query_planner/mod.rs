@@ -14,14 +14,8 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 /// Query planning options.
-#[derive(Clone, Eq, Hash, PartialEq, Debug)]
+#[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}
-
-impl Default for QueryPlanOptions {
-    fn default() -> QueryPlanOptions {
-        QueryPlanOptions {}
-    }
-}
 
 #[derive(Debug)]
 pub struct QueryPlan {
