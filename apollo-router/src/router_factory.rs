@@ -25,12 +25,6 @@ where
 #[derive(Default)]
 pub(crate) struct ApolloRouterFactory {}
 
-impl ApolloRouterFactory {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
 #[async_trait::async_trait]
 impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
     async fn create(
