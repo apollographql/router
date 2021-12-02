@@ -286,6 +286,10 @@ impl Query {
             }
         }
     }
+
+    pub(crate) fn get_root_object_type(&self, operation: impl AsRef<str>) -> Option<ObjectType> {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -376,9 +380,9 @@ impl From<ast::OperationDefinition> for Operation {
 }
 
 macro_rules! implement_object_type_or_interface {
-    ($name:ident, $ast_ty:ty) => {
+    ($visibility:vis $name:ident, $ast_ty:ty) => {
         #[derive(Debug)]
-        struct $name {
+        $visibility struct $name {
             name: String,
             fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
@@ -431,7 +435,7 @@ macro_rules! implement_object_type_or_interface {
 }
 
 // Spec: https://spec.graphql.org/draft/#sec-Objects
-implement_object_type_or_interface!(ObjectType, ast::ObjectTypeDefinition);
+implement_object_type_or_interface!(pub(crate) ObjectType, ast::ObjectTypeDefinition);
 // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
 implement_object_type_or_interface!(ObjectTypeExtension, ast::ObjectTypeExtension);
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
