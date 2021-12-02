@@ -13,6 +13,8 @@ pub struct Query {
     operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     object_types: HashMap<String, ObjectType>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    interfaces: HashMap<String, Interface>,
 }
 
 impl Query {
@@ -95,11 +97,24 @@ impl Query {
             })
             .collect();
 
+        let interfaces = document
+            .definitions()
+            .filter_map(|definition| {
+                if let ast::Definition::InterfaceTypeDefinition(interface) = definition {
+                    let interface = Interface::from(interface);
+                    Some((interface.name.clone(), interface))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Some(Query {
             string,
             fragments,
             operations,
             object_types,
+            interfaces,
         })
     }
 
@@ -293,58 +308,67 @@ impl From<ast::OperationDefinition> for Operation {
     }
 }
 
-#[derive(Debug)]
-struct ObjectType {
-    name: String,
-    fields: HashMap<String, FieldType>,
-    interfaces: Vec<String>,
-}
+macro_rules! implement_object_type_or_interface {
+    ($name:ident, $ast_ty:ty) => {
+        #[derive(Debug)]
+        struct $name {
+            name: String,
+            fields: HashMap<String, FieldType>,
+            interfaces: Vec<String>,
+        }
 
-impl From<ast::ObjectTypeDefinition> for ObjectType {
-    // Spec: https://spec.graphql.org/draft/#sec-Objects
-    fn from(object_type: ast::ObjectTypeDefinition) -> Self {
-        let name = object_type
-            .name()
-            .expect("the node Name is not optional in the spec; qed")
-            .text()
-            .to_string();
-        let fields = object_type
-            .fields_definition()
-            .iter()
-            .flat_map(|x| x.field_definitions())
-            .map(|x| {
-                let name = x
+        impl From<$ast_ty> for $name {
+            fn from(definition: $ast_ty) -> Self {
+                let name = definition
                     .name()
                     .expect("the node Name is not optional in the spec; qed")
                     .text()
                     .to_string();
-                let ty = x
-                    .ty()
-                    .expect("the node Type is not optional in the spec; qed")
-                    .into();
-                (name, ty)
-            })
-            .collect();
-        let interfaces = object_type
-            .implements_interfaces()
-            .iter()
-            .flat_map(|x| x.named_types())
-            .map(|x| {
-                x.name()
-                    .expect("neither Name neither NamedType are optionals; qed")
-                    .text()
-                    .to_string()
-            })
-            .collect();
+                let fields = definition
+                    .fields_definition()
+                    .iter()
+                    .flat_map(|x| x.field_definitions())
+                    .map(|x| {
+                        let name = x
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string();
+                        let ty = x
+                            .ty()
+                            .expect("the node Type is not optional in the spec; qed")
+                            .into();
+                        (name, ty)
+                    })
+                    .collect();
+                let interfaces = definition
+                    .implements_interfaces()
+                    .iter()
+                    .flat_map(|x| x.named_types())
+                    .map(|x| {
+                        x.name()
+                            .expect("neither Name neither NamedType are optionals; qed")
+                            .text()
+                            .to_string()
+                    })
+                    .collect();
 
-        ObjectType {
-            name,
-            fields,
-            interfaces,
+                $name {
+                    name,
+                    fields,
+                    interfaces,
+                }
+            }
         }
-    }
+    };
 }
 
+// Spec: https://spec.graphql.org/draft/#sec-Objects
+implement_object_type_or_interface!(ObjectType, ast::ObjectTypeDefinition);
+// Spec: https://spec.graphql.org/draft/#sec-Interfaces
+implement_object_type_or_interface!(Interface, ast::InterfaceTypeDefinition);
+
+// Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug)]
 enum FieldType {
     Named(String),
