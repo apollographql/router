@@ -1,0 +1,46 @@
+---
+source: apollo-router/src/configuration/mod.rs
+expression: config
+
+---
+server:
+  listen: "1.2.3.4:5"
+  cors: ~
+subgraphs:
+  example:
+    routing_url: foo
+opentelemetry:
+  otlp:
+    tracing:
+      exporter:
+        http:
+          endpoint: "http://example.org/"
+          headers:
+            foo: bar
+          protocol: Grpc
+          timeout: 42
+      trace_config:
+        sampler:
+          ParentBased:
+            TraceIdRatioBased: 0.42
+        max_events_per_span: 1
+        max_attributes_per_span: 2
+        max_links_per_span: 3
+        max_attributes_per_event: 4
+        max_attributes_per_link: 5
+        resource:
+          attrs:
+            key1:
+              String: value
+            key2:
+              Bool: true
+            key3:
+              I64: 42
+            key4:
+              F64: 42.0
+            key5:
+              Array:
+                String:
+                  - value1
+                  - value2
+
