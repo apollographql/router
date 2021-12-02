@@ -3,6 +3,7 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use router_bridge::plan;
+use serde::Deserialize;
 use std::sync::Arc;
 
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -35,11 +36,17 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
             operation_name: operation.unwrap_or_default(),
         };
 
-        tokio::task::spawn_blocking(|| {
-            plan::plan(context, options.into())
+        let query_plan_result = tokio::task::spawn_blocking(|| {
+            plan::plan::<QueryPlanResult>(context, options.into())
                 .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
         })
-        .await?
+        .await??;
+
+        if let Some(plan_node) = query_plan_result.node {
+            Ok(Arc::new(QueryPlan { root: plan_node }))
+        } else {
+            Err(QueryPlannerError::MissingRootPlanNode)
+        }
     }
 
     async fn get_hot_keys(&self) -> Vec<QueryKey> {
@@ -51,6 +58,14 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
     fn from(_: QueryPlanOptions) -> Self {
         plan::QueryPlanOptions::default()
     }
+}
+
+/// The root query plan container.
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(tag = "kind")]
+struct QueryPlanResult {
+    /// The hierarchical nodes that make up the query plan
+    node: Option<PlanNode>,
 }
 
 #[cfg(test)]

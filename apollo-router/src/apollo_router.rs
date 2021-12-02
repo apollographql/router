@@ -59,13 +59,8 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             )
             .await?;
 
-        if let Some(plan) = query_plan.node() {
-            tracing::debug!("query plan\n{:#?}", plan);
-            plan.validate_request(request, Arc::clone(&self.service_registry))?;
-        } else {
-            // TODO this should probably log something
-            return Err(stream::empty().boxed());
-        }
+        tracing::debug!("query plan\n{:#?}", query_plan);
+        query_plan.validate_request(request, Arc::clone(&self.service_registry))?;
 
         Ok(ApolloPreparedQuery {
             query_plan,
@@ -94,8 +89,6 @@ impl PreparedQuery for ApolloPreparedQuery {
             async move {
                 let response_task = self
                     .query_plan
-                    .node()
-                    .expect("we already ensured that the plan is some; qed")
                     .execute(
                         Arc::clone(&request),
                         Arc::clone(&self.service_registry),
