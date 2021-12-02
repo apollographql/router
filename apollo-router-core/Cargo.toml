@@ -2,7 +2,7 @@
 name = "apollo-router-core"
 version = "0.1.0-alpha.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
-edition = "2018"
+edition = "2021"
 license-file = "./LICENSE"
 
 [features]
