@@ -161,7 +161,7 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 pub enum ConfigurationKind {
     /// A static configuration.
     #[display(fmt = "Instance")]
-    Instance(Configuration),
+    Instance(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
@@ -189,7 +189,9 @@ impl ConfigurationKind {
             ConfigurationKind::Instance(instance) => {
                 stream::iter(vec![UpdateConfiguration(instance)]).boxed()
             }
-            ConfigurationKind::Stream(stream) => stream.map(UpdateConfiguration).boxed(),
+            ConfigurationKind::Stream(stream) => {
+                stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
+            }
             ConfigurationKind::File { path, watch, delay } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -206,11 +208,13 @@ impl ConfigurationKind {
                                     .filter_map(move |_| {
                                         future::ready(ConfigurationKind::read_config(&path).ok())
                                     })
-                                    .map(UpdateConfiguration)
+                                    .map(|x| UpdateConfiguration(Box::new(x)))
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateConfiguration(configuration)))
-                                    .boxed()
+                                stream::once(future::ready(UpdateConfiguration(Box::new(
+                                    configuration,
+                                ))))
+                                .boxed()
                             }
                         }
                         Err(err) => {
@@ -444,7 +448,7 @@ pub struct FederatedServer {
 #[derive(Debug)]
 enum Event {
     /// The configuration was updated.
-    UpdateConfiguration(Configuration),
+    UpdateConfiguration(Box<Configuration>),
 
     /// There are no more updates to the configuration
     NoMoreConfiguration,
@@ -619,7 +623,7 @@ mod tests {
                 .unwrap();
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         FederatedServer::builder()
-            .configuration(configuration)
+            .configuration(configuration.boxed())
             .schema(schema)
             .build()
             .serve()
