@@ -161,6 +161,7 @@ type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 pub enum ConfigurationKind {
     /// A static configuration.
     #[display(fmt = "Instance")]
+    #[from(types(Configuration))]
     Instance(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
@@ -623,7 +624,7 @@ mod tests {
                 .unwrap();
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         FederatedServer::builder()
-            .configuration(configuration.boxed())
+            .configuration(configuration)
             .schema(schema)
             .build()
             .serve()
