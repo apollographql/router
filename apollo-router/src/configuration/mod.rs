@@ -223,6 +223,7 @@ fn default_service_name() -> String {
     "router".to_string()
 }
 
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 fn default_service_namespace() -> String {
     "apollo".to_string()
 }
