@@ -11,7 +11,6 @@ pub struct QueryCache {
     cached: Mutex<LruCache<String, Option<Arc<Query>>>>,
     #[allow(clippy::type_complexity)]
     wait_map: Mutex<HashMap<String, broadcast::Sender<(String, Option<Arc<Query>>)>>>,
-    cache_limit: usize,
     schema: Arc<Schema>,
 }
 
@@ -21,7 +20,6 @@ impl QueryCache {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
             wait_map: Mutex::new(HashMap::new()),
-            cache_limit,
             schema,
         }
     }
