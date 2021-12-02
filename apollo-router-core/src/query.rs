@@ -85,29 +85,63 @@ impl Query {
             })
             .collect();
 
-        let object_types = document
-            .definitions()
-            .filter_map(|definition| {
-                if let ast::Definition::ObjectTypeDefinition(object_type) = definition {
-                    let object_type = ObjectType::from(object_type);
-                    Some((object_type.name.clone(), object_type))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        macro_rules! implement_object_type_or_interface_map {
+            ($ty:ty, $ty_extension:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+                let mut map = document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_ty(definition) = definition {
+                            let instance = <$ty>::from(definition);
+                            Some((instance.name.clone(), instance))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<HashMap<String, $ty>>();
 
-        let interfaces = document
-            .definitions()
-            .filter_map(|definition| {
-                if let ast::Definition::InterfaceTypeDefinition(interface) = definition {
-                    let interface = Interface::from(interface);
-                    Some((interface.name.clone(), interface))
-                } else {
-                    None
-                }
-            })
-            .collect();
+                document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_extension_ty(extension) = definition {
+                            Some(<$ty_extension>::from(extension))
+                        } else {
+                            None
+                        }
+                    })
+                    .for_each(|extension| {
+                        if let Some(instance) = map.get_mut(&extension.name) {
+                            instance.fields.extend(extension.fields);
+                            instance.interfaces.extend(extension.interfaces);
+                        } else {
+                            failfast_debug!(
+                                concat!(
+                                    stringify!($ty_extension),
+                                    " exists for {:?} but ",
+                                    stringify!($ty),
+                                    " could not be found."
+                                ),
+                                extension.name,
+                            );
+                        }
+                    });
+
+                map
+            }};
+        }
+
+        let object_types = implement_object_type_or_interface_map!(
+            ObjectType,
+            ObjectTypeExtension,
+            ast::Definition::ObjectTypeDefinition,
+            ast::Definition::ObjectTypeExtension,
+        );
+
+        let interfaces = implement_object_type_or_interface_map!(
+            Interface,
+            InterfaceExtension,
+            ast::Definition::InterfaceTypeDefinition,
+            ast::Definition::InterfaceTypeExtension,
+        );
 
         Some(Query {
             string,
@@ -365,8 +399,12 @@ macro_rules! implement_object_type_or_interface {
 
 // Spec: https://spec.graphql.org/draft/#sec-Objects
 implement_object_type_or_interface!(ObjectType, ast::ObjectTypeDefinition);
+// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
+implement_object_type_or_interface!(ObjectTypeExtension, ast::ObjectTypeExtension);
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
 implement_object_type_or_interface!(Interface, ast::InterfaceTypeDefinition);
+// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
+implement_object_type_or_interface!(InterfaceExtension, ast::InterfaceTypeExtension);
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug)]
