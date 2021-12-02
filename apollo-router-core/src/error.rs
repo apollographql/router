@@ -168,8 +168,8 @@ pub enum QueryPlannerError {
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
-    /// Failed to generate query plan.
-    MissingRootPlanNode,
+    /// Unhandled planner result.
+    UnhandledPlannerResult,
 }
 
 impl From<PlanningErrors> for QueryPlannerError {

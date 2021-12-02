@@ -1,6 +1,6 @@
 ---
-source: crates/apollo-router/tests/infrastructure_tests.rs
-expression: "include_str!(\"../../../examples/supergraph.graphql\")"
+source: apollo-router/tests/infrastructure_tests.rs
+expression: "include_str!(\"../../examples/supergraph.graphql\")"
 
 ---
 schema

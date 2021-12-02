@@ -36,16 +36,18 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
             operation_name: operation.unwrap_or_default(),
         };
 
-        let query_plan_result = tokio::task::spawn_blocking(|| {
-            plan::plan::<QueryPlanResult>(context, options.into())
+        let planner_result = tokio::task::spawn_blocking(|| {
+            plan::plan::<PlannerResult>(context, options.into())
                 .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
         })
         .await??;
 
-        if let Some(plan_node) = query_plan_result.node {
-            Ok(Arc::new(QueryPlan { root: plan_node }))
-        } else {
-            Err(QueryPlannerError::MissingRootPlanNode)
+        match planner_result {
+            PlannerResult::QueryPlan { node } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::Other => {
+                tracing::debug!("Unhandled planner result");
+                Err(QueryPlannerError::UnhandledPlannerResult)
+            }
         }
     }
 
@@ -63,9 +65,13 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 /// The root query plan container.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind")]
-struct QueryPlanResult {
-    /// The hierarchical nodes that make up the query plan
-    node: Option<PlanNode>,
+enum PlannerResult {
+    QueryPlan {
+        /// The hierarchical nodes that make up the query plan
+        node: PlanNode,
+    },
+    #[serde(other)]
+    Other,
 }
 
 #[cfg(test)]

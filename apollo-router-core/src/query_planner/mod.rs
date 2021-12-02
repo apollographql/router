@@ -24,7 +24,6 @@ impl Default for QueryPlanOptions {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(Deserialize))]
 pub struct QueryPlan {
     root: PlanNode,
 }
@@ -471,16 +470,15 @@ mod tests {
 
     #[test]
     fn query_plan_from_json() {
-        let query_plan: QueryPlan = serde_json::from_str(test_query_plan!()).unwrap();
+        let query_plan: PlanNode = serde_json::from_str(test_query_plan!()).unwrap();
         insta::assert_debug_snapshot!(query_plan);
     }
 
     #[test]
     fn service_usage() {
         assert_eq!(
-            serde_json::from_str::<QueryPlan>(test_query_plan!())
+            serde_json::from_str::<PlanNode>(test_query_plan!())
                 .unwrap()
-                .root
                 .service_usage()
                 .collect::<Vec<_>>(),
             vec!["product", "books", "product", "books", "product"]
@@ -490,9 +488,8 @@ mod tests {
     #[test]
     fn variable_usage() {
         assert_eq!(
-            serde_json::from_str::<QueryPlan>(test_query_plan!())
+            serde_json::from_str::<PlanNode>(test_query_plan!())
                 .unwrap()
-                .root
                 .variable_usage()
                 .collect::<Vec<_>>(),
             vec!["test_variable"]
