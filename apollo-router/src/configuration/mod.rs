@@ -16,6 +16,8 @@ use thiserror::Error;
 use typed_builder::TypedBuilder;
 use url::Url;
 
+use self::otlp::TraceConfig;
+
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 pub enum ConfigurationError {
@@ -221,6 +223,8 @@ pub struct Jaeger {
     #[serde(skip, default = "default_jaeger_password")]
     #[derivative(Default(value = "default_jaeger_password()"))]
     pub password: Option<String>,
+    #[serde(default)]
+    pub trace_config: Option<TraceConfig>,
 }
 
 fn default_service_name() -> String {

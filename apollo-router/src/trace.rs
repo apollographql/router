@@ -53,9 +53,11 @@ pub(crate) fn try_initialize_subscriber(
             }
             .build();
 
-            let provider = opentelemetry::sdk::trace::TracerProvider::builder()
-                .with_span_processor(batch)
-                .build();
+            let mut builder = opentelemetry::sdk::trace::TracerProvider::builder();
+            if let Some(trace_config) = &config.trace_config {
+                builder = builder.with_config(trace_config.trace_config());
+            }
+            let provider = builder.with_span_processor(batch).build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
             let _ = opentelemetry::global::set_tracer_provider(provider);
@@ -63,6 +65,7 @@ pub(crate) fn try_initialize_subscriber(
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
             opentelemetry::global::set_error_handler(handle_error)?;
+
             Ok(Arc::new(subscriber.with(telemetry)))
         }
         #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
