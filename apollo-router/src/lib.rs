@@ -429,14 +429,6 @@ pub struct FederatedServer {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
 
-    /// Limit query cache entries.
-    #[builder(default = 100)]
-    plan_cache_limit: usize,
-
-    /// Limit query cache entries.
-    #[builder(default = 100)]
-    query_cache_limit: usize,
-
     /// The Schema that the server will use. This can be static or a stream for hot reloading.
     schema: SchemaKind,
 
