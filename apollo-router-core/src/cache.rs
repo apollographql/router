@@ -15,7 +15,6 @@ use tokio::task::JoinError;
 ///
 /// The query planner performs LRU caching.
 pub struct CachingMap<E, K, V> {
-    // delegate: Option<Box<dyn CacheCallback<E, K, V> + Send + Sync + 'static>>,
     cached: Mutex<LruCache<K, Result<V, E>>>,
     #[allow(clippy::type_complexity)]
     wait_map: Mutex<HashMap<K, Sender<(K, Result<V, E>)>>>,
@@ -39,10 +38,8 @@ where
     Result<V, E>: Clone,
 {
     /// Creates a new CachingMap
-    // pub fn new(delegate: Option<Box<dyn CacheCallback<E, K, V>>>, cache_limit: usize) -> Self {
     pub fn new(cache_limit: usize) -> Self {
         Self {
-            // delegate,
             cached: Mutex::new(LruCache::new(cache_limit)),
             wait_map: Mutex::new(HashMap::new()),
             cache_limit,
@@ -223,7 +220,7 @@ mod tests {
 
         let q = |key: usize| async move { Ok(key) };
         for i in 0..14 {
-            cm.get_with(q, i).await;
+            cm.get_with(q, i).await.expect("gets the value");
         }
         let guard = cm.cached.lock().await;
         println!("{:?}", guard);
