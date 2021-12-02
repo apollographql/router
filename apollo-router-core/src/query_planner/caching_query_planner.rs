@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
-use crate::CacheCallback;
+use crate::CacheResolver;
 use async_trait::async_trait;
-use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
@@ -9,36 +9,41 @@ type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
+#[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
+    cm: CachingMap<QueryKey, Arc<QueryPlan>>,
+    phantom: PhantomData<T>,
+}
+
+/// A resolver for cache misses
+struct CachingQueryPlannerResolver<T: QueryPlanner> {
     delegate: T,
-    cm: CachingMap<QueryPlannerError, QueryKey, Arc<QueryPlan>>,
 }
 
-impl<T: QueryPlanner> fmt::Debug for CachingQueryPlanner<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CachingQueryPlanner").finish()
-    }
-}
-
-impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    /// Creates a new query planner that cache the results of another [`QueryPlanner`].
+impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
+    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cm = CachingMap::new(plan_cache_limit);
-        Self { delegate, cm }
+        let resolver = CachingQueryPlannerResolver { delegate };
+        let cm = CachingMap::new(Box::new(resolver), plan_cache_limit);
+        Self {
+            cm,
+            phantom: PhantomData,
+        }
     }
 }
 
 #[async_trait]
-impl<T: QueryPlanner> CacheCallback<QueryPlannerError, QueryKey, Arc<QueryPlan>>
-    for CachingQueryPlanner<T>
-{
-    async fn delegated_get(&self, key: QueryKey) -> Result<Arc<QueryPlan>, QueryPlannerError> {
-        self.delegate.get(key.0, key.1, key.2).await
+impl<T: QueryPlanner> CacheResolver<QueryKey, Arc<QueryPlan>> for CachingQueryPlannerResolver<T> {
+    async fn retrieve(&self, key: QueryKey) -> Result<Arc<QueryPlan>, CacheResolverError> {
+        self.delegate
+            .get(key.0, key.1, key.2)
+            .await
+            .map_err(|err| err.into())
     }
 }
 
 #[async_trait]
-impl<T: QueryPlanner + 'static> QueryPlanner for CachingQueryPlanner<T> {
+impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     async fn get(
         &self,
         query: String,
@@ -46,7 +51,7 @@ impl<T: QueryPlanner + 'static> QueryPlanner for CachingQueryPlanner<T> {
         options: QueryPlanOptions,
     ) -> PlanResult {
         let key = (query, operation, options);
-        self.cm.get(self, key).await
+        self.cm.get(key).await.map_err(|err| err.into())
     }
 
     async fn get_hot_keys(&self) -> Vec<QueryKey> {

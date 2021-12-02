@@ -4,9 +4,13 @@ use futures::prelude::*;
 use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
-#[async_trait::async_trait]
-pub trait CacheCallback<E, K, V> {
-    async fn delegated_get(&self, key: K) -> Result<V, E>;
+/// A cache resolution trait.
+///
+/// Clients of CachingMap are required to provider a resolver during Map creation. The resolver
+/// will be used to find values for cache misses. A Result is expected, because retrieval may fail.
+#[async_trait]
+pub trait CacheResolver<K, V> {
+    async fn retrieve(&self, key: K) -> Result<V, CacheResolverError>;
 }
 
 /// A planner key.
@@ -57,7 +61,7 @@ pub trait QueryPlanner: Send + Sync + Debug {
 /// Adds with_caching to any query planner.
 pub trait WithCaching: QueryPlanner
 where
-    Self: Sized + QueryPlanner,
+    Self: Sized + QueryPlanner + 'static,
 {
     /// Wrap this query planner in a caching decorator.
     /// The original query planner is consumed.
@@ -66,7 +70,7 @@ where
     }
 }
 
-impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized {}
+impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 
 /// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
 ///

@@ -150,6 +150,28 @@ impl From<QueryPlannerError> for FetchError {
     }
 }
 
+/// Error types for CacheResolver
+#[derive(Error, Debug, Display, Clone)]
+pub enum CacheResolverError {
+    /// Value retrieval failed: {0}
+    RetrievalError(Arc<QueryPlannerError>),
+
+    /// Cache update failed: {0}
+    JoinError(Arc<JoinError>),
+}
+
+impl From<JoinError> for CacheResolverError {
+    fn from(err: JoinError) -> Self {
+        CacheResolverError::JoinError(Arc::new(err))
+    }
+}
+
+impl From<QueryPlannerError> for CacheResolverError {
+    fn from(err: QueryPlannerError) -> Self {
+        CacheResolverError::RetrievalError(Arc::new(err))
+    }
+}
+
 /// An error while processing JSON data.
 #[derive(Debug, Error, Display)]
 pub enum JsonExtError {
@@ -167,6 +189,9 @@ pub enum QueryPlannerError {
 
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
+
+    /// Cache resolution failed: {0}
+    CacheResolverError(Arc<CacheResolverError>),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {
@@ -178,6 +203,12 @@ impl From<PlanningErrors> for QueryPlannerError {
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
         QueryPlannerError::JoinError(Arc::new(err))
+    }
+}
+
+impl From<CacheResolverError> for QueryPlannerError {
+    fn from(err: CacheResolverError) -> Self {
+        QueryPlannerError::CacheResolverError(Arc::new(err))
     }
 }
 
