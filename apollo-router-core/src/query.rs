@@ -15,6 +15,8 @@ pub struct Query {
     object_types: HashMap<String, ObjectType>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     interfaces: HashMap<String, Interface>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    operation_type_map: HashMap<OperationType, String>,
 }
 
 impl Query {
@@ -143,12 +145,43 @@ impl Query {
             ast::Definition::InterfaceTypeExtension,
         );
 
+        let operation_type_map = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                ast::Definition::SchemaDefinition(definition) => {
+                    Some(definition.root_operation_type_definitions())
+                }
+                ast::Definition::SchemaExtension(extension) => {
+                    Some(extension.root_operation_type_definitions())
+                }
+                _ => None,
+            })
+            .flatten()
+            .map(|definition| {
+                // Spec: https://spec.graphql.org/draft/#sec-Schema
+                let type_name = definition
+                    .named_type()
+                    .expect("the node NamedType is not optional in the spec; qed")
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let operation_type = OperationType::from(
+                    definition
+                        .operation_type()
+                        .expect("the node NamedType is not optional in the spec; qed"),
+                );
+                (operation_type, type_name)
+            })
+            .collect();
+
         Some(Query {
             string,
             fragments,
             operations,
             object_types,
             interfaces,
+            operation_type_map,
         })
     }
 
@@ -407,6 +440,7 @@ implement_object_type_or_interface!(Interface, ast::InterfaceTypeDefinition);
 implement_object_type_or_interface!(InterfaceExtension, ast::InterfaceTypeExtension);
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
+// TODO: custom scalars defined in https://spec.graphql.org/draft/#ScalarTypeDefinition
 #[derive(Debug)]
 enum FieldType {
     Named(String),
@@ -468,7 +502,32 @@ impl From<ast::NonNullType> for FieldType {
         } else if let Some(named) = non_null.named_type() {
             Self::NonNull(Box::new(named.into()))
         } else {
-            unreachable!("either the NamedType node is provider, either the ListType node; qed")
+            unreachable!("either the NamedType node is provided, either the ListType node; qed")
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+enum OperationType {
+    Query,
+    Mutation,
+    Subscription,
+}
+
+impl From<ast::OperationType> for OperationType {
+    // Spec: https://spec.graphql.org/draft/#OperationType
+    fn from(operation_type: ast::OperationType) -> Self {
+        if operation_type.query_token().is_some() {
+            Self::Query
+        } else if operation_type.mutation_token().is_some() {
+            Self::Mutation
+        } else if operation_type.subscription_token().is_some() {
+            Self::Subscription
+        } else {
+            unreachable!(
+                "either the `query` token is provided, either the `mutation` token, \
+                either the `subscription` token; qed"
+            )
         }
     }
 }
