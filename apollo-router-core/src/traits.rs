@@ -4,6 +4,11 @@ use futures::prelude::*;
 use std::sync::Arc;
 use std::{fmt::Debug, pin::Pin};
 
+#[async_trait::async_trait]
+pub trait CacheCallback<E, K, V> {
+    async fn delegated_get(&self, key: K) -> Result<V, E>;
+}
+
 /// A planner key.
 ///
 /// This type consists of a query string, an optional operation string and the
