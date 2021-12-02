@@ -98,6 +98,10 @@ impl Configuration {
             Err(errors)
         }
     }
+
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
 }
 
 /// Configuration for a subgraph.
