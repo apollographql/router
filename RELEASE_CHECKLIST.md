@@ -38,7 +38,7 @@ in lieu of an official changelog.
 6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock` and
     `CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
-7.  Request review from the Apollo GraphQL tooling team.
+7.  Request review from the Router team.
 
 ### Review
 
