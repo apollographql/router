@@ -13,7 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation -->
 
 
-# [v0.1.0-alpha.1] 2021-11-18
+# [v0.1.0-alpha.2] 2021-12-03
 
 ## :rocket::waxing_crescent_moon: Public alpha release
 
@@ -23,18 +23,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - JSON log output
 
-## :hammer_and_wrench: Maintenance
-
-- Reduced CI build times
-- Improved overall performance by reducing the number of clones when composing and building a graphql response
-- Logging feature flags: The two remaining features available are "otlp-grpc" (on by default) and "otpl-http"
-- Move composition benchmarks to a separate crate
-- OTLP / Tracing updates
-
 ## :bug: Fixes
 
-- Reworked the tests to make sure file configuration and schema updates work as indented (using the --watch flag)
-- Fix OTLP span reporting
+- Fix Open Telemetry Zipkin report errors [#180](https://github.com/apollographql/router/issues/180)
 
 # [v0.1.0-alpha.1] 2021-11-18
 
