@@ -14,6 +14,7 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum PrivateState<Router, PreparedQuery>
 where
     Router: graphql::Router<PreparedQuery>,
@@ -127,7 +128,7 @@ where
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
                     self.maybe_transition_to_running(Startup {
-                        configuration: Some(new_configuration),
+                        configuration: Some(*new_configuration),
                         schema,
                         phantom: PhantomData,
                     })
@@ -232,7 +233,7 @@ where
                 ) => {
                     tracing::info!("Reloading configuration");
 
-                    let mut derived_configuration = new_configuration.clone();
+                    let mut derived_configuration = (*new_configuration).clone();
                     match derived_configuration.load_subgraphs(&schema) {
                         Err(e) => {
                             let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
@@ -268,7 +269,7 @@ where
                                 .await
                             {
                                 Ok(server_handle) => Running {
-                                    configuration: Arc::new(new_configuration),
+                                    configuration: Arc::new(*new_configuration),
                                     schema,
                                     router,
                                     server_handle,
@@ -462,6 +463,7 @@ mod tests {
                         Configuration::builder()
                             .subgraphs(Default::default())
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema("".parse().unwrap()),
                     Shutdown
@@ -496,6 +498,7 @@ mod tests {
                         Configuration::builder()
                             .subgraphs(Default::default())
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema("".parse().unwrap()),
                     UpdateSchema(schema.parse().unwrap()),
@@ -534,6 +537,7 @@ mod tests {
                         Configuration::builder()
                             .subgraphs(Default::default())
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema("".parse().unwrap()),
                     UpdateConfiguration(
@@ -545,6 +549,7 @@ mod tests {
                             )
                             .subgraphs(Default::default())
                             .build()
+                            .boxed()
                     ),
                     Shutdown
                 ],
@@ -599,6 +604,7 @@ mod tests {
                                 .collect()
                             )
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema(r#"
                         enum join__Graph {
@@ -672,6 +678,7 @@ mod tests {
                                 .collect()
                             )
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema(r#"
                         enum join__Graph {
@@ -680,6 +687,7 @@ mod tests {
                     UpdateConfiguration(
                             Configuration::builder()
                                 .build()
+                                .boxed()
                         ),
                     Shutdown,
                 ],
@@ -733,6 +741,7 @@ mod tests {
                     UpdateConfiguration(
                         Configuration::builder()
                             .build()
+                            .boxed()
                     ),
                     UpdateSchema(r#"
                         enum join__Graph {
