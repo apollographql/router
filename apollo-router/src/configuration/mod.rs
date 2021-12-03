@@ -98,6 +98,10 @@ impl Configuration {
             Err(errors)
         }
     }
+
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
 }
 
 /// Configuration for a subgraph.
@@ -223,6 +227,7 @@ fn default_service_name() -> String {
     "router".to_string()
 }
 
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 fn default_service_namespace() -> String {
     "apollo".to_string()
 }
