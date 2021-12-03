@@ -88,7 +88,7 @@ impl Query {
             .collect();
 
         macro_rules! implement_object_type_or_interface_map {
-            ($ty:ty, $ty_extension:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+            ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
                 let mut map = document
                     .definitions()
                     .filter_map(|definition| {
@@ -105,7 +105,7 @@ impl Query {
                     .definitions()
                     .filter_map(|definition| {
                         if let $ast_extension_ty(extension) = definition {
-                            Some(<$ty_extension>::from(extension))
+                            Some(<$ty>::from(extension))
                         } else {
                             None
                         }
@@ -117,8 +117,7 @@ impl Query {
                         } else {
                             failfast_debug!(
                                 concat!(
-                                    stringify!($ty_extension),
-                                    " exists for {:?} but ",
+                                    "Extension exists for {:?} but ",
                                     stringify!($ty),
                                     " could not be found."
                                 ),
@@ -133,14 +132,12 @@ impl Query {
 
         let object_types = implement_object_type_or_interface_map!(
             ObjectType,
-            ObjectTypeExtension,
             ast::Definition::ObjectTypeDefinition,
             ast::Definition::ObjectTypeExtension,
         );
 
         let interfaces = implement_object_type_or_interface_map!(
             Interface,
-            InterfaceExtension,
             ast::Definition::InterfaceTypeDefinition,
             ast::Definition::InterfaceTypeExtension,
         );
@@ -305,7 +302,7 @@ impl Query {
             .iter()
             .flat_map(|(k, v)| {
                 if let Some(ty) = operation_variable_types.get(k) {
-                    (!ty.validate_value(v, &self.object_types)).then(|| {
+                    (!ty.validate_value(v, &self.object_types, &self.interfaces)).then(|| {
                         FetchError::ValidationInvalidTypeVariable {
                             name: k.to_string(),
                         }
@@ -441,7 +438,7 @@ impl From<ast::OperationDefinition> for Operation {
 }
 
 macro_rules! implement_object_type_or_interface {
-    ($visibility:vis $name:ident, $ast_ty:ty) => {
+    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
         #[derive(Debug)]
         $visibility struct $name {
             name: String,
@@ -449,6 +446,21 @@ macro_rules! implement_object_type_or_interface {
             interfaces: Vec<String>,
         }
 
+        impl $name {
+            fn get_field<'a>(
+                &'a self,
+                name: &str,
+                interfaces: &'a HashMap<String, Interface>,
+            ) -> Option<&'a FieldType> {
+                self.fields.get(name).or_else(|| {
+                    interfaces
+                        .get(name)
+                        .and_then(|x| x.get_field(name, interfaces))
+                })
+            }
+        }
+
+        $(
         impl From<$ast_ty> for $name {
             fn from(definition: $ast_ty) -> Self {
                 let name = definition
@@ -492,17 +504,24 @@ macro_rules! implement_object_type_or_interface {
                 }
             }
         }
+        )+
     };
 }
 
 // Spec: https://spec.graphql.org/draft/#sec-Objects
-implement_object_type_or_interface!(pub(crate) ObjectType, ast::ObjectTypeDefinition);
 // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-implement_object_type_or_interface!(ObjectTypeExtension, ast::ObjectTypeExtension);
+implement_object_type_or_interface!(
+    pub(crate) ObjectType =>
+    ast::ObjectTypeDefinition,
+    ast::ObjectTypeExtension,
+);
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
-implement_object_type_or_interface!(Interface, ast::InterfaceTypeDefinition);
 // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-implement_object_type_or_interface!(InterfaceExtension, ast::InterfaceTypeExtension);
+implement_object_type_or_interface!(
+    Interface =>
+    ast::InterfaceTypeDefinition,
+    ast::InterfaceTypeExtension,
+);
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 // TODO: custom scalars defined in https://spec.graphql.org/draft/#ScalarTypeDefinition
@@ -519,24 +538,29 @@ enum FieldType {
 }
 
 impl FieldType {
-    fn validate_value(&self, value: &Value, object_types: &HashMap<String, ObjectType>) -> bool {
+    fn validate_value(
+        &self,
+        value: &Value,
+        object_types: &HashMap<String, ObjectType>,
+        interfaces: &HashMap<String, Interface>,
+    ) -> bool {
         match (self, value) {
             (FieldType::String, Value::String(_)) => true,
             (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
             (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
             (FieldType::Id, Value::String(_)) => true,
             (FieldType::Boolean, Value::Bool(_)) => true,
-            (FieldType::List(inner_ty), Value::Array(vec)) => {
-                vec.iter().all(|x| inner_ty.validate_value(x, object_types))
-            }
+            (FieldType::List(inner_ty), Value::Array(vec)) => vec
+                .iter()
+                .all(|x| inner_ty.validate_value(x, object_types, interfaces)),
             (FieldType::NonNull(inner_ty), value) => {
-                !value.is_null() && inner_ty.validate_value(value, object_types)
+                !value.is_null() && inner_ty.validate_value(value, object_types, interfaces)
             }
             (FieldType::Named(name), value) if value.is_object() => {
                 if let Some(object_ty) = object_types.get(name) {
                     value.as_object().unwrap().iter().all(|(k, v)| {
-                        if let Some(field_ty) = object_ty.fields.get(k) {
-                            field_ty.validate_value(v, object_types)
+                        if let Some(field_ty) = object_ty.get_field(k, interfaces) {
+                            field_ty.validate_value(v, object_types, interfaces)
                         } else {
                             false
                         }
