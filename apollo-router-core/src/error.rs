@@ -192,6 +192,9 @@ pub enum QueryPlannerError {
 
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
+
+    /// Unhandled planner result.
+    UnhandledPlannerResult,
 }
 
 impl From<PlanningErrors> for QueryPlannerError {
