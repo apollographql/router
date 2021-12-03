@@ -25,7 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :bug: Fixes
 
-- Fix Open Telemetry Zipkin report errors [#180](https://github.com/apollographql/router/issues/180)
+- Fix Open Telemetry report errors when using Zipkin [#180](https://github.com/apollographql/router/issues/180)
 
 # [v0.1.0-alpha.1] 2021-11-18
 
