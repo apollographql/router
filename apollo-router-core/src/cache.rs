@@ -57,9 +57,8 @@ where
         }
 
         // Holding a lock across the delegated get is a bad idea because
-        // the delegate get() calls into v8 for processing of the plan.
-        // This would block all other get() requests for a potentially
-        // long time.
+        // the delegate get() could take a long time during which all
+        // other get() requests are blocked.
         // Alternatively, if we don't hold the lock, there is a risk
         // that we will do the work multiple times. This is also
         // sub-optimal.
@@ -70,8 +69,8 @@ where
         //
         // This is more complex than either of the two simple
         // alternatives but succeeds in providing a mechanism where each
-        // client only waits for uncached QueryPlans they are going to
-        // use AND avoids generating the plan multiple times.
+        // client only waits for uncached values that they are going to
+        // use AND avoids generating the value multiple times.
 
         let mut locked_wait_map = self.wait_map.lock().await;
 
@@ -87,11 +86,11 @@ where
                 drop(locked_wait_map);
                 // Our use case is very specific, so we are sure
                 // that we won't get any errors here.
-                let (recv_key, recv_plan) = receiver.recv().await.expect(
+                let (recv_key, recv_value) = receiver.recv().await.expect(
                     "the sender won't ever be dropped before all the receivers finish; qed",
                 );
                 debug_assert_eq!(recv_key, key);
-                recv_plan
+                recv_value
             }
             None => {
                 let (tx, _rx) = broadcast::channel(1);
@@ -137,6 +136,8 @@ mod tests {
     use super::*;
     use crate::CacheResolverError;
     use async_trait::async_trait;
+    use futures::future::join_all;
+    use mockall::mock;
     use test_log::test;
 
     struct HasACache {
@@ -146,10 +147,18 @@ mod tests {
     struct HasACacheResolver {}
 
     impl HasACache {
-        fn new(limit: usize) -> Self {
-            let resolver = Box::new(HasACacheResolver {});
-            let cm = CachingMap::new(resolver, limit);
+        // fn new(resolver: limit: usize) -> Self {
+        fn new(
+            resolver: Box<(dyn CacheResolver<usize, usize> + Send + Sync)>,
+            cache_limit: usize,
+        ) -> Self {
+            // let resolver = Box::new(HasACacheResolver {});
+            let cm = CachingMap::new(resolver, cache_limit);
             Self { cm }
+        }
+
+        async fn get(&self, key: usize) -> Result<usize, CacheResolverError> {
+            self.cm.get(key).await
         }
     }
 
@@ -160,15 +169,43 @@ mod tests {
         }
     }
 
+    mock! {
+        HasACacheResolver {}
+
+        #[async_trait]
+        impl CacheResolver<usize, usize> for HasACacheResolver {
+            async fn retrieve(&self, key: usize) -> Result<usize, CacheResolverError>;
+        }
+    }
+
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
-        let cache = HasACache::new(13);
+        let cache = HasACache::new(Box::new(HasACacheResolver {}), 13);
 
         for i in 0..14 {
-            cache.cm.get(i).await.expect("gets the value");
+            cache.get(i).await.expect("gets the value");
         }
         let guard = cache.cm.cached.lock().await;
-        println!("{:?}", guard);
         assert_eq!(guard.len(), 13);
+    }
+
+    #[test(tokio::test)]
+    async fn it_should_only_delegate_once_per_key() {
+        let mut mock = MockHasACacheResolver::new();
+
+        mock.expect_retrieve().times(1).return_const(Ok(1));
+
+        let cache = HasACache::new(Box::new(mock), 10);
+
+        // Let's trigger 100 concurrent gets of the same value and ensure only
+        // one delegated retrieve is made
+        let computations = (0..100).map(|_| cache.get(1));
+        let _ = join_all(computations)
+            .await
+            .into_iter()
+            .map(|res| assert_eq!(1, res.unwrap()));
+        // To be really sure, check there is only one value in the cache
+        let guard = cache.cm.cached.lock().await;
+        assert_eq!(guard.len(), 1);
     }
 }
