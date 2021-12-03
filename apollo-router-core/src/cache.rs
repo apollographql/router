@@ -1,4 +1,5 @@
 use crate::{CacheResolver, CacheResolverError};
+use derivative::Derivative;
 use futures::lock::Mutex;
 use lru::LruCache;
 use std::cmp::Eq;
@@ -16,20 +17,17 @@ pub type CacheResult<V> = Result<V, CacheResolverError>;
 /// the cache relies on the resolver to provide values. There is no way to manually remove, update
 /// or otherwise invalidate a cache value at this time. Values will be evicted from the cache once
 /// the cache_limit is reached.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct CachingMap<K, V> {
+    #[derivative(Debug = "ignore")]
     cached: Mutex<LruCache<K, CacheResult<V>>>,
     #[allow(clippy::type_complexity)]
+    #[derivative(Debug = "ignore")]
     wait_map: Mutex<HashMap<K, Sender<(K, CacheResult<V>)>>>,
     cache_limit: usize,
+    #[derivative(Debug = "ignore")]
     resolver: Box<dyn CacheResolver<K, V> + Send + Sync>,
-}
-
-impl<K, V> fmt::Debug for CachingMap<K, V> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CachingMap")
-            .field("cache_limit", &self.cache_limit)
-            .finish()
-    }
 }
 
 impl<K, V> CachingMap<K, V>
