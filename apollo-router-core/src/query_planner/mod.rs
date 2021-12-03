@@ -241,9 +241,9 @@ impl PlanNode {
         let required = self.variable_usage().collect::<HashSet<_>>();
         let provided = request
             .variables
-            .as_ref()
-            .map(|v| v.keys().map(|x| x.as_str()).collect::<HashSet<_>>())
-            .unwrap_or_default();
+            .keys()
+            .map(|x| x.as_str())
+            .collect::<HashSet<_>>();
         required
             .difference(&provided)
             .map(|x| FetchError::ValidationMissingVariable {
@@ -295,11 +295,10 @@ impl FetchNode {
 
             let mut variables = Object::with_capacity(1 + variable_usages.len());
             variables.extend(variable_usages.iter().filter_map(|key| {
-                request.variables.as_ref().map(|v| {
-                    v.get(key)
-                        .map(|value| (key.clone(), value.clone()))
-                        .unwrap_or_default()
-                })
+                request
+                    .variables
+                    .get(key)
+                    .map(|value| (key.clone(), value.clone()))
             }));
 
             {
@@ -318,7 +317,7 @@ impl FetchNode {
                 .stream(
                     Request::builder()
                         .query(operation)
-                        .variables(Some(Arc::new(variables)))
+                        .variables(Arc::new(variables))
                         .build(),
                 )
                 .await
@@ -390,9 +389,8 @@ impl FetchNode {
                     .filter_map(|key| {
                         request
                             .variables
-                            .as_ref()
-                            .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                            .unwrap_or_default()
+                            .get(key)
+                            .map(|value| (key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
             );

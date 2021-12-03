@@ -20,9 +20,9 @@ pub struct Request {
     pub operation_name: Option<String>,
 
     /// The optional variables in the form of a json object.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
     #[builder(default)]
-    pub variables: Option<Arc<Object>>,
+    pub variables: Arc<Object>,
 
     ///  extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
