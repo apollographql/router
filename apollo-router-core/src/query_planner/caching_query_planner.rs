@@ -53,6 +53,7 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         let key = (query, operation, options);
         self.cm.get(key).await.map_err(|err| err.into())
     }
+}
 
     async fn get_hot_keys(&self) -> Vec<QueryKey> {
         self.cm.get_hot_keys().await
@@ -89,10 +90,6 @@ mod tests {
         ) -> PlanResult {
             self.sync_get(query, operation, options)
         }
-
-        async fn get_hot_keys(&self) -> Vec<QueryKey> {
-            vec![]
-        }
     }
 
     #[test(tokio::test)]
@@ -105,7 +102,7 @@ mod tests {
                 PlanningErrors { errors: Vec::new() },
             ))));
 
-        let planner = delegate.with_caching(10);
+        let planner = CachingQueryPlanner::new(delegate, 10);
 
         for _ in 0..5 {
             assert!(planner
