@@ -29,7 +29,7 @@ async-trait = "0.1.51"
 atty = "0.2.14"
 bytes = "1.1.0"
 derivative = "2.2.0"
-derive_more = "0.99.16"
+derive_more = "0.99.17"
 directories = "4.0.1"
 displaydoc = "0.2"
 futures = { version = "0.3.18", features = ["thread-pool"] }
@@ -44,7 +44,7 @@ opentelemetry-jaeger = { version = "0.15.0", features = [
 opentelemetry-otlp = { version = "0.9.0", default-features = false, features = [
     "serialize",
 ], optional = true }
-reqwest = { version = "0.11.6", features = ["json", "stream"] }
+reqwest = { version = "0.11.7", features = ["json", "stream"] }
 reqwest-middleware = "0.1.2"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 serde = { version = "1.0.130", features = ["derive", "rc"] }
@@ -72,7 +72,7 @@ httpmock = "0.6.4"
 insta = "1.8.0"
 maplit = "1.0.2"
 mockall = "0.10.2"
-reqwest = { version = "0.11.6", features = ["json", "stream"] }
+reqwest = { version = "0.11.7", features = ["json", "stream"] }
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
