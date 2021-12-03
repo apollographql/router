@@ -30,6 +30,10 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
             phantom: PhantomData,
         }
     }
+
+    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
+        self.cm.get_hot_keys().await
+    }
 }
 
 #[async_trait]
@@ -52,11 +56,6 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     ) -> PlanResult {
         let key = (query, operation, options);
         self.cm.get(key).await.map_err(|err| err.into())
-    }
-}
-
-    async fn get_hot_keys(&self) -> Vec<QueryKey> {
-        self.cm.get_hot_keys().await
     }
 }
 
