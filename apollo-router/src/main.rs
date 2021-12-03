@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
                 delay: None,
             }
         })
-        .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build()));
+        .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
     ensure!(
         opt.supergraph_path.is_some(),
