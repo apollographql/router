@@ -63,11 +63,10 @@ impl Query {
         let parser = apollo_parser::Parser::new(string.as_str());
         let tree = parser.parse();
 
-        if !tree.errors().is_empty() {
+        if tree.errors().next().is_some() {
             failfast_debug!(
                 "Parsing error(s): {}",
                 tree.errors()
-                    .iter()
                     .map(|err| format!("{:?}", err))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -341,12 +340,8 @@ impl Query {
                         .to_graphql_error(None)
                     })
                 } else {
-                    Some(
-                        FetchError::ValidationUnknownVariable {
-                            name: k.to_string(),
-                        }
-                        .to_graphql_error(None),
-                    )
+                    failfast_debug!("Received variable unknown to the query: {:?}", k);
+                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -580,7 +575,13 @@ impl FieldType {
             (FieldType::String, Value::String(_)) => true,
             (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
             (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
-            (FieldType::Id, Value::String(_)) => true,
+            // "The ID scalar type represents a unique identifier, often used to refetch an object
+            // or as the key for a cache. The ID type is serialized in the same way as a String;
+            // however, it is not intended to be human-readable. While it is often numeric, it
+            // should always serialize as a String."
+            //
+            // In practice it seems Int works too
+            (FieldType::Id, Value::String(_) | Value::Number(_)) => true,
             (FieldType::Boolean, Value::Bool(_)) => true,
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
@@ -603,6 +604,9 @@ impl FieldType {
                     false
                 }
             }
+            // NOTE: graphql's types are all optional by default
+            // TODO add integration test for this
+            (_, Value::Null) => true,
             _ => false,
         }
     }
@@ -858,5 +862,15 @@ mod tests {
         assert_eq_and_ordered!(response.data, untouched.data);
         query.format_response(&mut response, Some("MyOperation"));
         assert_eq_and_ordered!(response.data, json! {{ "foo": "1" }});
+    }
+
+    #[test]
+    fn variable_validation() {
+        let schema: Schema = "".parse().unwrap();
+        let request = Request::builder()
+            .variables(Object::new())
+            .query("query Foo($bar:Int){name}")
+            .build();
+        let query = Query::parse(&request.query, &schema).unwrap();
     }
 }

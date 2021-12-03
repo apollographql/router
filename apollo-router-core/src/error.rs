@@ -33,12 +33,6 @@ pub enum FetchError {
         name: String,
     },
 
-    /// Variable type is not defined in the query: '{name}'
-    ValidationUnknownVariable {
-        /// Name of the variable.
-        name: String,
-    },
-
     /// Query could not be planned: {reason}
     ValidationPlanningError {
         /// The failure reason.
