@@ -136,7 +136,7 @@ mod tests {
     use super::*;
     use crate::CacheResolverError;
     use async_trait::async_trait;
-    use futures::future::join_all;
+    use futures::stream::{FuturesUnordered, StreamExt};
     use mockall::mock;
     use test_log::test;
 
@@ -199,11 +199,12 @@ mod tests {
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made
-        let computations = (0..100).map(|_| cache.get(1));
-        let _ = join_all(computations)
-            .await
-            .into_iter()
-            .map(|res| assert_eq!(1, res.unwrap()));
+        let mut computations: FuturesUnordered<_> = (0..100).map(|_| cache.get(1)).collect();
+
+        while let Some(result) = computations.next().await {
+            result.expect("result retrieved");
+        }
+
         // To be really sure, check there is only one value in the cache
         let guard = cache.cm.cached.lock().await;
         assert_eq!(guard.len(), 1);
