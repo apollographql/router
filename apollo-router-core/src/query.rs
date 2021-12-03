@@ -287,8 +287,46 @@ impl Query {
         }
     }
 
-    pub(crate) fn get_root_object_type(&self, operation: impl AsRef<str>) -> Option<ObjectType> {
-        todo!()
+    /// TODO
+    pub fn validate_variable_types(&self, request: &Request) -> Result<(), Response> {
+        let operation_name = request.operation_name.as_deref();
+        let operation_variable_types =
+            self.operations
+                .iter()
+                .fold(HashMap::new(), |mut acc, operation| {
+                    if operation_name.is_none() || operation.name.as_deref() == operation_name {
+                        acc.extend(operation.variables.iter())
+                    }
+                    acc
+                });
+
+        let errors = request
+            .variables
+            .iter()
+            .flat_map(|(k, v)| {
+                if let Some(ty) = operation_variable_types.get(k) {
+                    (!ty.validate_value(v, &self.object_types)).then(|| {
+                        FetchError::ValidationInvalidTypeVariable {
+                            name: k.to_string(),
+                        }
+                        .to_graphql_error(None)
+                    })
+                } else {
+                    Some(
+                        FetchError::ValidationUnknownVariable {
+                            name: k.to_string(),
+                        }
+                        .to_graphql_error(None),
+                    )
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Response::builder().errors(errors).build())
+        }
     }
 }
 
@@ -359,6 +397,7 @@ impl From<ast::Selection> for Selection {
 struct Operation {
     name: Option<String>,
     selection_set: Vec<Selection>,
+    variables: HashMap<String, FieldType>,
 }
 
 impl From<ast::OperationDefinition> for Operation {
@@ -371,10 +410,32 @@ impl From<ast::OperationDefinition> for Operation {
             .selections()
             .map(Into::into)
             .collect();
+        let variables = operation
+            .variable_definitions()
+            .iter()
+            .flat_map(|x| x.variable_definitions())
+            .map(|definition| {
+                let name = definition
+                    .variable()
+                    .expect("the node Variable is not optional in the spec; qed")
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let ty = FieldType::from(
+                    definition
+                        .ty()
+                        .expect("the node Type is not optional in the spec; qed"),
+                );
+
+                (name, ty)
+            })
+            .collect();
 
         Operation {
             selection_set,
             name,
+            variables,
         }
     }
 }
@@ -455,6 +516,38 @@ enum FieldType {
     Float,
     Id,
     Boolean,
+}
+
+impl FieldType {
+    fn validate_value(&self, value: &Value, object_types: &HashMap<String, ObjectType>) -> bool {
+        match (self, value) {
+            (FieldType::String, Value::String(_)) => true,
+            (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
+            (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
+            (FieldType::Id, Value::String(_)) => true,
+            (FieldType::Boolean, Value::Bool(_)) => true,
+            (FieldType::List(inner_ty), Value::Array(vec)) => {
+                vec.iter().all(|x| inner_ty.validate_value(x, object_types))
+            }
+            (FieldType::NonNull(inner_ty), value) => {
+                !value.is_null() && inner_ty.validate_value(value, object_types)
+            }
+            (FieldType::Named(name), value) if value.is_object() => {
+                if let Some(object_ty) = object_types.get(name) {
+                    value.as_object().unwrap().iter().all(|(k, v)| {
+                        if let Some(field_ty) = object_ty.fields.get(k) {
+                            field_ty.validate_value(v, object_types)
+                        } else {
+                            false
+                        }
+                    })
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 impl From<ast::Type> for FieldType {

@@ -100,11 +100,21 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             return Err(stream::empty().boxed());
         }
 
+        let query = self
+            .query_cache
+            .get_query(&request.query)
+            .instrument(tracing::info_span!("query_parsing"))
+            .await;
+
+        if let Some(query) = query.as_ref() {
+            query.validate_variable_types(request)?;
+        }
+
         Ok(ApolloPreparedQuery {
             query_plan,
             service_registry: Arc::clone(&self.service_registry),
             schema: Arc::clone(&self.schema),
-            query_cache: Arc::clone(&self.query_cache),
+            query,
         })
     }
 }
@@ -115,7 +125,7 @@ pub struct ApolloPreparedQuery {
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
-    query_cache: Arc<QueryCache>,
+    query: Option<Arc<Query>>,
 }
 
 #[async_trait::async_trait]
@@ -125,7 +135,7 @@ impl PreparedQuery for ApolloPreparedQuery {
         let span = Span::current();
         stream::once(
             async move {
-                let response_task = self
+                let mut response = self
                     .query_plan
                     .node()
                     .expect("we already ensured that the plan is some; qed")
@@ -134,15 +144,10 @@ impl PreparedQuery for ApolloPreparedQuery {
                         Arc::clone(&self.service_registry),
                         Arc::clone(&self.schema),
                     )
-                    .instrument(tracing::info_span!(parent: &span, "execution"));
-                let query_task = self
-                    .query_cache
-                    .get_query(&request.query)
-                    .instrument(tracing::info_span!(parent: &span, "query_parsing"));
+                    .instrument(tracing::info_span!(parent: &span, "execution"))
+                    .await;
 
-                let (mut response, query) = tokio::join!(response_task, query_task);
-
-                if let Some(query) = query {
+                if let Some(query) = self.query {
                     tracing::debug_span!(parent: &span, "format_response").in_scope(|| {
                         query.format_response(&mut response, request.operation_name.as_deref())
                     });
