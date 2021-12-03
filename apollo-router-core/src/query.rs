@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use apollo_parser::ast;
 use derivative::Derivative;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
@@ -17,6 +17,8 @@ pub struct Query {
     interfaces: HashMap<String, Interface>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operation_type_map: HashMap<OperationType, String>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    custom_scalars: HashSet<String>,
 }
 
 impl Query {
@@ -172,6 +174,29 @@ impl Query {
             })
             .collect();
 
+        let custom_scalars = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#sec-Scalars
+                // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
+                ast::Definition::ScalarTypeDefinition(definition) => Some(
+                    definition
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                ast::Definition::ScalarTypeExtension(extension) => Some(
+                    extension
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+
         Some(Query {
             string,
             fragments,
@@ -179,6 +204,7 @@ impl Query {
             object_types,
             interfaces,
             operation_type_map,
+            custom_scalars,
         })
     }
 
@@ -302,7 +328,13 @@ impl Query {
             .iter()
             .flat_map(|(k, v)| {
                 if let Some(ty) = operation_variable_types.get(k) {
-                    (!ty.validate_value(v, &self.object_types, &self.interfaces)).then(|| {
+                    (!ty.validate_value(
+                        v,
+                        &self.object_types,
+                        &self.interfaces,
+                        &self.custom_scalars,
+                    ))
+                    .then(|| {
                         FetchError::ValidationInvalidTypeVariable {
                             name: k.to_string(),
                         }
@@ -524,7 +556,6 @@ implement_object_type_or_interface!(
 );
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-// TODO: custom scalars defined in https://spec.graphql.org/draft/#ScalarTypeDefinition
 #[derive(Debug)]
 enum FieldType {
     Named(String),
@@ -543,6 +574,7 @@ impl FieldType {
         value: &Value,
         object_types: &HashMap<String, ObjectType>,
         interfaces: &HashMap<String, Interface>,
+        custom_scalars: &HashSet<String>,
     ) -> bool {
         match (self, value) {
             (FieldType::String, Value::String(_)) => true,
@@ -552,15 +584,17 @@ impl FieldType {
             (FieldType::Boolean, Value::Bool(_)) => true,
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
-                .all(|x| inner_ty.validate_value(x, object_types, interfaces)),
+                .all(|x| inner_ty.validate_value(x, object_types, interfaces, custom_scalars)),
             (FieldType::NonNull(inner_ty), value) => {
-                !value.is_null() && inner_ty.validate_value(value, object_types, interfaces)
+                !value.is_null()
+                    && inner_ty.validate_value(value, object_types, interfaces, custom_scalars)
             }
+            (FieldType::Named(name), _) if custom_scalars.contains(name) => true,
             (FieldType::Named(name), value) if value.is_object() => {
                 if let Some(object_ty) = object_types.get(name) {
                     value.as_object().unwrap().iter().all(|(k, v)| {
                         if let Some(field_ty) = object_ty.get_field(k, interfaces) {
-                            field_ty.validate_value(v, object_types, interfaces)
+                            field_ty.validate_value(v, object_types, interfaces, custom_scalars)
                         } else {
                             false
                         }
