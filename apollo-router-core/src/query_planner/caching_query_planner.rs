@@ -111,8 +111,10 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
             }
         }
     }
+}
 
-    async fn get_hot_keys(&self) -> Vec<QueryKey> {
+impl<T: QueryPlanner> CachingQueryPlanner<T> {
+    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
         let locked_cache = self.cached.lock().await;
         locked_cache
             .iter()
@@ -152,10 +154,6 @@ mod tests {
         ) -> PlanResult {
             self.sync_get(query, operation, options)
         }
-
-        async fn get_hot_keys(&self) -> Vec<QueryKey> {
-            vec![]
-        }
     }
 
     #[test(tokio::test)]
@@ -168,7 +166,7 @@ mod tests {
                 PlanningErrors { errors: Vec::new() },
             ))));
 
-        let planner = delegate.with_caching(10);
+        let planner = CachingQueryPlanner::new(delegate, 10);
 
         for _ in 0..5 {
             assert!(planner

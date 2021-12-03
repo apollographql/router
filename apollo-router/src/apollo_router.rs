@@ -11,7 +11,7 @@ use tracing_futures::WithSubscriber;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Arc<dyn QueryPlanner>,
+    query_planner: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
@@ -19,23 +19,56 @@ pub struct ApolloRouter {
 
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
-    pub fn new(
-        query_planner: Arc<dyn QueryPlanner>,
+    pub async fn new(
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
-        query_cache_limit: usize,
+        previous_router: Option<Arc<ApolloRouter>>,
     ) -> Self {
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_planner = Arc::new(CachingQueryPlanner::new(
+            RouterBridgeQueryPlanner::new(Arc::clone(&schema)),
+            plan_cache_limit,
+        ));
+
+        // NaiveIntrospection instantiation can potentially block for some time
+        let naive_introspection = {
+            let schema = Arc::clone(&schema);
+            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
+                .await
+                .expect("NaiveIntrospection instantiation panicked")
+        };
+
+        // Start warming up the cache
+        //
+        // We don't need to do this in background because the old server will keep running until
+        // this one is ready.
+        //
+        // If we first warm up the cache in foreground, then switch to the new config, the next
+        // queries will benefit from the warmed up cache. While if we switch and warm up in
+        // background, the next queries might be blocked until the cache is primed, so there'll be
+        // a perf hit.
+        if let Some(previous_router) = previous_router {
+            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
+                // We can ignore errors because some of the queries that were previously in the
+                // cache might not work with the new schema
+                let _ = query_planner.get(query, operation, options).await;
+            }
+        }
+
         Self {
-            naive_introspection: NaiveIntrospection::from_schema(&schema),
+            naive_introspection,
             query_planner,
             service_registry,
             query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
         }
-    }
-
-    pub fn get_query_planner(&self) -> Arc<dyn QueryPlanner> {
-        self.query_planner.clone()
     }
 }
 
