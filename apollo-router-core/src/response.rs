@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use crate::query_planner::model::Selection;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::map::Entry;

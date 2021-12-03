@@ -2,7 +2,7 @@
 name = "apollo-router-core"
 version = "0.1.0-alpha.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
-edition = "2018"
+edition = "2021"
 license-file = "./LICENSE"
 
 [features]
@@ -35,7 +35,8 @@ mockall = "0.10.2"
 static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 tokio = { version = "1", features = ["full"] }
-tracing-subscriber = { version = "0.3.2", default-features = false, features = [
+# don't bump to 0.3 until we bump tracing-opentelemetry to 0.16
+tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }

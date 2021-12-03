@@ -1,5 +1,5 @@
 ---
-source: crates/apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/mod.rs
 expression: config
 
 ---

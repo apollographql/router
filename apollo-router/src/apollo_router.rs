@@ -2,6 +2,7 @@ use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::prelude::*;
 use std::sync::Arc;
+use tracing::{Instrument, Span};
 use tracing_futures::WithSubscriber;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -10,28 +11,64 @@ use tracing_futures::WithSubscriber;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Arc<dyn QueryPlanner>,
+    query_planner: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
+    query_cache: Arc<QueryCache>,
 }
 
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
-    pub fn new(
-        query_planner: Arc<dyn QueryPlanner>,
+    pub async fn new(
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
+        previous_router: Option<Arc<ApolloRouter>>,
     ) -> Self {
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        let query_planner = Arc::new(CachingQueryPlanner::new(
+            RouterBridgeQueryPlanner::new(Arc::clone(&schema)),
+            plan_cache_limit,
+        ));
+
+        // NaiveIntrospection instantiation can potentially block for some time
+        let naive_introspection = {
+            let schema = Arc::clone(&schema);
+            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
+                .await
+                .expect("NaiveIntrospection instantiation panicked")
+        };
+
+        // Start warming up the cache
+        //
+        // We don't need to do this in background because the old server will keep running until
+        // this one is ready.
+        //
+        // If we first warm up the cache in foreground, then switch to the new config, the next
+        // queries will benefit from the warmed up cache. While if we switch and warm up in
+        // background, the next queries might be blocked until the cache is primed, so there'll be
+        // a perf hit.
+        if let Some(previous_router) = previous_router {
+            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
+                // We can ignore errors because some of the queries that were previously in the
+                // cache might not work with the new schema
+                let _ = query_planner.get(query, operation, options).await;
+            }
+        }
+
         Self {
-            naive_introspection: NaiveIntrospection::from_schema(&schema),
+            naive_introspection,
             query_planner,
             service_registry,
+            query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
         }
-    }
-
-    pub fn get_query_planner(&self) -> Arc<dyn QueryPlanner> {
-        self.query_planner.clone()
     }
 }
 
@@ -63,14 +100,11 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             return Err(stream::empty().boxed());
         }
 
-        // TODO query caching
-        let query = Arc::new(Query::from(&request.query));
-
         Ok(ApolloPreparedQuery {
             query_plan,
             service_registry: Arc::clone(&self.service_registry),
             schema: Arc::clone(&self.schema),
-            query,
+            query_cache: Arc::clone(&self.query_cache),
         })
     }
 }
@@ -81,34 +115,38 @@ pub struct ApolloPreparedQuery {
     query_plan: Arc<QueryPlan>,
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
-    // TODO
-    #[allow(dead_code)]
-    query: Arc<Query>,
+    query_cache: Arc<QueryCache>,
 }
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
+        let span = Span::current();
         stream::once(
             async move {
-                // TODO
-                #[allow(unused_mut)]
-                let mut response = self
+                let response_task = self
                     .query_plan
                     .node()
                     .expect("we already ensured that the plan is some; qed")
                     .execute(
-                        request,
+                        Arc::clone(&request),
                         Arc::clone(&self.service_registry),
                         Arc::clone(&self.schema),
                     )
-                    .await;
+                    .instrument(tracing::info_span!(parent: &span, "execution"));
+                let query_task = self
+                    .query_cache
+                    .get_query(&request.query)
+                    .instrument(tracing::info_span!(parent: &span, "query_parsing"));
 
-                // TODO move query parsing to query creation
-                #[cfg(feature = "post-processing")]
-                tracing::debug_span!("format_response")
-                    .in_scope(|| self.query.format_response(&mut response));
+                let (mut response, query) = tokio::join!(response_task, query_task);
+
+                if let Some(query) = query {
+                    tracing::debug_span!(parent: &span, "format_response").in_scope(|| {
+                        query.format_response(&mut response, request.operation_name.as_deref())
+                    });
+                }
 
                 response
             }
