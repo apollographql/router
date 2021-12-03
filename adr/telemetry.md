@@ -33,8 +33,10 @@ e.g.:
 
 This will have the effect of making the macro "opt-in" rather than the
 default behaviour of "opt-out" and will make mistakes easier to spot
-and prevent in code review. Required fields can be specified using the
-"fields" attribute.
+and prevent in code review. This prevents the default serialization of
+all parameters in a span.
+
+Required fields can be specified using the "fields" attribute. See [instrument documentation](https://docs.rs/tracing-attributes/0.1.18/tracing_attributes/attr.instrument.html) for more details.
 
  - Ensure that each instrumented function is named to promote understanding
    and consistency
@@ -43,8 +45,22 @@ and prevent in code review. Required fields can be specified using the
    as "debug" or "trace" should be avoided if possible and strictly
    reserved for developer problem solving.
 
+ - When deciding which attributes make sense to capture, refer to this
+   [OpenTelemetry Best Practices](https://opentelemetry.lightstep.com/best-practices/using-attributes/) document.
+
+ - Traces should be set on the source function rather than on the caller.
+
  - Document the agreed upon standard usage in DEVELOPMENT.md and ensure
-   that the standard is maintained via code review and tooling.
+   that the standard is maintained via code review and tooling. Examples
+   of standard usage include:
+
+
+     - Currently, tracing's Filter functionality is not well integrated. Avoid
+       using if possible.
+
+     - Make use of Layers to localise functionality.
+
+     - ...
 
 ## Consequences
 
@@ -56,5 +72,4 @@ confidential data.
 Telemetry stability is promoted.
 
 If a developer requires access to data that was previously offered in
-telemetry it is simple to make a temporary change or consume logs with
-the required data.
+telemetry it is simple to make a temporary change for testing.
