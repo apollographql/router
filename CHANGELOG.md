@@ -21,7 +21,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :sparkles: Features
 
-- JSON log output
+- Add support for JSON Logging [#46](https://github.com/apollographql/router/issues/46)
 
 ## :bug: Fixes
 
