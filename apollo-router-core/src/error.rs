@@ -232,7 +232,6 @@ impl ParseErrors {
         }
 
         let reports: Vec<_> = if atty::is(output) {
-            // Generate a fancy miette report
             self.fancy_reports()
         } else {
             self.raw_reports()
