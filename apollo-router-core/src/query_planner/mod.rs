@@ -289,10 +289,10 @@ impl FetchNode {
 
         let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-        if let Some(requires) = requires {
-            // We already checked that the service exists during planning
-            let fetcher = service_registry.get(service_name).unwrap();
+        // We already checked that the service exists during planning
+        let fetcher = service_registry.get(service_name).unwrap();
 
+        let variables = if let Some(requires) = requires {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
             variables.extend(variable_usages.iter().filter_map(|key| {
                 request.variables.as_ref().map(|v| {
@@ -313,28 +313,42 @@ impl FetchNode {
                 let representations = selection::select(&response, current_dir, requires, &schema)?;
                 variables.insert("representations".into(), representations);
             }
+            variables
+        } else {
+            variable_usages
+                .iter()
+                .filter_map(|key| {
+                    request
+                        .variables
+                        .as_ref()
+                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
+                        .unwrap_or_default()
+                })
+                .collect::<Object>()
+        };
 
-            let (res, _tail) = fetcher
-                .stream(
-                    Request::builder()
-                        .query(operation)
-                        .variables(Some(Arc::new(variables)))
-                        .build(),
-                )
-                .await
-                .into_future()
-                .instrument(query_span)
-                .await;
+        let (res, _tail) = fetcher
+            .stream(
+                Request::builder()
+                    .query(operation)
+                    .variables(Some(Arc::new(variables)))
+                    .build(),
+            )
+            .await
+            .into_future()
+            .instrument(query_span)
+            .await;
 
-            match res {
-                Some(response) if !response.is_primary() => {
-                    Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    })
-                }
-                Some(Response {
-                    data, mut errors, ..
-                }) => {
+        match res {
+            Some(response) if !response.is_primary() => {
+                Err(FetchError::SubrequestUnexpectedPatchResponse {
+                    service: service_name.to_owned(),
+                })
+            }
+            Some(Response {
+                data, mut errors, ..
+            }) => {
+                if requires.is_some() {
                     // we have to nest conditions and do early returns here
                     // because we need to take ownership of the inner value
                     if let Value::Object(mut map) = data {
@@ -378,49 +392,7 @@ impl FetchNode {
                     Err(FetchError::ExecutionInvalidContent {
                         reason: "Missing key `_entities`!".to_string(),
                     })
-                }
-                None => Err(FetchError::SubrequestNoResponse {
-                    service: service_name.to_string(),
-                }),
-            }
-        } else {
-            let variables = Arc::new(
-                variable_usages
-                    .iter()
-                    .filter_map(|key| {
-                        request
-                            .variables
-                            .as_ref()
-                            .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                            .unwrap_or_default()
-                    })
-                    .collect::<Object>(),
-            );
-
-            // We already validated that the service exists during planning
-            let fetcher = service_registry.get(service_name).unwrap();
-
-            let (res, _tail) = fetcher
-                .stream(
-                    Request::builder()
-                        .query(operation.clone())
-                        .variables(Arc::clone(&variables))
-                        .build(),
-                )
-                .await
-                .into_future()
-                .instrument(query_span)
-                .await;
-
-            match res {
-                Some(response) if !response.is_primary() => {
-                    Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    })
-                }
-                Some(Response {
-                    data, mut errors, ..
-                }) => {
+                } else {
                     let mut response = response
                         .lock()
                         .instrument(tracing::trace_span!("response_lock_wait"))
@@ -433,10 +405,10 @@ impl FetchNode {
 
                     Ok(())
                 }
-                None => Err(FetchError::SubrequestNoResponse {
-                    service: service_name.to_string(),
-                }),
             }
+            None => Err(FetchError::SubrequestNoResponse {
+                service: service_name.to_string(),
+            }),
         }
     }
 }
