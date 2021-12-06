@@ -8,9 +8,6 @@ use std::fmt;
 use std::hash::Hash;
 use tokio::sync::broadcast::{self, Sender};
 
-/// A result from a cache get().
-pub type CacheResult<V> = Result<V, CacheResolverError>;
-
 /// A caching map optimised for slow value resolution.
 ///
 /// The CachingMap hold values in an LruCache. Values are loaded into the cache on a cache miss and
@@ -21,10 +18,10 @@ pub type CacheResult<V> = Result<V, CacheResolverError>;
 #[derivative(Debug)]
 pub struct CachingMap<K, V> {
     #[derivative(Debug = "ignore")]
-    cached: Mutex<LruCache<K, CacheResult<V>>>,
+    cached: Mutex<LruCache<K, Result<V, CacheResolverError>>>,
     #[allow(clippy::type_complexity)]
     #[derivative(Debug = "ignore")]
-    wait_map: Mutex<HashMap<K, Sender<(K, CacheResult<V>)>>>,
+    wait_map: Mutex<HashMap<K, Sender<(K, Result<V, CacheResolverError>)>>>,
     cache_limit: usize,
     #[derivative(Debug = "ignore")]
     resolver: Box<dyn CacheResolver<K, V> + Send + Sync>,
@@ -34,7 +31,7 @@ impl<K, V> CachingMap<K, V>
 where
     K: Clone + fmt::Debug + Eq + Hash + Send + Sync + 'static,
     V: fmt::Debug + Send + Sync + 'static,
-    CacheResult<V>: Clone,
+    Result<V, CacheResolverError>: Clone,
 {
     /// Create a new CachingMap.
     ///
@@ -50,7 +47,7 @@ where
     }
 
     /// Get a value from the cache.
-    pub async fn get(&self, key: K) -> CacheResult<V> {
+    pub async fn get(&self, key: K) -> Result<V, CacheResolverError> {
         let mut locked_cache = self.cached.lock().await;
         if let Some(value) = locked_cache.get(&key).cloned() {
             return value;
@@ -114,7 +111,8 @@ where
                     tx.send((key, broadcast_value))
                         .expect("there is always at least one receiver alive, the _rx guard; qed")
                 })
-                .await?;
+                .await
+                .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
                 value
             }
         }

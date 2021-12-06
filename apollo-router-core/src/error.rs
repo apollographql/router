@@ -155,15 +155,6 @@ impl From<QueryPlannerError> for FetchError {
 pub enum CacheResolverError {
     /// Value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
-
-    /// Cache update failed: {0}
-    JoinError(Arc<JoinError>),
-}
-
-impl From<JoinError> for CacheResolverError {
-    fn from(err: JoinError) -> Self {
-        CacheResolverError::JoinError(Arc::new(err))
-    }
 }
 
 impl From<QueryPlannerError> for CacheResolverError {
