@@ -360,70 +360,81 @@ impl FetchNode {
                     service: service_name.to_owned(),
                 })
             }
-            Some(Response {
-                data, mut errors, ..
-            }) => {
-                if requires.is_some() {
-                    // we have to nest conditions and do early returns here
-                    // because we need to take ownership of the inner value
-                    if let Value::Object(mut map) = data {
-                        if let Some(entities) = map.remove("_entities") {
-                            tracing::trace!(
-                                "Received entities: {}",
-                                serde_json::to_string(&entities).unwrap(),
-                            );
-
-                            if let Value::Array(array) = entities {
-                                let mut response = response
-                                    .lock()
-                                    .instrument(tracing::trace_span!("response_lock_wait"))
-                                    .await;
-
-                                let span = tracing::trace_span!("response_insert");
-                                let _guard = span.enter();
-                                for (i, entity) in array.into_iter().enumerate() {
-                                    response.insert_data(
-                                        &current_dir.join(Path::from(i.to_string())),
-                                        entity,
-                                    )?;
-                                }
-
-                                return Ok(());
-                            } else {
-                                return Err(FetchError::ExecutionInvalidContent {
-                                    reason: "Received invalid type for key `_entities`!"
-                                        .to_string(),
-                                });
-                            }
-                        }
-                    }
-
-                    let mut response = response
-                        .lock()
-                        .instrument(tracing::trace_span!("response_lock_wait"))
-                        .await;
-
-                    response.append_errors(&mut errors);
-                    Err(FetchError::ExecutionInvalidContent {
-                        reason: "Missing key `_entities`!".to_string(),
-                    })
-                } else {
-                    let mut response = response
-                        .lock()
-                        .instrument(tracing::trace_span!("response_lock_wait"))
-                        .await;
-
-                    let span = tracing::trace_span!("response_insert");
-                    let _guard = span.enter();
-                    response.append_errors(&mut errors);
-                    response.insert_data(current_dir, data)?;
-
-                    Ok(())
-                }
+            Some(subgraph_response) => {
+                self.merge_response(response, current_dir, subgraph_response)
+                    .await
             }
             None => Err(FetchError::SubrequestNoResponse {
                 service: service_name.to_string(),
             }),
+        }
+    }
+
+    async fn merge_response<'a>(
+        &'a self,
+        response: Arc<Mutex<Response>>,
+        current_dir: &'a Path,
+        subgraph_response: Response,
+    ) -> Result<(), FetchError> {
+        let Response {
+            data, mut errors, ..
+        } = subgraph_response;
+
+        if self.requires.is_some() {
+            // we have to nest conditions and do early returns here
+            // because we need to take ownership of the inner value
+            if let Value::Object(mut map) = data {
+                if let Some(entities) = map.remove("_entities") {
+                    tracing::trace!(
+                        "Received entities: {}",
+                        serde_json::to_string(&entities).unwrap(),
+                    );
+
+                    if let Value::Array(array) = entities {
+                        let mut response = response
+                            .lock()
+                            .instrument(tracing::trace_span!("response_lock_wait"))
+                            .await;
+
+                        let span = tracing::trace_span!("response_insert");
+                        let _guard = span.enter();
+                        for (i, entity) in array.into_iter().enumerate() {
+                            response.insert_data(
+                                &current_dir.join(Path::from(i.to_string())),
+                                entity,
+                            )?;
+                        }
+
+                        return Ok(());
+                    } else {
+                        return Err(FetchError::ExecutionInvalidContent {
+                            reason: "Received invalid type for key `_entities`!".to_string(),
+                        });
+                    }
+                }
+            }
+
+            let mut response = response
+                .lock()
+                .instrument(tracing::trace_span!("response_lock_wait"))
+                .await;
+
+            response.append_errors(&mut errors);
+            Err(FetchError::ExecutionInvalidContent {
+                reason: "Missing key `_entities`!".to_string(),
+            })
+        } else {
+            let mut response = response
+                .lock()
+                .instrument(tracing::trace_span!("response_lock_wait"))
+                .await;
+
+            let span = tracing::trace_span!("response_insert");
+            let _guard = span.enter();
+            response.append_errors(&mut errors);
+            response.insert_data(current_dir, data)?;
+
+            Ok(())
         }
     }
 }
