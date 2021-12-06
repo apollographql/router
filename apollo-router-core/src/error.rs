@@ -225,14 +225,39 @@ impl ParseErrors {
         }
     }
 
-    pub fn print_pretty(&self) {
-        for err in self.errors.iter() {
-            let report = Report::new(ParserError {
-                src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
-                span: (err.index(), err.data().len()).into(),
-                ty: err.message().into(),
+    pub fn print(&self, output: atty::Stream) {
+        if let atty::Stream::Stdin = output {
+            // We don't print to stdin
+            return;
+        }
+
+        let reports: Vec<_> = if atty::is(output) {
+            // Generate a fancy miette report
+            self.errors
+                .iter()
+                .map(|err| {
+                    let report = Report::new(ParserError {
+                        src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
+                        span: (err.index(), err.data().len()).into(),
+                        ty: err.message().into(),
+                    });
+
+                    format!("{:?}", report)
+                })
+                .collect()
+        } else {
+            // Best effort to display errors
+            self.errors.iter().map(|e| format!("{:#?}", e)).collect()
+        };
+
+        if let atty::Stream::Stdout = output {
+            reports.iter().for_each(|r| {
+                println!("{}", r);
             });
-            eprintln!("{:?}", report);
+        } else {
+            reports.iter().for_each(|r| {
+                eprintln!("{}", r);
+            });
         }
     }
 }

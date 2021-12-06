@@ -20,9 +20,7 @@ impl std::str::FromStr for Schema {
         if tree.errors().len() != 0 {
             let errors = ParseErrors::new(s.to_string(), tree.errors());
 
-            if atty::is(atty::Stream::Stdout) {
-                errors.print_pretty();
-            }
+            errors.print(atty::Stream::Stderr);
 
             return Err(SchemaError::Parse(errors));
         }
