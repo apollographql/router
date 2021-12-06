@@ -159,14 +159,7 @@ impl PlanNode {
                         }
                     };
                     match fetch_node
-                        .fetch_node(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                            variables,
-                        )
+                        .fetch_node(Arc::clone(&service_registry), variables)
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
@@ -312,7 +305,6 @@ impl FetchNode {
         data: &Value,
         current_dir: &'a Path,
         request: &Arc<Request>,
-        //service_registry: Arc<dyn ServiceRegistry>,
         schema: &Arc<Schema>,
     ) -> Result<Map<String, Value>, FetchError> {
         if let Some(requires) = &self.requires {
@@ -352,18 +344,14 @@ impl FetchNode {
 
     async fn fetch_node<'a>(
         &'a self,
-        response: Arc<Mutex<Response>>,
-        current_dir: &'a Path,
-        request: Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
+
         variables: Map<String, Value>,
     ) -> Result<Response, FetchError> {
         let FetchNode {
-            variable_usages,
-            requires,
             operation,
             service_name,
+            ..
         } = self;
 
         let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
