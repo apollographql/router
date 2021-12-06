@@ -9,6 +9,7 @@ use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use selection::Selection;
 use serde::Deserialize;
+use serde_json::Map;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -272,6 +273,51 @@ pub(crate) struct FetchNode {
 }
 
 impl FetchNode {
+    async fn make_variables<'a>(
+        &'a self,
+        response: &Arc<Mutex<Response>>,
+        current_dir: &'a Path,
+        request: &Arc<Request>,
+        //service_registry: Arc<dyn ServiceRegistry>,
+        schema: &Arc<Schema>,
+    ) -> Result<Map<String, Value>, FetchError> {
+        if let Some(requires) = &self.requires {
+            let mut variables = Object::with_capacity(1 + self.variable_usages.len());
+            variables.extend(self.variable_usages.iter().filter_map(|key| {
+                request.variables.as_ref().map(|v| {
+                    v.get(key)
+                        .map(|value| (key.clone(), value.clone()))
+                        .unwrap_or_default()
+                })
+            }));
+
+            {
+                let response = response.lock().await;
+                tracing::trace!(
+                    "Creating representations at path '{}' for selections={:?} using data={}",
+                    current_dir,
+                    requires,
+                    serde_json::to_string(&response.data).unwrap(),
+                );
+                let representations = selection::select(&response, current_dir, requires, &schema)?;
+                variables.insert("representations".into(), representations);
+            }
+            Ok(variables)
+        } else {
+            Ok(self
+                .variable_usages
+                .iter()
+                .filter_map(|key| {
+                    request
+                        .variables
+                        .as_ref()
+                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
+                        .unwrap_or_default()
+                })
+                .collect::<Object>())
+        }
+    }
+
     async fn fetch_node<'a>(
         &'a self,
         response: Arc<Mutex<Response>>,
@@ -292,40 +338,9 @@ impl FetchNode {
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
 
-        let variables = if let Some(requires) = requires {
-            let mut variables = Object::with_capacity(1 + variable_usages.len());
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                request.variables.as_ref().map(|v| {
-                    v.get(key)
-                        .map(|value| (key.clone(), value.clone()))
-                        .unwrap_or_default()
-                })
-            }));
-
-            {
-                let response = response.lock().await;
-                tracing::trace!(
-                    "Creating representations at path '{}' for selections={:?} using data={}",
-                    current_dir,
-                    requires,
-                    serde_json::to_string(&response.data).unwrap(),
-                );
-                let representations = selection::select(&response, current_dir, requires, &schema)?;
-                variables.insert("representations".into(), representations);
-            }
-            variables
-        } else {
-            variable_usages
-                .iter()
-                .filter_map(|key| {
-                    request
-                        .variables
-                        .as_ref()
-                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                        .unwrap_or_default()
-                })
-                .collect::<Object>()
-        };
+        let variables = self
+            .make_variables(&response, current_dir, &request, &schema)
+            .await?;
 
         let (res, _tail) = fetcher
             .stream(
