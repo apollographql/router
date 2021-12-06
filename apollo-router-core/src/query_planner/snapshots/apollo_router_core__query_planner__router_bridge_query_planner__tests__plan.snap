@@ -1,17 +1,15 @@
 ---
-source: crates/apollo-router-core/src/query_planner/router_bridge_query_planner.rs
+source: apollo-router-core/src/query_planner/router_bridge_query_planner.rs
 expression: result
 
 ---
 QueryPlan {
-    node: Some(
-        Fetch(
-            FetchNode {
-                service_name: "accounts",
-                requires: None,
-                variable_usages: [],
-                operation: "{me{name{first last}}}",
-            },
-        ),
+    root: Fetch(
+        FetchNode {
+            service_name: "accounts",
+            requires: None,
+            variable_usages: [],
+            operation: "{me{name{first last}}}",
+        },
     ),
 }

@@ -12,6 +12,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🛠 Maintenance
 ## 📚 Documentation -->
 
+
+# [v0.1.0-alpha.2] 2021-12-03
+
+## :rocket::waxing_crescent_moon: Public alpha release
+
+> An alpha or beta release is in volatile, active development. The release might not be feature-complete, and breaking API changes are possible between individual versions.
+
+## :sparkles: Features
+
+- Add support for JSON Logging [#46](https://github.com/apollographql/router/issues/46)
+
+## :bug: Fixes
+
+- Fix Open Telemetry report errors when using Zipkin [#180](https://github.com/apollographql/router/issues/180)
+
 # [v0.1.0-alpha.1] 2021-11-18
 
 ## :rocket::waxing_crescent_moon: Initial public alpha release

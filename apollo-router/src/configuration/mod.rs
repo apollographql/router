@@ -98,6 +98,10 @@ impl Configuration {
             Err(errors)
         }
     }
+
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
 }
 
 /// Configuration for a subgraph.
@@ -208,8 +212,8 @@ pub enum OpenTelemetry {
 #[derivative(Default)]
 pub struct Jaeger {
     pub collector_endpoint: Option<Url>,
-    #[serde(default = "default_jaeger_service_name")]
-    #[derivative(Default(value = "default_jaeger_service_name()"))]
+    #[serde(default = "default_service_name")]
+    #[derivative(Default(value = "default_service_name()"))]
     pub service_name: String,
     #[serde(skip, default = "default_jaeger_username")]
     #[derivative(Default(value = "default_jaeger_username()"))]
@@ -219,8 +223,13 @@ pub struct Jaeger {
     pub password: Option<String>,
 }
 
-fn default_jaeger_service_name() -> String {
+fn default_service_name() -> String {
     "router".to_string()
+}
+
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+fn default_service_namespace() -> String {
+    "apollo".to_string()
 }
 
 fn default_jaeger_username() -> Option<String> {

@@ -74,7 +74,7 @@ requires that the `federation-demo` project is running:
 Once the subgraphs are up and running, run Apollo Router with this command:
 
 ```shell
-cargo run -- -s ./examples/local.graphql
+cargo run --release -- -s ./examples/local.graphql -c examples/config-jaeger.yml
 ```
 
 Go to https://studio.apollographql.com/sandbox/explorer to make queries and

@@ -7,9 +7,11 @@ mod http;
 pub use self::grpc::*;
 #[cfg(feature = "otlp-http")]
 pub use self::http::*;
+use super::{default_service_name, default_service_namespace};
 use crate::configuration::ConfigurationError;
 use opentelemetry::sdk::resource::Resource;
 use opentelemetry::sdk::trace::{Sampler, Tracer};
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
@@ -79,9 +81,8 @@ impl Tracing {
 
         pipeline = pipeline.with_exporter(self.exporter.exporter()?);
 
-        if let Some(config) = self.trace_config.as_ref() {
-            pipeline = pipeline.with_trace_config(config.trace_config());
-        }
+        pipeline = pipeline
+            .with_trace_config(self.trace_config.clone().unwrap_or_default().trace_config());
 
         pipeline
             .install_batch(opentelemetry::runtime::Tokio)
@@ -147,7 +148,7 @@ where
     Ok(Some(url))
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceConfig {
     pub sampler: Option<Sampler>,
@@ -180,9 +181,16 @@ impl TraceConfig {
         if let Some(n) = self.max_attributes_per_link {
             trace_config = trace_config.with_max_attributes_per_link(n);
         }
-        if let Some(resource) = self.resource.clone() {
-            trace_config = trace_config.with_resource(resource);
-        }
+
+        let resource = self.resource.clone().unwrap_or_else(|| {
+            Resource::new(vec![
+                KeyValue::new("service.name", default_service_name()),
+                KeyValue::new("service.namespace", default_service_namespace()),
+            ])
+        });
+
+        trace_config = trace_config.with_resource(resource);
+
         trace_config
     }
 }

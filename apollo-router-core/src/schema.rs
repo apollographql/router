@@ -7,6 +7,7 @@ pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, String>,
+    fragments: HashMap<String, Vec<Selection>>,
 }
 
 impl std::str::FromStr for Schema {
@@ -26,6 +27,7 @@ impl std::str::FromStr for Schema {
         let document = tree.document();
         let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
         let mut subgraphs = HashMap::new();
+        let mut fragments = HashMap::new();
 
         // the logic of this algorithm is inspired from the npm package graphql:
         // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
@@ -146,6 +148,21 @@ impl std::str::FromStr for Schema {
                         }
                     }
                 }
+                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
+                ast::Definition::FragmentDefinition(fragment_definition) => {
+                    let name = fragment_definition
+                        .fragment_name()
+                        .expect("the node FragmentName is not optional in the spec; qed")
+                        .name()
+                        .unwrap()
+                        .text()
+                        .to_string();
+                    let selection_set = fragment_definition
+                        .selection_set()
+                        .expect("the node SelectionSet is not optional in the spec; qed");
+
+                    fragments.insert(name, selection_set.selections().map(Into::into).collect());
+                }
                 _ => {}
             }
         }
@@ -154,6 +171,7 @@ impl std::str::FromStr for Schema {
             subtype_map,
             string: s.to_owned(),
             subgraphs,
+            fragments,
         })
     }
 }
@@ -176,6 +194,10 @@ impl Schema {
 
     pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
         self.subgraphs.iter()
+    }
+
+    pub(crate) fn fragments(&self) -> impl Iterator<Item = (&String, &Vec<Selection>)> {
+        self.fragments.iter()
     }
 }
 
