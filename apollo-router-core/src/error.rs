@@ -233,21 +233,9 @@ impl ParseErrors {
 
         let reports: Vec<_> = if atty::is(output) {
             // Generate a fancy miette report
-            self.errors
-                .iter()
-                .map(|err| {
-                    let report = Report::new(ParserError {
-                        src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
-                        span: (err.index(), err.data().len()).into(),
-                        ty: err.message().into(),
-                    });
-
-                    format!("{:?}", report)
-                })
-                .collect()
+            self.fancy_reports()
         } else {
-            // Best effort to display errors
-            self.errors.iter().map(|e| format!("{:#?}", e)).collect()
+            self.raw_reports()
         };
 
         if let atty::Stream::Stdout = output {
@@ -259,5 +247,26 @@ impl ParseErrors {
                 eprintln!("{}", r);
             });
         }
+    }
+
+    /// Fancy Miette reports for TTYs
+    fn fancy_reports(&self) -> Vec<String> {
+        self.errors
+            .iter()
+            .map(|err| {
+                let report = Report::new(ParserError {
+                    src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
+                    span: (err.index(), err.data().len()).into(),
+                    ty: err.message().into(),
+                });
+
+                format!("{:?}", report)
+            })
+            .collect()
+    }
+
+    /// Best effort to display errors
+    fn raw_reports(&self) -> Vec<String> {
+        self.errors.iter().map(|e| format!("{:#?}", e)).collect()
     }
 }
