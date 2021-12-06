@@ -163,10 +163,11 @@ impl PlanNode {
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
-                        Ok(subgraph_response) => {
+                        Ok(mut subgraph_response) => {
                             let mut response = response.lock().await;
+                            response.append_errors(&mut subgraph_response.errors);
                             match fetch_node.merge_response(
-                                &mut response,
+                                &mut response.data,
                                 current_dir,
                                 subgraph_response,
                             ) {
@@ -386,13 +387,11 @@ impl FetchNode {
 
     fn merge_response<'a>(
         &'a self,
-        response: &mut Response,
+        response_data: &mut Value,
         current_dir: &'a Path,
         subgraph_response: Response,
     ) -> Result<(), FetchError> {
-        let Response {
-            data, mut errors, ..
-        } = subgraph_response;
+        let Response { data, .. } = subgraph_response;
 
         if self.requires.is_some() {
             // we have to nest conditions and do early returns here
@@ -408,7 +407,7 @@ impl FetchNode {
                         let span = tracing::trace_span!("response_insert");
                         let _guard = span.enter();
                         for (i, entity) in array.into_iter().enumerate() {
-                            response.insert_data(
+                            response_data.insert_data(
                                 &current_dir.join(Path::from(i.to_string())),
                                 entity,
                             )?;
@@ -423,15 +422,14 @@ impl FetchNode {
                 }
             }
 
-            response.append_errors(&mut errors);
             Err(FetchError::ExecutionInvalidContent {
                 reason: "Missing key `_entities`!".to_string(),
             })
         } else {
             let span = tracing::trace_span!("response_insert");
             let _guard = span.enter();
-            response.append_errors(&mut errors);
-            response.insert_data(current_dir, data)?;
+
+            response_data.insert_data(current_dir, data)?;
 
             Ok(())
         }
