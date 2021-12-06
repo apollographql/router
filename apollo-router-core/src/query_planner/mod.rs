@@ -164,16 +164,16 @@ impl PlanNode {
                         .await
                     {
                         Ok(subgraph_response) => {
-                            match fetch_node
-                                .merge_response(response.clone(), current_dir, subgraph_response)
-                                .await
-                            {
+                            let mut response = response.lock().await;
+                            match fetch_node.merge_response(
+                                &mut response,
+                                current_dir,
+                                subgraph_response,
+                            ) {
                                 Ok(()) => {}
                                 Err(err) => {
                                     failfast_error!("Fetch error: {}", err);
                                     response
-                                        .lock()
-                                        .await
                                         .errors
                                         .push(err.to_graphql_error(Some(current_dir.to_owned())));
                                 }
@@ -384,9 +384,9 @@ impl FetchNode {
         }
     }
 
-    async fn merge_response<'a>(
+    fn merge_response<'a>(
         &'a self,
-        response: Arc<Mutex<Response>>,
+        response: &mut Response,
         current_dir: &'a Path,
         subgraph_response: Response,
     ) -> Result<(), FetchError> {
@@ -405,11 +405,6 @@ impl FetchNode {
                     );
 
                     if let Value::Array(array) = entities {
-                        let mut response = response
-                            .lock()
-                            .instrument(tracing::trace_span!("response_lock_wait"))
-                            .await;
-
                         let span = tracing::trace_span!("response_insert");
                         let _guard = span.enter();
                         for (i, entity) in array.into_iter().enumerate() {
@@ -428,21 +423,11 @@ impl FetchNode {
                 }
             }
 
-            let mut response = response
-                .lock()
-                .instrument(tracing::trace_span!("response_lock_wait"))
-                .await;
-
             response.append_errors(&mut errors);
             Err(FetchError::ExecutionInvalidContent {
                 reason: "Missing key `_entities`!".to_string(),
             })
         } else {
-            let mut response = response
-                .lock()
-                .instrument(tracing::trace_span!("response_lock_wait"))
-                .await;
-
             let span = tracing::trace_span!("response_insert");
             let _guard = span.enter();
             response.append_errors(&mut errors);
