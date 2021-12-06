@@ -140,6 +140,24 @@ impl PlanNode {
                     .await;
                 }
                 PlanNode::Fetch(fetch_node) => {
+                    let variables = {
+                        let mut response = response.lock().await;
+                        match fetch_node.make_variables(
+                            &response.data,
+                            current_dir,
+                            &request,
+                            &schema,
+                        ) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                failfast_error!("Fetch error: {}", err);
+                                response
+                                    .errors
+                                    .push(err.to_graphql_error(Some(current_dir.to_owned())));
+                                return;
+                            }
+                        }
+                    };
                     match fetch_node
                         .fetch_node(
                             Arc::clone(&response),
@@ -147,11 +165,27 @@ impl PlanNode {
                             Arc::clone(&request),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
+                            variables,
                         )
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
-                        Ok(()) => {}
+                        Ok(subgraph_response) => {
+                            match fetch_node
+                                .merge_response(response.clone(), current_dir, subgraph_response)
+                                .await
+                            {
+                                Ok(()) => {}
+                                Err(err) => {
+                                    failfast_error!("Fetch error: {}", err);
+                                    response
+                                        .lock()
+                                        .await
+                                        .errors
+                                        .push(err.to_graphql_error(Some(current_dir.to_owned())));
+                                }
+                            }
+                        }
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
                             response
@@ -273,7 +307,7 @@ pub(crate) struct FetchNode {
 }
 
 impl FetchNode {
-    async fn make_variables<'a>(
+    fn make_variables<'a>(
         &'a self,
         data: &Value,
         current_dir: &'a Path,
@@ -323,7 +357,8 @@ impl FetchNode {
         request: Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
-    ) -> Result<(), FetchError> {
+        variables: Map<String, Value>,
+    ) -> Result<Response, FetchError> {
         let FetchNode {
             variable_usages,
             requires,
@@ -335,12 +370,6 @@ impl FetchNode {
 
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
-
-        let variables = {
-            let response = response.lock().await;
-            self.make_variables(&response.data, current_dir, &request, &schema)
-                .await?
-        };
 
         let (res, _tail) = fetcher
             .stream(
@@ -360,10 +389,7 @@ impl FetchNode {
                     service: service_name.to_owned(),
                 })
             }
-            Some(subgraph_response) => {
-                self.merge_response(response, current_dir, subgraph_response)
-                    .await
-            }
+            Some(subgraph_response) => Ok(subgraph_response),
             None => Err(FetchError::SubrequestNoResponse {
                 service: service_name.to_string(),
             }),
