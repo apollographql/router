@@ -141,6 +141,7 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "apollo-parser",
  "async-trait",
+ "atty",
  "derivative",
  "displaydoc",
  "futures",

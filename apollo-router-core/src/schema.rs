@@ -18,10 +18,13 @@ impl std::str::FromStr for Schema {
         let tree = parser.parse();
 
         if tree.errors().len() != 0 {
-            return Err(SchemaError::from_parse_errors(
-                s.to_string(),
-                tree.errors().cloned().collect(),
-            ));
+            let errors = ParseErrors::new(s.to_string(), tree.errors());
+
+            if atty::is(atty::Stream::Stdout) {
+                errors.print_pretty();
+            }
+
+            return Err(SchemaError::Parse(errors));
         }
 
         let document = tree.document();
