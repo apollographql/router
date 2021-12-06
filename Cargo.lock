@@ -77,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
  "apollo-router-core",
@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "apollo-parser",
  "async-trait",
