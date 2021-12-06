@@ -275,7 +275,7 @@ pub(crate) struct FetchNode {
 impl FetchNode {
     async fn make_variables<'a>(
         &'a self,
-        response: &Arc<Mutex<Response>>,
+        data: &Value,
         current_dir: &'a Path,
         request: &Arc<Request>,
         //service_registry: Arc<dyn ServiceRegistry>,
@@ -291,17 +291,15 @@ impl FetchNode {
                 })
             }));
 
-            {
-                let response = response.lock().await;
-                tracing::trace!(
-                    "Creating representations at path '{}' for selections={:?} using data={}",
-                    current_dir,
-                    requires,
-                    serde_json::to_string(&response.data).unwrap(),
-                );
-                let representations = selection::select(&response, current_dir, requires, &schema)?;
-                variables.insert("representations".into(), representations);
-            }
+            tracing::trace!(
+                "Creating representations at path '{}' for selections={:?} using data={}",
+                current_dir,
+                requires,
+                serde_json::to_string(&data).unwrap(),
+            );
+            let representations = selection::select_value(&data, current_dir, requires, &schema)?;
+            variables.insert("representations".into(), representations);
+
             Ok(variables)
         } else {
             Ok(self
@@ -338,9 +336,11 @@ impl FetchNode {
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
 
-        let variables = self
-            .make_variables(&response, current_dir, &request, &schema)
-            .await?;
+        let variables = {
+            let response = response.lock().await;
+            self.make_variables(&response.data, current_dir, &request, &schema)
+                .await?
+        };
 
         let (res, _tail) = fetcher
             .stream(

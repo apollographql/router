@@ -71,6 +71,33 @@ pub(crate) fn select(
     ))
 }
 
+pub(crate) fn select_value(
+    data: &Value,
+    path: &Path,
+    selections: &[Selection],
+    schema: &Schema,
+) -> Result<Value, FetchError> {
+    let values = data
+        .get_at_path(path)
+        .map_err(|err| FetchError::ExecutionPathNotFound {
+            reason: err.to_string(),
+        })?;
+
+    Ok(Value::Array(
+        values
+            .into_iter()
+            .flat_map(|value| match (value, selections) {
+                (Value::Object(content), requires) => {
+                    select_object(content, requires, schema).transpose()
+                }
+                (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
+                    reason: "not an object".to_string(),
+                })),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
+}
+
 fn select_object(
     content: &Object,
     selections: &[Selection],
