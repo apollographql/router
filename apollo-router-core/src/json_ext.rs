@@ -146,10 +146,21 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
-                for ((_index, b_value), a_value) in b.drain(..).enumerate().zip(a.iter_mut()) {
-                    a_value.deep_merge(b_value);
+                if a.len() > b.len() {
+                    for ((_index, b_value), a_value) in b.drain(..).enumerate().zip(a.iter_mut()) {
+                        a_value.deep_merge(b_value);
+                    }
+                } else {
+                    for ((_index, b_value), a_value) in
+                        b.drain(..a.len()).enumerate().zip(a.iter_mut())
+                    {
+                        a_value.deep_merge(b_value);
+                    }
+
+                    a.extend(b.into_iter());
                 }
             }
+            (a, Value::Null) => {}
             (a, b) => {
                 *a = b;
             }
