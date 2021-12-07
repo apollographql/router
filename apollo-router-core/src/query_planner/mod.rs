@@ -83,7 +83,6 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
-        println!("WILL EXECUTE\n*********{:#?}", self.root);
         let (value, errors) = self
             .root
             .execute_recursively(
@@ -119,11 +118,6 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
-                    println!(
-                        "{} Sequence: parent = {}",
-                        current_dir,
-                        serde_json::to_string(parent_value).unwrap()
-                    );
                     value = parent_value.clone();
                     for node in nodes {
                         let (v, err) = node
@@ -132,25 +126,15 @@ impl PlanNode {
                                 Arc::clone(&request),
                                 Arc::clone(&service_registry),
                                 Arc::clone(&schema),
-                                // FIXME: should this use the parent_value?
-                                // that would mean we need to clone it at the beginning of the Sequence
                                 &value,
                             )
                             .instrument(tracing::info_span!("sequence"))
                             .await;
-                        println!("SEQUENCE will merge\n{:?}\nwith\n{:?}", value, v);
                         value.deep_merge(v);
-                        println!("\nSEQUENCE after merge: {:?}", value);
                         errors.extend(err.into_iter());
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    println!(
-                        "{} Parallel: parent = {}",
-                        current_dir,
-                        serde_json::to_string(parent_value).unwrap()
-                    );
-
                     async {
                         let mut resv = Value::default();
 
@@ -169,7 +153,6 @@ impl PlanNode {
                                 .collect();
 
                             while let Some((v, err)) = stream.next().await {
-                                println!("PARALLEL MERGING {:?}\nwith {:?}", resv, v);
                                 resv.deep_merge(v);
                                 errors.extend(err.into_iter());
                             }
@@ -181,11 +164,6 @@ impl PlanNode {
                     .await;
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
-                    println!(
-                        "\n\n{} FLATTEN: {} parent {:?}",
-                        current_dir, path, parent_value
-                    );
-
                     let (v, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
@@ -198,17 +176,10 @@ impl PlanNode {
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
 
-                    println!("FLATTEN will try to insert at {}: {:?}", path, v);
                     value = Value::from_path(current_dir, v);
-                    println!("FLATTEN value is now: {:?}", value);
                     errors.extend(err.into_iter());
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    println!(
-                        "==============\n{} | {:?} FETCH({}) parent = {:?}",
-                        current_dir, current_dir, fetch_node.service_name, parent_value
-                    );
-
                     match fetch_node
                         .fetch_node(
                             parent_value,
@@ -349,13 +320,6 @@ impl FetchNode {
                 })
             }));
 
-            println!(
-                "\nMAKE VARIABLES Creating representations at path '{}' for selections={:?} using data={}",
-                current_dir,
-                requires,
-                serde_json::to_string(&data).unwrap(),
-            );
-
             let values_and_paths = select_values(current_dir, data)?;
             let mut paths = Vec::new();
             let representations = Value::Array(
@@ -373,7 +337,6 @@ impl FetchNode {
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap(),
             );
-            //let representations = selection::select_value(&data, current_dir, requires, &schema)?;
             variables.insert("representations".into(), representations);
 
             Ok(Variables {
@@ -446,8 +409,6 @@ impl FetchNode {
             }
         };
 
-        println!("FETCH sub response: {:?}", subgraph_response);
-
         self.response_at_path(current_dir, paths, subgraph_response)
     }
 
@@ -477,19 +438,9 @@ impl FetchNode {
 
                         let paths = paths.unwrap();
                         for (entity, path) in array.into_iter().zip(paths.into_iter()) {
-                            println!(
-                                "RESPONSE_AT_PATH {} for entity: {}",
-                                path,
-                                serde_json::to_string(&entity).unwrap()
-                            );
                             let v = Value::from_path(&path, entity);
-                            println!("RESPONSE_AT_PATH merging\n{:?}\nwith\n{:?}", value, v);
                             value.deep_merge(v);
                         }
-                        println!(
-                            "RESPONSE_at_path ({}): inserted in value: {:?}",
-                            current_dir, value
-                        );
                         return Ok(value);
                     } else {
                         return Err(FetchError::ExecutionInvalidContent {

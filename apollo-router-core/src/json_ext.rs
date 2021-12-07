@@ -267,9 +267,7 @@ impl ValueExt for Value {
         let mut res_value = Value::default();
         let mut current_node = &mut res_value;
 
-        println!("FROM PATH: '{}'", path);
         for p in path.iter() {
-            println!("FROM PATH: '{:?}', current = {:?}", p, current_node);
             match p {
                 PathElement::Flatten => {
                     let a = Vec::new();
@@ -317,7 +315,6 @@ impl ValueExt for Value {
         }
 
         *current_node = value;
-        println!("FROM PATH: '{}' => {:?}", path, res_value);
         res_value
     }
 }
