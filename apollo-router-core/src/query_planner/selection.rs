@@ -98,7 +98,60 @@ pub(crate) fn select_value(
     ))
 }
 
-fn select_object(
+pub(crate) fn select_values<'a>(path: &'a Path, data: &'a Value) -> Vec<(Path, &'a Value)> {
+    let mut res = Vec::new();
+    iterate_path(&Path::default(), &path.0, data, &mut res);
+    res
+}
+
+fn iterate_path<'a>(
+    parent: &Path,
+    path: &'a [PathElement],
+    data: &'a Value,
+    results: &mut Vec<(Path, &'a Value)>,
+) {
+    match path.get(0) {
+        None => results.push((parent.clone(), data)),
+        Some(PathElement::Flatten) => {
+            for (i, value) in data
+                .as_array()
+                .into_iter()
+                .map(|v| v.iter())
+                .flatten()
+                .enumerate()
+            {
+                iterate_path(
+                    &parent.join(Path::from(i.to_string())),
+                    &path[1..],
+                    value,
+                    results,
+                );
+            }
+        }
+        Some(PathElement::Index(i)) => {
+            if let Value::Array(a) = data {
+                if let Some(value) = a.get(*i) {
+                    iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        results,
+                    );
+                }
+            }
+        }
+        Some(PathElement::Key(k)) => {
+            if let Value::Object(o) = data {
+                if let Some(value) = o.get(k) {
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results);
+                }
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+pub(crate) fn select_object(
     content: &Object,
     selections: &[Selection],
     schema: &Schema,

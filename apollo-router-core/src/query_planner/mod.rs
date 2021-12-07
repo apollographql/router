@@ -3,9 +3,11 @@ mod router_bridge_query_planner;
 mod selection;
 
 use crate::prelude::graphql::*;
+use crate::query_planner::selection::{select_object, select_values};
 pub use caching_query_planner::*;
 use futures::lock::Mutex;
 use futures::prelude::*;
+use futures::stream::FuturesUnordered;
 pub use router_bridge_query_planner::*;
 use selection::Selection;
 use serde::Deserialize;
@@ -83,16 +85,25 @@ impl QueryPlan {
         let response = Arc::new(Mutex::new(Response::builder().build()));
         let root = Path::empty();
 
-        self.root
+        println!("WILL EXECUTE\n*********");
+        let (value, errors) = self
+            .root
             .execute_recursively(
                 Arc::clone(&response),
                 &root,
                 Arc::clone(&request),
                 Arc::clone(&service_registry),
                 Arc::clone(&schema),
+                &Value::default(),
             )
             .await;
 
+        println!(
+            "res1:{}\nres2:{}",
+            serde_json::to_string_pretty(&response.lock().await.data).unwrap(),
+            serde_json::to_string_pretty(&value).unwrap()
+        );
+        assert!(response.lock().await.data.eq_and_ordered(&value));
         // TODO: this is not great but there is no other way
         Arc::try_unwrap(response)
             .expect("todo: how to prove?")
@@ -108,42 +119,104 @@ impl PlanNode {
         request: Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
-    ) -> future::BoxFuture<()> {
+        parent_value: &'a Value,
+    ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("Executing plan:\n{:#?}", self);
+            let mut value = Value::default();
+            let mut errors = Vec::new();
 
             match self {
                 PlanNode::Sequence { nodes } => {
+                    println!("{} Sequence", current_dir);
                     for node in nodes {
-                        node.execute_recursively(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                        .instrument(tracing::info_span!("sequence"))
-                        .await;
+                        let (v, err) = node
+                            .execute_recursively(
+                                Arc::clone(&response),
+                                current_dir,
+                                Arc::clone(&request),
+                                Arc::clone(&service_registry),
+                                Arc::clone(&schema),
+                                &value,
+                            )
+                            .instrument(tracing::info_span!("sequence"))
+                            .await;
+                        println!("SEQUENCE will merge\n{:?}\nwith\n{:?}", value, v);
+                        value.deep_merge(v);
+                        println!("\nSEQUENCE after merge: {:?}", value);
+                        println!("response data is {:?}", response.lock().await.data);
+                        errors.extend(err.into_iter());
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    future::join_all(nodes.iter().map(|plan| {
-                        plan.execute_recursively(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                    }))
+                    println!("{} Parallel", current_dir);
+
+                    async {
+                        let mut resv = Value::default();
+
+                        {
+                            let mut stream: FuturesUnordered<_> = nodes
+                                .iter()
+                                .map(|plan| {
+                                    plan.execute_recursively(
+                                        Arc::clone(&response),
+                                        current_dir,
+                                        Arc::clone(&request),
+                                        Arc::clone(&service_registry),
+                                        Arc::clone(&schema),
+                                        &value,
+                                    )
+                                })
+                                .collect();
+
+                            while let Some((v, err)) = stream.next().await {
+                                println!("PARALLEL MERGING {:?}\nwith {:?}", resv, v);
+                                resv.deep_merge(v);
+                                //FIXME errors
+                            }
+                        }
+
+                        value.deep_merge(resv);
+                    }
                     .instrument(tracing::info_span!("parallel"))
                     .await;
                 }
+                PlanNode::Flatten(FlattenNode { path, node }) => {
+                    println!(
+                        "\n\n{} FLATTEN: {} parent {:?}",
+                        current_dir, path, parent_value
+                    );
+
+                    let (v, err) = node
+                        .execute_recursively(
+                            Arc::clone(&response),
+                            // this is the only command that actually changes the "current dir"
+                            &path,
+                            Arc::clone(&request),
+                            Arc::clone(&service_registry),
+                            Arc::clone(&schema),
+                            &parent_value,
+                        )
+                        .instrument(tracing::trace_span!("flatten"))
+                        .await;
+
+                    let m = Map::new();
+                    println!("FLATTEN will try to insert at {}: {:?}", path, v);
+                    println!("current response is {:?}", response.lock().await.data);
+                    //value.insert_data(path, v).unwrap();
+                    value = Value::from_path(current_dir, v);
+                    println!("FLATTEN value is now: {:?}", value);
+                    errors.extend(err.into_iter());
+                }
                 PlanNode::Fetch(fetch_node) => {
-                    let variables = {
+                    println!(
+                        "==============\n{} | {:?} FETCH({}) parent = {:?}",
+                        current_dir, current_dir, fetch_node.service_name, parent_value
+                    );
+                    let (variables, paths) = {
                         let mut response = response.lock().await;
                         match fetch_node.make_variables(
-                            &response.data,
+                            parent_value,
                             current_dir,
                             &request,
                             &schema,
@@ -154,10 +227,12 @@ impl PlanNode {
                                 response
                                     .errors
                                     .push(err.to_graphql_error(Some(current_dir.to_owned())));
-                                return;
+                                errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                                return (value, errors);
                             }
                         }
                     };
+                    println!("FETCH variables: {:?}", variables);
                     match fetch_node
                         .fetch_node(Arc::clone(&service_registry), variables)
                         .instrument(tracing::info_span!("fetch"))
@@ -166,10 +241,12 @@ impl PlanNode {
                         Ok(mut subgraph_response) => {
                             let mut response = response.lock().await;
                             response.append_errors(&mut subgraph_response.errors);
+                            println!("FETCH sub response: {:?}", subgraph_response);
+
                             match fetch_node.merge_response(
                                 &mut response.data,
                                 current_dir,
-                                subgraph_response,
+                                subgraph_response.clone(),
                             ) {
                                 Ok(()) => {}
                                 Err(err) => {
@@ -177,8 +254,16 @@ impl PlanNode {
                                     response
                                         .errors
                                         .push(err.to_graphql_error(Some(current_dir.to_owned())));
+
+                                    errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                                    return (value, errors);
                                 }
                             }
+
+                            value = fetch_node
+                                .response_at_path(current_dir, paths, subgraph_response.clone())
+                                .unwrap();
+                            println!("FETCH value after merge: {:?}\n==============\n", value);
                         }
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
@@ -190,21 +275,9 @@ impl PlanNode {
                         }
                     }
                 }
-                PlanNode::Flatten(FlattenNode { path, node }) => {
-                    // this is the only command that actually changes the "current dir"
-                    let current_dir = current_dir.join(path);
-                    node.execute_recursively(
-                        Arc::clone(&response),
-                        // a path can go over multiple json node!
-                        &current_dir,
-                        Arc::clone(&request),
-                        Arc::clone(&service_registry),
-                        Arc::clone(&schema),
-                    )
-                    .instrument(tracing::trace_span!("flatten"))
-                    .await;
-                }
             }
+
+            (value, errors)
         })
     }
 
@@ -307,7 +380,7 @@ impl FetchNode {
         current_dir: &'a Path,
         request: &Arc<Request>,
         schema: &Arc<Schema>,
-    ) -> Result<Map<String, Value>, FetchError> {
+    ) -> Result<(Map<String, Value>, Option<Vec<Path>>), FetchError> {
         if let Some(requires) = &self.requires {
             let mut variables = Object::with_capacity(1 + self.variable_usages.len());
             variables.extend(self.variable_usages.iter().filter_map(|key| {
@@ -318,35 +391,54 @@ impl FetchNode {
                 })
             }));
 
-            tracing::trace!(
-                "Creating representations at path '{}' for selections={:?} using data={}",
+            println!(
+                "\nMAKE VARIABLES Creating representations at path '{}' for selections={:?} using data={}",
                 current_dir,
                 requires,
                 serde_json::to_string(&data).unwrap(),
             );
-            let representations = selection::select_value(&data, current_dir, requires, &schema)?;
+
+            let values_and_paths = select_values(current_dir, data);
+            let mut paths = Vec::new();
+            let representations = Value::Array(
+                values_and_paths
+                    .into_iter()
+                    .flat_map(|(path, value)| match (value, requires) {
+                        (Value::Object(content), requires) => {
+                            paths.push(path);
+                            select_object(content, requires, schema).transpose()
+                        }
+                        (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
+                            reason: "not an object".to_string(),
+                        })),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap(),
+            );
+            //let representations = selection::select_value(&data, current_dir, requires, &schema)?;
             variables.insert("representations".into(), representations);
 
-            Ok(variables)
+            Ok((variables, Some(paths)))
         } else {
-            Ok(self
-                .variable_usages
-                .iter()
-                .filter_map(|key| {
-                    request
-                        .variables
-                        .as_ref()
-                        .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                        .unwrap_or_default()
-                })
-                .collect::<Object>())
+            Ok((
+                self.variable_usages
+                    .iter()
+                    .filter_map(|key| {
+                        request
+                            .variables
+                            .as_ref()
+                            .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
+                            .unwrap_or_default()
+                    })
+                    .collect::<Object>(),
+                None,
+            ))
         }
     }
 
     async fn fetch_node<'a>(
         &'a self,
         service_registry: Arc<dyn ServiceRegistry>,
-
         variables: Map<String, Value>,
     ) -> Result<Response, FetchError> {
         let FetchNode {
@@ -406,12 +498,26 @@ impl FetchNode {
                     if let Value::Array(array) = entities {
                         let span = tracing::trace_span!("response_insert");
                         let _guard = span.enter();
+                        println!(
+                            "\nMERGE inserting entity in global response: {}",
+                            serde_json::to_string_pretty(&response_data).unwrap()
+                        );
                         for (i, entity) in array.into_iter().enumerate() {
+                            println!(
+                                "MERGE insert entity at: {}: {:#?}",
+                                current_dir.join(Path::from(i.to_string())),
+                                serde_json::to_string(&entity).unwrap()
+                            );
                             response_data.insert_data(
                                 &current_dir.join(Path::from(i.to_string())),
                                 entity,
                             )?;
+                            println!(
+                                "MERGE response is now {}",
+                                serde_json::to_string(&response_data).unwrap()
+                            );
                         }
+                        println!("MERGE end\n");
 
                         return Ok(());
                     } else {
@@ -432,6 +538,65 @@ impl FetchNode {
             response_data.insert_data(current_dir, data)?;
 
             Ok(())
+        }
+    }
+
+    fn response_at_path<'a>(
+        &'a self,
+        current_dir: &'a Path,
+        paths: Option<Vec<Path>>,
+        subgraph_response: Response,
+    ) -> Result<Value, FetchError> {
+        let Response { data, .. } = subgraph_response;
+
+        if self.requires.is_some() {
+            // we have to nest conditions and do early returns here
+            // because we need to take ownership of the inner value
+            if let Value::Object(mut map) = data {
+                if let Some(entities) = map.remove("_entities") {
+                    tracing::info!(
+                        "Received entities: {}",
+                        serde_json::to_string(&entities).unwrap(),
+                    );
+
+                    if let Value::Array(array) = entities {
+                        let span = tracing::trace_span!("response_insert");
+                        let _guard = span.enter();
+
+                        let mut value = Value::default();
+
+                        let paths = paths.unwrap();
+                        for (entity, path) in array.into_iter().zip(paths.into_iter()) {
+                            println!(
+                                "RESPONSE_AT_PATH {} for entity: {}",
+                                path,
+                                serde_json::to_string(&entity).unwrap()
+                            );
+                            let v = Value::from_path(&path, entity);
+                            println!("RESPONSE_AT_PATH merging\n{:?}\nwith\n{:?}", value, v);
+                            value.deep_merge(v);
+                        }
+                        println!(
+                            "RESPONSE_at_path ({}): inserted in value: {:?}",
+                            current_dir, value
+                        );
+                        return Ok(value);
+                    } else {
+                        return Err(FetchError::ExecutionInvalidContent {
+                            reason: "Received invalid type for key `_entities`!".to_string(),
+                        });
+                    }
+                }
+            }
+
+            Err(FetchError::ExecutionInvalidContent {
+                reason: "Missing key `_entities`!".to_string(),
+            })
+        } else {
+            let span = tracing::trace_span!("response_insert");
+            let _guard = span.enter();
+
+            Ok(Value::from_path(current_dir, data))
         }
     }
 }

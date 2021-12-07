@@ -376,7 +376,7 @@ where
 /// This can be composed of strings and numbers
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub struct Path(Vec<PathElement>);
+pub struct Path(pub Vec<PathElement>);
 
 impl Path {
     pub fn from_slice<T: AsRef<str>>(s: &[T]) -> Self {
