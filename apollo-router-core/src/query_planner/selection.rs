@@ -60,14 +60,12 @@ pub(crate) fn select<'a>(
     selections: &[Selection],
     schema: &Schema,
 ) -> Result<Value, FetchError> {
-    let values: Vec<_> = select_values(path, &response.data)?
+    let values = select_values(path, &response.data)?
         .into_iter()
-        .map(|r| r.1)
-        .collect();
+        .map(|r| r.1);
 
     Ok(Value::Array(
         values
-            .into_iter()
             .flat_map(|value| match (value, selections) {
                 (Value::Object(content), requires) => {
                     select_object(content, requires, schema).transpose()
@@ -96,7 +94,7 @@ fn iterate_path<'a>(
                 reason: "not an array".to_string(),
             }),
             Some(array) => {
-                for (i, value) in array.into_iter().enumerate() {
+                for (i, value) in array.iter().enumerate() {
                     if let Some(err) = iterate_path(
                         &parent.join(Path::from(i.to_string())),
                         &path[1..],

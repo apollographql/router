@@ -163,7 +163,7 @@ impl PlanNode {
                                         Arc::clone(&request),
                                         Arc::clone(&service_registry),
                                         Arc::clone(&schema),
-                                        &parent_value,
+                                        parent_value,
                                     )
                                 })
                                 .collect();
@@ -189,11 +189,11 @@ impl PlanNode {
                     let (v, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
-                            &path,
+                            path,
                             Arc::clone(&request),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
-                            &parent_value,
+                            parent_value,
                         )
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
@@ -326,6 +326,11 @@ pub(crate) struct FetchNode {
     operation: String,
 }
 
+struct Variables {
+    variables: Map<String, Value>,
+    paths: Option<Vec<Path>>,
+}
+
 impl FetchNode {
     fn make_variables<'a>(
         &'a self,
@@ -333,7 +338,7 @@ impl FetchNode {
         current_dir: &'a Path,
         request: &Arc<Request>,
         schema: &Arc<Schema>,
-    ) -> Result<(Map<String, Value>, Option<Vec<Path>>), FetchError> {
+    ) -> Result<Variables, FetchError> {
         if let Some(requires) = &self.requires {
             let mut variables = Object::with_capacity(1 + self.variable_usages.len());
             variables.extend(self.variable_usages.iter().filter_map(|key| {
@@ -371,10 +376,14 @@ impl FetchNode {
             //let representations = selection::select_value(&data, current_dir, requires, &schema)?;
             variables.insert("representations".into(), representations);
 
-            Ok((variables, Some(paths)))
+            Ok(Variables {
+                variables,
+                paths: Some(paths),
+            })
         } else {
-            Ok((
-                self.variable_usages
+            Ok(Variables {
+                variables: self
+                    .variable_usages
                     .iter()
                     .filter_map(|key| {
                         request
@@ -384,8 +393,8 @@ impl FetchNode {
                             .unwrap_or_default()
                     })
                     .collect::<Object>(),
-                None,
-            ))
+                paths: None,
+            })
         }
     }
 
@@ -405,7 +414,8 @@ impl FetchNode {
 
         let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-        let (variables, paths) = self.make_variables(data, current_dir, &request, &schema)?;
+        let Variables { variables, paths } =
+            self.make_variables(data, current_dir, request, schema)?;
 
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
@@ -438,7 +448,7 @@ impl FetchNode {
 
         println!("FETCH sub response: {:?}", subgraph_response);
 
-        self.response_at_path(current_dir, paths, subgraph_response.clone())
+        self.response_at_path(current_dir, paths, subgraph_response)
     }
 
     fn response_at_path<'a>(
