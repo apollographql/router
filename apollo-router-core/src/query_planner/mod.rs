@@ -119,7 +119,12 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
-                    println!("{} Sequence", current_dir);
+                    println!(
+                        "{} Sequence: parent = {}",
+                        current_dir,
+                        serde_json::to_string(parent_value).unwrap()
+                    );
+                    value = parent_value.clone();
                     for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
@@ -140,7 +145,11 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    println!("{} Parallel", current_dir);
+                    println!(
+                        "{} Parallel: parent = {}",
+                        current_dir,
+                        serde_json::to_string(parent_value).unwrap()
+                    );
 
                     async {
                         let mut resv = Value::default();
