@@ -42,62 +42,7 @@ pub(crate) struct InlineFragment {
     selections: Vec<Selection>,
 }
 
-pub(crate) fn select(
-    response: &Response,
-    path: &Path,
-    selections: &[Selection],
-    schema: &Schema,
-) -> Result<Value, FetchError> {
-    let values =
-        response
-            .data
-            .get_at_path(path)
-            .map_err(|err| FetchError::ExecutionPathNotFound {
-                reason: err.to_string(),
-            })?;
-
-    Ok(Value::Array(
-        values
-            .into_iter()
-            .flat_map(|value| match (value, selections) {
-                (Value::Object(content), requires) => {
-                    select_object(content, requires, schema).transpose()
-                }
-                (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
-                    reason: "not an object".to_string(),
-                })),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    ))
-}
-
-pub(crate) fn select_value(
-    data: &Value,
-    path: &Path,
-    selections: &[Selection],
-    schema: &Schema,
-) -> Result<Value, FetchError> {
-    let values = data
-        .get_at_path(path)
-        .map_err(|err| FetchError::ExecutionPathNotFound {
-            reason: err.to_string(),
-        })?;
-
-    Ok(Value::Array(
-        values
-            .into_iter()
-            .flat_map(|value| match (value, selections) {
-                (Value::Object(content), requires) => {
-                    select_object(content, requires, schema).transpose()
-                }
-                (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
-                    reason: "not an object".to_string(),
-                })),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    ))
-}
-
+//FIXME: we need to return errors on invalid fetches here
 pub(crate) fn select_values<'a>(path: &'a Path, data: &'a Value) -> Vec<(Path, &'a Value)> {
     let mut res = Vec::new();
     iterate_path(&Path::default(), &path.0, data, &mut res);

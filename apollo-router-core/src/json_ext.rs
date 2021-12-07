@@ -160,7 +160,7 @@ impl ValueExt for Value {
                     a.extend(b.into_iter());
                 }
             }
-            (a, Value::Null) => {}
+            (_, Value::Null) => {}
             (a, b) => {
                 *a = b;
             }
@@ -270,7 +270,7 @@ impl ValueExt for Value {
 
                 &PathElement::Index(index) => match current_node {
                     Value::Array(a) => {
-                        for i in 0..index {
+                        for _ in 0..index {
                             a.push(Value::default());
                         }
                         a.push(Value::default());

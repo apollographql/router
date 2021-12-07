@@ -162,7 +162,7 @@ impl PlanNode {
                             while let Some((v, err)) = stream.next().await {
                                 println!("PARALLEL MERGING {:?}\nwith {:?}", resv, v);
                                 resv.deep_merge(v);
-                                //FIXME errors
+                                errors.extend(err.into_iter());
                             }
                         }
 
@@ -189,7 +189,6 @@ impl PlanNode {
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
 
-                    let m = Map::new();
                     println!("FLATTEN will try to insert at {}: {:?}", path, v);
                     value = Value::from_path(current_dir, v);
                     println!("FLATTEN value is now: {:?}", value);
@@ -224,7 +223,7 @@ impl PlanNode {
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
-                        Ok(mut subgraph_response) => {
+                        Ok(subgraph_response) => {
                             /*let mut response = response.lock().await;
                             response.append_errors(&mut subgraph_response.errors);*/
                             println!("FETCH sub response: {:?}", subgraph_response);
