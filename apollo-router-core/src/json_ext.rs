@@ -161,6 +161,14 @@ impl ValueExt for Value {
                 }
             }
             (_, Value::Null) => {}
+            (Value::Object(_), Value::Array(_)) => {
+                #[cfg(debug)]
+                panic!("trying to replace an object with an array");
+            }
+            (Value::Array(_), Value::Object(_)) => {
+                #[cfg(debug)]
+                panic!("trying to replace an object with an array");
+            }
             (a, b) => {
                 *a = b;
             }

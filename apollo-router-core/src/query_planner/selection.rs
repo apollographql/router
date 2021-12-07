@@ -43,10 +43,15 @@ pub(crate) struct InlineFragment {
 }
 
 //FIXME: we need to return errors on invalid fetches here
-pub(crate) fn select_values<'a>(path: &'a Path, data: &'a Value) -> Vec<(Path, &'a Value)> {
+pub(crate) fn select_values<'a>(
+    path: &'a Path,
+    data: &'a Value,
+) -> Result<Vec<(Path, &'a Value)>, FetchError> {
     let mut res = Vec::new();
-    iterate_path(&Path::default(), &path.0, data, &mut res);
-    res
+    match iterate_path(&Path::default(), &path.0, data, &mut res) {
+        Some(err) => Err(err),
+        None => Ok(res),
+    }
 }
 
 fn iterate_path<'a>(
@@ -54,25 +59,30 @@ fn iterate_path<'a>(
     path: &'a [PathElement],
     data: &'a Value,
     results: &mut Vec<(Path, &'a Value)>,
-) {
+) -> Option<FetchError> {
     match path.get(0) {
-        None => results.push((parent.clone(), data)),
-        Some(PathElement::Flatten) => {
-            for (i, value) in data
-                .as_array()
-                .into_iter()
-                .map(|v| v.iter())
-                .flatten()
-                .enumerate()
-            {
-                iterate_path(
-                    &parent.join(Path::from(i.to_string())),
-                    &path[1..],
-                    value,
-                    results,
-                );
-            }
+        None => {
+            results.push((parent.clone(), data));
+            None
         }
+        Some(PathElement::Flatten) => match data.as_array() {
+            None => Some(FetchError::ExecutionInvalidContent {
+                reason: "not an array".to_string(),
+            }),
+            Some(array) => {
+                for (i, value) in array.into_iter().enumerate() {
+                    if let Some(err) = iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        results,
+                    ) {
+                        return Some(err);
+                    }
+                }
+                None
+            }
+        },
         Some(PathElement::Index(i)) => {
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
@@ -81,18 +91,33 @@ fn iterate_path<'a>(
                         &path[1..],
                         value,
                         results,
-                    );
+                    )
+                } else {
+                    Some(FetchError::ExecutionPathNotFound {
+                        reason: format!("index {} not found", i),
+                    })
                 }
+            } else {
+                Some(FetchError::ExecutionInvalidContent {
+                    reason: "not an array".to_string(),
+                })
             }
         }
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k) {
-                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results);
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results)
+                } else {
+                    Some(FetchError::ExecutionPathNotFound {
+                        reason: format!("key {} not found", k),
+                    })
                 }
+            } else {
+                Some(FetchError::ExecutionInvalidContent {
+                    reason: "not an object".to_string(),
+                })
             }
         }
-        _ => unreachable!(),
     }
 }
 

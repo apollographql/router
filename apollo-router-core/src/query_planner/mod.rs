@@ -375,7 +375,7 @@ impl FetchNode {
                 serde_json::to_string(&data).unwrap(),
             );
 
-            let values_and_paths = select_values(current_dir, data);
+            let values_and_paths = select_values(current_dir, data)?;
             let mut paths = Vec::new();
             let representations = Value::Array(
                 values_and_paths
