@@ -137,6 +137,8 @@ impl PlanNode {
                                 Arc::clone(&request),
                                 Arc::clone(&service_registry),
                                 Arc::clone(&schema),
+                                // FIXME: should this use the parent_value?
+                                // that would mean we need to clone it at the beginning of the Sequence
                                 &value,
                             )
                             .instrument(tracing::info_span!("sequence"))
@@ -164,7 +166,7 @@ impl PlanNode {
                                         Arc::clone(&request),
                                         Arc::clone(&service_registry),
                                         Arc::clone(&schema),
-                                        &value,
+                                        &parent_value,
                                     )
                                 })
                                 .collect();
