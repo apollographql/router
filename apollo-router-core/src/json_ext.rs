@@ -39,6 +39,10 @@ pub trait ValueExt {
     /// insert a specific value at a subpath
     #[track_caller]
     fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
+
+    /// insert a specific value at a subpath
+    #[track_caller]
+    fn from_path(path: &Path, value: Value) -> Value;
 }
 
 impl ValueExt for Value {
@@ -236,6 +240,66 @@ impl ValueExt for Value {
         }
 
         Ok(())
+    }
+
+    /// insert a specific value at a subpath
+    #[track_caller]
+    fn from_path(path: &Path, value: Value) -> Value {
+        let mut res_value = Value::default();
+        let mut current_node = &mut res_value;
+
+        println!("FROM PATH: '{}'", path);
+        for p in path.iter() {
+            println!("FROM PATH: '{:?}', current = {:?}", p, current_node);
+            match p {
+                PathElement::Flatten => {
+                    let a = Vec::new();
+                    *current_node = Value::Array(a);
+                }
+
+                &PathElement::Index(index) => match current_node {
+                    Value::Array(a) => {
+                        for i in 0..index {
+                            a.push(Value::default());
+                        }
+                        a.push(Value::default());
+                        current_node = a.get_mut(index).unwrap();
+                    }
+                    Value::Null => {
+                        let mut a = Vec::new();
+                        for _ in 0..index {
+                            a.push(Value::default());
+                        }
+                        a.push(Value::default());
+
+                        *current_node = Value::Array(a);
+                        match current_node {
+                            Value::Array(a) => {
+                                current_node = a.get_mut(index).unwrap();
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    other => unreachable!("unreachable node: {:?}", other),
+                },
+                PathElement::Key(k) => {
+                    let mut m = Map::new();
+                    m.insert(k.to_string(), Value::default());
+
+                    *current_node = Value::Object(m);
+                    match current_node {
+                        Value::Object(m) => {
+                            current_node = m.get_mut(k).unwrap();
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+
+        *current_node = value;
+        println!("FROM PATH: '{}' => {:?}", path, res_value);
+        res_value
     }
 }
 
@@ -538,5 +602,21 @@ mod tests {
         assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
+    }
+
+    #[test]
+    fn test_from_path() {
+        let json = json!([{"prop1":1},{"prop1":2}]);
+        let path = Path::from("obj/arr/@");
+        let result = Value::from_path(&path, json);
+        assert_eq!(result, json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
+    }
+
+    #[test]
+    fn test_from_path_index() {
+        let json = json!({"prop1":1});
+        let path = Path::from("obj/arr/1");
+        let result = Value::from_path(&path, json);
+        assert_eq!(result, json!({"obj":{"arr":[null, {"prop1":1}]}}));
     }
 }
