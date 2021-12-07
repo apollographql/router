@@ -222,6 +222,7 @@ impl PlanNode {
                     {
                         Ok(v) => value = v,
                         Err(err) => {
+                            failfast_error!("Fetch error: {}", err);
                             errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
                             return (value, errors);
                         }
