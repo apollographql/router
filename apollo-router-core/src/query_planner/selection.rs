@@ -42,7 +42,6 @@ pub(crate) struct InlineFragment {
     selections: Vec<Selection>,
 }
 
-//FIXME: we need to return errors on invalid fetches here
 pub(crate) fn select_values<'a>(
     path: &'a Path,
     data: &'a Value,
@@ -52,6 +51,33 @@ pub(crate) fn select_values<'a>(
         Some(err) => Err(err),
         None => Ok(res),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn select<'a>(
+    response: &Response,
+    path: &'a Path,
+    selections: &[Selection],
+    schema: &Schema,
+) -> Result<Value, FetchError> {
+    let values: Vec<_> = select_values(path, &response.data)?
+        .into_iter()
+        .map(|r| r.1)
+        .collect();
+
+    Ok(Value::Array(
+        values
+            .into_iter()
+            .flat_map(|value| match (value, selections) {
+                (Value::Object(content), requires) => {
+                    select_object(content, requires, schema).transpose()
+                }
+                (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
+                    reason: "not an object".to_string(),
+                })),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
 }
 
 fn iterate_path<'a>(
