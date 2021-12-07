@@ -208,56 +208,22 @@ impl PlanNode {
                         "==============\n{} | {:?} FETCH({}) parent = {:?}",
                         current_dir, current_dir, fetch_node.service_name, parent_value
                     );
-                    let (variables, paths) = {
-                        match fetch_node.make_variables(
+
+                    match fetch_node
+                        .fetch_node(
                             parent_value,
                             current_dir,
                             &request,
+                            Arc::clone(&service_registry),
                             &schema,
-                        ) {
-                            Ok(v) => v,
-                            Err(err) => {
-                                failfast_error!("Fetch error: {}", err);
-                                /*response
-                                .errors
-                                .push(err.to_graphql_error(Some(current_dir.to_owned())));*/
-                                errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
-                                return (value, errors);
-                            }
-                        }
-                    };
-                    println!("FETCH variables: {:?}", variables);
-                    match fetch_node
-                        .fetch_node(Arc::clone(&service_registry), variables)
+                        )
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
-                        Ok(subgraph_response) => {
-                            /*let mut response = response.lock().await;
-                            response.append_errors(&mut subgraph_response.errors);*/
-                            println!("FETCH sub response: {:?}", subgraph_response);
-
-                            value = match fetch_node.response_at_path(
-                                current_dir,
-                                paths,
-                                subgraph_response.clone(),
-                            ) {
-                                Ok(v) => v,
-                                Err(err) => {
-                                    errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
-                                    return (value, errors);
-                                }
-                            };
-                            println!("FETCH value after merge: {:?}\n==============\n", value);
-                        }
+                        Ok(v) => value = v,
                         Err(err) => {
-                            failfast_error!("Fetch error: {}", err);
                             errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
-                            /*response
-                            .lock()
-                            .await
-                            .errors
-                            .push(err.to_graphql_error(Some(current_dir.to_owned())));*/
+                            return (value, errors);
                         }
                     }
                 }
@@ -424,9 +390,12 @@ impl FetchNode {
 
     async fn fetch_node<'a>(
         &'a self,
+        data: &'a Value,
+        current_dir: &'a Path,
+        request: &'a Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
-        variables: Map<String, Value>,
-    ) -> Result<Response, FetchError> {
+        schema: &'a Arc<Schema>,
+    ) -> Result<Value, FetchError> {
         let FetchNode {
             operation,
             service_name,
@@ -434,6 +403,8 @@ impl FetchNode {
         } = self;
 
         let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
+
+        let (variables, paths) = self.make_variables(data, current_dir, &request, &schema)?;
 
         // We already checked that the service exists during planning
         let fetcher = service_registry.get(service_name).unwrap();
@@ -450,17 +421,23 @@ impl FetchNode {
             .instrument(query_span)
             .await;
 
-        match res {
+        let subgraph_response = match res {
             Some(response) if !response.is_primary() => {
-                Err(FetchError::SubrequestUnexpectedPatchResponse {
+                return Err(FetchError::SubrequestUnexpectedPatchResponse {
                     service: service_name.to_owned(),
+                });
+            }
+            Some(subgraph_response) => subgraph_response,
+            None => {
+                return Err(FetchError::SubrequestNoResponse {
+                    service: service_name.to_string(),
                 })
             }
-            Some(subgraph_response) => Ok(subgraph_response),
-            None => Err(FetchError::SubrequestNoResponse {
-                service: service_name.to_string(),
-            }),
-        }
+        };
+
+        println!("FETCH sub response: {:?}", subgraph_response);
+
+        self.response_at_path(current_dir, paths, subgraph_response.clone())
     }
 
     fn response_at_path<'a>(
