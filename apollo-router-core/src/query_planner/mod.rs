@@ -5,7 +5,6 @@ mod selection;
 use crate::prelude::graphql::*;
 use crate::query_planner::selection::{select_object, select_values};
 pub use caching_query_planner::*;
-use futures::lock::Mutex;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
 pub use router_bridge_query_planner::*;
@@ -82,14 +81,12 @@ impl QueryPlan {
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
     ) -> Response {
-        let response = Arc::new(Mutex::new(Response::builder().build()));
         let root = Path::empty();
 
-        println!("WILL EXECUTE\n*********");
+        println!("WILL EXECUTE\n*********{:#?}", self.root);
         let (value, errors) = self
             .root
             .execute_recursively(
-                Arc::clone(&response),
                 &root,
                 Arc::clone(&request),
                 Arc::clone(&service_registry),
@@ -98,23 +95,17 @@ impl QueryPlan {
             )
             .await;
 
-        println!(
-            "res1:{}\nres2:{}",
-            serde_json::to_string_pretty(&response.lock().await.data).unwrap(),
-            serde_json::to_string_pretty(&value).unwrap()
-        );
-        assert!(response.lock().await.data.eq_and_ordered(&value));
-        // TODO: this is not great but there is no other way
-        Arc::try_unwrap(response)
-            .expect("todo: how to prove?")
-            .into_inner()
+        let mut response = Response::builder().build();
+        response.data = value;
+        response.errors = errors;
+
+        response
     }
 }
 
 impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
-        response: Arc<Mutex<Response>>,
         current_dir: &'a Path,
         request: Arc<Request>,
         service_registry: Arc<dyn ServiceRegistry>,
@@ -132,7 +123,6 @@ impl PlanNode {
                     for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
-                                Arc::clone(&response),
                                 current_dir,
                                 Arc::clone(&request),
                                 Arc::clone(&service_registry),
@@ -146,7 +136,6 @@ impl PlanNode {
                         println!("SEQUENCE will merge\n{:?}\nwith\n{:?}", value, v);
                         value.deep_merge(v);
                         println!("\nSEQUENCE after merge: {:?}", value);
-                        println!("response data is {:?}", response.lock().await.data);
                         errors.extend(err.into_iter());
                     }
                 }
@@ -161,7 +150,6 @@ impl PlanNode {
                                 .iter()
                                 .map(|plan| {
                                     plan.execute_recursively(
-                                        Arc::clone(&response),
                                         current_dir,
                                         Arc::clone(&request),
                                         Arc::clone(&service_registry),
@@ -191,7 +179,6 @@ impl PlanNode {
 
                     let (v, err) = node
                         .execute_recursively(
-                            Arc::clone(&response),
                             // this is the only command that actually changes the "current dir"
                             &path,
                             Arc::clone(&request),
@@ -204,8 +191,6 @@ impl PlanNode {
 
                     let m = Map::new();
                     println!("FLATTEN will try to insert at {}: {:?}", path, v);
-                    println!("current response is {:?}", response.lock().await.data);
-                    //value.insert_data(path, v).unwrap();
                     value = Value::from_path(current_dir, v);
                     println!("FLATTEN value is now: {:?}", value);
                     errors.extend(err.into_iter());
@@ -216,7 +201,6 @@ impl PlanNode {
                         current_dir, current_dir, fetch_node.service_name, parent_value
                     );
                     let (variables, paths) = {
-                        let mut response = response.lock().await;
                         match fetch_node.make_variables(
                             parent_value,
                             current_dir,
@@ -226,9 +210,9 @@ impl PlanNode {
                             Ok(v) => v,
                             Err(err) => {
                                 failfast_error!("Fetch error: {}", err);
-                                response
-                                    .errors
-                                    .push(err.to_graphql_error(Some(current_dir.to_owned())));
+                                /*response
+                                .errors
+                                .push(err.to_graphql_error(Some(current_dir.to_owned())));*/
                                 errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
                                 return (value, errors);
                             }
@@ -241,39 +225,31 @@ impl PlanNode {
                         .await
                     {
                         Ok(mut subgraph_response) => {
-                            let mut response = response.lock().await;
-                            response.append_errors(&mut subgraph_response.errors);
+                            /*let mut response = response.lock().await;
+                            response.append_errors(&mut subgraph_response.errors);*/
                             println!("FETCH sub response: {:?}", subgraph_response);
 
-                            match fetch_node.merge_response(
-                                &mut response.data,
+                            value = match fetch_node.response_at_path(
                                 current_dir,
+                                paths,
                                 subgraph_response.clone(),
                             ) {
-                                Ok(()) => {}
+                                Ok(v) => v,
                                 Err(err) => {
-                                    failfast_error!("Fetch error: {}", err);
-                                    response
-                                        .errors
-                                        .push(err.to_graphql_error(Some(current_dir.to_owned())));
-
                                     errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
                                     return (value, errors);
                                 }
-                            }
-
-                            value = fetch_node
-                                .response_at_path(current_dir, paths, subgraph_response.clone())
-                                .unwrap();
+                            };
                             println!("FETCH value after merge: {:?}\n==============\n", value);
                         }
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
-                            response
-                                .lock()
-                                .await
-                                .errors
-                                .push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            /*response
+                            .lock()
+                            .await
+                            .errors
+                            .push(err.to_graphql_error(Some(current_dir.to_owned())));*/
                         }
                     }
                 }
@@ -476,70 +452,6 @@ impl FetchNode {
             None => Err(FetchError::SubrequestNoResponse {
                 service: service_name.to_string(),
             }),
-        }
-    }
-
-    fn merge_response<'a>(
-        &'a self,
-        response_data: &mut Value,
-        current_dir: &'a Path,
-        subgraph_response: Response,
-    ) -> Result<(), FetchError> {
-        let Response { data, .. } = subgraph_response;
-
-        if self.requires.is_some() {
-            // we have to nest conditions and do early returns here
-            // because we need to take ownership of the inner value
-            if let Value::Object(mut map) = data {
-                if let Some(entities) = map.remove("_entities") {
-                    tracing::trace!(
-                        "Received entities: {}",
-                        serde_json::to_string(&entities).unwrap(),
-                    );
-
-                    if let Value::Array(array) = entities {
-                        let span = tracing::trace_span!("response_insert");
-                        let _guard = span.enter();
-                        println!(
-                            "\nMERGE inserting entity in global response: {}",
-                            serde_json::to_string_pretty(&response_data).unwrap()
-                        );
-                        for (i, entity) in array.into_iter().enumerate() {
-                            println!(
-                                "MERGE insert entity at: {}: {:#?}",
-                                current_dir.join(Path::from(i.to_string())),
-                                serde_json::to_string(&entity).unwrap()
-                            );
-                            response_data.insert_data(
-                                &current_dir.join(Path::from(i.to_string())),
-                                entity,
-                            )?;
-                            println!(
-                                "MERGE response is now {}",
-                                serde_json::to_string(&response_data).unwrap()
-                            );
-                        }
-                        println!("MERGE end\n");
-
-                        return Ok(());
-                    } else {
-                        return Err(FetchError::ExecutionInvalidContent {
-                            reason: "Received invalid type for key `_entities`!".to_string(),
-                        });
-                    }
-                }
-            }
-
-            Err(FetchError::ExecutionInvalidContent {
-                reason: "Missing key `_entities`!".to_string(),
-            })
-        } else {
-            let span = tracing::trace_span!("response_insert");
-            let _guard = span.enter();
-
-            response_data.insert_data(current_dir, data)?;
-
-            Ok(())
         }
     }
 
