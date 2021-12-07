@@ -36,11 +36,7 @@ pub trait ValueExt {
     #[track_caller]
     fn is_subset(&self, superset: &Value) -> bool;
 
-    /// insert a specific value at a subpath
-    #[track_caller]
-    fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
-
-    /// insert a specific value at a subpath
+    /// create a Value by inserting a value at a subpath
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 }
@@ -238,27 +234,6 @@ impl ValueExt for Value {
             }
             (a, b) => a == b,
         }
-    }
-
-    fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
-        let mut nodes =
-            self.get_at_path_mut(path)
-                .map_err(|err| FetchError::ExecutionPathNotFound {
-                    reason: err.to_string(),
-                })?;
-
-        let len = nodes.len();
-        //FIXME: are there cases where we could write at multiple paths?
-        for (i, node) in nodes.iter_mut().enumerate() {
-            if i == len {
-                (*node).deep_merge(value);
-                break;
-            } else {
-                (*node).deep_merge(value.clone());
-            }
-        }
-
-        Ok(())
     }
 
     /// insert a specific value at a subpath
