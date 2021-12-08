@@ -425,7 +425,7 @@ impl FetchNode {
             // because we need to take ownership of the inner value
             if let Value::Object(mut map) = data {
                 if let Some(entities) = map.remove("_entities") {
-                    tracing::info!(
+                    tracing::trace!(
                         "Received entities: {}",
                         serde_json::to_string(&entities).unwrap(),
                     );
