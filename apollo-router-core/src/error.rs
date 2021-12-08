@@ -1,9 +1,10 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use futures::prelude::*;
+use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{slice::Iter, sync::Arc};
 use thiserror::Error;
 use tokio::task::JoinError;
 
@@ -218,5 +219,50 @@ pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
     /// Parsing error(s).
-    ParseErrors(Vec<apollo_parser::Error>),
+    Parse(ParseErrors),
+}
+
+#[derive(Debug)]
+pub struct ParseErrors {
+    raw_schema: String,
+    errors: Vec<apollo_parser::Error>,
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("{}", self.ty)]
+#[diagnostic(code("apollo-parser parsing error."))]
+struct ParserError {
+    ty: String,
+    #[source_code]
+    src: NamedSource,
+    #[label("{}", self.ty)]
+    span: SourceSpan,
+}
+
+impl ParseErrors {
+    pub(crate) fn new(raw_schema: String, errors: Iter<'_, apollo_parser::Error>) -> Self {
+        Self {
+            raw_schema,
+            errors: errors.cloned().collect(),
+        }
+    }
+
+    pub fn print(&self) {
+        if atty::is(atty::Stream::Stdout) {
+            // Fancy Miette reports for TTYs
+            self.errors.iter().for_each(|err| {
+                let report = Report::new(ParserError {
+                    src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
+                    span: (err.index(), err.data().len()).into(),
+                    ty: err.message().into(),
+                });
+                println!("{:?}", report);
+            });
+        } else {
+            // Best effort to display errors
+            self.errors.iter().for_each(|r| {
+                println!("{:#?}", r);
+            });
+        };
+    }
 }

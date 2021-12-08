@@ -45,7 +45,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         Router: graphql::Router<PreparedQuery> + 'static,
         PreparedQuery: graphql::PreparedQuery + 'static,
     {
-        Box::pin(async {
+        Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen;
 
@@ -56,12 +56,15 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
+            let dispatcher = configuration
+                .subscriber
+                .clone()
+                .map(tracing::Dispatch::new)
+                .unwrap_or_default();
+
             let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(
-                    Arc::clone(&router),
-                    Arc::clone(&configuration),
-                ))
-                .or(post_graphql_request(router, configuration))
+                .or(get_graphql_request_or_redirect(Arc::clone(&router)))
+                .or(post_graphql_request(router))
                 .with(cors);
 
             // generate a hyper service from warp routes
@@ -139,7 +142,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                         }
                                     }
                                 }
-                            });
+                            }.with_subscriber(dispatcher.clone()));
                         }
                     }
                 }
@@ -167,7 +170,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
 fn get_graphql_request_or_redirect<Router, PreparedQuery>(
     router: Arc<Router>,
-    configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     Router: graphql::Router<PreparedQuery> + 'static,
@@ -184,13 +186,12 @@ where
                   host: Option<Authority>,
                   body: Bytes,
                   header_map: HeaderMap| {
-                let configuration = Arc::clone(&configuration);
                 let router = Arc::clone(&router);
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
-                        run_graphql_request(configuration, router, request, header_map).await
+                        run_graphql_request(router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -245,7 +246,6 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
 
 fn post_graphql_request<Router, PreparedQuery>(
     router: Arc<Router>,
-    configuration: Arc<Configuration>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     Router: graphql::Router<PreparedQuery> + 'static,
@@ -256,10 +256,9 @@ where
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let configuration = Arc::clone(&configuration);
             let router = Arc::clone(&router);
             async move {
-                let reply = run_graphql_request(configuration, router, request, header_map).await;
+                let reply = run_graphql_request(router, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
             .boxed()
@@ -267,7 +266,6 @@ where
 }
 
 fn run_graphql_request<Router, PreparedQuery>(
-    configuration: Arc<Configuration>,
     router: Arc<Router>,
     request: graphql::Request,
     header_map: HeaderMap,
@@ -276,12 +274,6 @@ where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery + 'static,
 {
-    let dispatcher = configuration
-        .subscriber
-        .clone()
-        .map(tracing::Dispatch::new)
-        .unwrap_or_default();
-
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
         injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
@@ -294,7 +286,6 @@ where
 
         Box::new(Response::new(Body::wrap_stream(response_stream))) as Box<dyn Reply>
     }
-    .with_subscriber(dispatcher)
 }
 
 async fn stream_request<Router, PreparedQuery>(
