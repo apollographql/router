@@ -86,15 +86,17 @@ fn main() -> Result<()> {
 async fn rt_main() -> Result<()> {
     let opt = Opt::from_args();
 
+    let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
+
     let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.env_filter).context("could not parse log")?);
+        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
     if atty::is(atty::Stream::Stdout) {
         builder.init();
     } else {
         builder.json().init();
     }
 
-    GLOBAL_ENV_FILTER.set(opt.env_filter.clone()).unwrap();
+    GLOBAL_ENV_FILTER.set(env_filter).unwrap();
 
     let current_directory = std::env::current_dir()?;
 
