@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::map::Entry;
 use serde_json::Map;
 pub use serde_json::Value;
+use std::cmp::min;
 use std::fmt;
 
 /// A JSON object.
@@ -46,19 +47,11 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
-                if a.len() > b.len() {
-                    for ((_index, b_value), a_value) in b.drain(..).enumerate().zip(a.iter_mut()) {
-                        a_value.deep_merge(b_value);
-                    }
-                } else {
-                    for ((_index, b_value), a_value) in
-                        b.drain(..a.len()).enumerate().zip(a.iter_mut())
-                    {
-                        a_value.deep_merge(b_value);
-                    }
-
-                    a.extend(b.into_iter());
+                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
+                    a_value.deep_merge(b_value);
                 }
+
+                a.extend(b.into_iter());
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
