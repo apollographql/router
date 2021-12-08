@@ -42,17 +42,6 @@ pub(crate) struct InlineFragment {
     selections: Vec<Selection>,
 }
 
-pub(crate) fn select_values<'a>(
-    path: &'a Path,
-    data: &'a Value,
-) -> Result<Vec<(Path, &'a Value)>, FetchError> {
-    let mut res = Vec::new();
-    match iterate_path(&Path::default(), &path.0, data, &mut res) {
-        Some(err) => Err(err),
-        None => Ok(res),
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn select<'a>(
     response: &Response,
@@ -76,73 +65,6 @@ pub(crate) fn select<'a>(
             })
             .collect::<Result<Vec<_>, _>>()?,
     ))
-}
-
-fn iterate_path<'a>(
-    parent: &Path,
-    path: &'a [PathElement],
-    data: &'a Value,
-    results: &mut Vec<(Path, &'a Value)>,
-) -> Option<FetchError> {
-    match path.get(0) {
-        None => {
-            results.push((parent.clone(), data));
-            None
-        }
-        Some(PathElement::Flatten) => match data.as_array() {
-            None => Some(FetchError::ExecutionInvalidContent {
-                reason: "not an array".to_string(),
-            }),
-            Some(array) => {
-                for (i, value) in array.iter().enumerate() {
-                    if let Some(err) = iterate_path(
-                        &parent.join(Path::from(i.to_string())),
-                        &path[1..],
-                        value,
-                        results,
-                    ) {
-                        return Some(err);
-                    }
-                }
-                None
-            }
-        },
-        Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data {
-                if let Some(value) = a.get(*i) {
-                    iterate_path(
-                        &parent.join(Path::from(i.to_string())),
-                        &path[1..],
-                        value,
-                        results,
-                    )
-                } else {
-                    Some(FetchError::ExecutionPathNotFound {
-                        reason: format!("index {} not found", i),
-                    })
-                }
-            } else {
-                Some(FetchError::ExecutionInvalidContent {
-                    reason: "not an array".to_string(),
-                })
-            }
-        }
-        Some(PathElement::Key(k)) => {
-            if let Value::Object(o) = data {
-                if let Some(value) = o.get(k) {
-                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results)
-                } else {
-                    Some(FetchError::ExecutionPathNotFound {
-                        reason: format!("key {} not found", k),
-                    })
-                }
-            } else {
-                Some(FetchError::ExecutionInvalidContent {
-                    reason: "not an object".to_string(),
-                })
-            }
-        }
-    }
 }
 
 pub(crate) fn select_object(

@@ -3,7 +3,8 @@ mod router_bridge_query_planner;
 mod selection;
 
 use crate::prelude::graphql::*;
-use crate::query_planner::selection::{select_object, select_values};
+use crate::query_planner::json_ext::select_values;
+use crate::query_planner::selection::select_object;
 pub use caching_query_planner::*;
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;

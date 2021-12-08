@@ -294,6 +294,84 @@ impl ValueExt for Value {
     }
 }
 
+pub(crate) fn select_values<'a>(
+    path: &'a Path,
+    data: &'a Value,
+) -> Result<Vec<(Path, &'a Value)>, FetchError> {
+    let mut res = Vec::new();
+    match iterate_path(&Path::default(), &path.0, data, &mut res) {
+        Some(err) => Err(err),
+        None => Ok(res),
+    }
+}
+
+fn iterate_path<'a>(
+    parent: &Path,
+    path: &'a [PathElement],
+    data: &'a Value,
+    results: &mut Vec<(Path, &'a Value)>,
+) -> Option<FetchError> {
+    match path.get(0) {
+        None => {
+            results.push((parent.clone(), data));
+            None
+        }
+        Some(PathElement::Flatten) => match data.as_array() {
+            None => Some(FetchError::ExecutionInvalidContent {
+                reason: "not an array".to_string(),
+            }),
+            Some(array) => {
+                for (i, value) in array.iter().enumerate() {
+                    if let Some(err) = iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        results,
+                    ) {
+                        return Some(err);
+                    }
+                }
+                None
+            }
+        },
+        Some(PathElement::Index(i)) => {
+            if let Value::Array(a) = data {
+                if let Some(value) = a.get(*i) {
+                    iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        results,
+                    )
+                } else {
+                    Some(FetchError::ExecutionPathNotFound {
+                        reason: format!("index {} not found", i),
+                    })
+                }
+            } else {
+                Some(FetchError::ExecutionInvalidContent {
+                    reason: "not an array".to_string(),
+                })
+            }
+        }
+        Some(PathElement::Key(k)) => {
+            if let Value::Object(o) = data {
+                if let Some(value) = o.get(k) {
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results)
+                } else {
+                    Some(FetchError::ExecutionPathNotFound {
+                        reason: format!("key {} not found", k),
+                    })
+                }
+            } else {
+                Some(FetchError::ExecutionInvalidContent {
+                    reason: "not an object".to_string(),
+                })
+            }
+        }
+    }
+}
+
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -472,7 +550,11 @@ mod tests {
     fn test_get_at_path() {
         let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.1)
+            .collect::<Vec<_>>();
         assert_eq!(result, vec![&Value::Number(2.into())]);
         let result_mut = json.get_at_path_mut(&path).unwrap();
         assert_eq!(result_mut, vec![&mut Value::Number(2.into())]);
@@ -482,7 +564,11 @@ mod tests {
     fn test_get_at_path_flatmap() {
         let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.1)
+            .collect::<Vec<_>>();
         assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
         let result_mut = json.get_at_path_mut(&path).unwrap();
         assert_eq!(
@@ -512,7 +598,11 @@ mod tests {
             },
         });
         let path = Path::from("obj/arr/@/prop1/@/prop2");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json)
+            .unwrap()
+            .into_iter()
+            .map(|v| v.1)
+            .collect::<Vec<_>>();
         assert_eq!(
             result,
             vec![
