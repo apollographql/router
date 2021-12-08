@@ -4,14 +4,12 @@ expression: result
 
 ---
 QueryPlan {
-    node: Some(
-        Fetch(
-            FetchNode {
-                service_name: "accounts",
-                requires: None,
-                variable_usages: [],
-                operation: "{me{name{first last}}}",
-            },
-        ),
+    root: Fetch(
+        FetchNode {
+            service_name: "accounts",
+            requires: None,
+            variable_usages: [],
+            operation: "{me{name{first last}}}",
+        },
     ),
 }
