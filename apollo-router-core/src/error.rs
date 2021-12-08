@@ -225,47 +225,22 @@ impl ParseErrors {
         }
     }
 
-    pub fn print(&self, output: atty::Stream) {
-        if let atty::Stream::Stdin = output {
-            // We don't print to stdin
-            return;
-        }
-
-        let reports: Vec<_> = if atty::is(output) {
-            self.fancy_reports()
-        } else {
-            self.raw_reports()
-        };
-
-        if let atty::Stream::Stdout = output {
-            reports.iter().for_each(|r| {
-                println!("{}", r);
-            });
-        } else {
-            reports.iter().for_each(|r| {
-                eprintln!("{}", r);
-            });
-        }
-    }
-
-    /// Fancy Miette reports for TTYs
-    fn fancy_reports(&self) -> Vec<String> {
-        self.errors
-            .iter()
-            .map(|err| {
+    pub fn print(&self) {
+        if atty::is(atty::Stream::Stdout) {
+            // Fancy Miette reports for TTYs
+            self.errors.iter().for_each(|err| {
                 let report = Report::new(ParserError {
                     src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
                     span: (err.index(), err.data().len()).into(),
                     ty: err.message().into(),
                 });
-
-                format!("{:?}", report)
-            })
-            .collect()
-    }
-
-    /// Best effort to display errors
-    fn raw_reports(&self) -> Vec<String> {
-        self.errors.iter().map(|e| format!("{:#?}", e)).collect()
+                println!("{:?}", report);
+            });
+        } else {
+            // Best effort to display errors
+            self.errors.iter().for_each(|r| {
+                println!("{:#?}", r);
+            });
+        };
     }
 }
