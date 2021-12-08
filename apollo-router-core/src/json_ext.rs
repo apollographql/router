@@ -10,17 +10,6 @@ pub type Object = Map<String, Value>;
 
 /// Extension trait for [`serde_json::Value`].
 pub trait ValueExt {
-    /// Get a reference to the value(s) at a particular path.
-    #[track_caller]
-    fn get_at_path<'a, 'b>(&'a self, path: &'b Path) -> Result<Vec<&'a Self>, JsonExtError>;
-
-    /// Get a mutable reference to the value(s) at a particular path.
-    #[track_caller]
-    fn get_at_path_mut<'a, 'b>(
-        &'a mut self,
-        path: &'b Path,
-    ) -> Result<Vec<&'a mut Self>, JsonExtError>;
-
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
     /// exists.
     #[track_caller]
@@ -42,91 +31,6 @@ pub trait ValueExt {
 }
 
 impl ValueExt for Value {
-    fn get_at_path<'a, 'b>(&'a self, path: &'b Path) -> Result<Vec<&'a Self>, JsonExtError> {
-        let mut current = vec![self];
-
-        for path_element in path.iter() {
-            current = match path_element {
-                PathElement::Flatten => current
-                    .into_iter()
-                    .map(|x| x.as_array().ok_or(JsonExtError::InvalidFlatten))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                PathElement::Index(index) if !(current.len() == 1 && current[0].is_array()) => {
-                    vec![current
-                        .into_iter()
-                        .nth(*index)
-                        .ok_or(JsonExtError::PathNotFound)?]
-                }
-                path_element => current
-                    .into_iter()
-                    .map(|value| match (path_element, value) {
-                        (PathElement::Key(key), value) if value.is_object() => value
-                            .as_object()
-                            .unwrap()
-                            .get(key)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Key(_), _) => Err(JsonExtError::PathNotFound),
-                        (PathElement::Index(i), value) => value
-                            .as_array()
-                            .ok_or(JsonExtError::PathNotFound)?
-                            .get(*i)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Flatten, _) => unreachable!(),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-
-        Ok(current)
-    }
-
-    fn get_at_path_mut<'a, 'b>(
-        &'a mut self,
-        path: &'b Path,
-    ) -> Result<Vec<&'a mut Self>, JsonExtError> {
-        let mut current = vec![self];
-
-        for path_element in path.iter() {
-            current = match path_element {
-                PathElement::Flatten => current
-                    .into_iter()
-                    .map(|x| x.as_array_mut().ok_or(JsonExtError::InvalidFlatten))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                PathElement::Index(index) if !(current.len() == 1 && current[0].is_array()) => {
-                    vec![current
-                        .into_iter()
-                        .nth(*index)
-                        .ok_or(JsonExtError::PathNotFound)?]
-                }
-                path_element => current
-                    .into_iter()
-                    .map(|value| match (path_element, value) {
-                        (PathElement::Key(key), value) if value.is_object() => value
-                            .as_object_mut()
-                            .unwrap()
-                            .get_mut(key)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Key(_), _) => Err(JsonExtError::PathNotFound),
-                        (PathElement::Index(i), value) => value
-                            .as_array_mut()
-                            .ok_or(JsonExtError::PathNotFound)?
-                            .get_mut(*i)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Flatten, _) => unreachable!(),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-
-        Ok(current)
-    }
-
     fn deep_merge(&mut self, other: Self) {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
@@ -548,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_get_at_path() {
-        let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
         let result = select_values(&path, &json)
             .unwrap()
@@ -556,13 +460,11 @@ mod tests {
             .map(|v| v.1)
             .collect::<Vec<_>>();
         assert_eq!(result, vec![&Value::Number(2.into())]);
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(result_mut, vec![&mut Value::Number(2.into())]);
     }
 
     #[test]
     fn test_get_at_path_flatmap() {
-        let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
         let result = select_values(&path, &json)
             .unwrap()
@@ -570,16 +472,11 @@ mod tests {
             .map(|v| v.1)
             .collect::<Vec<_>>();
         assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(
-            result_mut,
-            vec![&mut json!({"prop1":1}), &mut json!({"prop1":2})]
-        );
     }
 
     #[test]
     fn test_get_at_path_flatmap_nested() {
-        let mut json = json!({
+        let json = json!({
             "obj": {
                 "arr": [
                     {
@@ -610,16 +507,6 @@ mod tests {
                 &json!({"prop3":2}),
                 &json!({"prop3":3}),
                 &json!({"prop3":4}),
-            ],
-        );
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(
-            result_mut,
-            vec![
-                &mut json!({"prop3":1}),
-                &mut json!({"prop3":2}),
-                &mut json!({"prop3":3}),
-                &mut json!({"prop3":4}),
             ],
         );
     }
