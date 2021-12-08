@@ -7,7 +7,10 @@ pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, String>,
-    fragments: HashMap<String, Vec<Selection>>,
+    object_types: HashMap<String, ObjectType>,
+    interfaces: HashMap<String, Interface>,
+    custom_scalars: HashSet<String>,
+    fragments: Fragments,
 }
 
 impl std::str::FromStr for Schema {
@@ -24,7 +27,6 @@ impl std::str::FromStr for Schema {
         let document = tree.document();
         let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
         let mut subgraphs = HashMap::new();
-        let mut fragments = HashMap::new();
 
         // the logic of this algorithm is inspired from the npm package graphql:
         // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
@@ -87,6 +89,7 @@ impl std::str::FromStr for Schema {
                 }
                 // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
                 ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
+                // Spec: https://spec.graphql.org/draft/#sec-Enums
                 ast::Definition::EnumTypeDefinition(enum_type) => {
                     if enum_type
                         .name()
@@ -145,29 +148,97 @@ impl std::str::FromStr for Schema {
                         }
                     }
                 }
-                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
-                ast::Definition::FragmentDefinition(fragment_definition) => {
-                    let name = fragment_definition
-                        .fragment_name()
-                        .expect("the node FragmentName is not optional in the spec; qed")
-                        .name()
-                        .unwrap()
-                        .text()
-                        .to_string();
-                    let selection_set = fragment_definition
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed");
-
-                    fragments.insert(name, selection_set.selections().map(Into::into).collect());
-                }
                 _ => {}
             }
         }
+
+        macro_rules! implement_object_type_or_interface_map {
+            ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+                let mut map = document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_ty(definition) = definition {
+                            let instance = <$ty>::from(definition);
+                            Some((instance.name.clone(), instance))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<HashMap<String, $ty>>();
+
+                document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_extension_ty(extension) = definition {
+                            Some(<$ty>::from(extension))
+                        } else {
+                            None
+                        }
+                    })
+                    .for_each(|extension| {
+                        if let Some(instance) = map.get_mut(&extension.name) {
+                            instance.fields.extend(extension.fields);
+                            instance.interfaces.extend(extension.interfaces);
+                        } else {
+                            failfast_debug!(
+                                concat!(
+                                    "Extension exists for {:?} but ",
+                                    stringify!($ty),
+                                    " could not be found."
+                                ),
+                                extension.name,
+                            );
+                        }
+                    });
+
+                map
+            }};
+        }
+
+        let object_types = implement_object_type_or_interface_map!(
+            ObjectType,
+            ast::Definition::ObjectTypeDefinition,
+            ast::Definition::ObjectTypeExtension,
+        );
+
+        let interfaces = implement_object_type_or_interface_map!(
+            Interface,
+            ast::Definition::InterfaceTypeDefinition,
+            ast::Definition::InterfaceTypeExtension,
+        );
+
+        let custom_scalars = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#sec-Scalars
+                // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
+                ast::Definition::ScalarTypeDefinition(definition) => Some(
+                    definition
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                ast::Definition::ScalarTypeExtension(extension) => Some(
+                    extension
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+
+        let fragments = Fragments::from(&document);
 
         Ok(Self {
             subtype_map,
             string: s.to_owned(),
             subgraphs,
+            object_types,
+            interfaces,
+            custom_scalars,
             fragments,
         })
     }
@@ -193,8 +264,243 @@ impl Schema {
         self.subgraphs.iter()
     }
 
-    pub(crate) fn fragments(&self) -> impl Iterator<Item = (&String, &Vec<Selection>)> {
-        self.fragments.iter()
+    pub(crate) fn fragments(&self) -> &Fragments {
+        &self.fragments
+    }
+}
+
+macro_rules! implement_object_type_or_interface {
+    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
+        #[derive(Debug)]
+        $visibility struct $name {
+            name: String,
+            fields: HashMap<String, FieldType>,
+            interfaces: Vec<String>,
+        }
+
+        impl $name {
+            fn validate_object(&self, object: &Object, schema: &Schema) -> bool {
+                self
+                    .fields
+                    .iter()
+                    .map(|(name, ty)| {
+                        let value = object.get(name).unwrap_or(&Value::Null);
+                        ty.validate_value(value, schema)
+                    })
+                    .chain(
+                        self
+                            .interfaces
+                            .iter()
+                            .flat_map(|name| schema.interfaces.get(name))
+                            .map(|interface| interface.validate_object(object, schema))
+                    )
+                    .all(std::convert::identity)
+            }
+        }
+
+        $(
+        impl From<$ast_ty> for $name {
+            fn from(definition: $ast_ty) -> Self {
+                let name = definition
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let fields = definition
+                    .fields_definition()
+                    .iter()
+                    .flat_map(|x| x.field_definitions())
+                    .map(|x| {
+                        let name = x
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string();
+                        let ty = x
+                            .ty()
+                            .expect("the node Type is not optional in the spec; qed")
+                            .into();
+                        (name, ty)
+                    })
+                    .collect();
+                let interfaces = definition
+                    .implements_interfaces()
+                    .iter()
+                    .flat_map(|x| x.named_types())
+                    .map(|x| {
+                        x.name()
+                            .expect("neither Name neither NamedType are optionals; qed")
+                            .text()
+                            .to_string()
+                    })
+                    .collect();
+
+                $name {
+                    name,
+                    fields,
+                    interfaces,
+                }
+            }
+        }
+        )+
+    };
+}
+
+// Spec: https://spec.graphql.org/draft/#sec-Objects
+// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
+implement_object_type_or_interface!(
+    pub(crate) ObjectType =>
+    ast::ObjectTypeDefinition,
+    ast::ObjectTypeExtension,
+);
+// Spec: https://spec.graphql.org/draft/#sec-Interfaces
+// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
+implement_object_type_or_interface!(
+    Interface =>
+    ast::InterfaceTypeDefinition,
+    ast::InterfaceTypeExtension,
+);
+
+// Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
+#[derive(Debug)]
+pub(crate) enum FieldType {
+    Named(String),
+    List(Box<FieldType>),
+    NonNull(Box<FieldType>),
+    String,
+    Int,
+    Float,
+    Id,
+    Boolean,
+}
+
+impl FieldType {
+    pub(crate) fn validate_value(&self, value: &Value, schema: &Schema) -> bool {
+        match (self, value) {
+            (FieldType::String, Value::String(_)) => true,
+            (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
+            (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
+            // "The ID scalar type represents a unique identifier, often used to refetch an object
+            // or as the key for a cache. The ID type is serialized in the same way as a String;
+            // however, it is not intended to be human-readable. While it is often numeric, it
+            // should always serialize as a String."
+            //
+            // In practice it seems Int works too
+            (FieldType::Id, Value::String(_) | Value::Number(_)) => true,
+            (FieldType::Boolean, Value::Bool(_)) => true,
+            (FieldType::List(inner_ty), Value::Array(vec)) => {
+                vec.iter().all(|x| inner_ty.validate_value(x, schema))
+            }
+            (FieldType::NonNull(inner_ty), value) => {
+                !value.is_null() && inner_ty.validate_value(value, schema)
+            }
+            (FieldType::Named(name), _) if schema.custom_scalars.contains(name) => true,
+            (FieldType::Named(name), value) if value.is_object() => {
+                if let Some(object_ty) = schema.object_types.get(name) {
+                    object_ty.validate_object(value.as_object().unwrap(), schema)
+                } else {
+                    false
+                }
+            }
+            // NOTE: graphql's types are all optional by default
+            // TODO add integration test for this
+            (_, Value::Null) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<ast::Type> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#sec-Type-References
+    fn from(ty: ast::Type) -> Self {
+        match ty {
+            ast::Type::NamedType(named) => named.into(),
+            ast::Type::ListType(list) => list.into(),
+            ast::Type::NonNullType(non_null) => non_null.into(),
+        }
+    }
+}
+
+impl From<ast::NamedType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NamedType
+    fn from(named: ast::NamedType) -> Self {
+        let name = named
+            .name()
+            .expect("the node Name is not optional in the spec; qed")
+            .text()
+            .to_string();
+        match name.as_str() {
+            "String" => Self::String,
+            "Int" => Self::Int,
+            "Float" => Self::Float,
+            "ID" => Self::Id,
+            "Boolean" => Self::Boolean,
+            _ => Self::Named(name),
+        }
+    }
+}
+
+impl From<ast::ListType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#ListType
+    fn from(list: ast::ListType) -> Self {
+        Self::List(Box::new(
+            list.ty()
+                .expect("the node Type is not optional in the spec; qed")
+                .into(),
+        ))
+    }
+}
+
+impl From<ast::NonNullType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NonNullType
+    fn from(non_null: ast::NonNullType) -> Self {
+        if let Some(list) = non_null.list_type() {
+            Self::NonNull(Box::new(list.into()))
+        } else if let Some(named) = non_null.named_type() {
+            Self::NonNull(Box::new(named.into()))
+        } else {
+            eprintln!("{:?}", non_null);
+            eprintln!("{:?}", non_null.to_string());
+            unreachable!("either the NamedType node is provided, either the ListType node; qed")
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Fragments {
+    map: HashMap<String, Vec<Selection>>,
+}
+
+impl From<&ast::Document> for Fragments {
+    fn from(document: &ast::Document) -> Self {
+        let map = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
+                ast::Definition::FragmentDefinition(fragment_definition) => {
+                    let name = fragment_definition
+                        .fragment_name()
+                        .expect("the node FragmentName is not optional in the spec; qed")
+                        .name()
+                        .unwrap()
+                        .text()
+                        .to_string();
+                    let selection_set = fragment_definition
+                        .selection_set()
+                        .expect("the node SelectionSet is not optional in the spec; qed");
+
+                    Some((name, selection_set.selections().map(Into::into).collect()))
+                }
+                _ => None,
+            })
+            .collect();
+        Fragments { map }
+    }
+}
+
+impl Fragments {
+    pub(crate) fn get(&self, key: impl AsRef<str>) -> Option<&[Selection]> {
+        self.map.get(key.as_ref()).map(|x| x.as_slice())
     }
 }
 

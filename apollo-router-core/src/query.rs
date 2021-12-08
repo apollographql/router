@@ -2,23 +2,21 @@ use crate::prelude::graphql::*;
 use apollo_parser::ast;
 use derivative::Derivative;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tracing::level_filters::LevelFilter;
 
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    fragments: HashMap<String, Vec<Selection>>,
+    fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    object_types: HashMap<String, ObjectType>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    interfaces: HashMap<String, Interface>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operation_type_map: HashMap<OperationType, String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    custom_scalars: HashSet<String>,
+    schema: Arc<Schema>,
 }
 
 impl Query {
@@ -53,12 +51,8 @@ impl Query {
         }
     }
 
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: Arc<Schema>) -> Option<Self> {
         let string = query.into();
-        let mut fragments = schema
-            .fragments()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<HashMap<String, Vec<_>>>();
 
         let parser = apollo_parser::Parser::new(string.as_str());
         let tree = parser.parse();
@@ -75,7 +69,7 @@ impl Query {
         }
 
         let document = tree.document();
-        fragments.extend(Self::fragments(&document));
+        let fragments = Fragments::from(&document);
 
         let operations = document
             .definitions()
@@ -87,61 +81,6 @@ impl Query {
                 }
             })
             .collect();
-
-        macro_rules! implement_object_type_or_interface_map {
-            ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                let mut map = document
-                    .definitions()
-                    .filter_map(|definition| {
-                        if let $ast_ty(definition) = definition {
-                            let instance = <$ty>::from(definition);
-                            Some((instance.name.clone(), instance))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<HashMap<String, $ty>>();
-
-                document
-                    .definitions()
-                    .filter_map(|definition| {
-                        if let $ast_extension_ty(extension) = definition {
-                            Some(<$ty>::from(extension))
-                        } else {
-                            None
-                        }
-                    })
-                    .for_each(|extension| {
-                        if let Some(instance) = map.get_mut(&extension.name) {
-                            instance.fields.extend(extension.fields);
-                            instance.interfaces.extend(extension.interfaces);
-                        } else {
-                            failfast_debug!(
-                                concat!(
-                                    "Extension exists for {:?} but ",
-                                    stringify!($ty),
-                                    " could not be found."
-                                ),
-                                extension.name,
-                            );
-                        }
-                    });
-
-                map
-            }};
-        }
-
-        let object_types = implement_object_type_or_interface_map!(
-            ObjectType,
-            ast::Definition::ObjectTypeDefinition,
-            ast::Definition::ObjectTypeExtension,
-        );
-
-        let interfaces = implement_object_type_or_interface_map!(
-            Interface,
-            ast::Definition::InterfaceTypeDefinition,
-            ast::Definition::InterfaceTypeExtension,
-        );
 
         let operation_type_map = document
             .definitions()
@@ -173,62 +112,13 @@ impl Query {
             })
             .collect();
 
-        let custom_scalars = document
-            .definitions()
-            .filter_map(|definition| match definition {
-                // Spec: https://spec.graphql.org/draft/#sec-Scalars
-                // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
-                ast::Definition::ScalarTypeDefinition(definition) => Some(
-                    definition
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string(),
-                ),
-                ast::Definition::ScalarTypeExtension(extension) => Some(
-                    extension
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string(),
-                ),
-                _ => None,
-            })
-            .collect();
-
         Some(Query {
             string,
             fragments,
             operations,
-            object_types,
-            interfaces,
             operation_type_map,
-            custom_scalars,
+            schema,
         })
-    }
-
-    fn fragments(document: &ast::Document) -> HashMap<String, Vec<Selection>> {
-        document
-            .definitions()
-            .filter_map(|definition| match definition {
-                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
-                ast::Definition::FragmentDefinition(fragment_definition) => {
-                    let name = fragment_definition
-                        .fragment_name()
-                        .expect("the node FragmentName is not optional in the spec; qed")
-                        .name()
-                        .unwrap()
-                        .text()
-                        .to_string();
-                    let selection_set = fragment_definition
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed");
-
-                    Some((name, selection_set.selections().map(Into::into).collect()))
-                }
-                _ => None,
-            })
-            .collect()
     }
 
     fn apply_selection_set(
@@ -299,7 +189,11 @@ impl Query {
                     self.apply_selection_set(selection_set, input, output);
                 }
                 Selection::FragmentSpread { name } => {
-                    if let Some(selection_set) = self.fragments.get(name) {
+                    if let Some(selection_set) = self
+                        .fragments
+                        .get(name)
+                        .or_else(|| self.schema.fragments().get(name))
+                    {
                         self.apply_selection_set(selection_set, input, output);
                     } else {
                         failfast_debug!("Missing fragment named: {}", name);
@@ -322,27 +216,30 @@ impl Query {
                     acc
                 });
 
-        let errors = request
-            .variables
+        if LevelFilter::current() >= LevelFilter::DEBUG {
+            let known_variables = operation_variable_types.keys().cloned().collect();
+            let provided_variables = request.variables.keys().collect::<HashSet<_>>();
+            let unknown_variables = provided_variables
+                .difference(&known_variables)
+                .collect::<Vec<_>>();
+            if !unknown_variables.is_empty() {
+                failfast_debug!(
+                    "Received variable unknown to the query: {:?}",
+                    unknown_variables,
+                );
+            }
+        }
+
+        let errors = operation_variable_types
             .iter()
-            .flat_map(|(k, v)| {
-                if let Some(ty) = operation_variable_types.get(k) {
-                    (!ty.validate_value(
-                        v,
-                        &self.object_types,
-                        &self.interfaces,
-                        &self.custom_scalars,
-                    ))
-                    .then(|| {
-                        FetchError::ValidationInvalidTypeVariable {
-                            name: k.to_string(),
-                        }
-                        .to_graphql_error(None)
-                    })
-                } else {
-                    failfast_debug!("Received variable unknown to the query: {:?}", k);
-                    None
-                }
+            .filter_map(|(name, ty)| {
+                let value = request.variables.get(name.as_str()).unwrap_or(&Value::Null);
+                (!ty.validate_value(value, &self.schema)).then(|| {
+                    FetchError::ValidationInvalidTypeVariable {
+                        name: name.to_string(),
+                    }
+                    .to_graphql_error(None)
+                })
             })
             .collect::<Vec<_>>();
 
@@ -464,208 +361,6 @@ impl From<ast::OperationDefinition> for Operation {
     }
 }
 
-macro_rules! implement_object_type_or_interface {
-    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug)]
-        $visibility struct $name {
-            name: String,
-            fields: HashMap<String, FieldType>,
-            interfaces: Vec<String>,
-        }
-
-        impl $name {
-            fn get_field<'a>(
-                &'a self,
-                name: &str,
-                interfaces: &'a HashMap<String, Interface>,
-            ) -> Option<&'a FieldType> {
-                self.fields.get(name).or_else(|| {
-                    interfaces
-                        .get(name)
-                        .and_then(|x| x.get_field(name, interfaces))
-                })
-            }
-        }
-
-        $(
-        impl From<$ast_ty> for $name {
-            fn from(definition: $ast_ty) -> Self {
-                let name = definition
-                    .name()
-                    .expect("the node Name is not optional in the spec; qed")
-                    .text()
-                    .to_string();
-                let fields = definition
-                    .fields_definition()
-                    .iter()
-                    .flat_map(|x| x.field_definitions())
-                    .map(|x| {
-                        let name = x
-                            .name()
-                            .expect("the node Name is not optional in the spec; qed")
-                            .text()
-                            .to_string();
-                        let ty = x
-                            .ty()
-                            .expect("the node Type is not optional in the spec; qed")
-                            .into();
-                        (name, ty)
-                    })
-                    .collect();
-                let interfaces = definition
-                    .implements_interfaces()
-                    .iter()
-                    .flat_map(|x| x.named_types())
-                    .map(|x| {
-                        x.name()
-                            .expect("neither Name neither NamedType are optionals; qed")
-                            .text()
-                            .to_string()
-                    })
-                    .collect();
-
-                $name {
-                    name,
-                    fields,
-                    interfaces,
-                }
-            }
-        }
-        )+
-    };
-}
-
-// Spec: https://spec.graphql.org/draft/#sec-Objects
-// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-implement_object_type_or_interface!(
-    pub(crate) ObjectType =>
-    ast::ObjectTypeDefinition,
-    ast::ObjectTypeExtension,
-);
-// Spec: https://spec.graphql.org/draft/#sec-Interfaces
-// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-implement_object_type_or_interface!(
-    Interface =>
-    ast::InterfaceTypeDefinition,
-    ast::InterfaceTypeExtension,
-);
-
-// Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug)]
-enum FieldType {
-    Named(String),
-    List(Box<FieldType>),
-    NonNull(Box<FieldType>),
-    String,
-    Int,
-    Float,
-    Id,
-    Boolean,
-}
-
-impl FieldType {
-    fn validate_value(
-        &self,
-        value: &Value,
-        object_types: &HashMap<String, ObjectType>,
-        interfaces: &HashMap<String, Interface>,
-        custom_scalars: &HashSet<String>,
-    ) -> bool {
-        match (self, value) {
-            (FieldType::String, Value::String(_)) => true,
-            (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
-            (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
-            // "The ID scalar type represents a unique identifier, often used to refetch an object
-            // or as the key for a cache. The ID type is serialized in the same way as a String;
-            // however, it is not intended to be human-readable. While it is often numeric, it
-            // should always serialize as a String."
-            //
-            // In practice it seems Int works too
-            (FieldType::Id, Value::String(_) | Value::Number(_)) => true,
-            (FieldType::Boolean, Value::Bool(_)) => true,
-            (FieldType::List(inner_ty), Value::Array(vec)) => vec
-                .iter()
-                .all(|x| inner_ty.validate_value(x, object_types, interfaces, custom_scalars)),
-            (FieldType::NonNull(inner_ty), value) => {
-                !value.is_null()
-                    && inner_ty.validate_value(value, object_types, interfaces, custom_scalars)
-            }
-            (FieldType::Named(name), _) if custom_scalars.contains(name) => true,
-            (FieldType::Named(name), value) if value.is_object() => {
-                if let Some(object_ty) = object_types.get(name) {
-                    value.as_object().unwrap().iter().all(|(k, v)| {
-                        if let Some(field_ty) = object_ty.get_field(k, interfaces) {
-                            field_ty.validate_value(v, object_types, interfaces, custom_scalars)
-                        } else {
-                            false
-                        }
-                    })
-                } else {
-                    false
-                }
-            }
-            // NOTE: graphql's types are all optional by default
-            // TODO add integration test for this
-            (_, Value::Null) => true,
-            _ => false,
-        }
-    }
-}
-
-impl From<ast::Type> for FieldType {
-    // Spec: https://spec.graphql.org/draft/#sec-Type-References
-    fn from(ty: ast::Type) -> Self {
-        match ty {
-            ast::Type::NamedType(named) => named.into(),
-            ast::Type::ListType(list) => list.into(),
-            ast::Type::NonNullType(non_null) => non_null.into(),
-        }
-    }
-}
-
-impl From<ast::NamedType> for FieldType {
-    // Spec: https://spec.graphql.org/draft/#NamedType
-    fn from(named: ast::NamedType) -> Self {
-        let name = named
-            .name()
-            .expect("the node Name is not optional in the spec; qed")
-            .text()
-            .to_string();
-        match name.as_str() {
-            "String" => Self::String,
-            "Int" => Self::Int,
-            "Float" => Self::Float,
-            "ID" => Self::Id,
-            "Boolean" => Self::Boolean,
-            _ => Self::Named(name),
-        }
-    }
-}
-
-impl From<ast::ListType> for FieldType {
-    // Spec: https://spec.graphql.org/draft/#ListType
-    fn from(list: ast::ListType) -> Self {
-        Self::List(Box::new(
-            list.ty()
-                .expect("the node Type is not optional in the spec; qed")
-                .into(),
-        ))
-    }
-}
-
-impl From<ast::NonNullType> for FieldType {
-    // Spec: https://spec.graphql.org/draft/#NonNullType
-    fn from(non_null: ast::NonNullType) -> Self {
-        if let Some(list) = non_null.list_type() {
-            Self::NonNull(Box::new(list.into()))
-        } else if let Some(named) = non_null.named_type() {
-            Self::NonNull(Box::new(named.into()))
-        } else {
-            unreachable!("either the NamedType node is provided, either the ListType node; qed")
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum OperationType {
     Query,
@@ -723,7 +418,7 @@ mod tests {
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
             }"#,
-            &schema,
+            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -766,7 +461,7 @@ mod tests {
     #[test]
     fn reformat_response_data_inline_fragment() {
         let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#, &schema).unwrap();
+        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#, Arc::new(schema)).unwrap();
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
@@ -786,7 +481,7 @@ mod tests {
         let schema: Schema = "fragment baz on Baz {baz}".parse().unwrap();
         let query = Query::parse(
             r#"{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}"#,
-            &schema,
+            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -808,7 +503,7 @@ mod tests {
         let schema: Schema = "".parse().unwrap();
         let query = Query::parse(
             r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#,
-            &schema,
+            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -848,7 +543,7 @@ mod tests {
             r#"query MyOperation {
                 foo
             }"#,
-            &schema,
+            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -864,13 +559,93 @@ mod tests {
         assert_eq_and_ordered!(response.data, json! {{ "foo": "1" }});
     }
 
+    macro_rules! run_validation {
+        ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
+            let variables = match $variables {
+                Value::Object(object) => object,
+                _ => unreachable!("variables must be an object"),
+            };
+            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let request = Request::builder()
+                .variables(variables)
+                .query($query)
+                .build();
+            let query =
+                Query::parse(&request.query, Arc::new(schema)).expect("could not parse query");
+            query.validate_variable_types(&request)
+        }};
+    }
+
+    macro_rules! assert_validation {
+        ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
+            let res = run_validation!($schema, $query, $variables);
+            assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
+        }};
+    }
+
+    macro_rules! assert_validation_error {
+        ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
+            let res = run_validation!($schema, $query, $variables);
+            assert!(res.is_err(), "validation should have failed");
+        }};
+    }
+
     #[test]
     fn variable_validation() {
-        let schema: Schema = "".parse().unwrap();
-        let request = Request::builder()
-            .variables(Object::new())
-            .query("query Foo($bar:Int){name}")
-            .build();
-        let query = Query::parse(&request.query, &schema).unwrap();
+        assert_validation!("", "query($foo:Int){}", json!({}));
+        assert_validation!("", "query($foo:Int){}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int){}", json!({"foo":2.0}));
+        assert_validation_error!("", "query($foo:Int){}", json!({"foo":"str"}));
+        assert_validation_error!("", "query($foo:Int){}", json!({"foo":true}));
+        assert_validation_error!("", "query($foo:Int){}", json!({"foo":{}}));
+        assert_validation!("", "query($foo:ID){}", json!({"foo": "1"}));
+        assert_validation!("", "query($foo:ID){}", json!({"foo": 1}));
+        assert_validation_error!("", "query($foo:ID){}", json!({"foo": true}));
+        assert_validation_error!("", "query($foo:ID){}", json!({"foo": {}}));
+        assert_validation!("", "query($foo:String){}", json!({"foo": "str"}));
+        assert_validation!("", "query($foo:Float){}", json!({"foo":2.0}));
+        assert_validation_error!("", "query($foo:Float){}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int!){}", json!({}));
+        // TODO https://github.com/apollographql/apollo-rs/issues/131
+        /*
+        assert_validation!("", "query($foo:[Int]){}", json!({}));
+        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":1}));
+        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":"str"}));
+        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":{}}));
+        assert_validation_error!("", "query($foo:[Int]!){}", json!({}));
+        assert_validation!("", "query($foo:[Int]!){}", json!({"foo":[]}));
+        assert_validation!("", "query($foo:[Int]){}", json!({"foo":[1,2,3]}));
+        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":["1","2","3"]}));
+        assert_validation!("", "query($foo:[String]){}", json!({"foo":["1","2","3"]}));
+        assert_validation_error!("", "query($foo:[String]){}", json!({"foo":[1,2,3]}));
+        */
+        assert_validation!("type Foo{}", "query($foo:Foo){}", json!({}));
+        assert_validation!("type Foo{}", "query($foo:Foo){}", json!({"foo":{}}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){}", json!({"foo":1}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){}", json!({"foo":"str"}));
+        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){}", json!({"foo":{}}));
+        assert_validation!(
+            "type Foo{x:Int!}",
+            "query($foo:Foo){}",
+            json!({"foo":{"x":1}})
+        );
+        assert_validation!(
+            "type Foo implements Bar interface Bar{x:Int!}",
+            "query($foo:Foo){}",
+            json!({"foo":{"x":1}}),
+        );
+        assert_validation_error!(
+            "type Foo implements Bar interface Bar{x:Int!}",
+            "query($foo:Foo){}",
+            json!({"foo":{"x":"str"}}),
+        );
+        assert_validation_error!(
+            "type Foo implements Bar interface Bar{x:Int!}",
+            "query($foo:Foo){}",
+            json!({"foo":{}}),
+        );
+        assert_validation!("scalar Foo", "query($foo:Foo!){}", json!({"foo":{}}));
+        assert_validation!("scalar Foo", "query($foo:Foo!){}", json!({"foo":1}));
+        assert_validation_error!("scalar Foo", "query($foo:Foo!){}", json!({}));
     }
 }

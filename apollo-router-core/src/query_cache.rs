@@ -72,7 +72,7 @@ impl QueryCache {
                 let query_parsing_future = {
                     let query = query.as_ref().to_string();
                     let schema = Arc::clone(&self.schema);
-                    tokio::task::spawn_blocking(move || Query::parse(query, &schema))
+                    tokio::task::spawn_blocking(move || Query::parse(query, schema))
                 };
                 let parsed_query = match query_parsing_future.await {
                     Ok(res) => res.map(Arc::new),
