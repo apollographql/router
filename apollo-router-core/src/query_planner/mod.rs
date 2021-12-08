@@ -3,7 +3,6 @@ mod router_bridge_query_planner;
 mod selection;
 
 use crate::prelude::graphql::*;
-use crate::query_planner::json_ext::select_values;
 use crate::query_planner::selection::select_object;
 pub use caching_query_planner::*;
 use futures::prelude::*;
@@ -321,7 +320,7 @@ impl FetchNode {
                 })
             }));
 
-            let values_and_paths = select_values(current_dir, data)?;
+            let values_and_paths = select_values_and_paths(current_dir, data)?;
             let mut paths = Vec::new();
             let representations = Value::Array(
                 values_and_paths

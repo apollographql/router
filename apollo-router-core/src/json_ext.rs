@@ -141,6 +141,10 @@ impl ValueExt for Value {
     }
 
     /// insert a specific value at a subpath
+    ///
+    /// this will create objects, arrays and null nodes as needed if they
+    /// are not present: the resulting Value is meant to be merged with an
+    /// existing one that contains those nodes
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
         let mut res_value = Value::default();
@@ -159,7 +163,9 @@ impl ValueExt for Value {
                             a.push(Value::default());
                         }
                         a.push(Value::default());
-                        current_node = a.get_mut(index).unwrap();
+                        current_node = a
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
                     }
                     Value::Null => {
                         let mut a = Vec::new();
@@ -169,12 +175,11 @@ impl ValueExt for Value {
                         a.push(Value::default());
 
                         *current_node = Value::Array(a);
-                        match current_node {
-                            Value::Array(a) => {
-                                current_node = a.get_mut(index).unwrap();
-                            }
-                            _ => unreachable!(),
-                        }
+                        current_node = current_node
+                            .as_array_mut()
+                            .expect("current_node was just set to a Value::Array")
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
                     }
                     other => unreachable!("unreachable node: {:?}", other),
                 },
@@ -183,12 +188,11 @@ impl ValueExt for Value {
                     m.insert(k.to_string(), Value::default());
 
                     *current_node = Value::Object(m);
-                    match current_node {
-                        Value::Object(m) => {
-                            current_node = m.get_mut(k).unwrap();
-                        }
-                        _ => unreachable!(),
-                    }
+                    current_node = current_node
+                        .as_object_mut()
+                        .expect("current_node was just set to a Value::Object")
+                        .get_mut(k)
+                        .expect("the value at that key was just inserted");
                 }
             }
         }
@@ -198,7 +202,11 @@ impl ValueExt for Value {
     }
 }
 
-pub(crate) fn select_values<'a>(
+/// selects all values matching a Path
+///
+/// this will return the values and their specific path in the Value:
+/// a Path with a flatten node can match multiple values
+pub(crate) fn select_values_and_paths<'a>(
     path: &'a Path,
     data: &'a Value,
 ) -> Result<Vec<(Path, &'a Value)>, FetchError> {
@@ -207,6 +215,17 @@ pub(crate) fn select_values<'a>(
         Some(err) => Err(err),
         None => Ok(res),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn select_values<'a>(
+    path: &'a Path,
+    data: &'a Value,
+) -> Result<Vec<&'a Value>, FetchError> {
+    Ok(select_values_and_paths(path, data)?
+        .into_iter()
+        .map(|r| r.1)
+        .collect())
 }
 
 fn iterate_path<'a>(
@@ -454,11 +473,7 @@ mod tests {
     fn test_get_at_path() {
         let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
-        let result = select_values(&path, &json)
-            .unwrap()
-            .into_iter()
-            .map(|v| v.1)
-            .collect::<Vec<_>>();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(result, vec![&Value::Number(2.into())]);
     }
 
@@ -466,11 +481,7 @@ mod tests {
     fn test_get_at_path_flatmap() {
         let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
-        let result = select_values(&path, &json)
-            .unwrap()
-            .into_iter()
-            .map(|v| v.1)
-            .collect::<Vec<_>>();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
     }
 
@@ -495,11 +506,7 @@ mod tests {
             },
         });
         let path = Path::from("obj/arr/@/prop1/@/prop2");
-        let result = select_values(&path, &json)
-            .unwrap()
-            .into_iter()
-            .map(|v| v.1)
-            .collect::<Vec<_>>();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(
             result,
             vec![

@@ -49,9 +49,7 @@ pub(crate) fn select<'a>(
     selections: &[Selection],
     schema: &Schema,
 ) -> Result<Value, FetchError> {
-    let values = select_values(path, &response.data)?
-        .into_iter()
-        .map(|r| r.1);
+    let values = select_values(path, &response.data)?.into_iter();
 
     Ok(Value::Array(
         values
