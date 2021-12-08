@@ -6,6 +6,7 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -55,10 +56,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let routes =
-                get_graphql_request_or_redirect(Arc::clone(&router), Arc::clone(&configuration))
-                    .or(post_graphql_request(router, configuration))
-                    .with(cors);
+            let routes = get_health_request()
+                .or(get_graphql_request_or_redirect(
+                    Arc::clone(&router),
+                    Arc::clone(&configuration),
+                ))
+                .or(post_graphql_request(router, configuration))
+                .with(cors);
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
@@ -224,6 +228,19 @@ fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
             StatusCode::BAD_REQUEST,
         ))
     }
+}
+
+fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
+    warp::get()
+        .and(warp::path(".well-known"))
+        .and(warp::path("apollo"))
+        .and(warp::path("server-health"))
+        .and_then(move || async {
+            let mut result = HashMap::new();
+            result.insert("status", "pass");
+            let reply = Box::new(warp::reply::json(&result).into_response()) as Box<dyn Reply>;
+            Ok::<_, Rejection>(reply)
+        })
 }
 
 fn post_graphql_request<Router, PreparedQuery>(
@@ -682,5 +699,22 @@ mod tests {
         ["application/json", "application/json,text/html"]
             .iter()
             .for_each(|accepts| assert!(!prefers_html(accepts.to_string())));
+    }
+
+    #[test(tokio::test)]
+    async fn it_provides_health_status() -> Result<(), FederatedServerError> {
+        let filter = get_health_request();
+        let expected = bytes::Bytes::from("{\"status\":\"pass\"}");
+
+        let res = warp::test::request()
+            .path("/.well-known/apollo/server-health")
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 200);
+        assert_eq!(res.body().len(), expected.len());
+        assert_eq!(res.body(), &expected);
+
+        Ok(())
     }
 }
