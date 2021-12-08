@@ -592,60 +592,60 @@ mod tests {
 
     #[test]
     fn variable_validation() {
-        assert_validation!("", "query($foo:Int){}", json!({}));
-        assert_validation!("", "query($foo:Int){}", json!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int){}", json!({"foo":2.0}));
-        assert_validation_error!("", "query($foo:Int){}", json!({"foo":"str"}));
-        assert_validation_error!("", "query($foo:Int){}", json!({"foo":true}));
-        assert_validation_error!("", "query($foo:Int){}", json!({"foo":{}}));
-        assert_validation!("", "query($foo:ID){}", json!({"foo": "1"}));
-        assert_validation!("", "query($foo:ID){}", json!({"foo": 1}));
-        assert_validation_error!("", "query($foo:ID){}", json!({"foo": true}));
-        assert_validation_error!("", "query($foo:ID){}", json!({"foo": {}}));
-        assert_validation!("", "query($foo:String){}", json!({"foo": "str"}));
-        assert_validation!("", "query($foo:Float){}", json!({"foo":2.0}));
-        assert_validation_error!("", "query($foo:Float){}", json!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int!){}", json!({}));
-        // TODO https://github.com/apollographql/apollo-rs/issues/131
-        /*
-        assert_validation!("", "query($foo:[Int]){}", json!({}));
-        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":1}));
-        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":"str"}));
-        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":{}}));
-        assert_validation_error!("", "query($foo:[Int]!){}", json!({}));
-        assert_validation!("", "query($foo:[Int]!){}", json!({"foo":[]}));
-        assert_validation!("", "query($foo:[Int]){}", json!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int]){}", json!({"foo":["1","2","3"]}));
-        assert_validation!("", "query($foo:[String]){}", json!({"foo":["1","2","3"]}));
-        assert_validation_error!("", "query($foo:[String]){}", json!({"foo":[1,2,3]}));
-        */
-        assert_validation!("type Foo{}", "query($foo:Foo){}", json!({}));
-        assert_validation!("type Foo{}", "query($foo:Foo){}", json!({"foo":{}}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){}", json!({"foo":1}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){}", json!({"foo":"str"}));
-        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){}", json!({"foo":{}}));
+        assert_validation!("", "query($foo:Int){x}", json!({}));
+        assert_validation!("", "query($foo:Int){x}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":2.0}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":"str"}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":true}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":{}}));
+        assert_validation!("", "query($foo:ID){x}", json!({"foo": "1"}));
+        assert_validation!("", "query($foo:ID){x}", json!({"foo": 1}));
+        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": true}));
+        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": {}}));
+        assert_validation!("", "query($foo:String){x}", json!({"foo": "str"}));
+        assert_validation!("", "query($foo:Float){x}", json!({"foo":2.0}));
+        assert_validation_error!("", "query($foo:Float){x}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int!){x}", json!({}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":"str"}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":{}}));
+        assert_validation_error!("", "query($foo:[Int]!){x}", json!({}));
+        assert_validation!("", "query($foo:[Int]!){x}", json!({"foo":[]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
+        assert_validation!("", "query($foo:[String]){x}", json!({"foo":["1","2","3"]}));
+        assert_validation_error!("", "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
+        assert_validation!("", "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!("", "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({}));
+        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({"foo":{}}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":1}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":"str"}));
+        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){x}", json!({"foo":{}}));
         assert_validation!(
             "type Foo{x:Int!}",
-            "query($foo:Foo){}",
+            "query($foo:Foo){x}",
             json!({"foo":{"x":1}})
         );
         assert_validation!(
             "type Foo implements Bar interface Bar{x:Int!}",
-            "query($foo:Foo){}",
+            "query($foo:Foo){x}",
             json!({"foo":{"x":1}}),
         );
         assert_validation_error!(
             "type Foo implements Bar interface Bar{x:Int!}",
-            "query($foo:Foo){}",
+            "query($foo:Foo){x}",
             json!({"foo":{"x":"str"}}),
         );
         assert_validation_error!(
             "type Foo implements Bar interface Bar{x:Int!}",
-            "query($foo:Foo){}",
+            "query($foo:Foo){x}",
             json!({"foo":{}}),
         );
-        assert_validation!("scalar Foo", "query($foo:Foo!){}", json!({"foo":{}}));
-        assert_validation!("scalar Foo", "query($foo:Foo!){}", json!({"foo":1}));
-        assert_validation_error!("scalar Foo", "query($foo:Foo!){}", json!({}));
+        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":{}}));
+        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":1}));
+        assert_validation_error!("scalar Foo", "query($foo:Foo!){x}", json!({}));
     }
 }

@@ -70,7 +70,7 @@ checksum = "8b26702f315f53b6071259e15dd9d64528213b44d61de1ec926eca7715d62203"
 [[package]]
 name = "apollo-parser"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=49e553c223fb28db21e5433c16bd756afa588a79#49e553c223fb28db21e5433c16bd756afa588a79"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=5f8a51b4c47e842bda5095604c6f60caefd4975b#5f8a51b4c47e842bda5095604c6f60caefd4975b"
 dependencies = [
  "rowan",
 ]
