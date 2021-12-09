@@ -352,6 +352,7 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
+    use insta::{assert_json_snapshot, assert_snapshot};
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -693,9 +694,23 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn it_provides_health_status() -> Result<(), FederatedServerError> {
+    async fn it_provides_health_status_body() -> Result<(), FederatedServerError> {
         let filter = get_health_request();
-        let expected = bytes::Bytes::from("{\"status\":\"pass\"}");
+
+        let res = warp::test::request()
+            .path("/.well-known/apollo/server-health")
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 200);
+        assert_json_snapshot!(String::from_utf8_lossy(res.body()));
+
+        Ok(())
+    }
+
+    #[test(tokio::test)]
+    async fn it_provides_health_status_header() -> Result<(), FederatedServerError> {
+        let filter = get_health_request();
 
         let res = warp::test::request()
             .path("/.well-known/apollo/server-health")
@@ -703,10 +718,9 @@ mod tests {
             .await;
 
         let hdrs = res.headers();
-        assert_eq!(hdrs["content-type"], "application/json");
+
         assert_eq!(res.status(), 200);
-        assert_eq!(res.body().len(), expected.len());
-        assert_eq!(res.body(), &expected);
+        assert_snapshot!(hdrs["content-type"].to_str().unwrap());
 
         Ok(())
     }
