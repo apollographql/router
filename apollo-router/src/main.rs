@@ -70,8 +70,20 @@ impl fmt::Display for ProjectDir {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if let Some(nb) = std::env::var("ROUTER_NUM_CORES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        builder.worker_threads(nb);
+    }
+    let runtime = builder.build()?;
+    runtime.block_on(rt_main())
+}
+
+async fn rt_main() -> Result<()> {
     let opt = Opt::from_args();
 
     let builder = tracing_subscriber::fmt::fmt()
