@@ -83,6 +83,12 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             return Err(response.into());
         }
 
+        let query = self
+            .query_cache
+            .get_query(&request.query)
+            .instrument(tracing::info_span!("query_parsing"))
+            .await;
+
         let query_plan = self
             .query_planner
             .get(
@@ -99,12 +105,6 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             // TODO this should probably log something
             return Err(stream::empty().boxed());
         }
-
-        let query = self
-            .query_cache
-            .get_query(&request.query)
-            .instrument(tracing::info_span!("query_parsing"))
-            .await;
 
         if let Some(query) = query.as_ref() {
             query.validate_variable_types(request, &self.schema)?;

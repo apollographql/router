@@ -63,15 +63,13 @@ impl Query {
 
         let parser = apollo_parser::Parser::new(string.as_str());
         let tree = parser.parse();
+        let errors = tree
+            .errors()
+            .map(|err| format!("{:?}", err))
+            .collect::<Vec<_>>();
 
-        if tree.errors().next().is_some() {
-            failfast_debug!(
-                "Parsing error(s): {}",
-                tree.errors()
-                    .map(|err| format!("{:?}", err))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
+        if !errors.is_empty() {
+            failfast_debug!("Parsing error(s): {}", errors.join(", "));
             return None;
         }
 
