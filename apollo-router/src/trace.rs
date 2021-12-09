@@ -5,8 +5,10 @@ use std::str::FromStr;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+use crate::configuration::otlp;
 use crate::{
-    configuration::{self, Configuration, OpenTelemetry},
+    configuration::{Configuration, OpenTelemetry},
     GLOBAL_ENV_FILTER,
 };
 
@@ -69,11 +71,11 @@ pub(crate) fn try_initialize_subscriber(
             Ok(Arc::new(subscriber.with(telemetry)))
         }
         #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-        Some(OpenTelemetry::Otlp(configuration::otlp::Otlp::Tracing(tracing))) => {
+        Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
             let tracer = if let Some(tracing) = tracing.as_ref() {
                 tracing.tracer()?
             } else {
-                configuration::otlp::Tracing::tracer_from_env()?
+                otlp::Tracing::tracer_from_env()?
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
             opentelemetry::global::set_error_handler(handle_error)?;
