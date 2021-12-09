@@ -331,6 +331,22 @@ struct HeaderMapCarrier<'a>(&'a HeaderMap);
 
 impl<'a> Extractor for HeaderMapCarrier<'a> {
     fn get(&self, key: &str) -> Option<&str> {
+        // we only support the TraceParent and TraceState HTTP headers
+        // supported by OpenTelemetry:
+        // https://www.w3.org/TR/trace-context/#traceparent-header
+        // if a new one appears, panic in debug mode here so we can get notified
+
+        if key != "traceparent" && key != "tracestate" {
+            #[cfg(not(debug))]
+            return None;
+
+            #[cfg(debug)]
+            panic!(
+                "Header propagator tried to transmit a forbidden header: {}",
+                key
+            );
+        }
+
         if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
             tracing::trace!(
                 "found OpenTelemetry key in user's request: {}={}",
