@@ -1,5 +1,4 @@
 use crate::prelude::graphql::*;
-use crate::selection::Selection;
 use apollo_parser::ast;
 use derivative::Derivative;
 use std::collections::{HashMap, HashSet};

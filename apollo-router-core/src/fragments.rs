@@ -1,4 +1,4 @@
-use crate::selection::Selection;
+use crate::*;
 use apollo_parser::ast;
 use std::collections::HashMap;
 

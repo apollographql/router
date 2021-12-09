@@ -47,6 +47,7 @@ pub use query_planner::*;
 pub use request::*;
 pub use response::*;
 pub use schema::*;
+pub(crate) use selection::*;
 pub use traits::*;
 
 pub mod prelude {
