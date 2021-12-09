@@ -1,0 +1,107 @@
+use crate::*;
+use apollo_parser::ast;
+
+// Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
+#[derive(Debug)]
+pub(crate) enum FieldType {
+    Named(String),
+    List(Box<FieldType>),
+    NonNull(Box<FieldType>),
+    String,
+    Int,
+    Float,
+    Id,
+    Boolean,
+}
+
+impl FieldType {
+    pub(crate) fn validate_value(&self, value: &Value, schema: &Schema) -> bool {
+        match (self, value) {
+            (FieldType::String, Value::String(_)) => true,
+            (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
+            (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
+            // "The ID scalar type represents a unique identifier, often used to refetch an object
+            // or as the key for a cache. The ID type is serialized in the same way as a String;
+            // however, it is not intended to be human-readable. While it is often numeric, it
+            // should always serialize as a String."
+            //
+            // In practice it seems Int works too
+            (FieldType::Id, Value::String(_) | Value::Number(_)) => true,
+            (FieldType::Boolean, Value::Bool(_)) => true,
+            (FieldType::List(inner_ty), Value::Array(vec)) => {
+                vec.iter().all(|x| inner_ty.validate_value(x, schema))
+            }
+            (FieldType::NonNull(inner_ty), value) => {
+                !value.is_null() && inner_ty.validate_value(value, schema)
+            }
+            (FieldType::Named(name), _) if schema.custom_scalars.contains(name) => true,
+            (FieldType::Named(name), value) if value.is_object() => {
+                if let Some(object_ty) = schema.object_types.get(name) {
+                    object_ty.validate_object(value.as_object().unwrap(), schema)
+                } else {
+                    false
+                }
+            }
+            // NOTE: graphql's types are all optional by default
+            // TODO add integration test for this
+            (_, Value::Null) => true,
+            _ => false,
+        }
+    }
+}
+
+impl From<ast::Type> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#sec-Type-References
+    fn from(ty: ast::Type) -> Self {
+        match ty {
+            ast::Type::NamedType(named) => named.into(),
+            ast::Type::ListType(list) => list.into(),
+            ast::Type::NonNullType(non_null) => non_null.into(),
+        }
+    }
+}
+
+impl From<ast::NamedType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NamedType
+    fn from(named: ast::NamedType) -> Self {
+        let name = named
+            .name()
+            .expect("the node Name is not optional in the spec; qed")
+            .text()
+            .to_string();
+        match name.as_str() {
+            "String" => Self::String,
+            "Int" => Self::Int,
+            "Float" => Self::Float,
+            "ID" => Self::Id,
+            "Boolean" => Self::Boolean,
+            _ => Self::Named(name),
+        }
+    }
+}
+
+impl From<ast::ListType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#ListType
+    fn from(list: ast::ListType) -> Self {
+        Self::List(Box::new(
+            list.ty()
+                .expect("the node Type is not optional in the spec; qed")
+                .into(),
+        ))
+    }
+}
+
+impl From<ast::NonNullType> for FieldType {
+    // Spec: https://spec.graphql.org/draft/#NonNullType
+    fn from(non_null: ast::NonNullType) -> Self {
+        if let Some(list) = non_null.list_type() {
+            Self::NonNull(Box::new(list.into()))
+        } else if let Some(named) = non_null.named_type() {
+            Self::NonNull(Box::new(named.into()))
+        } else {
+            eprintln!("{:?}", non_null);
+            eprintln!("{:?}", non_null.to_string());
+            unreachable!("either the NamedType node is provided, either the ListType node; qed")
+        }
+    }
+}

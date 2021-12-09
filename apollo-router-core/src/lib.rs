@@ -23,6 +23,8 @@ macro_rules! failfast_error {
 }
 
 mod error;
+mod field_type;
+mod fragments;
 mod json_ext;
 mod naive_introspection;
 mod query;
@@ -31,9 +33,12 @@ mod query_planner;
 mod request;
 mod response;
 mod schema;
+mod selection;
 mod traits;
 
 pub use error::*;
+pub(crate) use field_type::*;
+pub(crate) use fragments::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
 pub use query::*;
