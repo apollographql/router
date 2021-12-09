@@ -26,24 +26,22 @@ mod cache;
 mod error;
 mod json_ext;
 mod naive_introspection;
-mod query;
 mod query_cache;
 mod query_planner;
 mod request;
 mod response;
-mod schema;
+mod spec;
 mod traits;
 
 pub use cache::*;
 pub use error::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
-pub use query::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;
-pub use schema::*;
+pub use spec::*;
 pub use traits::*;
 
 pub mod prelude {
@@ -52,5 +50,4 @@ pub mod prelude {
     pub mod graphql {
         pub use crate::*;
     }
-    pub use crate::schema::Schema;
 }
