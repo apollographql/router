@@ -13,7 +13,7 @@ failfast = []
 
 [dependencies]
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "6fd0c59a936a80f2f889830ba6dea78ede529afe" }
-async-trait = "0.1.51"
+async-trait = "0.1.52"
 atty = "0.2.14"
 derivative = "2.2.0"
 displaydoc = "0.2"
