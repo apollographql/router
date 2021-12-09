@@ -89,6 +89,10 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             .instrument(tracing::info_span!("query_parsing"))
             .await;
 
+        if let Some(query) = query.as_ref() {
+            query.validate_variable_types(request, &self.schema)?;
+        }
+
         let query_plan = self
             .query_planner
             .get(
@@ -100,10 +104,6 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
 
         tracing::debug!("query plan\n{:#?}", query_plan);
         query_plan.validate_request(request, Arc::clone(&self.service_registry))?;
-
-        if let Some(query) = query.as_ref() {
-            query.validate_variable_types(request, &self.schema)?;
-        }
 
         Ok(ApolloPreparedQuery {
             query_plan,
