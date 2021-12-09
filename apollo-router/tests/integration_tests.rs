@@ -3,6 +3,7 @@ use apollo_router::http_service_registry::HttpServiceRegistry;
 use apollo_router::http_subgraph::HttpSubgraphFetcher;
 use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
+use apollo_router_core::ValueExt;
 use futures::prelude::*;
 use maplit::hashmap;
 use serde_json::to_string_pretty;

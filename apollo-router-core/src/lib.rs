@@ -55,7 +55,6 @@ pub mod prelude {
     //      This is because the user might work with HTTP requests alongside GraphQL requests so we
     //      thought it might be handy to have everything under the namespace "graphql" and let
     //      the user imports things explicitly if they prefer to.
-    pub use crate::json_ext::ValueExt;
     pub use crate::traits::*;
     pub mod graphql {
         pub use crate::*;
