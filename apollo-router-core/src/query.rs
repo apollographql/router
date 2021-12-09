@@ -431,7 +431,6 @@ mod tests {
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
             }"#,
-            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -446,7 +445,7 @@ mod tests {
                 "other": "13",
             }})
             .build();
-        query.format_response(&mut response, None);
+        query.format_response(&mut response, None, &schema);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -474,11 +473,11 @@ mod tests {
     #[test]
     fn reformat_response_data_inline_fragment() {
         let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#, Arc::new(schema)).unwrap();
+        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#).unwrap();
         let mut response = Response::builder()
             .data(json! {{"stuff": {"bar": "2"}}})
             .build();
-        query.format_response(&mut response, None);
+        query.format_response(&mut response, None, &schema);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -494,13 +493,12 @@ mod tests {
         let schema: Schema = "fragment baz on Baz {baz}".parse().unwrap();
         let query = Query::parse(
             r#"{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}"#,
-            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
             .data(json! {{"foo": "1", "bar": "2", "baz": "3"}})
             .build();
-        query.format_response(&mut response, None);
+        query.format_response(&mut response, None, &schema);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -514,11 +512,8 @@ mod tests {
     #[test]
     fn reformat_response_data_best_effort() {
         let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(
-            r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#,
-            Arc::new(schema),
-        )
-        .unwrap();
+        let query =
+            Query::parse(r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#).unwrap();
         let mut response = Response::builder()
             .data(json! {{
                 "foo": "1",
@@ -531,7 +526,7 @@ mod tests {
                 "other": "6",
             }})
             .build();
-        query.format_response(&mut response, None);
+        query.format_response(&mut response, None, &schema);
         assert_eq_and_ordered!(
             response.data,
             json! {{
@@ -556,7 +551,6 @@ mod tests {
             r#"query MyOperation {
                 foo
             }"#,
-            Arc::new(schema),
         )
         .unwrap();
         let mut response = Response::builder()
@@ -566,9 +560,9 @@ mod tests {
             }})
             .build();
         let untouched = response.clone();
-        query.format_response(&mut response, Some("OtherOperation"));
+        query.format_response(&mut response, Some("OtherOperation"), &schema);
         assert_eq_and_ordered!(response.data, untouched.data);
-        query.format_response(&mut response, Some("MyOperation"));
+        query.format_response(&mut response, Some("MyOperation"), &schema);
         assert_eq_and_ordered!(response.data, json! {{ "foo": "1" }});
     }
 
@@ -583,9 +577,8 @@ mod tests {
                 .variables(variables)
                 .query($query)
                 .build();
-            let query =
-                Query::parse(&request.query, Arc::new(schema)).expect("could not parse query");
-            query.validate_variable_types(&request)
+            let query = Query::parse(&request.query).expect("could not parse query");
+            query.validate_variable_types(&request, &schema)
         }};
     }
 
