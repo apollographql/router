@@ -239,7 +239,7 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         .and_then(move || async {
             let mut result = HashMap::new();
             result.insert("status", "pass");
-            let reply = Box::new(warp::reply::json(&result).into_response()) as Box<dyn Reply>;
+            let reply = Box::new(warp::reply::json(&result)) as Box<dyn Reply>;
             Ok::<_, Rejection>(reply)
         })
 }
@@ -702,6 +702,8 @@ mod tests {
             .reply(&filter)
             .await;
 
+        let hdrs = res.headers();
+        assert_eq!(hdrs["content-type"], "application/json");
         assert_eq!(res.status(), 200);
         assert_eq!(res.body().len(), expected.len());
         assert_eq!(res.body(), &expected);
