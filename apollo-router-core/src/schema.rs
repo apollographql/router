@@ -19,9 +19,10 @@ impl std::str::FromStr for Schema {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parser = apollo_parser::Parser::new(s);
         let tree = parser.parse();
+        let errors = tree.errors().cloned().collect::<Vec<_>>();
 
-        if tree.errors().next().is_some() {
-            return Err(SchemaError::ParseErrors(tree.errors().cloned().collect()));
+        if !errors.is_empty() {
+            return Err(SchemaError::ParseErrors(errors));
         }
 
         let document = tree.document();
