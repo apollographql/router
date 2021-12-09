@@ -43,6 +43,16 @@ pub use spec::*;
 pub use traits::*;
 
 pub mod prelude {
+    // NOTE: only traits can be added here! Everything else should be scoped under the module
+    //       graphql so the user can use, for example:
+    //        -  graphql::Schema to get a GraphQL Schema
+    //        -  graphql::Request to get a GraphQL Request
+    //        -  graphql::Response to get a GraphQL Response
+    //        -  ...
+    //
+    //      This is because the user might work with HTTP requests alongside GraphQL requests so we
+    //      thought it might be handy to have everything under the namespace "graphql" and let
+    //      the user imports things explicitly if they prefer to.
     pub use crate::json_ext::ValueExt;
     pub use crate::traits::*;
     pub mod graphql {
