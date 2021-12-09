@@ -418,11 +418,21 @@ mod tests {
         };
     }
 
+    macro_rules! assert_format_response {
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
+            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let query = Query::parse($query).expect("could not parse query");
+            let mut response = Response::builder().data($response.clone()).build();
+            query.format_response(&mut response, $operation, &schema);
+            assert_eq_and_ordered!(response.data, $expected);
+        }};
+    }
+
     #[test]
     fn reformat_response_data_field() {
-        let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(
-            r#"{
+        assert_format_response!(
+            "",
+            "{
                 foo
                 stuff{bar}
                 array{bar}
@@ -430,11 +440,8 @@ mod tests {
                 alias:baz
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
-            }"#,
-        )
-        .unwrap();
-        let mut response = Response::builder()
-            .data(json! {{
+            }",
+            json! {{
                 "foo": "1",
                 "stuff": {"bar": "2"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
@@ -443,11 +450,8 @@ mod tests {
                 "alias_obj": {"bar": "8"},
                 "alias_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
                 "other": "13",
-            }})
-            .build();
-        query.format_response(&mut response, None, &schema);
-        assert_eq_and_ordered!(
-            response.data,
+            }},
+            None,
             json! {{
                 "foo": "1",
                 "stuff": {
@@ -472,14 +476,11 @@ mod tests {
 
     #[test]
     fn reformat_response_data_inline_fragment() {
-        let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(r#"{... on Stuff { stuff{bar}}}"#).unwrap();
-        let mut response = Response::builder()
-            .data(json! {{"stuff": {"bar": "2"}}})
-            .build();
-        query.format_response(&mut response, None, &schema);
-        assert_eq_and_ordered!(
-            response.data,
+        assert_format_response!(
+            "",
+            "{... on Stuff { stuff{bar}}}",
+            json! {{"stuff": {"bar": "2"}}},
+            None,
             json! {{
                 "stuff": {
                     "bar": "2",
@@ -490,17 +491,11 @@ mod tests {
 
     #[test]
     fn reformat_response_data_fragment_spread() {
-        let schema: Schema = "fragment baz on Baz {baz}".parse().unwrap();
-        let query = Query::parse(
-            r#"{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}"#,
-        )
-        .unwrap();
-        let mut response = Response::builder()
-            .data(json! {{"foo": "1", "bar": "2", "baz": "3"}})
-            .build();
-        query.format_response(&mut response, None, &schema);
-        assert_eq_and_ordered!(
-            response.data,
+        assert_format_response!(
+            "fragment baz on Baz {baz}",
+            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            json! {{"foo": "1", "bar": "2", "baz": "3"}},
+            None,
             json! {{
                 "foo": "1",
                 "bar": "2",
@@ -511,11 +506,10 @@ mod tests {
 
     #[test]
     fn reformat_response_data_best_effort() {
-        let schema: Schema = "".parse().unwrap();
-        let query =
-            Query::parse(r#"{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}"#).unwrap();
-        let mut response = Response::builder()
-            .data(json! {{
+        assert_format_response!(
+            "",
+            "{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}",
+            json! {{
                 "foo": "1",
                 "stuff": {"baz": "2"},
                 "array": [
@@ -524,11 +518,8 @@ mod tests {
                     {"bar": "5"},
                 ],
                 "other": "6",
-            }})
-            .build();
-        query.format_response(&mut response, None, &schema);
-        assert_eq_and_ordered!(
-            response.data,
+            }},
+            None,
             json! {{
                 "foo": "1",
                 "stuff": {
@@ -546,24 +537,31 @@ mod tests {
 
     #[test]
     fn reformat_matching_operation() {
-        let schema: Schema = "".parse().unwrap();
-        let query = Query::parse(
-            r#"query MyOperation {
-                foo
-            }"#,
-        )
-        .unwrap();
-        let mut response = Response::builder()
-            .data(json! {{
+        let schema = "";
+        let query = "query MyOperation { foo }";
+        let response = json! {{
+            "foo": "1",
+            "other": "2",
+        }};
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            Some("OtherOperation"),
+            json! {{
                 "foo": "1",
                 "other": "2",
-            }})
-            .build();
-        let untouched = response.clone();
-        query.format_response(&mut response, Some("OtherOperation"), &schema);
-        assert_eq_and_ordered!(response.data, untouched.data);
-        query.format_response(&mut response, Some("MyOperation"), &schema);
-        assert_eq_and_ordered!(response.data, json! {{ "foo": "1" }});
+            }},
+        );
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            Some("MyOperation"),
+            json! {{
+                "foo": "1",
+            }},
+        );
     }
 
     macro_rules! run_validation {
