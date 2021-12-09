@@ -11,16 +11,14 @@ pub struct QueryCache {
     cached: Mutex<LruCache<String, Option<Arc<Query>>>>,
     #[allow(clippy::type_complexity)]
     wait_map: Mutex<HashMap<String, broadcast::Sender<(String, Option<Arc<Query>>)>>>,
-    schema: Arc<Schema>,
 }
 
 impl QueryCache {
     /// Instantiate a new cache for parsed GraphQL queries.
-    pub fn new(cache_limit: usize, schema: Arc<Schema>) -> Self {
+    pub fn new(cache_limit: usize) -> Self {
         Self {
             cached: Mutex::new(LruCache::new(cache_limit)),
             wait_map: Mutex::new(HashMap::new()),
-            schema,
         }
     }
 
@@ -71,8 +69,7 @@ impl QueryCache {
                 // No locks are held here
                 let query_parsing_future = {
                     let query = query.as_ref().to_string();
-                    let schema = Arc::clone(&self.schema);
-                    tokio::task::spawn_blocking(move || Query::parse(query, schema))
+                    tokio::task::spawn_blocking(move || Query::parse(query))
                 };
                 let parsed_query = match query_parsing_future.await {
                     Ok(res) => res.map(Arc::new),

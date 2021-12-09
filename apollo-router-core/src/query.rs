@@ -2,7 +2,6 @@ use crate::prelude::graphql::*;
 use apollo_parser::ast;
 use derivative::Derivative;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::level_filters::LevelFilter;
 
 #[derive(Debug, Derivative)]
@@ -15,8 +14,6 @@ pub struct Query {
     operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operation_type_map: HashMap<OperationType, String>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    schema: Arc<Schema>,
 }
 
 impl Query {
@@ -30,14 +27,24 @@ impl Query {
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
     #[tracing::instrument(level = "trace")]
-    pub fn format_response(&self, response: &mut Response, operation_name: Option<&str>) {
+    pub fn format_response(
+        &self,
+        response: &mut Response,
+        operation_name: Option<&str>,
+        schema: &Schema,
+    ) {
         let data = std::mem::take(&mut response.data);
         match data {
             Value::Object(init) => {
                 let output = self.operations.iter().fold(init, |mut input, operation| {
                     if operation_name.is_none() || operation.name.as_deref() == operation_name {
                         let mut output = Object::default();
-                        self.apply_selection_set(&operation.selection_set, &mut input, &mut output);
+                        self.apply_selection_set(
+                            &operation.selection_set,
+                            &mut input,
+                            &mut output,
+                            schema,
+                        );
                         output
                     } else {
                         input
@@ -51,7 +58,7 @@ impl Query {
         }
     }
 
-    pub fn parse(query: impl Into<String>, schema: Arc<Schema>) -> Option<Self> {
+    pub fn parse(query: impl Into<String>) -> Option<Self> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -117,7 +124,6 @@ impl Query {
             fragments,
             operations,
             operation_type_map,
-            schema,
         })
     }
 
@@ -126,6 +132,7 @@ impl Query {
         selection_set: &[Selection],
         input: &mut Object,
         output: &mut Object,
+        schema: &Schema,
     ) {
         for selection in selection_set {
             match selection {
@@ -142,6 +149,7 @@ impl Query {
                                         selection_set,
                                         &mut input_object,
                                         &mut output_object,
+                                        schema,
                                     );
                                     output.insert(name.to_string(), output_object.into());
                                 }
@@ -156,6 +164,7 @@ impl Query {
                                                     selection_set,
                                                     input_object,
                                                     &mut output_object,
+                                                    schema,
                                                 );
                                                 output_object.into()
                                             } else {
@@ -186,15 +195,15 @@ impl Query {
                     }
                 }
                 Selection::InlineFragment { selection_set } => {
-                    self.apply_selection_set(selection_set, input, output);
+                    self.apply_selection_set(selection_set, input, output, schema);
                 }
                 Selection::FragmentSpread { name } => {
                     if let Some(selection_set) = self
                         .fragments
                         .get(name)
-                        .or_else(|| self.schema.fragments().get(name))
+                        .or_else(|| schema.fragments().get(name))
                     {
-                        self.apply_selection_set(selection_set, input, output);
+                        self.apply_selection_set(selection_set, input, output, schema);
                     } else {
                         failfast_debug!("Missing fragment named: {}", name);
                     }
@@ -204,7 +213,11 @@ impl Query {
     }
 
     /// TODO
-    pub fn validate_variable_types(&self, request: &Request) -> Result<(), Response> {
+    pub fn validate_variable_types(
+        &self,
+        request: &Request,
+        schema: &Schema,
+    ) -> Result<(), Response> {
         let operation_name = request.operation_name.as_deref();
         let operation_variable_types =
             self.operations
@@ -234,7 +247,7 @@ impl Query {
             .iter()
             .filter_map(|(name, ty)| {
                 let value = request.variables.get(name.as_str()).unwrap_or(&Value::Null);
-                (!ty.validate_value(value, &self.schema)).then(|| {
+                (!ty.validate_value(value, &schema)).then(|| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
                     }

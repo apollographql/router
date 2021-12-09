@@ -66,7 +66,7 @@ impl ApolloRouter {
             naive_introspection,
             query_planner,
             service_registry,
-            query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
+            query_cache: Arc::new(QueryCache::new(query_cache_limit)),
             schema,
         }
     }
@@ -107,7 +107,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             .await;
 
         if let Some(query) = query.as_ref() {
-            query.validate_variable_types(request)?;
+            query.validate_variable_types(request, &self.schema)?;
         }
 
         Ok(ApolloPreparedQuery {
@@ -149,7 +149,11 @@ impl PreparedQuery for ApolloPreparedQuery {
 
                 if let Some(query) = self.query {
                     tracing::debug_span!(parent: &span, "format_response").in_scope(|| {
-                        query.format_response(&mut response, request.operation_name.as_deref())
+                        query.format_response(
+                            &mut response,
+                            request.operation_name.as_deref(),
+                            &self.schema,
+                        )
                     });
                 }
 
