@@ -34,6 +34,13 @@ impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
         previous_router: Option<Arc<ApolloRouter>>,
     ) -> ApolloRouter {
         let service_registry = HttpServiceRegistry::new(configuration);
-        ApolloRouter::new(Arc::new(service_registry), schema, previous_router).await
+        let extensions = configuration.load_extensions().await;
+        ApolloRouter::new(
+            Arc::new(service_registry),
+            schema,
+            previous_router,
+            extensions,
+        )
+        .await
     }
 }

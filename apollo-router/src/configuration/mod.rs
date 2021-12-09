@@ -3,6 +3,8 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use apollo_router_core::extensions::configuration::Extension;
+use apollo_router_core::extensions::Extensions;
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -59,6 +61,11 @@ pub struct Configuration {
     #[builder(default)]
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
+
+    /// Extensions.
+    #[serde(default)]
+    #[builder(default)]
+    pub extensions: HashMap<String, Extension>,
 }
 
 fn default_listen() -> SocketAddr {
@@ -97,6 +104,16 @@ impl Configuration {
         } else {
             Err(errors)
         }
+    }
+
+    pub async fn load_extensions(&self) -> Arc<Extensions> {
+        let mut extensions = Extensions::new();
+
+        for (name, config) in self.extensions.clone() {
+            extensions.add_extension(name, config);
+        }
+
+        Arc::new(extensions)
     }
 
     pub fn boxed(self) -> Box<Self> {

@@ -1,4 +1,4 @@
-use apollo_router_core::prelude::graphql::*;
+use apollo_router_core::{extensions::Extensions, prelude::graphql::*};
 use derivative::Derivative;
 use futures::prelude::*;
 use std::sync::Arc;
@@ -15,6 +15,7 @@ pub struct ApolloRouter {
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
+    extensions: Arc<Extensions>,
 }
 
 impl ApolloRouter {
@@ -23,6 +24,7 @@ impl ApolloRouter {
         service_registry: Arc<dyn ServiceRegistry>,
         schema: Arc<Schema>,
         previous_router: Option<Arc<ApolloRouter>>,
+        extensions: Arc<Extensions>,
     ) -> Self {
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
@@ -68,6 +70,7 @@ impl ApolloRouter {
             service_registry,
             query_cache: Arc::new(QueryCache::new(query_cache_limit, Arc::clone(&schema))),
             schema,
+            extensions,
         }
     }
 }
@@ -82,6 +85,8 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response.into());
         }
+
+        self.extensions.requestDidStart(request).await;
 
         let query_plan = self
             .query_planner
@@ -100,6 +105,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             service_registry: Arc::clone(&self.service_registry),
             schema: Arc::clone(&self.schema),
             query_cache: Arc::clone(&self.query_cache),
+            extensions: Arc::clone(&self.extensions),
         })
     }
 }
@@ -111,6 +117,7 @@ pub struct ApolloPreparedQuery {
     service_registry: Arc<dyn ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
+    extensions: Arc<Extensions>,
 }
 
 #[async_trait::async_trait]

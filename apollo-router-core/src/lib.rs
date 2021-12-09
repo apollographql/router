@@ -24,6 +24,7 @@ macro_rules! failfast_error {
 
 mod cache;
 mod error;
+pub mod extensions;
 mod json_ext;
 mod naive_introspection;
 mod query;
