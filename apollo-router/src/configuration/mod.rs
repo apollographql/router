@@ -66,7 +66,10 @@ fn default_listen() -> SocketAddr {
 }
 
 impl Configuration {
-    pub fn load_subgraphs(&mut self, schema: &Schema) -> Result<(), Vec<ConfigurationError>> {
+    pub fn load_subgraphs(
+        &mut self,
+        schema: &graphql::Schema,
+    ) -> Result<(), Vec<ConfigurationError>> {
         let mut errors = Vec::new();
 
         for (name, schema_url) in schema.subgraphs() {
@@ -381,7 +384,7 @@ mod tests {
             )
             .build();
 
-        let schema: Schema = r#"
+        let schema: graphql::Schema = r#"
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")

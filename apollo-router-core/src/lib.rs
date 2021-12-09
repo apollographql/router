@@ -23,31 +23,23 @@ macro_rules! failfast_error {
 }
 
 mod error;
-mod field_type;
-mod fragments;
 mod json_ext;
 mod naive_introspection;
-mod query;
 mod query_cache;
 mod query_planner;
 mod request;
 mod response;
-mod schema;
-mod selection;
+mod spec;
 mod traits;
 
 pub use error::*;
-pub(crate) use field_type::*;
-pub(crate) use fragments::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
-pub use query::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;
-pub use schema::*;
-pub(crate) use selection::*;
+pub use spec::*;
 pub use traits::*;
 
 pub mod prelude {
@@ -56,5 +48,4 @@ pub mod prelude {
     pub mod graphql {
         pub use crate::*;
     }
-    pub use crate::schema::Schema;
 }
