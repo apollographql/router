@@ -2,7 +2,7 @@ use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::prelude::*;
 use std::sync::Arc;
-use tracing::{Instrument, Span};
+use tracing::Instrument;
 use tracing_futures::WithSubscriber;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -127,33 +127,26 @@ pub struct ApolloPreparedQuery {
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
-        let span = Span::current();
-        stream::once(
-            async move {
-                let mut response = self
-                    .query_plan
-                    .execute(
-                        Arc::clone(&request),
-                        Arc::clone(&self.service_registry),
-                        Arc::clone(&self.schema),
-                    )
-                    .instrument(tracing::info_span!(parent: &span, "execution"))
-                    .await;
+        let mut response = self
+            .query_plan
+            .execute(
+                Arc::clone(&request),
+                Arc::clone(&self.service_registry),
+                Arc::clone(&self.schema),
+            )
+            .instrument(tracing::info_span!("execution"))
+            .await;
 
-                if let Some(query) = self.query {
-                    tracing::debug_span!(parent: &span, "format_response").in_scope(|| {
-                        query.format_response(
-                            &mut response,
-                            request.operation_name.as_deref(),
-                            &self.schema,
-                        )
-                    });
-                }
+        if let Some(query) = self.query {
+            tracing::debug_span!("format_response").in_scope(|| {
+                query.format_response(
+                    &mut response,
+                    request.operation_name.as_deref(),
+                    &self.schema,
+                )
+            });
+        }
 
-                response
-            }
-            .with_current_subscriber(),
-        )
-        .boxed()
+        stream::once(async move { response }.with_current_subscriber()).boxed()
     }
 }
