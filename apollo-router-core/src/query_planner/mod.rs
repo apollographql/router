@@ -207,7 +207,7 @@ impl PlanNode {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.variable_usage()))
             }
-            Self::Fetch(fetch) => Box::new(fetch.variable_usages.iter().map(|x| x.as_str())),
+            Self::Fetch(fetch) => fetch.variable_usage(),
             Self::Flatten(flatten) => Box::new(flatten.node.variable_usage()),
         }
     }
@@ -220,7 +220,8 @@ impl PlanNode {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
-            Self::Fetch(fetch) => Box::new(vec![fetch.service_name.as_str()].into_iter()),
+            Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+
             Self::Flatten(flatten) => Box::new(flatten.node.service_usage()),
         }
     }
@@ -289,14 +290,14 @@ mod fetch {
     #[serde(rename_all = "camelCase")]
     pub(crate) struct FetchNode {
         /// The name of the service or subgraph that the fetch is querying.
-        pub(crate) service_name: String,
+        service_name: String,
 
         /// The data that is required for the subgraph fetch.
         #[serde(skip_serializing_if = "Option::is_none")]
         requires: Option<Vec<Selection>>,
 
         /// The variables that are used for the subgraph fetch.
-        pub(crate) variable_usages: Vec<String>,
+        variable_usages: Vec<String>,
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
@@ -472,6 +473,14 @@ mod fetch {
 
                 Ok(Value::from_path(current_dir, data))
             }
+        }
+
+        pub(crate) fn service_name(&self) -> &str {
+            &self.service_name
+        }
+
+        pub(crate) fn variable_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
+            Box::new(self.variable_usages.iter().map(|x| x.as_str()))
         }
     }
 }
