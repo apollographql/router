@@ -437,10 +437,7 @@ mod fetch {
                 // because we need to take ownership of the inner value
                 if let Value::Object(mut map) = data {
                     if let Some(entities) = map.remove("_entities") {
-                        tracing::trace!(
-                            "Received entities: {}",
-                            serde_json::to_string(&entities).unwrap(),
-                        );
+                        tracing::trace!("Received entities: {:?}", &entities);
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
