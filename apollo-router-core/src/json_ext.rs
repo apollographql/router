@@ -26,7 +26,7 @@ pub trait ValueExt {
     #[track_caller]
     fn is_subset(&self, superset: &Value) -> bool;
 
-    /// create a Value by inserting a value at a subpath
+    /// Create a `Value` by inserting a value at a subpath.
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 }
@@ -47,7 +47,7 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
-                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
+                for (b_value, a_value) in b.drain(..).zip(a.iter_mut()) {
                     a_value.deep_merge(b_value);
                 }
 
@@ -55,12 +55,10 @@ impl ValueExt for Value {
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {
-                #[cfg(debug)]
-                panic!("trying to replace an object with an array");
+                failfast_debug!("trying to replace an object with an array");
             }
             (Value::Array(_), Value::Object(_)) => {
-                #[cfg(debug)]
-                panic!("trying to replace an object with an array");
+                failfast_debug!("trying to replace an array with an object");
             }
             (a, b) => {
                 *a = b;
