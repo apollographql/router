@@ -21,12 +21,6 @@ pub enum FetchError {
         service: String,
     },
 
-    /// Query requires variable '{name}', but it was not provided.
-    ValidationMissingVariable {
-        /// Name of the variable.
-        name: String,
-    },
-
     /// Invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
         /// Name of the variable.

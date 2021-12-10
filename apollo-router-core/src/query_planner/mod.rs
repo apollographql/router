@@ -61,10 +61,6 @@ impl QueryPlan {
             early_errors.push(err.to_graphql_error(None));
         }
 
-        for err in self.root.validate_request_variables_against_plan(request) {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
         if !early_errors.is_empty() {
             Err(Response::builder().errors(early_errors).build())
         } else {
@@ -179,19 +175,6 @@ impl PlanNode {
         })
     }
 
-    /// Retrieves all the variables used across all plan nodes.
-    ///
-    /// Note that duplicates are not filtered.
-    fn variable_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-        match self {
-            Self::Sequence { nodes } | Self::Parallel { nodes } => {
-                Box::new(nodes.iter().flat_map(|x| x.variable_usage()))
-            }
-            Self::Fetch(fetch) => Box::new(fetch.variable_usages.iter().map(|x| x.as_str())),
-            Self::Flatten(flatten) => Box::new(flatten.node.variable_usage()),
-        }
-    }
-
     /// Retrieves all the services used across all plan nodes.
     ///
     /// Note that duplicates are not filtered.
@@ -224,30 +207,6 @@ impl PlanNode {
             .into_iter()
             .map(|service| FetchError::ValidationUnknownServiceError {
                 service: service.to_string(),
-            })
-            .collect::<Vec<_>>()
-    }
-
-    /// Recursively validate a query plan node making sure that all variable usages are known before we
-    /// go for execution.
-    ///
-    /// This simplifies processing later as we can always guarantee that the variable usages are
-    /// available for the plan.
-    ///
-    /// # Arguments
-    ///
-    ///  *   `plan`: The root query plan node to validate.
-    fn validate_request_variables_against_plan(&self, request: &Request) -> Vec<FetchError> {
-        let required = self.variable_usage().collect::<HashSet<_>>();
-        let provided = request
-            .variables
-            .keys()
-            .map(|x| x.as_str())
-            .collect::<HashSet<_>>();
-        required
-            .difference(&provided)
-            .map(|x| FetchError::ValidationMissingVariable {
-                name: x.to_string(),
             })
             .collect::<Vec<_>>()
     }
