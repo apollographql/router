@@ -94,9 +94,10 @@ impl QueryPlan {
             )
             .await;
 
-        let mut response = Response::builder().build();
-        response.data = value;
-        response.errors = errors;
+        let mut response = Response::builder()
+            .data(value)
+            .errors(errors)
+            .build();
 
         response
     }
@@ -113,7 +114,7 @@ impl PlanNode {
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("Executing plan:\n{:#?}", self);
-            let mut value = Value::default();
+            let mut value;
             let mut errors = Vec::new();
 
             match self {
@@ -195,7 +196,6 @@ impl PlanNode {
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
                             errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
-                            return (value, errors);
                         }
                     }
                 }
@@ -334,8 +334,7 @@ impl FetchNode {
                             reason: "not an object".to_string(),
                         })),
                     })
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap(),
+                    .collect::<Result<Vec<_>, _>>()?;
             );
             variables.insert("representations".into(), representations);
 
@@ -380,8 +379,7 @@ impl FetchNode {
         let Variables { variables, paths } =
             self.make_variables(data, current_dir, request, schema)?;
 
-        // We already checked that the service exists during planning
-        let fetcher = service_registry.get(service_name).unwrap();
+        let fetcher = service_registry.get(service_name).expect("we already checked that the service exists during planning; qed");
 
         let (res, _tail) = fetcher
             .stream(

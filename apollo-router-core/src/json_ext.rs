@@ -133,11 +133,11 @@ impl ValueExt for Value {
         }
     }
 
-    /// insert a specific value at a subpath
+    /// Insert a specific value at a subpath.
     ///
-    /// this will create objects, arrays and null nodes as needed if they
+    /// This will create objects, arrays and null nodes as needed if they
     /// are not present: the resulting Value is meant to be merged with an
-    /// existing one that contains those nodes
+    /// existing one that contains those nodes.
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
         let mut res_value = Value::default();
