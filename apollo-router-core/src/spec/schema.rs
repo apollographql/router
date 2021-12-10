@@ -22,7 +22,12 @@ impl std::str::FromStr for Schema {
         let errors = tree.errors().cloned().collect::<Vec<_>>();
 
         if !errors.is_empty() {
-            return Err(SchemaError::ParseErrors(errors));
+            let errors = ParseErrors {
+                raw_schema: s.to_string(),
+                errors,
+            };
+            errors.print();
+            return Err(SchemaError::Parse(errors));
         }
 
         let document = tree.document();
