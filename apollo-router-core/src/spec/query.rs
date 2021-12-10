@@ -584,5 +584,10 @@ mod tests {
         assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":{}}));
         assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":1}));
         assert_validation_error!("scalar Foo", "query($foo:Foo!){x}", json!({}));
+        assert_validation!(
+            "type Foo{bar:Bar!} type Bar{x:Int!}",
+            "query($foo:Foo){x}",
+            json!({"foo":{"bar":{"x":1}}})
+        );
     }
 }
