@@ -281,7 +281,7 @@ mod fetch {
     use futures::StreamExt;
     use serde::Deserialize;
     use serde_json::{Map, Value};
-    use tracing::Instrument;
+    use tracing::{instrument, Instrument};
 
     use crate::{FetchError, Object, Path, Request, Response, Schema, ServiceRegistry, ValueExt};
 
@@ -423,6 +423,7 @@ mod fetch {
             self.response_at_path(current_dir, paths, subgraph_response)
         }
 
+        #[instrument(, level = "trace", name = "response_insert", skip_all)]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
@@ -442,9 +443,6 @@ mod fetch {
                         );
 
                         if let Value::Array(array) = entities {
-                            let span = tracing::trace_span!("response_insert");
-                            let _guard = span.enter();
-
                             let mut value = Value::default();
 
                             for (entity, path) in array.into_iter().zip(paths.into_iter()) {
@@ -464,9 +462,6 @@ mod fetch {
                     reason: "Missing key `_entities`!".to_string(),
                 })
             } else {
-                let span = tracing::trace_span!("response_insert");
-                let _guard = span.enter();
-
                 Ok(Value::from_path(current_dir, data))
             }
         }
