@@ -243,7 +243,7 @@ impl Query {
             .iter()
             .filter_map(|(name, ty)| {
                 let value = request.variables.get(name.as_str()).unwrap_or(&Value::Null);
-                (!ty.validate_value(value, &schema)).then(|| {
+                (!ty.validate_value(value, schema)).then(|| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
                     }

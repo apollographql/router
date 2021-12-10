@@ -241,6 +241,7 @@ struct ParserError {
 }
 
 impl ParseErrors {
+    #[allow(clippy::needless_return)]
     pub fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF {
             return;
