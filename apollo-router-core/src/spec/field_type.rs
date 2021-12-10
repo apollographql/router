@@ -43,7 +43,6 @@ impl FieldType {
                 }
             }
             // NOTE: graphql's types are all optional by default
-            // TODO add integration test for this
             (_, Value::Null) => true,
             _ => false,
         }
