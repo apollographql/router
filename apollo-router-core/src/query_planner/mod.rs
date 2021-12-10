@@ -299,17 +299,18 @@ struct Variables {
     paths: Option<Vec<Path>>,
 }
 
-impl FetchNode {
-    fn make_variables<'a>(
-        &'a self,
+impl Variables {
+    fn new<'a>(
+        requires: Option<&Vec<Selection>>,
+        variable_usages: &[String],
         data: &Value,
         current_dir: &'a Path,
         request: &Arc<Request>,
         schema: &Arc<Schema>,
     ) -> Result<Variables, FetchError> {
-        if let Some(requires) = &self.requires {
-            let mut variables = Object::with_capacity(1 + self.variable_usages.len());
-            variables.extend(self.variable_usages.iter().filter_map(|key| {
+        if let Some(requires) = requires {
+            let mut variables = Object::with_capacity(1 + variable_usages.len());
+            variables.extend(variable_usages.iter().filter_map(|key| {
                 request.variables.as_ref().map(|v| {
                     v.get(key)
                         .map(|value| (key.clone(), value.clone()))
@@ -341,8 +342,7 @@ impl FetchNode {
             })
         } else {
             Ok(Variables {
-                variables: self
-                    .variable_usages
+                variables: variable_usages
                     .iter()
                     .filter_map(|key| {
                         request
@@ -356,7 +356,9 @@ impl FetchNode {
             })
         }
     }
+}
 
+impl FetchNode {
     async fn fetch_node<'a>(
         &'a self,
         data: &'a Value,
@@ -373,8 +375,14 @@ impl FetchNode {
 
         let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-        let Variables { variables, paths } =
-            self.make_variables(data, current_dir, request, schema)?;
+        let Variables { variables, paths } = Variables::new(
+            self.requires.as_ref(),
+            self.variable_usages.as_ref(),
+            data,
+            current_dir,
+            request,
+            schema,
+        )?;
 
         let fetcher = service_registry
             .get(service_name)
