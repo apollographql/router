@@ -208,17 +208,6 @@ pub(crate) fn select_values_and_paths<'a>(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn select_values<'a>(
-    path: &'a Path,
-    data: &'a Value,
-) -> Result<Vec<&'a Value>, FetchError> {
-    Ok(select_values_and_paths(path, data)?
-        .into_iter()
-        .map(|r| r.1)
-        .collect())
-}
-
 fn iterate_path<'a>(
     parent: &Path,
     path: &'a [PathElement],
@@ -458,6 +447,13 @@ mod tests {
         ($a:expr, $b:expr $(,)?) => {
             assert!(!$a.is_subset(&$b));
         };
+    }
+
+    fn select_values<'a>(path: &'a Path, data: &'a Value) -> Result<Vec<&'a Value>, FetchError> {
+        Ok(select_values_and_paths(path, data)?
+            .into_iter()
+            .map(|r| r.1)
+            .collect())
     }
 
     #[test]

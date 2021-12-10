@@ -42,29 +42,6 @@ pub(crate) struct InlineFragment {
     selections: Vec<Selection>,
 }
 
-#[cfg(test)]
-pub(crate) fn select<'a>(
-    response: &Response,
-    path: &'a Path,
-    selections: &[Selection],
-    schema: &Schema,
-) -> Result<Value, FetchError> {
-    let values = select_values(path, &response.data)?.into_iter();
-
-    Ok(Value::Array(
-        values
-            .flat_map(|value| match (value, selections) {
-                (Value::Object(content), requires) => {
-                    select_object(content, requires, schema).transpose()
-                }
-                (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
-                    reason: "not an object".to_string(),
-                })),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    ))
-}
-
 pub(crate) fn select_object(
     content: &Object,
     selections: &[Selection],
@@ -139,6 +116,30 @@ mod tests {
     use super::Selection;
     use super::*;
     use serde_json::json;
+
+    fn select<'a>(
+        response: &Response,
+        path: &'a Path,
+        selections: &[Selection],
+        schema: &Schema,
+    ) -> Result<Value, FetchError> {
+        let values = select_values_and_paths(path, &response.data)?
+            .into_iter()
+            .map(|r| r.1);
+
+        Ok(Value::Array(
+            values
+                .flat_map(|value| match (value, selections) {
+                    (Value::Object(content), requires) => {
+                        select_object(content, requires, schema).transpose()
+                    }
+                    (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
+                        reason: "not an object".to_string(),
+                    })),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
+    }
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
