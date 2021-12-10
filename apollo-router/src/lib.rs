@@ -104,6 +104,12 @@ pub enum SchemaKind {
     },
 }
 
+impl From<graphql::Schema> for SchemaKind {
+    fn from(schema: graphql::Schema) -> Self {
+        Self::Instance(Box::new(schema))
+    }
+}
+
 impl SchemaKind {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
