@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::map::Entry;
 use serde_json::Map;
 pub use serde_json::Value;
+use std::cmp::min;
 use std::fmt;
 
 /// A JSON object.
