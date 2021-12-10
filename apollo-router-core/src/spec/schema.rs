@@ -246,12 +246,12 @@ impl std::str::FromStr for Schema {
 }
 
 impl Schema {
-    /// TODO
+    /// Read a [`Schema`] from a file at a path.
     pub fn read(path: impl AsRef<std::path::Path>) -> Result<Self, SchemaError> {
         std::fs::read_to_string(path)?.parse()
     }
 
-    /// TODO
+    /// Extracts a string slice containing the entire [`Schema`].
     pub fn as_str(&self) -> &str {
         &self.string
     }
@@ -263,7 +263,7 @@ impl Schema {
             .unwrap_or(false)
     }
 
-    /// TODO
+    /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
         self.subgraphs.iter()
     }
