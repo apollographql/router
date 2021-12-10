@@ -332,12 +332,12 @@ mod fetch {
                 let representations = Value::Array(
                     values_and_paths
                         .into_iter()
-                        .flat_map(|(path, value)| match (value, requires) {
-                            (Value::Object(content), requires) => {
+                        .flat_map(|(path, value)| match value {
+                            Value::Object(content) => {
                                 paths.push(path);
                                 select_object(content, requires, schema).transpose()
                             }
-                            (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
+                            _ => Some(Err(FetchError::ExecutionInvalidContent {
                                 reason: "not an object".to_string(),
                             })),
                         })
