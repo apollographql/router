@@ -317,7 +317,7 @@ impl FetchNode {
                 })
             }));
 
-            let values_and_paths = select_values_and_paths(current_dir, data)?;
+            let values_and_paths = data.select_values_and_paths(current_dir)?;
             let mut paths = Vec::new();
             let representations = Value::Array(
                 values_and_paths

@@ -27,8 +27,22 @@ pub trait ValueExt {
     fn is_subset(&self, superset: &Value) -> bool;
 
     /// Create a `Value` by inserting a value at a subpath.
+    ///
+    /// This will create objects, arrays and null nodes as needed if they
+    /// are not present: the resulting Value is meant to be merged with an
+    /// existing one that contains those nodes.
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
+
+    /// Select all values matching a `Path`.
+    ///
+    /// this will return the values and their specific path in the `Value`:
+    /// a `Path` with a flatten node can match multiple values.
+    #[track_caller]
+    fn select_values_and_paths<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> Result<Vec<(Path, &'a Value)>, FetchError>;
 }
 
 impl ValueExt for Value {
@@ -131,11 +145,6 @@ impl ValueExt for Value {
         }
     }
 
-    /// Insert a specific value at a subpath.
-    ///
-    /// This will create objects, arrays and null nodes as needed if they
-    /// are not present: the resulting Value is meant to be merged with an
-    /// existing one that contains those nodes.
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
         let mut res_value = Value::default();
@@ -191,20 +200,17 @@ impl ValueExt for Value {
         *current_node = value;
         res_value
     }
-}
 
-/// selects all values matching a Path
-///
-/// this will return the values and their specific path in the Value:
-/// a Path with a flatten node can match multiple values
-pub(crate) fn select_values_and_paths<'a>(
-    path: &'a Path,
-    data: &'a Value,
-) -> Result<Vec<(Path, &'a Value)>, FetchError> {
-    let mut res = Vec::new();
-    match iterate_path(&Path::default(), &path.0, data, &mut res) {
-        Some(err) => Err(err),
-        None => Ok(res),
+    #[track_caller]
+    fn select_values_and_paths<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> Result<Vec<(Path, &'a Value)>, FetchError> {
+        let mut res = Vec::new();
+        match iterate_path(&Path::default(), &path.0, self, &mut res) {
+            Some(err) => Err(err),
+            None => Ok(res),
+        }
     }
 }
 
@@ -450,7 +456,8 @@ mod tests {
     }
 
     fn select_values<'a>(path: &'a Path, data: &'a Value) -> Result<Vec<&'a Value>, FetchError> {
-        Ok(select_values_and_paths(path, data)?
+        Ok(data
+            .select_values_and_paths(path)?
             .into_iter()
             .map(|r| r.1)
             .collect())

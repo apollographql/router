@@ -123,7 +123,9 @@ mod tests {
         selections: &[Selection],
         schema: &Schema,
     ) -> Result<Value, FetchError> {
-        let values = select_values_and_paths(path, &response.data)?
+        let values = response
+            .data
+            .select_values_and_paths(path)?
             .into_iter()
             .map(|r| r.1);
 
