@@ -509,7 +509,7 @@ mod tests {
                 .query($query)
                 .build();
             let query = Query::parse(&request.query).expect("could not parse query");
-            query.validate_variable_types(&request, &schema)
+            query.validate_variables(&request, &schema)
         }};
     }
 

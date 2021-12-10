@@ -435,15 +435,4 @@ mod tests {
             vec!["product", "books", "product", "books", "product"]
         );
     }
-
-    #[test]
-    fn variable_usage() {
-        assert_eq!(
-            serde_json::from_str::<PlanNode>(test_query_plan!())
-                .unwrap()
-                .variable_usage()
-                .collect::<Vec<_>>(),
-            vec!["test_variable"]
-        );
-    }
 }
