@@ -26,7 +26,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn format_response(
         &self,
         response: &mut Response,
@@ -58,6 +58,7 @@ impl Query {
         }
     }
 
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn parse(query: impl Into<String>) -> Option<Self> {
         let string = query.into();
 
@@ -211,6 +212,7 @@ impl Query {
     }
 
     /// TODO
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn validate_variable_types(
         &self,
         request: &Request,
