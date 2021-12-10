@@ -305,7 +305,7 @@ mod fetch {
 
     struct Variables {
         variables: Map<String, Value>,
-        paths: Option<Vec<Path>>,
+        paths: Vec<Path>,
     }
 
     impl Variables {
@@ -345,10 +345,7 @@ mod fetch {
                 );
                 variables.insert("representations".into(), representations);
 
-                Ok(Variables {
-                    variables,
-                    paths: Some(paths),
-                })
+                Ok(Variables { variables, paths })
             } else {
                 Ok(Variables {
                     variables: variable_usages
@@ -361,7 +358,7 @@ mod fetch {
                                 .unwrap_or_default()
                         })
                         .collect::<Object>(),
-                    paths: None,
+                    paths: Vec::new(),
                 })
             }
         }
@@ -429,7 +426,7 @@ mod fetch {
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
-            paths: Option<Vec<Path>>,
+            paths: Vec<Path>,
             subgraph_response: Response,
         ) -> Result<Value, FetchError> {
             let Response { data, .. } = subgraph_response;
@@ -450,7 +447,6 @@ mod fetch {
 
                             let mut value = Value::default();
 
-                            let paths = paths.unwrap();
                             for (entity, path) in array.into_iter().zip(paths.into_iter()) {
                                 let v = Value::from_path(&path, entity);
                                 value.deep_merge(v);
