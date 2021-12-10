@@ -9,6 +9,7 @@ use std::fmt;
 /// A JSON object.
 pub type Object = Map<String, Value>;
 
+#[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
 pub trait ValueExt {
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
