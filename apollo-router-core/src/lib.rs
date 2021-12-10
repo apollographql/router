@@ -22,6 +22,7 @@ macro_rules! failfast_error {
     }};
 }
 
+mod cache;
 mod error;
 mod json_ext;
 mod naive_introspection;
@@ -32,6 +33,7 @@ mod response;
 mod spec;
 mod traits;
 
+pub use cache::*;
 pub use error::*;
 pub use json_ext::*;
 pub use naive_introspection::*;
