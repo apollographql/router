@@ -208,7 +208,7 @@ impl PlanNode {
                 Box::new(nodes.iter().flat_map(|x| x.variable_usage()))
             }
             Self::Fetch(fetch) => fetch.variable_usage(),
-            Self::Flatten(flatten) => Box::new(flatten.node.variable_usage()),
+            Self::Flatten(flatten) => flatten.node.variable_usage(),
         }
     }
 
@@ -222,7 +222,7 @@ impl PlanNode {
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
 
-            Self::Flatten(flatten) => Box::new(flatten.node.service_usage()),
+            Self::Flatten(flatten) => flatten.node.service_usage(),
         }
     }
 
