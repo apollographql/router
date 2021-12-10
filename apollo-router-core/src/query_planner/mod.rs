@@ -94,12 +94,7 @@ impl QueryPlan {
             )
             .await;
 
-        let mut response = Response::builder()
-            .data(value)
-            .errors(errors)
-            .build();
-
-        response
+        Response::builder().data(value).errors(errors).build()
     }
 }
 
@@ -136,6 +131,7 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Parallel { nodes } => {
+                    value = Value::default();
                     async {
                         let mut resv = Value::default();
 
@@ -196,6 +192,7 @@ impl PlanNode {
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
                             errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            value = Value::default();
                         }
                     }
                 }
@@ -334,7 +331,7 @@ impl FetchNode {
                             reason: "not an object".to_string(),
                         })),
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?,
             );
             variables.insert("representations".into(), representations);
 
@@ -379,7 +376,9 @@ impl FetchNode {
         let Variables { variables, paths } =
             self.make_variables(data, current_dir, request, schema)?;
 
-        let fetcher = service_registry.get(service_name).expect("we already checked that the service exists during planning; qed");
+        let fetcher = service_registry
+            .get(service_name)
+            .expect("we already checked that the service exists during planning; qed");
 
         let (res, _tail) = fetcher
             .stream(
