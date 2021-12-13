@@ -133,7 +133,7 @@ mod tests {
                 .into_iter()
                 .flat_map(|value| match (value, selections) {
                     (Value::Object(content), requires) => {
-                        select_object(&content, requires, schema).transpose()
+                        select_object(content, requires, schema).transpose()
                     }
                     (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
                         reason: "not an object".to_string(),
