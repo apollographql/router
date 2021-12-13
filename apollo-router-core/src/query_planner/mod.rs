@@ -323,14 +323,18 @@ mod fetch {
                     })
                 }));
 
-                let values_and_paths = data.select_values_and_paths(current_dir)?;
                 let mut paths = Vec::new();
+                let mut values = Vec::new();
+                data.select_values_and_paths(current_dir, |_path, value| {
+                    paths.push(_path);
+                    values.push(value)
+                })?;
+
                 let representations = Value::Array(
-                    values_and_paths
+                    values
                         .into_iter()
-                        .flat_map(|(path, value)| match value {
+                        .flat_map(|value| match value {
                             Value::Object(content) => {
-                                paths.push(path);
                                 select_object(content, requires, schema).transpose()
                             }
                             _ => Some(Err(FetchError::ExecutionInvalidContent {

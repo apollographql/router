@@ -123,17 +123,17 @@ mod tests {
         selections: &[Selection],
         schema: &Schema,
     ) -> Result<Value, FetchError> {
-        let values = response
+        let mut values = Vec::new();
+        response
             .data
-            .select_values_and_paths(path)?
-            .into_iter()
-            .map(|r| r.1);
+            .select_values_and_paths(path, |_path, value| values.push(value))?;
 
         Ok(Value::Array(
             values
+                .into_iter()
                 .flat_map(|value| match (value, selections) {
                     (Value::Object(content), requires) => {
-                        select_object(content, requires, schema).transpose()
+                        select_object(&content, requires, schema).transpose()
                     }
                     (_, _) => Some(Err(FetchError::ExecutionInvalidContent {
                         reason: "not an object".to_string(),

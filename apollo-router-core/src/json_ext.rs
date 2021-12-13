@@ -44,10 +44,9 @@ pub trait ValueExt {
     /// this will return the values and their specific path in the `Value`:
     /// a `Path` with a flatten node can match multiple values.
     #[track_caller]
-    fn select_values_and_paths<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> Result<Vec<(Path, &'a Value)>, FetchError>;
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F) -> Result<(), FetchError>
+    where
+        F: FnMut(Path, &'a Value);
 }
 
 impl ValueExt for Value {
@@ -284,27 +283,29 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
-    fn select_values_and_paths<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> Result<Vec<(Path, &'a Value)>, FetchError> {
-        let mut res = Vec::new();
-        match iterate_path(&Path::default(), &path.0, self, &mut res) {
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F) -> Result<(), FetchError>
+    where
+        F: FnMut(Path, &'a Value),
+    {
+        match iterate_path(&Path::default(), &path.0, self, &mut f) {
             Some(err) => Err(err),
-            None => Ok(res),
+            None => Ok(()),
         }
     }
 }
 
-fn iterate_path<'a>(
+fn iterate_path<'a, F>(
     parent: &Path,
     path: &'a [PathElement],
     data: &'a Value,
-    results: &mut Vec<(Path, &'a Value)>,
-) -> Option<FetchError> {
+    f: &mut F,
+) -> Option<FetchError>
+where
+    F: FnMut(Path, &'a Value),
+{
     match path.get(0) {
         None => {
-            results.push((parent.clone(), data));
+            f(parent.clone(), data);
             None
         }
         Some(PathElement::Flatten) => match data.as_array() {
@@ -317,7 +318,7 @@ fn iterate_path<'a>(
                         &parent.join(Path::from(i.to_string())),
                         &path[1..],
                         value,
-                        results,
+                        f,
                     ) {
                         return Some(err);
                     }
@@ -332,7 +333,7 @@ fn iterate_path<'a>(
                         &parent.join(Path::from(i.to_string())),
                         &path[1..],
                         value,
-                        results,
+                        f,
                     )
                 } else {
                     Some(FetchError::ExecutionPathNotFound {
@@ -348,7 +349,7 @@ fn iterate_path<'a>(
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k) {
-                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, results)
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
                 } else {
                     Some(FetchError::ExecutionPathNotFound {
                         reason: format!("key {} not found", k),
@@ -538,11 +539,9 @@ mod tests {
     }
 
     fn select_values<'a>(path: &'a Path, data: &'a Value) -> Result<Vec<&'a Value>, FetchError> {
-        Ok(data
-            .select_values_and_paths(path)?
-            .into_iter()
-            .map(|r| r.1)
-            .collect())
+        let mut v = Vec::new();
+        data.select_values_and_paths(path, |_path, value| v.push(value))?;
+        Ok(v)
     }
 
     #[test]
