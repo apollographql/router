@@ -6,6 +6,9 @@ pub mod otlp;
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
+use opentelemetry::sdk::trace::Sampler;
+use opentelemetry::sdk::Resource;
+use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -224,13 +227,13 @@ pub struct Jaeger {
     #[serde(skip, default = "default_jaeger_password")]
     #[derivative(Default(value = "default_jaeger_password()"))]
     pub password: Option<String>,
+    pub trace_config: Option<TraceConfig>,
 }
 
 fn default_service_name() -> String {
     "router".to_string()
 }
 
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 fn default_service_namespace() -> String {
     "apollo".to_string()
 }
@@ -292,6 +295,53 @@ impl TlsConfig {
         }
 
         Ok(config)
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TraceConfig {
+    pub sampler: Option<Sampler>,
+    pub max_events_per_span: Option<u32>,
+    pub max_attributes_per_span: Option<u32>,
+    pub max_links_per_span: Option<u32>,
+    pub max_attributes_per_event: Option<u32>,
+    pub max_attributes_per_link: Option<u32>,
+    pub resource: Option<Resource>,
+}
+
+impl TraceConfig {
+    pub fn trace_config(&self) -> opentelemetry::sdk::trace::Config {
+        let mut trace_config = opentelemetry::sdk::trace::config();
+        if let Some(sampler) = self.sampler.clone() {
+            trace_config = trace_config.with_sampler(sampler);
+        }
+        if let Some(n) = self.max_events_per_span {
+            trace_config = trace_config.with_max_events_per_span(n);
+        }
+        if let Some(n) = self.max_attributes_per_span {
+            trace_config = trace_config.with_max_attributes_per_span(n);
+        }
+        if let Some(n) = self.max_links_per_span {
+            trace_config = trace_config.with_max_links_per_span(n);
+        }
+        if let Some(n) = self.max_attributes_per_event {
+            trace_config = trace_config.with_max_attributes_per_event(n);
+        }
+        if let Some(n) = self.max_attributes_per_link {
+            trace_config = trace_config.with_max_attributes_per_link(n);
+        }
+
+        let resource = self.resource.clone().unwrap_or_else(|| {
+            Resource::new(vec![
+                KeyValue::new("service.name", default_service_name()),
+                KeyValue::new("service.namespace", default_service_namespace()),
+            ])
+        });
+
+        trace_config = trace_config.with_resource(resource);
+
+        trace_config
     }
 }
 
