@@ -130,8 +130,6 @@ impl PlanNode {
                 PlanNode::Parallel { nodes } => {
                     value = Value::default();
                     async {
-                        let mut resv = Value::default();
-
                         {
                             let mut stream: FuturesUnordered<_> = nodes
                                 .iter()
@@ -147,12 +145,10 @@ impl PlanNode {
                                 .collect();
 
                             while let Some((v, err)) = stream.next().await {
-                                resv.deep_merge(v);
+                                value.deep_merge(v);
                                 errors.extend(err.into_iter());
                             }
                         }
-
-                        value.deep_merge(resv);
                     }
                     .instrument(tracing::info_span!("parallel"))
                     .await;
