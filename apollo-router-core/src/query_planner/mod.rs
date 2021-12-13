@@ -443,8 +443,7 @@ mod fetch {
                             let mut value = Value::default();
 
                             for (entity, path) in array.into_iter().zip(paths.into_iter()) {
-                                let v = Value::from_path(&path, entity);
-                                value.deep_merge(v);
+                                value.insert(&path, entity)?;
                             }
                             return Ok(value);
                         } else {

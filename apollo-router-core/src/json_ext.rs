@@ -35,6 +35,10 @@ pub trait ValueExt {
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 
+    /// Insert a `value` at a `Path`
+    #[track_caller]
+    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
+
     /// Select all values matching a `Path`.
     ///
     /// this will return the values and their specific path in the `Value`:
@@ -200,6 +204,83 @@ impl ValueExt for Value {
 
         *current_node = value;
         res_value
+    }
+
+    /// Insert a `value` at a `Path`
+    #[track_caller]
+    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
+        let mut current_node = self;
+
+        for p in path.iter() {
+            match p {
+                PathElement::Flatten => {
+                    if current_node.is_null() {
+                        let a = Vec::new();
+                        *current_node = Value::Array(a);
+                    } else if !current_node.is_array() {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an array".to_string(),
+                        });
+                    }
+                }
+
+                &PathElement::Index(index) => match current_node {
+                    Value::Array(a) => {
+                        // add more elements if the index is after the end
+                        for _ in a.len()..index + 1 {
+                            a.push(Value::default());
+                        }
+                        current_node = a
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    Value::Null => {
+                        let mut a = Vec::new();
+                        for _ in 0..index + 1 {
+                            a.push(Value::default());
+                        }
+
+                        *current_node = Value::Array(a);
+                        current_node = current_node
+                            .as_array_mut()
+                            .expect("current_node was just set to a Value::Array")
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    _other => {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an array".to_string(),
+                        })
+                    }
+                },
+                PathElement::Key(k) => match current_node {
+                    Value::Object(o) => {
+                        current_node = o
+                            .get_mut(k)
+                            .expect("the value at that key was just inserted");
+                    }
+                    Value::Null => {
+                        let mut m = Map::new();
+                        m.insert(k.to_string(), Value::default());
+
+                        *current_node = Value::Object(m);
+                        current_node = current_node
+                            .as_object_mut()
+                            .expect("current_node was just set to a Value::Object")
+                            .get_mut(k)
+                            .expect("the value at that key was just inserted");
+                    }
+                    _other => {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an object".to_string(),
+                        })
+                    }
+                },
+            }
+        }
+
+        *current_node = value;
+        Ok(())
     }
 
     #[track_caller]
