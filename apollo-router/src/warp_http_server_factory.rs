@@ -5,8 +5,8 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
+use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -237,9 +237,10 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         .and(warp::path("apollo"))
         .and(warp::path("server-health"))
         .and_then(move || async {
-            let mut result = HashMap::new();
-            result.insert("status", "pass");
-            let reply = Box::new(warp::reply::json(&result)) as Box<dyn Reply>;
+            static RESULT: Lazy<serde_json::Value> =
+                Lazy::new(|| serde_json::json!({"status": "pass"}));
+
+            let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
             Ok::<_, Rejection>(reply)
         })
 }
