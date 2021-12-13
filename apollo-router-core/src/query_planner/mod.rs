@@ -157,7 +157,7 @@ impl PlanNode {
                     let (v, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
-                            path,
+                            &current_dir.join(path),
                             Arc::clone(&request),
                             Arc::clone(&service_registry),
                             Arc::clone(&schema),
@@ -166,7 +166,7 @@ impl PlanNode {
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
 
-                    value = Value::from_path(current_dir, v);
+                    value = v;
                     errors.extend(err.into_iter());
                 }
                 PlanNode::Fetch(fetch_node) => {
