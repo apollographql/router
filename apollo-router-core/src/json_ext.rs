@@ -313,15 +313,15 @@ where
                 reason: "not an array".to_string(),
             }),
             Some(array) => {
-                // avoid reallocating a path on each iteration
-                let mut child_path = parent.append(PathElement::Flatten);
-                child_path.0.pop();
                 for (i, value) in array.iter().enumerate() {
-                    child_path.0.push(PathElement::Index(i));
-                    if let Some(err) = iterate_path(&child_path, &path[1..], value, f) {
+                    if let Some(err) = iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        f,
+                    ) {
                         return Some(err);
                     }
-                    child_path.0.pop();
                 }
                 None
             }
@@ -329,7 +329,12 @@ where
         Some(PathElement::Index(i)) => {
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
-                    iterate_path(&parent.append(PathElement::Index(*i)), &path[1..], value, f)
+                    iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        f,
+                    )
                 } else {
                     Some(FetchError::ExecutionPathNotFound {
                         reason: format!("index {} not found", i),
@@ -344,12 +349,7 @@ where
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k) {
-                    iterate_path(
-                        &parent.append(PathElement::Key(k.to_string())),
-                        &path[1..],
-                        value,
-                        f,
-                    )
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
                 } else {
                     Some(FetchError::ExecutionPathNotFound {
                         reason: format!("key {} not found", k),
@@ -475,13 +475,6 @@ impl Path {
         let mut new = Vec::with_capacity(self.len() + other.len());
         new.extend(self.iter().cloned());
         new.extend(other.iter().cloned());
-        Path(new)
-    }
-
-    pub fn append(&self, element: PathElement) -> Self {
-        let mut new = Vec::with_capacity(self.len() + 1);
-        new.extend(self.iter().cloned());
-        new.push(element);
         Path(new)
     }
 }
