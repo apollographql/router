@@ -2774,11 +2774,10 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation.git?rev=a4abfff1a617b9cfd53d6bcc6321c93158dcf115#a4abfff1a617b9cfd53d6bcc6321c93158dcf115"
+source = "git+https://github.com/apollographql/federation.git?rev=6ae693fc60ecb39a860a7dad702fff53887bd77a#6ae693fc60ecb39a860a7dad702fff53887bd77a"
 dependencies = [
  "anyhow",
  "deno_core",
- "once_cell",
  "serde",
  "serde_json",
  "thiserror",
