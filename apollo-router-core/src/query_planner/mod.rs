@@ -287,8 +287,9 @@ mod fetch {
         service_name: String,
 
         /// The data that is required for the subgraph fetch.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        requires: Option<Vec<Selection>>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default)]
+        requires: Vec<Selection>,
 
         /// The variables that are used for the subgraph fetch.
         variable_usages: Vec<String>,
@@ -304,14 +305,14 @@ mod fetch {
 
     impl Variables {
         fn new(
-            requires: Option<&Vec<Selection>>,
+            requires: &[Selection],
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
             request: &Arc<Request>,
             schema: &Arc<Schema>,
         ) -> Result<Variables, FetchError> {
-            if let Some(requires) = requires {
+            if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
                 variables.extend(variable_usages.iter().filter_map(|key| {
                     request.variables.as_ref().map(|v| {
@@ -380,7 +381,7 @@ mod fetch {
             let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
             let Variables { variables, paths } = Variables::new(
-                self.requires.as_ref(),
+                &self.requires,
                 self.variable_usages.as_ref(),
                 data,
                 current_dir,
@@ -430,7 +431,7 @@ mod fetch {
         ) -> Result<Value, FetchError> {
             let Response { data, .. } = subgraph_response;
 
-            if self.requires.is_some() {
+            if !self.requires.is_empty() {
                 // we have to nest conditions and do early returns here
                 // because we need to take ownership of the inner value
                 if let Value::Object(mut map) = data {
