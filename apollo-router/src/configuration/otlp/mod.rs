@@ -7,11 +7,9 @@ mod http;
 pub use self::grpc::*;
 #[cfg(feature = "otlp-http")]
 pub use self::http::*;
-use super::{default_service_name, default_service_namespace};
+use super::TraceConfig;
 use crate::configuration::ConfigurationError;
-use opentelemetry::sdk::resource::Resource;
-use opentelemetry::sdk::trace::{Sampler, Tracer};
-use opentelemetry::KeyValue;
+use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
@@ -146,51 +144,4 @@ where
     }
 
     Ok(Some(url))
-}
-
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TraceConfig {
-    pub sampler: Option<Sampler>,
-    pub max_events_per_span: Option<u32>,
-    pub max_attributes_per_span: Option<u32>,
-    pub max_links_per_span: Option<u32>,
-    pub max_attributes_per_event: Option<u32>,
-    pub max_attributes_per_link: Option<u32>,
-    pub resource: Option<Resource>,
-}
-
-impl TraceConfig {
-    pub fn trace_config(&self) -> opentelemetry::sdk::trace::Config {
-        let mut trace_config = opentelemetry::sdk::trace::config();
-        if let Some(sampler) = self.sampler.clone() {
-            trace_config = trace_config.with_sampler(sampler);
-        }
-        if let Some(n) = self.max_events_per_span {
-            trace_config = trace_config.with_max_events_per_span(n);
-        }
-        if let Some(n) = self.max_attributes_per_span {
-            trace_config = trace_config.with_max_attributes_per_span(n);
-        }
-        if let Some(n) = self.max_links_per_span {
-            trace_config = trace_config.with_max_links_per_span(n);
-        }
-        if let Some(n) = self.max_attributes_per_event {
-            trace_config = trace_config.with_max_attributes_per_event(n);
-        }
-        if let Some(n) = self.max_attributes_per_link {
-            trace_config = trace_config.with_max_attributes_per_link(n);
-        }
-
-        let resource = self.resource.clone().unwrap_or_else(|| {
-            Resource::new(vec![
-                KeyValue::new("service.name", default_service_name()),
-                KeyValue::new("service.namespace", default_service_namespace()),
-            ])
-        });
-
-        trace_config = trace_config.with_resource(resource);
-
-        trace_config
-    }
 }

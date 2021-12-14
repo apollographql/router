@@ -17,8 +17,12 @@ impl std::str::FromStr for Schema {
         let parser = apollo_parser::Parser::new(s);
         let tree = parser.parse();
 
-        if !tree.errors().is_empty() {
-            return Err(SchemaError::ParseErrors(tree.errors().to_vec()));
+        if tree.errors().len() != 0 {
+            let errors = ParseErrors::new(s.to_string(), tree.errors());
+
+            errors.print();
+
+            return Err(SchemaError::Parse(errors));
         }
 
         let document = tree.document();

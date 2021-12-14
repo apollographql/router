@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/warp_http_server_factory.rs
+expression: "String::from_utf8_lossy(res.body())"
+
+---
+"{\"status\":\"pass\"}"

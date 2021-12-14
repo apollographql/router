@@ -2,7 +2,7 @@ use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::prelude::*;
 use std::sync::Arc;
-use tracing::{Instrument, Span};
+use tracing::Instrument;
 use tracing_futures::WithSubscriber;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -117,34 +117,28 @@ pub struct ApolloPreparedQuery {
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(skip_all, level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
-        let span = Span::current();
-        stream::once(
-            async move {
-                let response_task = self
-                    .query_plan
-                    .execute(
-                        Arc::clone(&request),
-                        Arc::clone(&self.service_registry),
-                        Arc::clone(&self.schema),
-                    )
-                    .instrument(tracing::info_span!(parent: &span, "execution"));
-                let query_task = self
-                    .query_cache
-                    .get_query(&request.query)
-                    .instrument(tracing::info_span!(parent: &span, "query_parsing"));
+        let response_task = self
+            .query_plan
+            .execute(
+                Arc::clone(&request),
+                Arc::clone(&self.service_registry),
+                Arc::clone(&self.schema),
+            )
+            .instrument(tracing::info_span!("execution"));
 
-                let (mut response, query) = tokio::join!(response_task, query_task);
+        let query_task = self
+            .query_cache
+            .get_query(&request.query)
+            .instrument(tracing::info_span!("query_parsing"));
 
-                if let Some(query) = query {
-                    tracing::debug_span!(parent: &span, "format_response").in_scope(|| {
-                        query.format_response(&mut response, request.operation_name.as_deref())
-                    });
-                }
+        let (mut response, query) = tokio::join!(response_task, query_task);
 
-                response
-            }
-            .with_current_subscriber(),
-        )
-        .boxed()
+        if let Some(query) = query {
+            tracing::debug_span!("format_response").in_scope(|| {
+                query.format_response(&mut response, request.operation_name.as_deref())
+            });
+        }
+
+        stream::once(async move { response }.with_current_subscriber()).boxed()
     }
 }

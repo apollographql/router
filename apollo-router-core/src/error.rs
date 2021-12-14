@@ -1,9 +1,10 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use futures::prelude::*;
+use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{slice::Iter, sync::Arc};
 use thiserror::Error;
 use tokio::task::JoinError;
 
@@ -150,6 +151,19 @@ impl From<QueryPlannerError> for FetchError {
     }
 }
 
+/// Error types for CacheResolver
+#[derive(Error, Debug, Display, Clone)]
+pub enum CacheResolverError {
+    /// Value retrieval failed: {0}
+    RetrievalError(Arc<QueryPlannerError>),
+}
+
+impl From<QueryPlannerError> for CacheResolverError {
+    fn from(err: QueryPlannerError) -> Self {
+        CacheResolverError::RetrievalError(Arc::new(err))
+    }
+}
+
 /// An error while processing JSON data.
 #[derive(Debug, Error, Display)]
 pub enum JsonExtError {
@@ -168,6 +182,9 @@ pub enum QueryPlannerError {
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
+    /// Cache resolution failed: {0}
+    CacheResolverError(Arc<CacheResolverError>),
+
     /// Unhandled planner result.
     UnhandledPlannerResult,
 }
@@ -184,6 +201,12 @@ impl From<JoinError> for QueryPlannerError {
     }
 }
 
+impl From<CacheResolverError> for QueryPlannerError {
+    fn from(err: CacheResolverError) -> Self {
+        QueryPlannerError::CacheResolverError(Arc::new(err))
+    }
+}
+
 impl From<QueryPlannerError> for ResponseStream {
     fn from(err: QueryPlannerError) -> Self {
         stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
@@ -196,5 +219,50 @@ pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
     /// Parsing error(s).
-    ParseErrors(Vec<apollo_parser::Error>),
+    Parse(ParseErrors),
+}
+
+#[derive(Debug)]
+pub struct ParseErrors {
+    raw_schema: String,
+    errors: Vec<apollo_parser::Error>,
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("{}", self.ty)]
+#[diagnostic(code("apollo-parser parsing error."))]
+struct ParserError {
+    ty: String,
+    #[source_code]
+    src: NamedSource,
+    #[label("{}", self.ty)]
+    span: SourceSpan,
+}
+
+impl ParseErrors {
+    pub(crate) fn new(raw_schema: String, errors: Iter<'_, apollo_parser::Error>) -> Self {
+        Self {
+            raw_schema,
+            errors: errors.cloned().collect(),
+        }
+    }
+
+    pub fn print(&self) {
+        if atty::is(atty::Stream::Stdout) {
+            // Fancy Miette reports for TTYs
+            self.errors.iter().for_each(|err| {
+                let report = Report::new(ParserError {
+                    src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
+                    span: (err.index(), err.data().len()).into(),
+                    ty: err.message().into(),
+                });
+                println!("{:?}", report);
+            });
+        } else {
+            // Best effort to display errors
+            self.errors.iter().for_each(|r| {
+                println!("{:#?}", r);
+            });
+        };
+    }
 }
