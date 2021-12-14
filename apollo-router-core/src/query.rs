@@ -23,7 +23,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument(level = "trace")]
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn format_response(&self, response: &mut Response, operation_name: Option<&str>) {
         let data = std::mem::take(&mut response.data);
         match data {

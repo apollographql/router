@@ -47,7 +47,7 @@ pub(crate) enum PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(name = "validation", level = "debug")]
+    #[tracing::instrument(skip_all, name = "validation", level = "debug")]
     pub fn validate_request(
         &self,
         request: &Request,

@@ -2,12 +2,14 @@
 
 mod apollo_router;
 pub mod configuration;
+mod custom;
 mod files;
 mod http_server_factory;
 pub mod http_service_registry;
 pub mod http_subgraph;
 mod router_factory;
 mod state_machine;
+mod stdout;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
@@ -17,6 +19,7 @@ use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 use configuration::{Configuration, OpenTelemetry};
+use custom::CustomLayer;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -27,6 +30,7 @@ use futures::FutureExt;
 use once_cell::sync::OnceCell;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::trace::TracerProvider;
+use std::io::stderr;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -34,6 +38,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use stdout::new_pipeline;
 use thiserror::Error;
 use tokio::task::spawn;
 use tracing_subscriber::prelude::*;
@@ -327,7 +332,19 @@ fn try_initialize_subscriber(
         None => {}
     }
 
-    Ok(None)
+    /* XXX OPENTELEMETRY APPROACH
+    let tracer = new_pipeline()
+        .with_pretty_print(true)
+        .with_writer(stderr())
+        .install_simple();
+    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+    */
+    /* XXX LAYERS APPROACH
+     */
+    let telemetry = CustomLayer {};
+
+    // tracing_subscriber::registry().with(telemetry);
+    Ok(Some(Arc::new(telemetry.with_subscriber(subscriber))))
 }
 
 pub fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
