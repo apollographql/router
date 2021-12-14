@@ -286,10 +286,7 @@ impl ValueExt for Value {
     where
         F: FnMut(Path, &'a Value),
     {
-        match iterate_path(&Path::default(), &path.0, self, &mut f) {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
+        iterate_path(&Path::default(), &path.0, self, &mut f)
     }
 }
 
@@ -298,31 +295,29 @@ fn iterate_path<'a, F>(
     path: &'a [PathElement],
     data: &'a Value,
     f: &mut F,
-) -> Option<FetchError>
+) -> Result<(), FetchError>
 where
     F: FnMut(Path, &'a Value),
 {
     match path.get(0) {
         None => {
             f(parent.clone(), data);
-            None
+            Ok(())
         }
         Some(PathElement::Flatten) => match data.as_array() {
-            None => Some(FetchError::ExecutionInvalidContent {
+            None => Err(FetchError::ExecutionInvalidContent {
                 reason: "not an array".to_string(),
             }),
             Some(array) => {
                 for (i, value) in array.iter().enumerate() {
-                    if let Some(err) = iterate_path(
+                    iterate_path(
                         &parent.join(Path::from(i.to_string())),
                         &path[1..],
                         value,
                         f,
-                    ) {
-                        return Some(err);
-                    }
+                    )?;
                 }
-                None
+                Ok(())
             }
         },
         Some(PathElement::Index(i)) => {
@@ -335,12 +330,12 @@ where
                         f,
                     )
                 } else {
-                    Some(FetchError::ExecutionPathNotFound {
+                    Err(FetchError::ExecutionPathNotFound {
                         reason: format!("index {} not found", i),
                     })
                 }
             } else {
-                Some(FetchError::ExecutionInvalidContent {
+                Err(FetchError::ExecutionInvalidContent {
                     reason: "not an array".to_string(),
                 })
             }
@@ -350,12 +345,12 @@ where
                 if let Some(value) = o.get(k) {
                     iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
                 } else {
-                    Some(FetchError::ExecutionPathNotFound {
+                    Err(FetchError::ExecutionPathNotFound {
                         reason: format!("key {} not found", k),
                     })
                 }
             } else {
-                Some(FetchError::ExecutionInvalidContent {
+                Err(FetchError::ExecutionInvalidContent {
                     reason: "not an object".to_string(),
                 })
             }
