@@ -217,7 +217,6 @@ impl PlanNode {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
-
             Self::Flatten(flatten) => flatten.node.service_usage(),
         }
     }
@@ -274,12 +273,11 @@ mod fetch {
     use std::sync::Arc;
 
     use super::selection::{select_object, Selection};
-    use futures::StreamExt;
+    use futures::prelude::*;
     use serde::Deserialize;
-    use serde_json::{Map, Value};
     use tracing::{instrument, Instrument};
 
-    use crate::{FetchError, Object, Path, Request, Response, Schema, ServiceRegistry, ValueExt};
+    use crate::prelude::graphql::*;
 
     /// A fetch node.
     #[derive(Debug, PartialEq, Deserialize)]
@@ -300,16 +298,16 @@ mod fetch {
     }
 
     struct Variables {
-        variables: Map<String, Value>,
+        variables: Object,
         paths: Vec<Path>,
     }
 
     impl Variables {
-        fn new<'a>(
+        fn new(
             requires: Option<&Vec<Selection>>,
             variable_usages: &[String],
             data: &Value,
-            current_dir: &'a Path,
+            current_dir: &Path,
             request: &Arc<Request>,
             schema: &Arc<Schema>,
         ) -> Result<Variables, FetchError> {
