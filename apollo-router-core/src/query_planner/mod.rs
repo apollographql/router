@@ -315,8 +315,10 @@ mod fetch {
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
                 variables.extend(variable_usages.iter().filter_map(|key| {
-                    request.variables.get(key)
-                            .map(|value| (key.clone(), value.clone()))
+                    request
+                        .variables
+                        .get(key)
+                        .map(|value| (key.clone(), value.clone()))
                 }));
 
                 let mut paths = Vec::new();
@@ -349,9 +351,8 @@ mod fetch {
                         .filter_map(|key| {
                             request
                                 .variables
-                                .as_ref()
-                                .map(|v| v.get(key).map(|value| (key.clone(), value.clone())))
-                                .unwrap_or_default()
+                                .get(key)
+                                .map(|value| (key.clone(), value.clone()))
                         })
                         .collect::<Object>(),
                     paths: Vec::new(),
