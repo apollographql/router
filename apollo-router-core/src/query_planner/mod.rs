@@ -309,8 +309,8 @@ mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &Arc<Request>,
-            schema: &Arc<Schema>,
+            request: &Request,
+            schema: &Schema,
         ) -> Result<Variables, FetchError> {
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -368,9 +368,9 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            request: &'a Arc<Request>,
+            request: &'a Request,
             service_registry: Arc<dyn ServiceRegistry>,
-            schema: &'a Arc<Schema>,
+            schema: &'a Schema,
         ) -> Result<Value, FetchError> {
             let FetchNode {
                 operation,
