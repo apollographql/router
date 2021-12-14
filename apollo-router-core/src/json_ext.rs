@@ -41,8 +41,7 @@ pub trait ValueExt {
 
     /// Select all values matching a `Path`.
     ///
-    /// this will return the values and their specific path in the `Value`:
-    /// a `Path` with a flatten node can match multiple values.
+    /// the function passed as argument will be called with the values found and their Path
     #[track_caller]
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F) -> Result<(), FetchError>
     where
@@ -366,6 +365,7 @@ where
 
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
+#[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PathElement {
@@ -424,6 +424,7 @@ where
 /// A path into the result document.
 ///
 /// This can be composed of strings and numbers
+#[doc(hidden)]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Path(pub Vec<PathElement>);
