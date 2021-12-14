@@ -13,4 +13,5 @@ opentelemetry:
   jaeger:
     collector_endpoint: "http://example.org/"
     service_name: bar
+    trace_config: ~
 
