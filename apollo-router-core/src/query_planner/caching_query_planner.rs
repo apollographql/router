@@ -1,10 +1,8 @@
 use crate::prelude::graphql::*;
+use crate::CacheResolver;
 use async_trait::async_trait;
-use futures::lock::Mutex;
-use lru::LruCache;
-use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
-use tokio::sync::broadcast::{self, Sender};
 
 type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 
@@ -13,21 +11,38 @@ type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
-    delegate: T,
-    cached: Mutex<LruCache<QueryKey, PlanResult>>,
-    wait_map: Mutex<HashMap<QueryKey, Sender<(QueryKey, PlanResult)>>>,
-    plan_cache_limit: usize,
+    cm: CachingMap<QueryKey, Arc<QueryPlan>>,
+    phantom: PhantomData<T>,
 }
 
-impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    /// Creates a new query planner that cache the results of another [`QueryPlanner`].
+/// A resolver for cache misses
+struct CachingQueryPlannerResolver<T: QueryPlanner> {
+    delegate: T,
+}
+
+impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
+    /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
+        let resolver = CachingQueryPlannerResolver { delegate };
+        let cm = CachingMap::new(Box::new(resolver), plan_cache_limit);
         Self {
-            delegate,
-            cached: Mutex::new(LruCache::new(plan_cache_limit)),
-            wait_map: Mutex::new(HashMap::new()),
-            plan_cache_limit,
+            cm,
+            phantom: PhantomData,
         }
+    }
+
+    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
+        self.cm.get_hot_keys().await
+    }
+}
+
+#[async_trait]
+impl<T: QueryPlanner> CacheResolver<QueryKey, Arc<QueryPlan>> for CachingQueryPlannerResolver<T> {
+    async fn retrieve(&self, key: QueryKey) -> Result<Arc<QueryPlan>, CacheResolverError> {
+        self.delegate
+            .get(key.0, key.1, key.2)
+            .await
+            .map_err(|err| err.into())
     }
 }
 
@@ -39,88 +54,8 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
         operation: Option<String>,
         options: QueryPlanOptions,
     ) -> PlanResult {
-        let mut locked_cache = self.cached.lock().await;
         let key = (query, operation, options);
-        if let Some(value) = locked_cache.get(&key).cloned() {
-            return value;
-        }
-
-        // Holding a lock across the delegated get is a bad idea because
-        // the delegate get() calls into v8 for processing of the plan.
-        // This would block all other get() requests for a potentially
-        // long time.
-        // Alternatively, if we don't hold the lock, there is a risk
-        // that we will do the work multiple times. This is also
-        // sub-optimal.
-
-        // To work around this, we keep a list of keys we are currently
-        // processing in the delegate. If we try to get a key on this
-        // list, we block and wait for it to complete and then retry.
-        //
-        // This is more complex than either of the two simple
-        // alternatives but succeeds in providing a mechanism where each
-        // client only waits for uncached QueryPlans they are going to
-        // use AND avoids generating the plan multiple times.
-
-        let mut locked_wait_map = self.wait_map.lock().await;
-
-        // We must only drop the locked cache after we have locked the
-        // wait map. Otherwise,we might get a race that causes us to
-        // miss a broadcast.
-        drop(locked_cache);
-
-        match locked_wait_map.get_mut(&key) {
-            Some(waiter) => {
-                // Register interest in key
-                let mut receiver = waiter.subscribe();
-                drop(locked_wait_map);
-                // Our use case is very specific, so we are sure
-                // that we won't get any errors here.
-                let (recv_key, recv_plan) = receiver.recv().await.expect(
-                    "the sender won't ever be dropped before all the receivers finish; qed",
-                );
-                debug_assert_eq!(recv_key, key);
-                recv_plan
-            }
-            None => {
-                let (tx, _rx) = broadcast::channel(1);
-                locked_wait_map.insert(key.clone(), tx.clone());
-                drop(locked_wait_map);
-                // This is the potentially high duration operation
-                // No locks are held here
-                let value = self
-                    .delegate
-                    .get(key.0.clone(), key.1.clone(), key.2.clone())
-                    .await;
-                // Update our cache
-                let mut locked_cache = self.cached.lock().await;
-                locked_cache.put(key.clone(), value.clone());
-                // Update our wait list
-                let mut locked_wait_map = self.wait_map.lock().await;
-                locked_wait_map.remove(&key);
-                // Let our waiters know
-                let broadcast_value = value.clone();
-                // Our use case is very specific, so we are sure that
-                // we won't get any errors here.
-                tokio::task::spawn_blocking(move || {
-                    tx.send((key, broadcast_value))
-                        .expect("there is always at least one receiver alive, the _rx guard; qed")
-                })
-                .await?;
-                value
-            }
-        }
-    }
-}
-
-impl<T: QueryPlanner> CachingQueryPlanner<T> {
-    pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
-        let locked_cache = self.cached.lock().await;
-        locked_cache
-            .iter()
-            .take(self.plan_cache_limit / 5)
-            .map(|(key, _value)| key.clone())
-            .collect()
+        self.cm.get(key).await.map_err(|err| err.into())
     }
 }
 

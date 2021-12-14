@@ -20,14 +20,28 @@ pub struct Request {
     pub operation_name: Option<String>,
 
     /// The optional variables in the form of a json object.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        skip_serializing_if = "Object::is_empty",
+        default,
+        deserialize_with = "deserialize_null_default"
+    )]
     #[builder(default)]
-    pub variables: Option<Arc<Object>>,
+    pub variables: Arc<Object>,
 
     ///  extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     #[builder(default)]
     pub extensions: Object,
+}
+
+// NOTE: this deserialize helper is used to transform `null` to Default::default()
+fn deserialize_null_default<'de, D, T: Default + Deserialize<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
 #[cfg(test)]
