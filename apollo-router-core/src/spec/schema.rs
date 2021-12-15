@@ -274,6 +274,9 @@ impl Schema {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct InvalidObject;
+
 macro_rules! implement_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
         #[derive(Debug)]
@@ -284,7 +287,11 @@ macro_rules! implement_object_type_or_interface {
         }
 
         impl $name {
-            pub(crate) fn validate_object(&self, object: &Object, schema: &Schema) -> bool {
+            pub(crate) fn validate_object(
+                &self,
+                object: &Object,
+                schema: &Schema,
+            ) -> Result<(), InvalidObject> {
                 self
                     .fields
                     .iter()
@@ -292,14 +299,15 @@ macro_rules! implement_object_type_or_interface {
                         let value = object.get(name).unwrap_or(&Value::Null);
                         ty.validate_value(value, schema)
                     })
-                    .chain(
-                        self
-                            .interfaces
-                            .iter()
-                            .flat_map(|name| schema.interfaces.get(name))
-                            .map(|interface| interface.validate_object(object, schema))
-                    )
-                    .all(std::convert::identity)
+                    .collect::<Result<(), InvalidValue>>()
+                    .map_err(|_| InvalidObject)?;
+
+                self
+                    .interfaces
+                    .iter()
+                    .flat_map(|name| schema.interfaces.get(name))
+                    .map(|interface| interface.validate_object(object, schema))
+                    .collect::<Result<(), InvalidObject>>()
             }
         }
 

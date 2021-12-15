@@ -1,6 +1,9 @@
 use crate::*;
 use apollo_parser::ast;
 
+#[derive(Debug)]
+pub(crate) struct InvalidValue;
+
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug)]
 pub(crate) enum FieldType {
@@ -15,36 +18,47 @@ pub(crate) enum FieldType {
 }
 
 impl FieldType {
-    pub(crate) fn validate_value(&self, value: &Value, schema: &Schema) -> bool {
+    pub(crate) fn validate_value(
+        &self,
+        value: &Value,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
         match (self, value) {
-            (FieldType::String, Value::String(_)) => true,
-            (FieldType::Int, Value::Number(number)) if !number.is_f64() => true,
-            (FieldType::Float, Value::Number(number)) if number.is_f64() => true,
+            (FieldType::String, Value::String(_)) => Ok(()),
+            (FieldType::Int, Value::Number(number)) if !number.is_f64() => Ok(()),
+            (FieldType::Float, Value::Number(number)) if number.is_f64() => Ok(()),
             // "The ID scalar type represents a unique identifier, often used to refetch an object
             // or as the key for a cache. The ID type is serialized in the same way as a String;
             // however, it is not intended to be human-readable. While it is often numeric, it
             // should always serialize as a String."
             //
             // In practice it seems Int works too
-            (FieldType::Id, Value::String(_) | Value::Number(_)) => true,
-            (FieldType::Boolean, Value::Bool(_)) => true,
-            (FieldType::List(inner_ty), Value::Array(vec)) => {
-                vec.iter().all(|x| inner_ty.validate_value(x, schema))
-            }
+            (FieldType::Id, Value::String(_) | Value::Number(_)) => Ok(()),
+            (FieldType::Boolean, Value::Bool(_)) => Ok(()),
+            (FieldType::List(inner_ty), Value::Array(vec)) => vec
+                .iter()
+                .map(|x| inner_ty.validate_value(x, schema))
+                .collect::<Result<(), InvalidValue>>(),
             (FieldType::NonNull(inner_ty), value) => {
-                !value.is_null() && inner_ty.validate_value(value, schema)
+                if value.is_null() {
+                    Err(InvalidValue)
+                } else {
+                    inner_ty.validate_value(value, schema)
+                }
             }
-            (FieldType::Named(name), _) if schema.custom_scalars.contains(name) => true,
+            (FieldType::Named(name), _) if schema.custom_scalars.contains(name) => Ok(()),
             (FieldType::Named(name), value) if value.is_object() => {
                 if let Some(object_ty) = schema.object_types.get(name) {
-                    object_ty.validate_object(value.as_object().unwrap(), schema)
+                    object_ty
+                        .validate_object(value.as_object().unwrap(), schema)
+                        .map_err(|_| InvalidValue)
                 } else {
-                    false
+                    Err(InvalidValue)
                 }
             }
             // NOTE: graphql's types are all optional by default
-            (_, Value::Null) => true,
-            _ => false,
+            (_, Value::Null) => Ok(()),
+            _ => Err(InvalidValue),
         }
     }
 }
