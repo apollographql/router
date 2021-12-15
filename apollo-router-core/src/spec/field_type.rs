@@ -25,7 +25,7 @@ impl FieldType {
     ) -> Result<(), InvalidValue> {
         match (self, value) {
             (FieldType::String, Value::String(_)) => Ok(()),
-            (FieldType::Int, Value::Number(number)) if !number.is_f64() => Ok(()),
+            (FieldType::Int, Value::Number(number)) if number.is_i64() || number.is_u64() => Ok(()),
             (FieldType::Float, Value::Number(number)) if number.is_f64() => Ok(()),
             // "The ID scalar type represents a unique identifier, often used to refetch an object
             // or as the key for a cache. The ID type is serialized in the same way as a String;
