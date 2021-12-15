@@ -10,6 +10,7 @@ use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tracing_futures::WithSubscriber;
 use tracing_subscriber::prelude::*;
 
 #[tokio::test]
@@ -18,21 +19,23 @@ async fn tracing_works() {
     let all_spans = Default::default();
     let logs = Default::default();
 
-    tracing_subscriber::registry()
-        .with(span_tests::Layer::new(
-            Arc::clone(&id_sequence),
-            Arc::clone(&all_spans),
-            Arc::clone(&logs),
-        ))
-        .init();
+    let subscriber = tracing_subscriber::registry().with(span_tests::Layer::new(
+        Arc::clone(&id_sequence),
+        Arc::clone(&all_spans),
+        Arc::clone(&logs),
+    ));
 
-    let res = do_stuff().await;
+    async {
+        let res = do_stuff().await;
 
-    assert_eq!(res, 104);
+        assert_eq!(res, 104);
 
-    let res2 = do_stuff().await;
+        let res2 = do_stuff().await;
 
-    assert_eq!(res2, 104);
+        assert_eq!(res2, 104);
+    }
+    .with_subscriber(subscriber)
+    .await;
 
     let all_spans = all_spans.lock().unwrap().clone();
     let id_sequence = id_sequence.read().unwrap().clone();
@@ -87,20 +90,22 @@ async fn traced_basic_request() {
     let all_spans = Default::default();
     let logs = Default::default();
 
-    tracing_subscriber::registry()
-        .with(span_tests::Layer::new(
-            Arc::clone(&id_sequence),
-            Arc::clone(&all_spans),
-            Arc::clone(&logs),
-        ))
-        .init();
+    let subscriber = tracing_subscriber::registry().with(span_tests::Layer::new(
+        Arc::clone(&id_sequence),
+        Arc::clone(&all_spans),
+        Arc::clone(&logs),
+    ));
 
-    assert_federated_response!(
-        r#"{ topProducts { name name2:name } }"#,
-        hashmap! {
-            "products".to_string()=>1,
-        },
-    );
+    async {
+        assert_federated_response!(
+            r#"{ topProducts { name name2:name } }"#,
+            hashmap! {
+                "products".to_string()=>1,
+            },
+        );
+    }
+    .with_subscriber(subscriber)
+    .await;
 
     let all_spans = all_spans.lock().unwrap().clone();
     let id_sequence = id_sequence.read().unwrap().clone();
