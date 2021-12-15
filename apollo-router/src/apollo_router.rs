@@ -130,7 +130,8 @@ impl PreparedQuery for ApolloPreparedQuery {
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)
-            .instrument(tracing::info_span!("execution")).await;;
+            .instrument(tracing::info_span!("execution"))
+            .await;
 
         if let Some(query) = self.query {
             tracing::debug_span!("format_response").in_scope(|| {
