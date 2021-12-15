@@ -295,19 +295,17 @@ macro_rules! implement_object_type_or_interface {
                 self
                     .fields
                     .iter()
-                    .map(|(name, ty)| {
+                    .try_for_each(|(name, ty)| {
                         let value = object.get(name).unwrap_or(&Value::Null);
                         ty.validate_value(value, schema)
                     })
-                    .collect::<Result<(), InvalidValue>>()
                     .map_err(|_| InvalidObject)?;
 
                 self
                     .interfaces
                     .iter()
                     .flat_map(|name| schema.interfaces.get(name))
-                    .map(|interface| interface.validate_object(object, schema))
-                    .collect::<Result<(), InvalidObject>>()
+                    .try_for_each(|interface| interface.validate_object(object, schema))
             }
         }
 

@@ -37,8 +37,7 @@ impl FieldType {
             (FieldType::Boolean, Value::Bool(_)) => Ok(()),
             (FieldType::List(inner_ty), Value::Array(vec)) => vec
                 .iter()
-                .map(|x| inner_ty.validate_value(x, schema))
-                .collect::<Result<(), InvalidValue>>(),
+                .try_for_each(|x| inner_ty.validate_value(x, schema)),
             (FieldType::NonNull(inner_ty), value) => {
                 if value.is_null() {
                     Err(InvalidValue)
