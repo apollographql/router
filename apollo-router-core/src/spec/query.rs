@@ -529,10 +529,16 @@ mod tests {
 
     #[test]
     fn variable_validation() {
+        assert_validation!("", "query($foo:Boolean){x}", json!({}));
+        assert_validation_error!("", "query($foo:Boolean!){x}", json!({}));
+        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":true}));
+        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":"true"}));
+        assert_validation_error!("", "query($foo:Boolean!){x}", json!({"foo":"str"}));
         assert_validation!("", "query($foo:Int){x}", json!({}));
         assert_validation!("", "query($foo:Int){x}", json!({"foo":2}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":2.0}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":"str"}));
+        assert_validation!("", "query($foo:Int){x}", json!({"foo":"2"}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":true}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":{}}));
         assert_validation_error!(
@@ -553,6 +559,7 @@ mod tests {
         assert_validation_error!("", "query($foo:ID){x}", json!({"foo": {}}));
         assert_validation!("", "query($foo:String){x}", json!({"foo": "str"}));
         assert_validation!("", "query($foo:Float){x}", json!({"foo":2.0}));
+        assert_validation!("", "query($foo:Float){x}", json!({"foo":"2.0"}));
         assert_validation_error!("", "query($foo:Float){x}", json!({"foo":2}));
         assert_validation_error!("", "query($foo:Int!){x}", json!({}));
         assert_validation!("", "query($foo:[Int]){x}", json!({}));
@@ -562,7 +569,8 @@ mod tests {
         assert_validation_error!("", "query($foo:[Int]!){x}", json!({}));
         assert_validation!("", "query($foo:[Int]!){x}", json!({"foo":[]}));
         assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
         assert_validation!("", "query($foo:[String]){x}", json!({"foo":["1","2","3"]}));
         assert_validation_error!("", "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
         assert_validation!("", "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));

@@ -24,6 +24,14 @@ impl FieldType {
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         match (self, value) {
+            // Type coercion from string to Int, Float or Boolean
+            (FieldType::Int | FieldType::Float | FieldType::Boolean, Value::String(s)) => {
+                if let Ok(value) = serde_json::from_str::<Value>(s) {
+                    self.validate_value(&value, schema)
+                } else {
+                    Err(InvalidValue)
+                }
+            }
             (FieldType::String, Value::String(_)) => Ok(()),
             // Spec: https://spec.graphql.org/June2018/#sec-Int
             (FieldType::Int, Value::Number(number)) if number.is_i64() || number.is_u64() => {
@@ -41,6 +49,7 @@ impl FieldType {
                     Err(InvalidValue)
                 }
             }
+            // Spec: https://spec.graphql.org/draft/#sec-Float
             (FieldType::Float, Value::Number(number)) if number.is_f64() => Ok(()),
             // "The ID scalar type represents a unique identifier, often used to refetch an object
             // or as the key for a cache. The ID type is serialized in the same way as a String;
