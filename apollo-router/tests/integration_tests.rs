@@ -383,7 +383,7 @@ mod span_tests {
         fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
             self.0.push((
                 field.name().to_string(),
-                RecordedValue::Debug(format!("{:?}", value).into()),
+                RecordedValue::Debug(format!("{:?}", value)),
             ));
         }
     }
@@ -406,33 +406,33 @@ mod span_tests {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct OwnedMetadata {
-        name: String,
+        pub name: String,
 
         /// The part of the system that the span that this metadata describes
         /// occurred in.
-        target: String,
+        pub target: String,
 
         /// The level of verbosity of the described span.
         // TODO[igni]: maybe put an enum here
-        level: String,
+        pub level: String,
 
         /// The name of the Rust module where the span occurred, or `None` if this
         /// could not be determined.
-        module_path: Option<String>,
+        pub module_path: Option<String>,
 
         /// The name of the source code file where the span occurred, or `None` if
         /// this could not be determined.
         #[serde(skip_serializing)]
-        file: Option<String>,
+        pub file: Option<String>,
 
         /// The line number in the source code file where the span occurred, or
         /// `None` if this could not be determined.
         #[serde(skip_serializing)]
-        line: Option<u32>,
+        pub line: Option<u32>,
 
         /// The names of the key-value fields attached to the described span or
         /// event.
-        fields: OwnedFieldSet,
+        pub fields: OwnedFieldSet,
     }
 
     impl From<&Metadata<'_>> for OwnedMetadata {
@@ -443,7 +443,7 @@ mod span_tests {
                 level: md.level().to_string(),
                 module_path: md.module_path().map(std::string::ToString::to_string),
                 file: md.file().map(std::string::ToString::to_string),
-                line: md.line().clone(),
+                line: md.line(),
                 fields: md.fields().into(),
             }
         }
@@ -484,17 +484,9 @@ mod span_tests {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct LogRecorder {
         visitor: DumpVisitor,
-    }
-
-    impl Default for LogRecorder {
-        fn default() -> Self {
-            Self {
-                visitor: Default::default(),
-            }
-        }
     }
 
     impl LogRecorder {
@@ -533,15 +525,15 @@ mod span_tests {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Span {
         id: usize,
-        target: String,
+        name: String,
         records: Records,
         children: BTreeMap<String, Span>,
     }
 
     impl Span {
-        pub fn from(target: String, id: usize, records: Records) -> Self {
+        pub fn from(name: String, id: usize, records: Records) -> Self {
             Self {
-                target,
+                name,
                 id,
                 records,
                 children: Default::default(),
@@ -615,11 +607,13 @@ mod span_tests {
                         .map(|metadata| format!("{}::{}", metadata.target, metadata.name))
                         .unwrap_or_else(|| child_span_id.to_string());
 
+                    let span_key = format!("{} - {}", span_name, child_span_id);
+
                     let mut child_span =
-                        Span::from(span_name.clone(), *child_span_id, child_records.clone());
+                        Span::from(span_name, *child_span_id, child_records.clone());
 
                     self.dfs_insert(&mut child_span, child_node);
-                    (span_name, child_span)
+                    (span_key, child_span)
                 })
                 .collect();
         }
@@ -667,7 +661,7 @@ mod span_tests {
             let mut with_close_id = self.current_span_list();
             with_close_id.push(id.clone());
             self.id_sequence.write().unwrap().push(with_close_id);
-            self.exit_id(id.clone());
+            self.exit_id(id);
         }
 
         fn current_span_list(&self) -> Vec<Id> {
