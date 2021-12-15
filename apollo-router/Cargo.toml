@@ -68,6 +68,7 @@ warp = { version = "0.3.2", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+daggy = { version = "0.8.0", features = ["serde-1", "stable_dag"] }
 httpmock = "0.6.4"
 insta = "1.8.0"
 maplit = "1.0.2"
