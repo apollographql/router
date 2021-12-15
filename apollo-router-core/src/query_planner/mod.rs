@@ -5,7 +5,6 @@ mod selection;
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
 use futures::prelude::*;
-use futures::stream::FuturesUnordered;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -131,7 +130,7 @@ impl PlanNode {
                     value = Value::default();
                     async {
                         {
-                            let mut stream: FuturesUnordered<_> = nodes
+                            let mut stream: stream::FuturesUnordered<_> = nodes
                                 .iter()
                                 .map(|plan| {
                                     plan.execute_recursively(
@@ -420,7 +419,7 @@ mod fetch {
             self.response_at_path(current_dir, paths, subgraph_response)
         }
 
-        #[instrument(, level = "trace", name = "response_insert", skip_all)]
+        #[instrument(level = "trace", name = "response_insert", skip_all)]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
