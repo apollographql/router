@@ -4,9 +4,10 @@ use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
-use std::{slice::Iter, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tracing::level_filters::LevelFilter;
 
 /// Error types for execution.
 ///
@@ -22,8 +23,8 @@ pub enum FetchError {
         service: String,
     },
 
-    /// Query requires variable '{name}', but it was not provided.
-    ValidationMissingVariable {
+    /// Invalid type for variable: '{name}'
+    ValidationInvalidTypeVariable {
         /// Name of the variable.
         name: String,
     },
@@ -224,8 +225,8 @@ pub enum SchemaError {
 
 #[derive(Debug)]
 pub struct ParseErrors {
-    raw_schema: String,
-    errors: Vec<apollo_parser::Error>,
+    pub(crate) raw_schema: String,
+    pub(crate) errors: Vec<apollo_parser::Error>,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -240,15 +241,11 @@ struct ParserError {
 }
 
 impl ParseErrors {
-    pub(crate) fn new(raw_schema: String, errors: Iter<'_, apollo_parser::Error>) -> Self {
-        Self {
-            raw_schema,
-            errors: errors.cloned().collect(),
-        }
-    }
-
+    #[allow(clippy::needless_return)]
     pub fn print(&self) {
-        if atty::is(atty::Stream::Stdout) {
+        if LevelFilter::current() == LevelFilter::OFF {
+            return;
+        } else if atty::is(atty::Stream::Stdout) {
             // Fancy Miette reports for TTYs
             self.errors.iter().for_each(|err| {
                 let report = Report::new(ParserError {

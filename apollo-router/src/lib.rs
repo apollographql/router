@@ -77,7 +77,7 @@ pub enum FederatedServerError {
 pub enum SchemaKind {
     /// A static schema.
     #[display(fmt = "Instance")]
-    Instance(graphql::Schema),
+    Instance(Box<graphql::Schema>),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -107,12 +107,20 @@ pub enum SchemaKind {
     },
 }
 
+impl From<graphql::Schema> for SchemaKind {
+    fn from(schema: graphql::Schema) -> Self {
+        Self::Instance(Box::new(schema))
+    }
+}
+
 impl SchemaKind {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             SchemaKind::Instance(instance) => stream::iter(vec![UpdateSchema(instance)]).boxed(),
-            SchemaKind::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            SchemaKind::Stream(stream) => {
+                stream.map(|schema| UpdateSchema(Box::new(schema))).boxed()
+            }
             SchemaKind::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -130,10 +138,10 @@ impl SchemaKind {
                                     .filter_map(move |_| {
                                         future::ready(ConfigurationKind::read_schema(&path).ok())
                                     })
-                                    .map(UpdateSchema)
+                                    .map(|schema| UpdateSchema(Box::new(schema)))
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateSchema(schema))).boxed()
+                                stream::once(future::ready(UpdateSchema(Box::new(schema)))).boxed()
                             }
                         }
                         Err(err) => {
@@ -358,7 +366,7 @@ enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(graphql::Schema),
+    UpdateSchema(Box<graphql::Schema>),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -528,7 +536,7 @@ mod tests {
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         FederatedServer::builder()
             .configuration(configuration)
-            .schema(schema)
+            .schema(Box::new(schema))
             .build()
             .serve()
     }
