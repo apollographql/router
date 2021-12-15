@@ -14,7 +14,7 @@ where
         id: &tracing::span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let span = ctx.span(id).unwrap();
+        let span = ctx.span(id).expect("new span");
         let mut fields = BTreeMap::new();
         let mut visitor = JsonVisitor(&mut fields);
         attrs.record(&mut visitor);
@@ -30,12 +30,13 @@ where
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         // Get the span whose data is being recorded
-        let span = ctx.span(id).unwrap();
+        let span = ctx.span(id).expect("record span");
 
         // Get a mutable reference to the data we created in new_span
         let mut extensions_mut = span.extensions_mut();
-        let custom_field_storage: &mut CustomFieldStorage =
-            extensions_mut.get_mut::<CustomFieldStorage>().unwrap();
+        let custom_field_storage: &mut CustomFieldStorage = extensions_mut
+            .get_mut::<CustomFieldStorage>()
+            .expect("record extensions");
         let json_data: &mut BTreeMap<String, serde_json::Value> = &mut custom_field_storage.0;
 
         // And add to using our old friend the visitor!
@@ -45,18 +46,21 @@ where
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         // All of the span context
-        let scope = ctx.event_scope(event).unwrap();
         let mut spans = vec![];
-        for span in scope.from_root() {
-            let extensions = span.extensions();
-            let storage = extensions.get::<CustomFieldStorage>().unwrap();
-            let field_data: &BTreeMap<String, serde_json::Value> = &storage.0;
-            spans.push(serde_json::json!({
-                "target": span.metadata().target(),
-                "name": span.name(),
-                "level": format!("{:?}", span.metadata().level()),
-                "fields": field_data,
-            }));
+        if let Some(scope) = ctx.event_scope(event) {
+            for span in scope.from_root() {
+                let extensions = span.extensions();
+                let storage = extensions
+                    .get::<CustomFieldStorage>()
+                    .expect("event extensions");
+                let field_data: &BTreeMap<String, serde_json::Value> = &storage.0;
+                spans.push(serde_json::json!({
+                    "target": span.metadata().target(),
+                    "name": span.name(),
+                    "level": format!("{:?}", span.metadata().level()),
+                    "fields": field_data,
+                }));
+            }
         }
 
         // The fields of the event
@@ -72,7 +76,10 @@ where
             "fields": fields,
             "spans": spans,
         });
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&output).expect("event output as JSON")
+        );
     }
 }
 

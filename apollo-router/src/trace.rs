@@ -1,7 +1,9 @@
+use crate::stdout::new_pipeline;
 use crate::CustomLayer;
 use std::sync::Arc;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};
+use std::io::stderr;
 use std::str::FromStr;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -16,6 +18,9 @@ use crate::{
 pub(crate) fn try_initialize_subscriber(
     config: &Configuration,
 ) -> Result<Arc<dyn tracing::Subscriber + Send + Sync + 'static>, Box<dyn std::error::Error>> {
+    // XXX Seems bogus that we have set a subscriber in src/main.rs and yet
+    // create another one here that may/will have a different configuration.
+    // We should check if there is one and if not, make this the default...
     let subscriber = tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::new(
             GLOBAL_ENV_FILTER
@@ -23,6 +28,7 @@ pub(crate) fn try_initialize_subscriber(
                 .map(|x| x.as_str())
                 .unwrap_or("info"),
         ))
+        .json()
         .finish();
 
     match config.opentelemetry.as_ref() {
@@ -83,18 +89,19 @@ pub(crate) fn try_initialize_subscriber(
             Ok(Arc::new(subscriber.with(telemetry)))
         }
         None => {
-            /* XXX OPENTELEMETRY APPROACH
+            // XXX OPENTELEMETRY APPROACH
             let tracer = new_pipeline()
                 .with_pretty_print(true)
                 .with_writer(stderr())
                 .install_simple();
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-            */
+            //
             /* XXX LAYERS APPROACH
-             */
             let telemetry = CustomLayer {};
+            */
 
             // tracing_subscriber::registry().with(telemetry);
+            tracing::info!("Instantiating tracing telemetry");
             Ok(Arc::new(telemetry.with_subscriber(subscriber)))
         }
     }
