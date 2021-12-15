@@ -585,7 +585,6 @@ mod span_tests {
         fn into_span(self) -> Span {
             let mut root_span = Span::from("root".to_string(), 0, Default::default());
 
-            // bfs the spans to map children the right way
             self.dfs_insert(&mut root_span, NodeIndex::from(0));
 
             root_span
