@@ -408,10 +408,6 @@ mod fetch {
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
         }
-
-        pub(crate) fn variable_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-            Box::new(self.variable_usages.iter().map(|x| x.as_str()))
-        }
     }
 }
 
