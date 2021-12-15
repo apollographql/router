@@ -14,7 +14,7 @@ struct QueryCacheResolver;
 #[async_trait::async_trait]
 impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
     async fn retrieve(&self, key: String) -> Result<Option<Arc<Query>>, CacheResolverError> {
-        let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key));
+        let query_parsing_future = tokio::task::spawn_blocking(|| Query::parse(key));
         let parsed_query = match query_parsing_future.await {
             Ok(res) => res.map(Arc::new),
             // Silently ignore cancelled tasks (never happen for blocking tasks).
