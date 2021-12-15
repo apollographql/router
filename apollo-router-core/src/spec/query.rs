@@ -535,6 +535,18 @@ mod tests {
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":"str"}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":true}));
         assert_validation_error!("", "query($foo:Int){x}", json!({"foo":{}}));
+        assert_validation_error!(
+            "",
+            "query($foo:Int){x}",
+            json!({ "foo": i32::MAX as i64 + 1 })
+        );
+        assert_validation_error!(
+            "",
+            "query($foo:Int){x}",
+            json!({ "foo": i32::MIN as i64 - 1 })
+        );
+        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MAX }));
+        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MIN }));
         assert_validation!("", "query($foo:ID){x}", json!({"foo": "1"}));
         assert_validation!("", "query($foo:ID){x}", json!({"foo": 1}));
         assert_validation_error!("", "query($foo:ID){x}", json!({"foo": true}));

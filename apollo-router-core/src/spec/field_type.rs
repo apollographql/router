@@ -25,7 +25,22 @@ impl FieldType {
     ) -> Result<(), InvalidValue> {
         match (self, value) {
             (FieldType::String, Value::String(_)) => Ok(()),
-            (FieldType::Int, Value::Number(number)) if number.is_i64() || number.is_u64() => Ok(()),
+            // Spec: https://spec.graphql.org/June2018/#sec-Int
+            (FieldType::Int, Value::Number(number)) if number.is_i64() || number.is_u64() => {
+                if number
+                    .as_i64()
+                    .and_then(|x| i32::try_from(x).ok())
+                    .is_some()
+                    || number
+                        .as_u64()
+                        .and_then(|x| i32::try_from(x).ok())
+                        .is_some()
+                {
+                    Ok(())
+                } else {
+                    Err(InvalidValue)
+                }
+            }
             (FieldType::Float, Value::Number(number)) if number.is_f64() => Ok(()),
             // "The ID scalar type represents a unique identifier, often used to refetch an object
             // or as the key for a cache. The ID type is serialized in the same way as a String;
