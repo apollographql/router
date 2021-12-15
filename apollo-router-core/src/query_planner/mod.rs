@@ -74,20 +74,14 @@ impl QueryPlan {
     pub async fn execute<'a>(
         &'a self,
         request: &'a Request,
-        service_registry: Arc<dyn ServiceRegistry>,
+        service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
 
         let (value, errors) = self
             .root
-            .execute_recursively(
-                &root,
-                &request,
-                Arc::clone(&service_registry),
-                &schema,
-                &Value::default(),
-            )
+            .execute_recursively(&root, request, service_registry, schema, &Value::default())
             .await;
 
         Response::builder().data(value).errors(errors).build()
@@ -99,7 +93,7 @@ impl PlanNode {
         &'a self,
         current_dir: &'a Path,
         request: &'a Request,
-        service_registry: Arc<dyn ServiceRegistry>,
+        service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -115,8 +109,8 @@ impl PlanNode {
                         let (v, err) = node
                             .execute_recursively(
                                 current_dir,
-                                &request,
-                                Arc::clone(&service_registry),
+                                request,
+                                service_registry,
                                 schema,
                                 &value,
                             )
@@ -135,8 +129,8 @@ impl PlanNode {
                                 .map(|plan| {
                                     plan.execute_recursively(
                                         current_dir,
-                                        &request,
-                                        Arc::clone(&service_registry),
+                                        request,
+                                        service_registry,
                                         schema,
                                         parent_value,
                                     )
@@ -157,8 +151,8 @@ impl PlanNode {
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
-                            &request,
-                            Arc::clone(&service_registry),
+                            request,
+                            service_registry,
                             schema,
                             parent_value,
                         )
@@ -170,13 +164,7 @@ impl PlanNode {
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(
-                            parent_value,
-                            current_dir,
-                            &request,
-                            Arc::clone(&service_registry),
-                            schema,
-                        )
+                        .fetch_node(parent_value, current_dir, request, service_registry, schema)
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
@@ -366,7 +354,7 @@ mod fetch {
             data: &'a Value,
             current_dir: &'a Path,
             request: &'a Request,
-            service_registry: Arc<dyn ServiceRegistry>,
+            service_registry: &'a dyn ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
             let FetchNode {
