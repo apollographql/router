@@ -179,8 +179,8 @@ CONSTANT Keys
    }
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "9854a4c7" /\ chksum(tla) = "fb95c68d")
-\* Parameter index of procedure lock at line 38 col 18 changed to index_
+\* BEGIN TRANSLATION (chksum(pcal) = "4471d3ed" /\ chksum(tla) = "6aa3bd7d")
+\* Parameter idx of procedure lock at line 63 col 18 changed to idx_
 VARIABLES cache_lock, wait_map_lock, locks, cache, wait_map, channels, 
           tested_keys, pc, stack
 
@@ -193,10 +193,14 @@ DeadlockFreedom ==
     \A i \in Proc :
       (pc[i] = "exchange") ~> (\E j \in Proc : pc[j] = "cs")
 
-VARIABLES index_, old_value, index, Key
+
+
+AllKeysLoaded == <>(\A k \in tested_keys: cache[k])
+
+VARIABLES idx_, idx, Key, local_wait_map
 
 vars == << cache_lock, wait_map_lock, locks, cache, wait_map, channels, 
-           tested_keys, pc, stack, index_, old_value, index, Key >>
+           tested_keys, pc, stack, idx_, idx, Key, local_wait_map >>
 
 ProcSet == (Proc)
 
@@ -209,130 +213,120 @@ Init == (* Global variables *)
         /\ channels = [i \in Proc |-> FALSE ]
         /\ tested_keys = {}
         (* Procedure lock *)
-        /\ index_ = [ self \in ProcSet |-> 0]
-        /\ old_value = [ self \in ProcSet |-> FALSE]
+        /\ idx_ = [ self \in ProcSet |-> 0]
         (* Procedure unlock *)
-        /\ index = [ self \in ProcSet |-> 0]
+        /\ idx = [ self \in ProcSet |-> 0]
         (* Process P *)
         /\ Key \in [Proc -> Keys]
+        /\ local_wait_map = [self \in Proc |-> {}]
         /\ stack = [self \in ProcSet |-> << >>]
         /\ pc = [self \in ProcSet |-> "start"]
 
 exchange(self) == /\ pc[self] = "exchange"
-                  /\ old_value' = [old_value EXCEPT ![self] = locks[index_[self]]]
-                  /\ locks' = [locks EXCEPT ![index_[self]] = TRUE]
+                  /\ ~locks[idx_[self]]
                   /\ pc' = [pc EXCEPT ![self] = "check"]
-                  /\ UNCHANGED << cache_lock, wait_map_lock, cache, wait_map, 
-                                  channels, tested_keys, stack, index_, index, 
-                                  Key >>
+                  /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
+                                  wait_map, channels, tested_keys, stack, idx_, 
+                                  idx, Key, local_wait_map >>
 
 check(self) == /\ pc[self] = "check"
-               /\ IF old_value[self]
-                     THEN /\ pc' = [pc EXCEPT ![self] = "exchange"]
-                          /\ UNCHANGED << stack, index_, old_value >>
-                     ELSE /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-                          /\ old_value' = [old_value EXCEPT ![self] = Head(stack[self]).old_value]
-                          /\ index_' = [index_ EXCEPT ![self] = Head(stack[self]).index_]
+               /\ IF ~locks[idx_[self]]
+                     THEN /\ locks' = [locks EXCEPT ![idx_[self]] = TRUE]
+                          /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+                          /\ idx_' = [idx_ EXCEPT ![self] = Head(stack[self]).idx_]
                           /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-               /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                               wait_map, channels, tested_keys, index, Key >>
+                     ELSE /\ pc' = [pc EXCEPT ![self] = "exchange"]
+                          /\ UNCHANGED << locks, stack, idx_ >>
+               /\ UNCHANGED << cache_lock, wait_map_lock, cache, wait_map, 
+                               channels, tested_keys, idx, Key, local_wait_map >>
 
 lock(self) == exchange(self) \/ check(self)
 
 reset_state(self) == /\ pc[self] = "reset_state"
-                     /\ locks' = [locks EXCEPT ![index[self]] = FALSE]
+                     /\ locks' = [locks EXCEPT ![idx[self]] = FALSE]
                      /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-                     /\ index' = [index EXCEPT ![self] = Head(stack[self]).index]
+                     /\ idx' = [idx EXCEPT ![self] = Head(stack[self]).idx]
                      /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
                      /\ UNCHANGED << cache_lock, wait_map_lock, cache, 
-                                     wait_map, channels, tested_keys, index_, 
-                                     old_value, Key >>
+                                     wait_map, channels, tested_keys, idx_, 
+                                     Key, local_wait_map >>
 
 unlock(self) == reset_state(self)
 
 start(self) == /\ pc[self] = "start"
-               /\ \/ /\ /\ index_' = [index_ EXCEPT ![self] = cache_lock]
-                        /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
-                                                                 pc        |->  "expiration_lock_1",
-                                                                 old_value |->  old_value[self],
-                                                                 index_    |->  index_[self] ] >>
-                                                             \o stack[self]]
-                     /\ old_value' = [old_value EXCEPT ![self] = FALSE]
-                     /\ pc' = [pc EXCEPT ![self] = "exchange"]
-                     /\ UNCHANGED tested_keys
-                  \/ /\ tested_keys' = (tested_keys \union {Key[self]})
-                     /\ /\ index_' = [index_ EXCEPT ![self] = cache_lock]
-                        /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
-                                                                 pc        |->  "lock_1",
-                                                                 old_value |->  old_value[self],
-                                                                 index_    |->  index_[self] ] >>
-                                                             \o stack[self]]
-                     /\ old_value' = [old_value EXCEPT ![self] = FALSE]
-                     /\ pc' = [pc EXCEPT ![self] = "exchange"]
+               /\ /\ idx_' = [idx_ EXCEPT ![self] = cache_lock]
+                  /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
+                                                           pc        |->  "cache_locked",
+                                                           idx_      |->  idx_[self] ] >>
+                                                       \o stack[self]]
+               /\ pc' = [pc EXCEPT ![self] = "exchange"]
                /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                               wait_map, channels, index, Key >>
+                               wait_map, channels, tested_keys, idx, Key, 
+                               local_wait_map >>
+
+cache_locked(self) == /\ pc[self] = "cache_locked"
+                      /\ IF cache[Key[self]]
+                            THEN /\ \/ /\ pc' = [pc EXCEPT ![self] = "expiration_lock_1"]
+                                       /\ UNCHANGED <<stack, idx>>
+                                    \/ /\ /\ idx' = [idx EXCEPT ![self] = cache_lock]
+                                          /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
+                                                                                   pc        |->  "cache_hit",
+                                                                                   idx       |->  idx[self] ] >>
+                                                                               \o stack[self]]
+                                       /\ pc' = [pc EXCEPT ![self] = "reset_state"]
+                            ELSE /\ pc' = [pc EXCEPT ![self] = "cache_miss"]
+                                 /\ UNCHANGED << stack, idx >>
+                      /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
+                                      wait_map, channels, tested_keys, idx_, 
+                                      Key, local_wait_map >>
 
 expiration_lock_1(self) == /\ pc[self] = "expiration_lock_1"
                            /\ cache' = [cache EXCEPT ![Key[self]] = FALSE]
-                           /\ /\ index' = [index EXCEPT ![self] = cache_lock]
+                           /\ /\ idx' = [idx EXCEPT ![self] = cache_lock]
                               /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
                                                                        pc        |->  "expiration_done",
-                                                                       index     |->  index[self] ] >>
+                                                                       idx       |->  idx[self] ] >>
                                                                    \o stack[self]]
                            /\ pc' = [pc EXCEPT ![self] = "reset_state"]
                            /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
                                            wait_map, channels, tested_keys, 
-                                           index_, old_value, Key >>
+                                           idx_, Key, local_wait_map >>
 
 expiration_done(self) == /\ pc[self] = "expiration_done"
                          /\ pc' = [pc EXCEPT ![self] = "finished"]
                          /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
                                          cache, wait_map, channels, 
-                                         tested_keys, stack, index_, old_value, 
-                                         index, Key >>
-
-lock_1(self) == /\ pc[self] = "lock_1"
-                /\ IF cache[Key[self]]
-                      THEN /\ /\ index' = [index EXCEPT ![self] = cache_lock]
-                              /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
-                                                                       pc        |->  "cache_hit",
-                                                                       index     |->  index[self] ] >>
-                                                                   \o stack[self]]
-                           /\ pc' = [pc EXCEPT ![self] = "reset_state"]
-                      ELSE /\ pc' = [pc EXCEPT ![self] = "lock_2"]
-                           /\ UNCHANGED << stack, index >>
-                /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                wait_map, channels, tested_keys, index_, 
-                                old_value, Key >>
+                                         tested_keys, stack, idx_, idx, Key, 
+                                         local_wait_map >>
 
 cache_hit(self) == /\ pc[self] = "cache_hit"
                    /\ pc' = [pc EXCEPT ![self] = "finished"]
                    /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
                                    wait_map, channels, tested_keys, stack, 
-                                   index_, old_value, index, Key >>
+                                   idx_, idx, Key, local_wait_map >>
 
-lock_2(self) == /\ pc[self] = "lock_2"
-                /\ /\ index_' = [index_ EXCEPT ![self] = wait_map_lock]
-                   /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
-                                                            pc        |->  "lock_3",
-                                                            old_value |->  old_value[self],
-                                                            index_    |->  index_[self] ] >>
-                                                        \o stack[self]]
-                /\ old_value' = [old_value EXCEPT ![self] = FALSE]
-                /\ pc' = [pc EXCEPT ![self] = "exchange"]
-                /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                wait_map, channels, tested_keys, index, Key >>
+cache_miss(self) == /\ pc[self] = "cache_miss"
+                    /\ tested_keys' = (tested_keys \union {Key[self]})
+                    /\ /\ idx_' = [idx_ EXCEPT ![self] = wait_map_lock]
+                       /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
+                                                                pc        |->  "lock_3",
+                                                                idx_      |->  idx_[self] ] >>
+                                                            \o stack[self]]
+                    /\ pc' = [pc EXCEPT ![self] = "exchange"]
+                    /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
+                                    wait_map, channels, idx, Key, 
+                                    local_wait_map >>
 
 lock_3(self) == /\ pc[self] = "lock_3"
-                /\ /\ index' = [index EXCEPT ![self] = cache_lock]
+                /\ /\ idx' = [idx EXCEPT ![self] = cache_lock]
                    /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
                                                             pc        |->  "lookup_wait_map",
-                                                            index     |->  index[self] ] >>
+                                                            idx       |->  idx[self] ] >>
                                                         \o stack[self]]
                 /\ pc' = [pc EXCEPT ![self] = "reset_state"]
                 /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                wait_map, channels, tested_keys, index_, 
-                                old_value, Key >>
+                                wait_map, channels, tested_keys, idx_, Key, 
+                                local_wait_map >>
 
 lookup_wait_map(self) == /\ pc[self] = "lookup_wait_map"
                          /\ IF Cardinality(wait_map[Key[self]]) > 0
@@ -340,142 +334,131 @@ lookup_wait_map(self) == /\ pc[self] = "lookup_wait_map"
                                ELSE /\ pc' = [pc EXCEPT ![self] = "wait_map_register"]
                          /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
                                          cache, wait_map, channels, 
-                                         tested_keys, stack, index_, old_value, 
-                                         index, Key >>
+                                         tested_keys, stack, idx_, idx, Key, 
+                                         local_wait_map >>
 
 wait_map_subscribe(self) == /\ pc[self] = "wait_map_subscribe"
                             /\ wait_map' = [wait_map EXCEPT ![Key[self]] = wait_map[Key[self]] \union {self}]
-                            /\ /\ index' = [index EXCEPT ![self] = wait_map_lock]
+                            /\ /\ idx' = [idx EXCEPT ![self] = wait_map_lock]
                                /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
                                                                         pc        |->  "waiting_for_value",
-                                                                        index     |->  index[self] ] >>
+                                                                        idx       |->  idx[self] ] >>
                                                                     \o stack[self]]
                             /\ pc' = [pc EXCEPT ![self] = "reset_state"]
                             /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
-                                            cache, channels, tested_keys, 
-                                            index_, old_value, Key >>
+                                            cache, channels, tested_keys, idx_, 
+                                            Key, local_wait_map >>
 
 waiting_for_value(self) == /\ pc[self] = "waiting_for_value"
                            /\ channels[self]
                            /\ pc' = [pc EXCEPT ![self] = "finished"]
                            /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
                                            cache, wait_map, channels, 
-                                           tested_keys, stack, index_, 
-                                           old_value, index, Key >>
+                                           tested_keys, stack, idx_, idx, Key, 
+                                           local_wait_map >>
 
 wait_map_register(self) == /\ pc[self] = "wait_map_register"
                            /\ Assert(wait_map[Key[self]] = {}, 
-                                     "Failure of assertion at line 124, column 17.")
+                                     "Failure of assertion at line 145, column 17.")
                            /\ Assert(~cache[Key[self]], 
-                                     "Failure of assertion at line 126, column 17.")
+                                     "Failure of assertion at line 147, column 17.")
                            /\ wait_map' = [wait_map EXCEPT ![Key[self]] = {self}]
-                           /\ /\ index' = [index EXCEPT ![self] = wait_map_lock]
+                           /\ /\ idx' = [idx EXCEPT ![self] = wait_map_lock]
                               /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
                                                                        pc        |->  "fetching_value",
-                                                                       index     |->  index[self] ] >>
+                                                                       idx       |->  idx[self] ] >>
                                                                    \o stack[self]]
                            /\ pc' = [pc EXCEPT ![self] = "reset_state"]
                            /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
-                                           cache, channels, tested_keys, 
-                                           index_, old_value, Key >>
+                                           cache, channels, tested_keys, idx_, 
+                                           Key, local_wait_map >>
 
 fetching_value(self) == /\ pc[self] = "fetching_value"
                         /\ TRUE
                         /\ pc' = [pc EXCEPT ![self] = "inserting_value_lock_cache"]
                         /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
                                         cache, wait_map, channels, tested_keys, 
-                                        stack, index_, old_value, index, Key >>
+                                        stack, idx_, idx, Key, local_wait_map >>
 
 inserting_value_lock_cache(self) == /\ pc[self] = "inserting_value_lock_cache"
-                                    /\ /\ index_' = [index_ EXCEPT ![self] = cache_lock]
+                                    /\ /\ idx_' = [idx_ EXCEPT ![self] = cache_lock]
                                        /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
                                                                                 pc        |->  "inserting_value",
-                                                                                old_value |->  old_value[self],
-                                                                                index_    |->  index_[self] ] >>
+                                                                                idx_      |->  idx_[self] ] >>
                                                                             \o stack[self]]
-                                    /\ old_value' = [old_value EXCEPT ![self] = FALSE]
                                     /\ pc' = [pc EXCEPT ![self] = "exchange"]
                                     /\ UNCHANGED << cache_lock, wait_map_lock, 
                                                     locks, cache, wait_map, 
-                                                    channels, tested_keys, 
-                                                    index, Key >>
+                                                    channels, tested_keys, idx, 
+                                                    Key, local_wait_map >>
 
 inserting_value(self) == /\ pc[self] = "inserting_value"
                          /\ cache' = [cache EXCEPT ![Key[self]] = TRUE]
-                         /\ /\ index_' = [index_ EXCEPT ![self] = wait_map_lock]
+                         /\ /\ idx_' = [idx_ EXCEPT ![self] = wait_map_lock]
                             /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "lock",
-                                                                     pc        |->  "broadcast",
-                                                                     old_value |->  old_value[self],
-                                                                     index_    |->  index_[self] ] >>
+                                                                     pc        |->  "remove_wait_map",
+                                                                     idx_      |->  idx_[self] ] >>
                                                                  \o stack[self]]
-                         /\ old_value' = [old_value EXCEPT ![self] = FALSE]
                          /\ pc' = [pc EXCEPT ![self] = "exchange"]
                          /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
-                                         wait_map, channels, tested_keys, 
-                                         index, Key >>
+                                         wait_map, channels, tested_keys, idx, 
+                                         Key, local_wait_map >>
 
-broadcast(self) == /\ pc[self] = "broadcast"
-                   /\ wait_map' = [wait_map EXCEPT ![Key[self]] = wait_map[Key[self]] \ {self}]
-                   /\ pc' = [pc EXCEPT ![self] = "notify_all"]
-                   /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                   channels, tested_keys, stack, index_, 
-                                   old_value, index, Key >>
-
-notify_all(self) == /\ pc[self] = "notify_all"
-                    /\ IF Cardinality(wait_map[Key[self]]) > 0
-                          THEN /\ pc' = [pc EXCEPT ![self] = "notify"]
-                               /\ UNCHANGED << stack, index >>
-                          ELSE /\ /\ index' = [index EXCEPT ![self] = wait_map_lock]
-                                  /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
-                                                                           pc        |->  "unlock_1",
-                                                                           index     |->  index[self] ] >>
-                                                                       \o stack[self]]
-                               /\ pc' = [pc EXCEPT ![self] = "reset_state"]
-                    /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                    wait_map, channels, tested_keys, index_, 
-                                    old_value, Key >>
-
-notify(self) == /\ pc[self] = "notify"
-                /\ \E proc \in wait_map[Key[self]]:
-                     /\ channels' = [channels EXCEPT ![proc] = TRUE]
-                     /\ wait_map' = [wait_map EXCEPT ![Key[self]] = wait_map[Key[self]] \ {proc}]
-                /\ pc' = [pc EXCEPT ![self] = "notify_all"]
-                /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                tested_keys, stack, index_, old_value, index, 
-                                Key >>
+remove_wait_map(self) == /\ pc[self] = "remove_wait_map"
+                         /\ local_wait_map' = [local_wait_map EXCEPT ![self] = wait_map[Key[self]] \ { self }]
+                         /\ wait_map' = [wait_map EXCEPT ![Key[self]] = {}]
+                         /\ /\ idx' = [idx EXCEPT ![self] = wait_map_lock]
+                            /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
+                                                                     pc        |->  "unlock_1",
+                                                                     idx       |->  idx[self] ] >>
+                                                                 \o stack[self]]
+                         /\ pc' = [pc EXCEPT ![self] = "reset_state"]
+                         /\ UNCHANGED << cache_lock, wait_map_lock, locks, 
+                                         cache, channels, tested_keys, idx_, 
+                                         Key >>
 
 unlock_1(self) == /\ pc[self] = "unlock_1"
-                  /\ /\ index' = [index EXCEPT ![self] = cache_lock]
+                  /\ /\ idx' = [idx EXCEPT ![self] = cache_lock]
                      /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "unlock",
-                                                              pc        |->  "unlock_2",
-                                                              index     |->  index[self] ] >>
+                                                              pc        |->  "notify_all",
+                                                              idx       |->  idx[self] ] >>
                                                           \o stack[self]]
                   /\ pc' = [pc EXCEPT ![self] = "reset_state"]
                   /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                  wait_map, channels, tested_keys, index_, 
-                                  old_value, Key >>
+                                  wait_map, channels, tested_keys, idx_, Key, 
+                                  local_wait_map >>
 
-unlock_2(self) == /\ pc[self] = "unlock_2"
-                  /\ pc' = [pc EXCEPT ![self] = "finished"]
-                  /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                  wait_map, channels, tested_keys, stack, 
-                                  index_, old_value, index, Key >>
+notify_all(self) == /\ pc[self] = "notify_all"
+                    /\ IF Cardinality(local_wait_map[self]) > 0
+                          THEN /\ pc' = [pc EXCEPT ![self] = "notify"]
+                          ELSE /\ pc' = [pc EXCEPT ![self] = "finished"]
+                    /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
+                                    wait_map, channels, tested_keys, stack, 
+                                    idx_, idx, Key, local_wait_map >>
+
+notify(self) == /\ pc[self] = "notify"
+                /\ \E proc \in local_wait_map[self]:
+                     /\ channels' = [channels EXCEPT ![proc] = TRUE]
+                     /\ local_wait_map' = [local_wait_map EXCEPT ![self] = local_wait_map[self] \ {proc}]
+                /\ pc' = [pc EXCEPT ![self] = "notify_all"]
+                /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
+                                wait_map, tested_keys, stack, idx_, idx, Key >>
 
 finished(self) == /\ pc[self] = "finished"
                   /\ TRUE
                   /\ pc' = [pc EXCEPT ![self] = "Done"]
                   /\ UNCHANGED << cache_lock, wait_map_lock, locks, cache, 
-                                  wait_map, channels, tested_keys, stack, 
-                                  index_, old_value, index, Key >>
+                                  wait_map, channels, tested_keys, stack, idx_, 
+                                  idx, Key, local_wait_map >>
 
-P(self) == start(self) \/ expiration_lock_1(self) \/ expiration_done(self)
-              \/ lock_1(self) \/ cache_hit(self) \/ lock_2(self)
-              \/ lock_3(self) \/ lookup_wait_map(self)
+P(self) == start(self) \/ cache_locked(self) \/ expiration_lock_1(self)
+              \/ expiration_done(self) \/ cache_hit(self)
+              \/ cache_miss(self) \/ lock_3(self) \/ lookup_wait_map(self)
               \/ wait_map_subscribe(self) \/ waiting_for_value(self)
               \/ wait_map_register(self) \/ fetching_value(self)
               \/ inserting_value_lock_cache(self) \/ inserting_value(self)
-              \/ broadcast(self) \/ notify_all(self) \/ notify(self)
-              \/ unlock_1(self) \/ unlock_2(self) \/ finished(self)
+              \/ remove_wait_map(self) \/ unlock_1(self)
+              \/ notify_all(self) \/ notify(self) \/ finished(self)
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
@@ -496,7 +479,7 @@ Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Tue Dec 14 14:43:54 CET 2021 by geal
+\* Last modified Wed Dec 15 23:25:36 CET 2021 by geal
 \* Created Sat Dec 11 13:04:21 CET 2021 by geal
 
       
