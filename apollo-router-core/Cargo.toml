@@ -22,7 +22,7 @@ include_dir = "0.7.2"
 lru = "0.7.0"
 miette = { version = "3.2.0", features = ["fancy"] }
 once_cell = "1.8.0"
-router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "e88ce2a8be6a9159370c972b462ef61d598c2f33" }
+router-bridge = { path = "../../federation/router-bridge" }                                                                  # git = "https://github.com/apollographql/federation.git", rev = "a4b27cc0ca4ccd1d6ec69fa6c1d146faee3eb27a" }
 serde = { version = "1.0.131", features = ["derive", "rc"] }
 serde_json = { version = "1.0.72", features = ["preserve_order"] }
 thiserror = "1.0.30"

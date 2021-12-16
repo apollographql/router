@@ -5,3 +5,4 @@ query MiniIntrospectionQuery {
             subscriptionType { name }
           }
         }
+      

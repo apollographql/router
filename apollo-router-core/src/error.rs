@@ -188,6 +188,9 @@ pub enum QueryPlannerError {
 
     /// Unhandled planner result.
     UnhandledPlannerResult,
+
+    /// Router Bridge error: {0}
+    RouterBridgeError(router_bridge::error::Error),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {

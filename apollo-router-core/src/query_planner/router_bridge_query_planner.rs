@@ -38,9 +38,9 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
 
         let planner_result = tokio::task::spawn_blocking(|| {
             plan::plan::<PlannerResult>(context, options.into())
-                .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
+                .map_err(QueryPlannerError::RouterBridgeError)
         })
-        .await??;
+        .await???;
 
         match planner_result {
             PlannerResult::QueryPlan { node } => Ok(Arc::new(QueryPlan { root: node })),
@@ -63,6 +63,8 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 #[serde(tag = "kind")]
 enum PlannerResult {
     QueryPlan {
+        // Do not make it a raw PlanNode,
+        // introspection queries return an empty query plan.
         /// The hierarchical nodes that make up the query plan
         node: Option<PlanNode>,
     },
@@ -73,6 +75,7 @@ enum PlannerResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use test_log::test;
 
     #[test(tokio::test)]
@@ -89,6 +92,16 @@ mod tests {
             .await
             .unwrap();
         insta::assert_debug_snapshot!(result);
+    }
+
+    #[test]
+    fn empty_query_plan() {
+        let expected = PlannerResult::QueryPlan { node: None };
+        let actual: PlannerResult = serde_json::from_value(json!({ "kind": "QueryPlan"})).expect(
+            "If this test fails, It probably means QueryPlan::node isn't an Option anymore.",
+        );
+
+        assert_eq!(expected, actual);
     }
 
     #[test(tokio::test)]
