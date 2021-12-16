@@ -56,7 +56,7 @@ CONSTANT Keys
   }
   
   fair process (P \in Proc)
-  variables Key \in Keys;
+  variables Key \in Keys, pr = 0;
   {
   
  
@@ -153,11 +153,10 @@ CONSTANT Keys
                 \*})
             notify_all:
                 while(Cardinality(wait_map[Key]) > 0) {
-                   notify:
-                       with (proc \in wait_map[Key]) {
-                          channels[proc] := TRUE;
-                          wait_map[Key] := wait_map[Key] \ {proc};
-                       }
+
+                    pr:= CHOOSE p \in wait_map[Key]: TRUE;
+                    channels[pr] := TRUE;
+                    wait_map[Key] := wait_map[Key] \ {pr};
                 };
             
                 \* locks are automatically dropped
