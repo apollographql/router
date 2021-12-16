@@ -64,7 +64,7 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 enum PlannerResult {
     QueryPlan {
         /// The hierarchical nodes that make up the query plan
-        node: PlanNode,
+        node: Option<PlanNode>,
     },
     #[serde(other)]
     Other,
