@@ -61,31 +61,35 @@ CONSTANT Keys
   
  
     start:
-        either {
-            \* expire one key
-            call lock(cache_lock);
-            expiration_lock_1:
-                cache[Key] := FALSE;
-                call unlock(cache_lock);
-            expiration_done:
-                goto finished;
-        }
-        or {
-        \* we test at the end if all keys have been loaded
-        tested_keys := tested_keys \union {Key};
-        
         \* let mut locked_cache = self.cached.lock().await;
         call lock(cache_lock);
-        };
-        
-    lock_1:    
+
+    cache_locked:
         \*if let Some(value) = locked_cache.get(&key).cloned() { return value }
         if (cache[Key]) {
-            call unlock(cache_lock);
-            cache_hit:
-                goto finished;
+            \* if there is a value for the key, we test two possible behaviours
+            \* expire the key, or assume a normal task that will just return after
+            \* receiving the value
+            either {
+                \* expire one key
+                expiration_lock_1:
+                    cache[Key] := FALSE;
+                    call unlock(cache_lock);
+
+                expiration_done:
+                    goto finished;
+            }
+            or {
+                \*if let Some(value) = locked_cache.get(&key).cloned() { return value }
+                call unlock(cache_lock);
+                cache_hit:
+                    goto finished;
+            }
         };
-        
+
+    cache_miss:
+        \* we test at the end if all keys have been loaded
+        tested_keys := tested_keys \union {Key};
     
     lock_2:
         \* let mut locked_wait_map = self.wait_map.lock().await;
