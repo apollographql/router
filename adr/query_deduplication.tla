@@ -56,10 +56,9 @@ CONSTANT Keys
   }
   
   fair process (P \in Proc)
-  variables Key \in Keys, pr = 0;
+  variables Key \in Keys, local_wait_map = {};
   {
   
- 
     start:
         \* let mut locked_cache = self.cached.lock().await;
         call lock(cache_lock);
@@ -87,11 +86,11 @@ CONSTANT Keys
             }
         };
 
+
     cache_miss:
         \* we test at the end if all keys have been loaded
         tested_keys := tested_keys \union {Key};
-    
-    lock_2:
+
         \* let mut locked_wait_map = self.wait_map.lock().await;
         call lock(wait_map_lock);
     
@@ -146,33 +145,35 @@ CONSTANT Keys
                 \* let mut locked_wait_map = self.wait_map.lock().await;
                 call lock(wait_map_lock);
  
-            broadcast:
+            remove_wait_map:
                 \* locked_wait_map.remove(&key);
-                wait_map[Key] := wait_map[Key] \ {self};
-                
+                \* locks are dropped right after last use
+
+                local_wait_map := wait_map[Key] \ { self };
+                wait_map[Key] := {};
+
+                call unlock(wait_map_lock);
+
+            unlock_1:
+                call unlock(cache_lock);
+
                 \* notify all waiting processes
                 \*  tokio::task::spawn_blocking(move || {
                 \*    tx.send((key, broadcast_value))
                 \*        .expect("there is always at least one receiver alive, the _rx guard; qed")
                 \*})
             notify_all:
-                while(Cardinality(wait_map[Key]) > 0) {
-
-                    pr:= CHOOSE p \in wait_map[Key]: TRUE;
-                    channels[pr] := TRUE;
-                    wait_map[Key] := wait_map[Key] \ {pr};
+                while(Cardinality(local_wait_map) > 0) {
+                    notify:
+                        with (proc \in local_wait_map) {
+                            channels[proc] := TRUE;
+                            local_wait_map := local_wait_map \ {proc};
+                        }
                 };
             
-                \* locks are automatically dropped
-                call unlock(wait_map_lock);
-            unlock_1:
-                call unlock(cache_lock);
-            unlock_2:    
                 goto finished;
-                
-            
         };
-    
+
     finished:
         skip;
    }
