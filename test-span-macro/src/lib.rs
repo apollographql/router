@@ -41,7 +41,7 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let subscriber_boilerplate = subscriber_boilerplate();
 
-    let res = quote! {
+    quote! {
       #[#macro_attrs]
       #(#fn_attrs)*
       #maybe_async fn #test_name() #ret {
@@ -53,10 +53,8 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #run_test #maybe_semicolon
       }
-    };
-
-    println!("{}", &res);
-    res.into()
+    }
+    .into()
 }
 
 fn async_test() -> TokenStream2 {
