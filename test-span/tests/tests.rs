@@ -3,7 +3,7 @@ mod traced_span_tests {
     use std::sync::Arc;
     use test_span::prelude::*;
 
-    #[test_span(test)]
+    #[test_span]
     fn tracing_macro_works() {
         let res = do_sync_stuff();
 
@@ -15,12 +15,14 @@ mod traced_span_tests {
 
         let logs = get_logs();
 
-        insta::assert_json_snapshot!(logs);
-        insta::assert_json_snapshot!(get_span());
+        dbg!(&logs);
 
         assert!(logs.contains_message("here i am!"));
         assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
         assert!(logs.contains_message("in a separate context!"));
+
+        insta::assert_json_snapshot!(logs);
+        insta::assert_json_snapshot!(get_span());
     }
 
     #[test_span(tokio::test)]
@@ -35,16 +37,60 @@ mod traced_span_tests {
 
         let logs = get_logs();
 
+        assert!(logs.contains_message("here i am!"));
+        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
+        assert!(logs.contains_message("in a separate context!"));
+
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(get_span());
+    }
+
+    #[test]
+    fn tracing_works() {
+        let id_sequence = Default::default();
+        let all_spans = Default::default();
+        let logs = Default::default();
+
+        let subscriber = tracing_subscriber::registry().with(Layer::new(
+            Arc::clone(&id_sequence),
+            Arc::clone(&all_spans),
+            Arc::clone(&logs),
+        ));
+
+        let logs_clone = Arc::clone(&logs);
+        let get_logs = move || logs_clone.lock().unwrap().contents();
+
+        let spans_clone = Arc::clone(&all_spans);
+        let id_sequence_clone = Arc::clone(&id_sequence);
+
+        let get_span = move || {
+            let all_spans = spans_clone.lock().unwrap().clone();
+            let id_sequence = id_sequence_clone.read().unwrap().clone();
+            Span::from_records(id_sequence, all_spans)
+        };
+
+        subscriber.init();
+
+        let res = do_sync_stuff();
+
+        assert_eq!(res, 104);
+
+        let res2 = do_sync_stuff();
+
+        assert_eq!(res2, 104);
+
+        let logs = get_logs();
 
         assert!(logs.contains_message("here i am!"));
         assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
         assert!(logs.contains_message("in a separate context!"));
+
+        insta::assert_json_snapshot!(logs);
+        insta::assert_json_snapshot!(get_span());
     }
 
     #[tokio::test]
-    async fn tracing_works() {
+    async fn async_tracing_works() {
         let id_sequence = Default::default();
         let all_spans = Default::default();
         let logs = Default::default();
@@ -79,15 +125,14 @@ mod traced_span_tests {
         .with_subscriber(subscriber)
         .await;
 
-        println!("{}", serde_json::to_string_pretty(&get_span()).unwrap());
-
         let logs = get_logs();
-
-        println!("{}", serde_json::to_string_pretty(&logs).unwrap());
 
         assert!(logs.contains_message("here i am!"));
         assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
         assert!(logs.contains_message("in a separate context!"));
+
+        insta::assert_json_snapshot!(logs);
+        insta::assert_json_snapshot!(get_span());
     }
 
     #[tracing::instrument(level = "info")]

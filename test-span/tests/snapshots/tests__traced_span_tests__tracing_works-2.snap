@@ -1,0 +1,103 @@
+---
+source: test-span/tests/tests.rs
+expression: get_span()
+
+---
+{
+  "id": 0,
+  "name": "root",
+  "records": [
+    [],
+    null
+  ],
+  "children": {
+    "tests::traced_span_tests::do_sync_stuff - 1": {
+      "id": 1,
+      "name": "tests::traced_span_tests::do_sync_stuff",
+      "records": [
+        [],
+        {
+          "name": "do_sync_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      ],
+      "children": {
+        "my_crate::an_other_target::do_sync_stuff_2 - 2": {
+          "id": 2,
+          "name": "my_crate::an_other_target::do_sync_stuff_2",
+          "records": [
+            [
+              [
+                "number",
+                {
+                  "Value": 42
+                }
+              ]
+            ],
+            {
+              "name": "do_sync_stuff_2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    },
+    "tests::traced_span_tests::do_sync_stuff - 2251799813685249": {
+      "id": 2251799813685249,
+      "name": "tests::traced_span_tests::do_sync_stuff",
+      "records": [
+        [],
+        {
+          "name": "do_sync_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      ],
+      "children": {
+        "my_crate::an_other_target::do_sync_stuff_2 - 2251799813685250": {
+          "id": 2251799813685250,
+          "name": "my_crate::an_other_target::do_sync_stuff_2",
+          "records": [
+            [
+              [
+                "number",
+                {
+                  "Value": 42
+                }
+              ]
+            ],
+            {
+              "name": "do_sync_stuff_2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    }
+  }
+}

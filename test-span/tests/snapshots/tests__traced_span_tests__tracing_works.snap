@@ -1,0 +1,58 @@
+---
+source: test-span/tests/tests.rs
+expression: logs
+
+---
+[
+  [
+    [
+      "message",
+      {
+        "Debug": "here i am again!"
+      }
+    ],
+    [
+      "message",
+      {
+        "Debug": "in a separate context!"
+      }
+    ],
+    [
+      "message",
+      {
+        "Debug": "here i am!"
+      }
+    ],
+    [
+      "number",
+      {
+        "Value": 52
+      }
+    ],
+    [
+      "message",
+      {
+        "Debug": "here i am again!"
+      }
+    ],
+    [
+      "message",
+      {
+        "Debug": "in a separate context!"
+      }
+    ],
+    [
+      "message",
+      {
+        "Debug": "here i am!"
+      }
+    ],
+    [
+      "number",
+      {
+        "Value": 52
+      }
+    ]
+  ],
+  null
+]

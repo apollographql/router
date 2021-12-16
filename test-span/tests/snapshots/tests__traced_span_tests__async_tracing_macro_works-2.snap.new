@@ -1,0 +1,103 @@
+---
+source: test-span/tests/tests.rs
+expression: get_span()
+
+---
+{
+  "id": 0,
+  "name": "root",
+  "records": [
+    [],
+    null
+  ],
+  "children": {
+    "tests::traced_span_tests::do_stuff - 2252349569499137": {
+      "id": 2252349569499137,
+      "name": "tests::traced_span_tests::do_stuff",
+      "records": [
+        [],
+        {
+          "name": "do_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      ],
+      "children": {
+        "my_crate::an_other_target::do_stuff2 - 2252349569499138": {
+          "id": 2252349569499138,
+          "name": "my_crate::an_other_target::do_stuff2",
+          "records": [
+            [
+              [
+                "number",
+                {
+                  "Value": 42
+                }
+              ]
+            ],
+            {
+              "name": "do_stuff2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    },
+    "tests::traced_span_tests::do_stuff - 549755813889": {
+      "id": 549755813889,
+      "name": "tests::traced_span_tests::do_stuff",
+      "records": [
+        [],
+        {
+          "name": "do_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      ],
+      "children": {
+        "my_crate::an_other_target::do_stuff2 - 549755813890": {
+          "id": 549755813890,
+          "name": "my_crate::an_other_target::do_stuff2",
+          "records": [
+            [
+              [
+                "number",
+                {
+                  "Value": 42
+                }
+              ]
+            ],
+            {
+              "name": "do_stuff2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    }
+  }
+}
