@@ -11,8 +11,8 @@ expression: get_span()
     null
   ],
   "children": {
-    "tests::traced_span_tests::do_stuff - 2252349569499137": {
-      "id": 2252349569499137,
+    "tests::traced_span_tests::do_stuff - 2252074691592193": {
+      "id": 2252074691592193,
       "name": "tests::traced_span_tests::do_stuff",
       "records": [
         [],
@@ -27,8 +27,8 @@ expression: get_span()
         }
       ],
       "children": {
-        "my_crate::an_other_target::do_stuff2 - 2252349569499138": {
-          "id": 2252349569499138,
+        "my_crate::an_other_target::do_stuff2 - 2252074691592194": {
+          "id": 2252074691592194,
           "name": "my_crate::an_other_target::do_stuff2",
           "records": [
             [
@@ -55,8 +55,8 @@ expression: get_span()
         }
       }
     },
-    "tests::traced_span_tests::do_stuff - 549755813889": {
-      "id": 549755813889,
+    "tests::traced_span_tests::do_stuff - 274877906945": {
+      "id": 274877906945,
       "name": "tests::traced_span_tests::do_stuff",
       "records": [
         [],
@@ -71,8 +71,8 @@ expression: get_span()
         }
       ],
       "children": {
-        "my_crate::an_other_target::do_stuff2 - 549755813890": {
-          "id": 549755813890,
+        "my_crate::an_other_target::do_stuff2 - 274877906946": {
+          "id": 274877906946,
           "name": "my_crate::an_other_target::do_stuff2",
           "records": [
             [

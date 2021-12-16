@@ -312,7 +312,7 @@ mod span_tests {
                         .map(|metadata| format!("{}::{}", metadata.target, metadata.name))
                         .unwrap_or_else(|| child_span_id.to_string());
 
-                    let span_key = format!("{} - {}", span_name, child_span_id);
+                    let span_key = format!("{} - {}", span_name, child_node.index());
 
                     let mut child_span =
                         Span::from(span_name, *child_span_id, child_records.clone());
