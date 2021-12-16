@@ -23,12 +23,7 @@ impl RouterBridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for RouterBridgeQueryPlanner {
-    #[tracing::instrument(
-        skip_all,
-        fields(query = %query),
-        name = "plan",
-        level = "debug"
-    )]
+    #[tracing::instrument(skip_all, name = "plan", level = "debug")]
     async fn get(
         &self,
         query: String,

@@ -17,9 +17,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -30,7 +30,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -124,9 +124,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -137,7 +137,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -213,9 +213,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -226,7 +226,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -293,9 +293,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -306,7 +306,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -373,9 +373,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -386,7 +386,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -435,9 +435,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -448,7 +448,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -479,9 +479,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -492,7 +492,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -557,9 +557,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -570,7 +570,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -601,9 +601,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -614,7 +614,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -627,9 +627,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -640,7 +640,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -671,9 +671,9 @@ expression: get_span()
       "records": [
         [
           [
-            "query",
+            "operation_name",
             {
-              "Debug": "{ topProducts { name name2:name } }"
+              "Debug": ""
             }
           ]
         ],
@@ -684,7 +684,7 @@ expression: get_span()
           "module_path": "apollo_router::apollo_router",
           "fields": {
             "names": [
-              "query"
+              "operation_name"
             ]
           }
         }
@@ -861,23 +861,14 @@ expression: get_span()
       "id": 1,
       "name": "apollo_router::apollo_router::prepare_query",
       "records": [
-        [
-          [
-            "query",
-            {
-              "Debug": "{ topProducts { name name2:name } }"
-            }
-          ]
-        ],
+        [],
         {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
           "module_path": "apollo_router::apollo_router",
           "fields": {
-            "names": [
-              "query"
-            ]
+            "names": []
           }
         }
       ],
@@ -886,23 +877,14 @@ expression: get_span()
           "id": 2,
           "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
           "records": [
-            [
-              [
-                "query",
-                {
-                  "Debug": "{ topProducts { name name2:name } }"
-                }
-              ]
-            ],
+            [],
             {
               "name": "plan",
               "target": "apollo_router_core::query_planner::router_bridge_query_planner",
               "level": "DEBUG",
               "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
               "fields": {
-                "names": [
-                  "query"
-                ]
+                "names": []
               }
             }
           ],
@@ -914,23 +896,14 @@ expression: get_span()
       "id": 1,
       "name": "apollo_router::apollo_router::prepare_query",
       "records": [
-        [
-          [
-            "query",
-            {
-              "Debug": "{ topProducts { name name2:name } }"
-            }
-          ]
-        ],
+        [],
         {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
           "module_path": "apollo_router::apollo_router",
           "fields": {
-            "names": [
-              "query"
-            ]
+            "names": []
           }
         }
       ],
@@ -958,23 +931,14 @@ expression: get_span()
       "id": 1,
       "name": "apollo_router::apollo_router::prepare_query",
       "records": [
-        [
-          [
-            "query",
-            {
-              "Debug": "{ topProducts { name name2:name } }"
-            }
-          ]
-        ],
+        [],
         {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
           "module_path": "apollo_router::apollo_router",
           "fields": {
-            "names": [
-              "query"
-            ]
+            "names": []
           }
         }
       ],

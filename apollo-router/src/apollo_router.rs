@@ -74,7 +74,7 @@ impl ApolloRouter {
 
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
-    #[tracing::instrument(skip_all, fields(query = %request.query), level = "debug")]
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn prepare_query(
         &self,
         request: &Request,
@@ -115,7 +115,7 @@ pub struct ApolloPreparedQuery {
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
-    #[tracing::instrument(skip_all, fields(query = %request.query), level = "debug")]
+    #[tracing::instrument(skip_all, fields(operation_name = %request.operation_name.clone().unwrap_or_default()), level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         let response_task = self
             .query_plan
