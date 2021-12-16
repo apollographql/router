@@ -1,0 +1,214 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: get_span()
+
+---
+{
+  "id": 0,
+  "name": "root",
+  "records": [
+    [],
+    null
+  ],
+  "children": {
+    "apollo_router::apollo_router::execute - 2251799813685249": {
+      "id": 2251799813685249,
+      "name": "apollo_router::apollo_router::execute",
+      "records": [
+        [
+          [
+            "query",
+            {
+              "Debug": "{ topProducts { name name2:name } }"
+            }
+          ]
+        ],
+        {
+          "name": "execute",
+          "target": "apollo_router::apollo_router",
+          "level": "DEBUG",
+          "module_path": "apollo_router::apollo_router",
+          "fields": {
+            "names": [
+              "query"
+            ]
+          }
+        }
+      ],
+      "children": {
+        "apollo_router::apollo_router::query_parsing - 3": {
+          "id": 3,
+          "name": "apollo_router::apollo_router::query_parsing",
+          "records": [
+            [],
+            {
+              "name": "query_parsing",
+              "target": "apollo_router::apollo_router",
+              "level": "INFO",
+              "module_path": "apollo_router::apollo_router",
+              "fields": {
+                "names": []
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    },
+    "apollo_router::apollo_router::prepare_query - 1": {
+      "id": 1,
+      "name": "apollo_router::apollo_router::prepare_query",
+      "records": [
+        [
+          [
+            "query",
+            {
+              "Debug": "{ topProducts { name name2:name } }"
+            }
+          ]
+        ],
+        {
+          "name": "prepare_query",
+          "target": "apollo_router::apollo_router",
+          "level": "DEBUG",
+          "module_path": "apollo_router::apollo_router",
+          "fields": {
+            "names": [
+              "query"
+            ]
+          }
+        }
+      ],
+      "children": {
+        "apollo_router_core::query_planner::router_bridge_query_planner::plan - 2": {
+          "id": 2,
+          "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
+          "records": [
+            [
+              [
+                "query",
+                {
+                  "Debug": "{ topProducts { name name2:name } }"
+                }
+              ]
+            ],
+            {
+              "name": "plan",
+              "target": "apollo_router_core::query_planner::router_bridge_query_planner",
+              "level": "DEBUG",
+              "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
+              "fields": {
+                "names": [
+                  "query"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    },
+    "apollo_router::http_subgraph::http-subgraph-request - 4503599627370497": {
+      "id": 4503599627370497,
+      "name": "apollo_router::http_subgraph::http-subgraph-request",
+      "records": [
+        [],
+        {
+          "name": "http-subgraph-request",
+          "target": "apollo_router::http_subgraph",
+          "level": "TRACE",
+          "module_path": "apollo_router::http_subgraph",
+          "fields": {
+            "names": []
+          }
+        }
+      ],
+      "children": {
+        "reqwest_tracing::middleware::HTTP request - 9007199254740994": {
+          "id": 9007199254740994,
+          "name": "reqwest_tracing::middleware::HTTP request",
+          "records": [
+            [
+              [
+                "http.method",
+                {
+                  "Debug": "POST"
+                }
+              ],
+              [
+                "http.scheme",
+                {
+                  "Debug": "http"
+                }
+              ],
+              [
+                "http.host",
+                {
+                  "Debug": "localhost"
+                }
+              ],
+              [
+                "net.host.port",
+                {
+                  "Debug": "4100"
+                }
+              ],
+              [
+                "otel.kind",
+                {
+                  "Value": "client"
+                }
+              ],
+              [
+                "otel.name",
+                {
+                  "Debug": "POST /graphql"
+                }
+              ],
+              [
+                "otel.status_code",
+                {
+                  "Value": "OK"
+                }
+              ],
+              [
+                "http.status_code",
+                {
+                  "Value": 200
+                }
+              ],
+              [
+                "http.user_agent",
+                {
+                  "Value": ""
+                }
+              ]
+            ],
+            {
+              "name": "HTTP request",
+              "target": "reqwest_tracing::middleware",
+              "level": "INFO",
+              "module_path": "reqwest_tracing::middleware",
+              "fields": {
+                "names": [
+                  "http.method",
+                  "http.scheme",
+                  "http.host",
+                  "net.host.port",
+                  "otel.kind",
+                  "otel.name",
+                  "otel.status_code",
+                  "http.user_agent",
+                  "http.status_code",
+                  "error.message",
+                  "error.cause_chain"
+                ]
+              }
+            }
+          ],
+          "children": {}
+        }
+      }
+    }
+  }
+}

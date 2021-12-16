@@ -115,7 +115,7 @@ pub struct ApolloPreparedQuery {
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
-    #[tracing::instrument(level = "debug")]
+    #[tracing::instrument(skip_all, fields(query = %request.query), level = "debug")]
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         let response_task = self
             .query_plan
