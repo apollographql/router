@@ -139,14 +139,15 @@ where
          * Break down batch and send to studio
          */
         for span in batch {
+            if span.name == "plan" {
+                if let Some(q) = span
+                    .attributes
+                    .get(&opentelemetry::Key::from_static_str("query"))
+                {
+                    eprintln!("TRACING OUT A QUERY: {}", q);
+                }
+            }
             /*
-            self.writer
-                .write_all(format!("SPAN NAME: {}\n", span.name).as_bytes())
-                .map_err::<Error, _>(Into::into)?;
-            self.writer
-                .write_all(format!("SPAN ATTRIBUTES: {:#?}\n", span.attributes).as_bytes())
-                .map_err::<Error, _>(Into::into)?;
-            */
             if self.pretty_print {
                 self.writer
                     .write_all(format!("{:#?}\n", span).as_bytes())
@@ -156,6 +157,7 @@ where
                     .write_all(format!("{:?}\n", span).as_bytes())
                     .map_err::<Error, _>(Into::into)?;
             }
+            */
         }
 
         Ok(())
