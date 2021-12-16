@@ -34,28 +34,24 @@ CONSTANT Keys
     \*AllFinished == <>(\A proc \in Proc: pc[proc] = "Done")
     \*AllKeysLoaded == <>(\A k \in tested_keys: cache[k])
   };
-  
-  procedure lock(index = 0)
-  variable old_value = FALSE;
+
+  procedure lock(idx = 0)
   {
     exchange:
-      old_value := locks[index];
-      locks[index] := TRUE;
+      await ~locks[idx];
     check:
-      if (old_value)
-      {
-          goto exchange;
-      }
-      else
-      {
-          return;
+      if(~locks[idx]) {
+        locks[idx] := TRUE;
+        return;
+      } else {
+        goto exchange;
       };
   };
- 
-  procedure unlock(index = 0)
+
+  procedure unlock(idx = 0)
   {
     reset_state:
-      locks[index] := FALSE;
+      locks[idx] := FALSE;
       return;
   }
   
