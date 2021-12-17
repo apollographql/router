@@ -1,10 +1,7 @@
 use super::{bytestring::ByteString, map::Map};
-use indexmap::IndexMap;
-use serde::Deserialize;
 use std::{
     fmt::{self, Debug},
     mem,
-    ops::Add,
 };
 
 #[derive(Clone, Eq, PartialEq)]
@@ -220,10 +217,11 @@ impl Value {
     /// assert!(!v["b"].is_number());
     /// ```
     pub fn is_number(&self) -> bool {
-        match *self {
+        /*match *self {
             Value::Number(_) => true,
             _ => false,
-        }
+        }*/
+        matches!(*self, Value::Number(_))
     }
 
     /// Returns true if the `Value` is an integer between `i64::MIN` and

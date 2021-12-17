@@ -167,19 +167,17 @@ impl Error {
         match object.remove("locations") {
             Some(Value::Array(v)) => {
                 for val in v.into_iter() {
-                    match val {
-                        Value::Object(o) => {
-                            if let (Some(line), Some(column)) = (
-                                o.get("line").and_then(|v| v.as_i64()),
-                                o.get("column").and_then(|v| v.as_i64()),
-                            ) {
-                                errors.push(Location {
-                                    line: line as i32,
-                                    column: column as i32,
-                                });
-                            }
+                    if let Value::Object(o) = val {
+                        if let (Some(line), Some(column)) = (
+                            o.get("line").and_then(|v| v.as_i64()),
+                            o.get("column").and_then(|v| v.as_i64()),
+                        ) {
+                            errors.push(Location {
+                                line: line as i32,
+                                column: column as i32,
+                            });
+                            continue;
                         }
-                        _ => {}
                     }
                     return Err(graphql::FetchError::SubrequestMalformedResponse {
                         service: service_name.to_string(),

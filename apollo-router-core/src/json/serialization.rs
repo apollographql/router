@@ -6,10 +6,9 @@ use super::bytestring::ByteString;
 use super::map::Map;
 use super::value::Value;
 use bytes::Bytes;
-use indexmap::IndexMap;
 use serde::de::SeqAccess;
 use serde::de::{DeserializeSeed, Deserializer, MapAccess, Visitor};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
 impl Value {
@@ -265,16 +264,4 @@ impl Serialize for Value {
             }
         }
     }
-}
-
-pub(crate) fn object_serialize<S>(m: &crate::Object, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    use serde::ser::SerializeMap;
-    let mut map = tri!(serializer.serialize_map(Some(m.len())));
-    for (k, v) in m {
-        tri!(map.serialize_entry(k, v));
-    }
-    map.end()
 }

@@ -40,7 +40,7 @@ impl From<&str> for ByteString {
 
 impl PartialEq<ByteString> for String {
     fn eq(&self, other: &ByteString) -> bool {
-        self.as_bytes() == &other.0
+        self.as_bytes() == other.0
     }
 }
 

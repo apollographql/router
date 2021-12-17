@@ -27,5 +27,4 @@ mod map;
 mod serialization;
 mod value;
 pub(crate) use map::{Entry, Map};
-pub(crate) use serialization::object_serialize;
 pub use value::Value;

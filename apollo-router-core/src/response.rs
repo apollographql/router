@@ -1,7 +1,7 @@
 use crate::prelude::graphql::{self, *};
 use bytes::Bytes;
 use futures::prelude::*;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use typed_builder::TypedBuilder;
 
