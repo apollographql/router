@@ -1,5 +1,7 @@
-use crate::stdout::new_pipeline;
-use crate::CustomLayer;
+use crate::apollo_telemetry::new_pipeline;
+/* XXX TELEMETRY OR CUSTOMLAYER?
+ * use crate::CustomLayer;
+ */
 use std::sync::Arc;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};

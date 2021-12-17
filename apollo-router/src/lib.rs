@@ -1,6 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
 mod apollo_router;
+mod apollo_telemetry;
 pub mod configuration;
 mod custom;
 mod files;
@@ -9,7 +10,6 @@ pub mod http_service_registry;
 pub mod http_subgraph;
 mod router_factory;
 mod state_machine;
-mod stdout;
 mod trace;
 mod warp_http_server_factory;
 
