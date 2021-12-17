@@ -63,8 +63,6 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 #[serde(tag = "kind")]
 enum PlannerResult {
     QueryPlan {
-        // Do not make it a raw PlanNode,
-        // introspection queries return an empty query plan.
         /// The hierarchical nodes that make up the query plan
         node: Option<PlanNode>,
     },
@@ -98,7 +96,8 @@ mod tests {
     fn empty_query_plan() {
         let expected = PlannerResult::QueryPlan { node: None };
         let actual: PlannerResult = serde_json::from_value(json!({ "kind": "QueryPlan"})).expect(
-            "If this test fails, It probably means QueryPlan::node isn't an Option anymore.",
+            "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
+                 Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
 
         assert_eq!(expected, actual);
