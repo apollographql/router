@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::prelude::graphql::{self, *};
 use displaydoc::Display;
 use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
@@ -128,6 +128,90 @@ pub struct Error {
     /// The optional graphql extensions.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+}
+
+impl Error {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, graphql::FetchError> {
+        let mut object = match value {
+            Value::Object(o) => o,
+            _ => {
+                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "expected a JSON object".to_string(),
+                })
+            }
+        };
+
+        let message = match object
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+        {
+            Some(s) => s,
+            None => {
+                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "missing message field".to_string(),
+                })
+            }
+        };
+
+        let path = object
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.into());
+
+        let locations = Vec::new();
+
+        let mut errors = Vec::new();
+        match object.remove("locations") {
+            Some(Value::Array(v)) => {
+                for val in v.into_iter() {
+                    match val {
+                        Value::Object(o) => {
+                            if let (Some(line), Some(column)) = (
+                                o.get("line").and_then(|v| v.as_i64()),
+                                o.get("column").and_then(|v| v.as_i64()),
+                            ) {
+                                errors.push(Location {
+                                    line: line as i32,
+                                    column: column as i32,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Err(graphql::FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_string(),
+                        reason: "missing location value".to_string(),
+                    });
+                }
+            }
+            _ => {
+                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "missing errors field".to_string(),
+                })
+            }
+        };
+
+        let extensions = match object.remove("extensions") {
+            Some(Value::Object(o)) => o,
+            _ => {
+                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "missing extensions field".to_string(),
+                })
+            }
+        };
+
+        Ok(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
 }
 
 /// A location in the request that triggered a graphql error.

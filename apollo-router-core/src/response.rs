@@ -1,4 +1,5 @@
-use crate::prelude::graphql::*;
+use crate::prelude::graphql::{self, *};
+use bytes::Bytes;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
 use std::pin::Pin;
@@ -60,6 +61,64 @@ impl Response {
     /// append_errors default the errors `path` with the one provided.
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
+    }
+
+    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, graphql::FetchError> {
+        let value = Value::from_bytes(b).map_err(|error| {
+            graphql::FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            }
+        })?;
+
+        let mut object = match value {
+            Value::Object(o) => o,
+            _ => {
+                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: "expected a JSON object".to_string(),
+                })
+            }
+        };
+
+        // FIXME: we should check that if label is there, it should be a string
+        let label = object
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let data = object.remove("data").unwrap_or_default();
+
+        let path = object
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.into());
+        let has_next = object.get("has_next").and_then(|v| v.as_bool());
+
+        let errors = match object.remove("errors") {
+            Some(Value::Array(v)) => {
+                let res: Result<Vec<Error>, FetchError> = v
+                    .into_iter()
+                    .map(|v| Error::from_value(service_name, v))
+                    .collect();
+                res?
+            }
+            _ => Vec::new(),
+        };
+
+        let extensions = match object.remove("extensions") {
+            Some(Value::Object(o)) => o,
+            _ => Object::new(),
+        };
+
+        Ok(Response {
+            label,
+            data,
+            path,
+            has_next,
+            errors,
+            extensions,
+        })
     }
 }
 
