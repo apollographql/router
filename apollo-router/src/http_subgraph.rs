@@ -89,15 +89,15 @@ impl HttpSubgraphFetcher {
                     }
                 }
 
-                serde_json::from_slice::<graphql::Response>(&current_payload_bytes).unwrap_or_else(
-                    |error| {
+                //serde_json::from_slice::<graphql::Response>(&current_payload_bytes).unwrap_or_else(
+                graphql::Response::from_bytes(&service_name, current_payload_bytes.freeze())
+                    .unwrap_or_else(|error| {
                         graphql::FetchError::SubrequestMalformedResponse {
                             service: service_name.clone(),
                             reason: error.to_string(),
                         }
                         .to_response(is_primary)
-                    },
-                )
+                    })
             }
             .into_stream(),
         )
