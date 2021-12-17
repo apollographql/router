@@ -1,6 +1,5 @@
-use crate::prelude::graphql::*;
+use crate::{json::Entry, prelude::graphql::*};
 use serde::Deserialize;
-use serde_json::map::Entry;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -97,7 +96,7 @@ fn select_inline_fragment(
 ) -> Result<Option<Value>, FetchError> {
     match (&fragment.type_condition, &content.get("__typename")) {
         (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename || schema.is_subtype(condition, typename) {
+            if condition == typename || schema.is_subtype(condition, typename.as_str()) {
                 select_object(content, &fragment.selections, schema)
             } else {
                 Ok(None)
@@ -190,10 +189,10 @@ mod tests {
         assert_eq!(
             select!(
                 "",
-                json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
+                bjson!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
-            json!([{
+            bjson!([{
                 "__typename": "User",
                 "id": 2,
                 "job": {
@@ -208,10 +207,10 @@ mod tests {
         assert_eq!(
             select!(
                 "union User = Author | Reviewer",
-                json!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
+                bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
-            json!([{
+            bjson!([{
                 "__typename": "Author",
                 "id": 2,
                 "job": {

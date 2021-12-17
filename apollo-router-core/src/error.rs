@@ -89,15 +89,12 @@ pub enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        let value: Value = serde_json::to_value(self).unwrap().into();
         Error {
             message: self.to_string(),
             locations: Default::default(),
             path,
-            extensions: serde_json::to_value(self)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .to_owned(),
+            extensions: value.as_object().unwrap().to_owned(),
         }
     }
 

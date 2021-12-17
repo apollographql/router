@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use futures::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::pin::Pin;
 use typed_builder::TypedBuilder;
 
@@ -172,7 +172,7 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: json!({
+                    extensions: bjson!({
                         "error-extension": 5,
                     })
                     .as_object()
@@ -180,7 +180,7 @@ mod tests {
                     .unwrap()
                 }])
                 .extensions(
-                    json!({
+                    bjson!({
                         "response-extension": 3,
                     })
                     .as_object()
@@ -264,7 +264,7 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: json!({
+                    extensions: bjson!({
                         "error-extension": 5,
                     })
                     .as_object()
@@ -272,7 +272,7 @@ mod tests {
                     .unwrap()
                 }])
                 .extensions(
-                    json!({
+                    bjson!({
                         "response-extension": 3,
                     })
                     .as_object()
