@@ -395,7 +395,6 @@ mod tests {
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
-    use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
     use test_log::test;
@@ -797,8 +796,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 

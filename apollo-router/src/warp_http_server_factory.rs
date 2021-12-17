@@ -409,8 +409,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 

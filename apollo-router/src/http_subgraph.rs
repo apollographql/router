@@ -1,4 +1,5 @@
 use apollo_router_core::prelude::*;
+use async_trait::async_trait;
 use bytes::BytesMut;
 use derivative::Derivative;
 use futures::prelude::*;
@@ -104,15 +105,13 @@ impl HttpSubgraphFetcher {
     }
 }
 
+#[async_trait]
 impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
-    fn stream(
-        &self,
-        request: graphql::Request,
-    ) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>> {
+    async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
         let service_name = self.service.to_string();
         let bytes_stream = self.request_stream(request);
-        Box::pin(async { Self::map_to_graphql(service_name, bytes_stream) })
+        Self::map_to_graphql(service_name, bytes_stream)
     }
 }
 
