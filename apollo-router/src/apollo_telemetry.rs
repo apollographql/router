@@ -1,4 +1,4 @@
-//! # Stdout Span Exporter
+//! # Apollo-Telemetry Span Exporter
 //!
 //! The stdout [`SpanExporter`] writes debug printed [`Span`]s to its configured
 //! [`Write`] instance. By default it will write to [`Stdout`].
@@ -34,15 +34,16 @@ use opentelemetry::{
         trace::{ExportResult, SpanData, SpanExporter},
         ExportError,
     },
-    trace::TracerProvider,
+    trace::{TraceError, TracerProvider},
 };
 use prost_types::Timestamp;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{stdout, Stdout, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use usage_agent::report::trace::CachePolicy;
+use tokio::runtime::{Handle, Runtime};
 use usage_agent::report::{Report, ReportHeader, Trace, TracesAndStats};
+use usage_agent::{report::trace::CachePolicy, Reporter};
 
 /// Pipeline builder
 #[derive(Debug)]
@@ -105,7 +106,7 @@ where
             provider_builder = provider_builder.with_config(config);
         }
         let provider = provider_builder.build();
-        let tracer = provider.tracer("opentelemetry", Some(env!("CARGO_PKG_VERSION")));
+        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
         let _ = global::set_tracer_provider(provider);
 
         tracer
@@ -121,15 +122,55 @@ where
 pub struct Exporter<W: Write> {
     writer: W,
     pretty_print: bool,
+    runtime: Runtime,
 }
 
 impl<W: Write> Exporter<W> {
     /// Create a new stdout `Exporter`.
     pub fn new(writer: W, pretty_print: bool) -> Self {
+        /*
+        let fut_values = async move {
+            println!("ABOUT TO WAIT");
+            let res = Reporter::try_new_with_static("https://127.0.0.1:50051")
+                .await
+                .expect("XXX");
+            println!("AFTER WAIT");
+            res
+        };
+
+        let handle = Handle::current();
+        let guard = handle.enter();
+        let hdl = handle.spawn(fut_values);
+        tracing::info!("ABOUT TO BLOCK ON");
+        // let reporter: Reporter = handle.spawn(hdl).expect("XXX");
+        tracing::info!("AFTER BLOCK ON");
+        drop(guard);
+        let hdl = handle.spawn_blocking(|| fut_values);
+        // let _ = handle.enter();
+        tracing::info!("ABOUT TO BLOCK ON");
+        // let current = Handle::current();
+        let reporter: Reporter = futures::executor::block_on(hdl).expect("XXX");
+        // let reporter: Reporter = current.spawn(fut_values);
+        tracing::info!("AFTER BLOCK ON");
+        */
+
+        let rt = Runtime::new().expect("Creating tokio runtime");
         Self {
             writer,
             pretty_print,
+            runtime: rt,
         }
+    }
+}
+
+/// Stdout exporter's error
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+struct ApolloError(#[from] usage_agent::ReporterError);
+
+impl ExportError for ApolloError {
+    fn exporter_name(&self) -> &'static str {
+        "apollo-telemetry"
     }
 }
 
@@ -143,13 +184,51 @@ where
         /*
          * Break down batch and send to studio
          */
+        let handle = self.runtime.handle();
+        let _guard = handle.enter();
+        let mut reporter = Reporter::try_new("https://127.0.0.1:50051")
+            .await
+            // .map_err(|e| ExportError::from(e))?;
+            .map_err::<ApolloError, _>(Into::into)?;
         for span in batch {
-            if span.name == "plan" {
+            if span.name == "prepare_query" {
                 if let Some(q) = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
                 {
                     eprintln!("TRACING OUT A QUERY: {}", q);
+                    let mut report =
+                        usage_agent::Report::try_new("Usage-Agent-uc0sri@current").expect("XXX");
+                    let ts_start: Timestamp = span.start_time.into();
+                    let ts_end: Timestamp = span.end_time.into();
+
+                    let mut tpq = HashMap::new();
+
+                    let trace = Trace {
+                        start_time: Some(ts_start),
+                        end_time: Some(ts_end.clone()),
+                        cache_policy: Some(CachePolicy {
+                            scope: 0,
+                            max_age_ns: 0,
+                        }),
+                        ..Default::default()
+                    };
+                    let tns = TracesAndStats {
+                        trace: vec![trace],
+                        ..Default::default()
+                    };
+                    let hash_q = format!("# {}", q);
+                    tpq.insert(hash_q, tns);
+                    report.traces_per_query = tpq;
+                    report.end_time = Some(ts_end);
+
+                    let msg = reporter
+                        .submit(report)
+                        .await
+                        .expect("XXX")
+                        .into_inner()
+                        .message;
+                    tracing::info!("server response: {}", msg);
                 }
             }
             /*
@@ -167,72 +246,4 @@ where
 
         Ok(())
     }
-}
-
-/// Stdout exporter's error
-#[derive(thiserror::Error, Debug)]
-#[error(transparent)]
-struct Error(#[from] std::io::Error);
-
-impl ExportError for Error {
-    fn exporter_name(&self) -> &'static str {
-        "stdout"
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut reporter = usage_agent::Reporter::try_new("https://127.0.0.1:50051").await?;
-
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let seconds = time.as_secs();
-    let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-    let ts = Timestamp {
-        seconds: seconds as i64,
-        nanos: nanos as i32,
-    };
-    let mut tpq = HashMap::new();
-
-    let start_time = ts.clone();
-    let mut end_time = ts.clone();
-    end_time.nanos += 100;
-    let trace = Trace {
-        start_time: Some(start_time),
-        end_time: Some(end_time),
-        duration_ns: 100,
-        cache_policy: Some(CachePolicy {
-            scope: 0,
-            max_age_ns: 0,
-        }),
-        ..Default::default()
-    };
-    let tns = TracesAndStats {
-        trace: vec![trace],
-        ..Default::default()
-    };
-    tpq.insert(
-        "# query ExampleQuery {
-  topProducts {
-    name
-  }
-}"
-        .to_string(),
-        tns,
-    );
-    println!("tpq: {:?}", tpq);
-    let mut report = Report::new();
-    report.header = Some(ReportHeader {
-        agent_version: "router-0.1.0-alpha-0.2".to_string(),
-        graph_ref: "Usage-Agent@current".to_string(),
-        ..Default::default()
-    });
-    report.traces_per_query = tpq;
-    report.end_time = Some(ts);
-
-    let response = reporter.submit(report).await?;
-    println!("response: {}", response.into_inner().message);
-
-    Ok(())
 }
