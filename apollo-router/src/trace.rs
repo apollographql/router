@@ -29,6 +29,14 @@ pub(crate) fn try_initialize_subscriber(
         .json()
         .finish();
 
+    // Add studio agent as an OT pipeline
+    let tracer = new_pipeline()
+        // .with_reporter(XXXWRITETHISCODEXXX())
+        .install_simple();
+    let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+    tracing::info!("Adding agent telemetry");
+    let base_layer = subscriber.with(agent);
+
     match config.opentelemetry.as_ref() {
         Some(OpenTelemetry::Jaeger(config)) => {
             let default_config = Default::default();
@@ -73,7 +81,7 @@ pub(crate) fn try_initialize_subscriber(
 
             opentelemetry::global::set_error_handler(handle_error)?;
 
-            Ok(Arc::new(subscriber.with(telemetry)))
+            Ok(Arc::new(base_layer.with(telemetry)))
         }
         #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
@@ -84,18 +92,9 @@ pub(crate) fn try_initialize_subscriber(
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
             opentelemetry::global::set_error_handler(handle_error)?;
-            Ok(Arc::new(subscriber.with(telemetry)))
+            Ok(Arc::new(base_layer.with(telemetry)))
         }
-        None => {
-            // XXX OPENTELEMETRY APPROACH
-            let tracer = new_pipeline()
-                // .with_reporter(XXXWRITETHISCODEXXX())
-                .install_simple();
-            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-            tracing::info!("Instantiating tracing telemetry");
-            Ok(Arc::new(telemetry.with_subscriber(subscriber)))
-        }
+        None => Ok(Arc::new(base_layer)),
     }
 }
 
