@@ -1,12 +1,12 @@
 //! # Apollo-Telemetry Span Exporter
 //!
-//! The stdout [`SpanExporter`] writes debug printed [`Span`]s to its configured
-//! [`Write`] instance. By default it will write to [`Stdout`].
+//! The apollo-telemetry [`SpanExporter`] sends [`Reports`]s to its configured
+//! [`Reporter`] instance. By default it will write to the Apollo Ingress.
 //!
 //! [`SpanExporter`]: super::SpanExporter
 //! [`Span`]: crate::trace::Span
-//! [`Write`]: std::io::Write
-//! [`Stdout`]: std::io::Stdout
+//! [`Report`]: usage_agent::report::Report
+//! [`Reporter`]: usage_agent::Reporter
 //!
 //! # Examples
 //!
@@ -16,8 +16,7 @@
 //! use opentelemetry::global::shutdown_tracer_provider;
 //!
 //! fn main() {
-//!     let tracer = stdout::new_pipeline()
-//!         .with_pretty_print(true)
+//!     let tracer = apollo_telemetry::new_pipeline()
 //!         .install_simple();
 //!
 //!     tracer.in_span("doing_work", |cx| {
@@ -34,71 +33,69 @@ use opentelemetry::{
         trace::{ExportResult, SpanData, SpanExporter},
         ExportError,
     },
-    trace::{TraceError, TracerProvider},
+    trace::TracerProvider,
 };
 use prost_types::Timestamp;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::{stdout, Stdout, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::runtime::{Handle, Runtime};
-use usage_agent::report::{Report, ReportHeader, Trace, TracesAndStats};
+use tokio::runtime::Runtime;
+use usage_agent::report::{Trace, TracesAndStats};
 use usage_agent::{report::trace::CachePolicy, Reporter};
 
 /// Pipeline builder
 #[derive(Debug)]
-pub struct PipelineBuilder<W: Write> {
-    pretty_print: bool,
+pub struct PipelineBuilder {
     trace_config: Option<sdk::trace::Config>,
-    writer: W,
+    rt: Runtime,
+    reporter: Reporter,
 }
 
 /// Create a new stdout exporter pipeline builder.
-pub fn new_pipeline() -> PipelineBuilder<Stdout> {
+pub fn new_pipeline() -> PipelineBuilder {
     PipelineBuilder::default()
 }
 
-impl Default for PipelineBuilder<Stdout> {
+impl Default for PipelineBuilder {
     /// Return the default pipeline builder.
     fn default() -> Self {
+        let rt = Runtime::new().expect("Creating tokio runtime");
+        // let handle = rt.handle();
+        // let _guard = handle.enter();
+        let jh = rt.spawn(async {
+            Reporter::try_new("https://127.0.0.1:50051")
+                .await
+                .map_err::<ApolloError, _>(Into::into)
+                .expect("creating reporter")
+        });
+        tracing::info!("ABOUT TO BLOCK ON");
+        let reporter: Reporter = futures::executor::block_on(jh).expect("XXX");
+        tracing::info!("AFTER BLOCK ON");
         Self {
-            pretty_print: false,
             trace_config: None,
-            writer: stdout(),
+            rt,
+            reporter,
         }
     }
 }
 
-impl<W: Write> PipelineBuilder<W> {
-    /// Specify the pretty print setting.
-    pub fn with_pretty_print(mut self, pretty_print: bool) -> Self {
-        self.pretty_print = pretty_print;
-        self
-    }
-
+impl PipelineBuilder {
     /// Assign the SDK trace configuration.
     pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
         self.trace_config = Some(config);
         self
     }
 
-    /// Specify the writer to use.
-    pub fn with_writer<T: Write>(self, writer: T) -> PipelineBuilder<T> {
-        PipelineBuilder {
-            pretty_print: self.pretty_print,
-            trace_config: self.trace_config,
-            writer,
-        }
+    /// Specify the reporter to use.
+    pub fn with_reporter(mut self, reporter: Reporter) -> Self {
+        self.reporter = reporter;
+        self
     }
 }
 
-impl<W> PipelineBuilder<W>
-where
-    W: Write + Debug + Send + 'static,
-{
-    /// Install the stdout exporter pipeline with the recommended defaults.
+impl PipelineBuilder {
+    /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     pub fn install_simple(mut self) -> sdk::trace::Tracer {
-        let exporter = Exporter::new(self.writer, self.pretty_print);
+        let exporter = Exporter::new(self.rt, self.reporter);
 
         let mut provider_builder =
             sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
@@ -113,21 +110,20 @@ where
     }
 }
 
-/// A [`SpanExporter`] that writes to [`Stdout`] or other configured [`Write`].
+/// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
-/// [`Write`]: std::io::Write
-/// [`Stdout`]: std::io::Stdout
+/// [`Reporter`]: usage_agent::Reporter
 #[derive(Debug)]
-pub struct Exporter<W: Write> {
-    writer: W,
-    pretty_print: bool,
-    runtime: Runtime,
+pub struct Exporter {
+    // We have to keep the runtime alive, but we don't use it directly
+    rt: Runtime,
+    reporter: Reporter,
 }
 
-impl<W: Write> Exporter<W> {
+impl Exporter {
     /// Create a new stdout `Exporter`.
-    pub fn new(writer: W, pretty_print: bool) -> Self {
+    pub fn new(rt: Runtime, reporter: Reporter) -> Self {
         /*
         let fut_values = async move {
             println!("ABOUT TO WAIT");
@@ -154,16 +150,12 @@ impl<W: Write> Exporter<W> {
         tracing::info!("AFTER BLOCK ON");
         */
 
-        let rt = Runtime::new().expect("Creating tokio runtime");
-        Self {
-            writer,
-            pretty_print,
-            runtime: rt,
-        }
+        // let rt = Runtime::new().expect("Creating tokio runtime");
+        Self { rt, reporter }
     }
 }
 
-/// Stdout exporter's error
+/// Apollo Telemetry exporter's error
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
 struct ApolloError(#[from] usage_agent::ReporterError);
@@ -175,21 +167,12 @@ impl ExportError for ApolloError {
 }
 
 #[async_trait]
-impl<W> SpanExporter for Exporter<W>
-where
-    W: Write + Debug + Send + 'static,
-{
+impl SpanExporter for Exporter {
     /// Export spans to stdout
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
         /*
          * Break down batch and send to studio
          */
-        let handle = self.runtime.handle();
-        let _guard = handle.enter();
-        let mut reporter = Reporter::try_new("https://127.0.0.1:50051")
-            .await
-            // .map_err(|e| ExportError::from(e))?;
-            .map_err::<ApolloError, _>(Into::into)?;
         for span in batch {
             if span.name == "prepare_query" {
                 if let Some(q) = span
@@ -222,7 +205,8 @@ where
                     report.traces_per_query = tpq;
                     report.end_time = Some(ts_end);
 
-                    let msg = reporter
+                    let msg = self
+                        .reporter
                         .submit(report)
                         .await
                         .expect("XXX")

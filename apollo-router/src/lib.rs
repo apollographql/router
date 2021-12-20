@@ -20,7 +20,6 @@ use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 use configuration::Configuration;
-use custom::CustomLayer;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;

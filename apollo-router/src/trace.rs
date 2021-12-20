@@ -1,11 +1,7 @@
 use crate::apollo_telemetry::new_pipeline;
-/* XXX TELEMETRY OR CUSTOMLAYER?
- * use crate::CustomLayer;
- */
 use std::sync::Arc;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};
-use std::io::stderr;
 use std::str::FromStr;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -93,16 +89,10 @@ pub(crate) fn try_initialize_subscriber(
         None => {
             // XXX OPENTELEMETRY APPROACH
             let tracer = new_pipeline()
-                .with_pretty_print(true)
-                .with_writer(stderr())
+                // .with_reporter(XXXWRITETHISCODEXXX())
                 .install_simple();
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-            //
-            /* XXX LAYERS APPROACH
-            let telemetry = CustomLayer {};
-            */
 
-            // tracing_subscriber::registry().with(telemetry);
             tracing::info!("Instantiating tracing telemetry");
             Ok(Arc::new(telemetry.with_subscriber(subscriber)))
         }
