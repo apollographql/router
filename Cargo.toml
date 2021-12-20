@@ -5,4 +5,3 @@ members = ["apollo-router", "apollo-router-core", "apollo-router-benchmarks", "x
 [patch.crates-io]
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6b3aa02aa" }
 opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6b3aa02aa" }
-hyper = { git = "https://github.com/o0Ignition0o/hyper.git", branch = "igni/bump_h2_dependency" }

@@ -1326,24 +1326,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "h2"
-version = "0.3.9"
-source = "git+https://github.com/o0Ignition0o/h2.git?branch=igni/bump_indexmap_dependency#93be8238810539c79e7d909cb021628b7b4a16ee"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http",
- "indexmap",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
 name = "half"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1476,18 +1458,19 @@ dependencies = [
 [[package]]
 name = "hyper"
 version = "0.14.16"
-source = "git+https://github.com/o0Ignition0o/hyper.git?branch=igni/bump_h2_dependency#9f663511505469c2c24f9cc468c47ca769a63c85"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7ec3e62bdc98a2f0393a5048e4c30ef659440ea6e0e572965103e72bd836f55"
 dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.9 (git+https://github.com/o0Ignition0o/h2.git?branch=igni/bump_indexmap_dependency)",
+ "h2",
  "http",
  "http-body",
  "httparse",
  "httpdate",
- "itoa 1.0.1",
+ "itoa 0.4.8",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -3519,7 +3502,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "h2 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "h2",
  "http",
  "http-body",
  "hyper",
