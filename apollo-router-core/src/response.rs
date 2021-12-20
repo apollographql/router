@@ -57,28 +57,6 @@ impl Response {
         self.path.is_none()
     }
 
-    pub fn insert_data(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
-        let mut nodes =
-            self.data
-                .get_at_path_mut(path)
-                .map_err(|err| FetchError::ExecutionPathNotFound {
-                    reason: err.to_string(),
-                })?;
-
-        let len = nodes.len();
-        //FIXME: are there cases where we could write at multiple paths?
-        for (i, node) in nodes.iter_mut().enumerate() {
-            if i == len {
-                (*node).deep_merge(value);
-                break;
-            } else {
-                (*node).deep_merge(value.clone());
-            }
-        }
-
-        Ok(())
-    }
-
     /// append_errors default the errors `path` with the one provided.
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
@@ -95,29 +73,6 @@ impl From<Response> for ResponseStream {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_insert_data() {
-        let mut response = Response::builder()
-            .data(json!({
-                "name": "SpongeBob",
-                "job": {},
-            }))
-            .build();
-        let data = json!({
-            "name": "cook",
-        });
-        response.insert_data(&Path::from("job"), data).unwrap();
-        assert_eq!(
-            response.data,
-            json!({
-                "name": "SpongeBob",
-                "job": {
-                    "name": "cook",
-                },
-            }),
-        );
-    }
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

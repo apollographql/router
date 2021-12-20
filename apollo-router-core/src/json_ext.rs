@@ -3,24 +3,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::map::Entry;
 use serde_json::Map;
 pub use serde_json::Value;
+use std::cmp::min;
 use std::fmt;
 
 /// A JSON object.
 pub type Object = Map<String, Value>;
 
+#[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
 pub trait ValueExt {
-    /// Get a reference to the value(s) at a particular path.
-    #[track_caller]
-    fn get_at_path<'a, 'b>(&'a self, path: &'b Path) -> Result<Vec<&'a Self>, JsonExtError>;
-
-    /// Get a mutable reference to the value(s) at a particular path.
-    #[track_caller]
-    fn get_at_path_mut<'a, 'b>(
-        &'a mut self,
-        path: &'b Path,
-    ) -> Result<Vec<&'a mut Self>, JsonExtError>;
-
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
     /// exists.
     #[track_caller]
@@ -35,94 +26,29 @@ pub trait ValueExt {
     /// values in `self`.
     #[track_caller]
     fn is_subset(&self, superset: &Value) -> bool;
+
+    /// Create a `Value` by inserting a value at a subpath.
+    ///
+    /// This will create objects, arrays and null nodes as needed if they
+    /// are not present: the resulting Value is meant to be merged with an
+    /// existing one that contains those nodes.
+    #[track_caller]
+    fn from_path(path: &Path, value: Value) -> Value;
+
+    /// Insert a `value` at a `Path`
+    #[track_caller]
+    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
+
+    /// Select all values matching a `Path`.
+    ///
+    /// the function passed as argument will be called with the values found and their Path
+    #[track_caller]
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F) -> Result<(), FetchError>
+    where
+        F: FnMut(Path, &'a Value);
 }
 
 impl ValueExt for Value {
-    fn get_at_path<'a, 'b>(&'a self, path: &'b Path) -> Result<Vec<&'a Self>, JsonExtError> {
-        let mut current = vec![self];
-
-        for path_element in path.iter() {
-            current = match path_element {
-                PathElement::Flatten => current
-                    .into_iter()
-                    .map(|x| x.as_array().ok_or(JsonExtError::InvalidFlatten))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                PathElement::Index(index) if !(current.len() == 1 && current[0].is_array()) => {
-                    vec![current
-                        .into_iter()
-                        .nth(*index)
-                        .ok_or(JsonExtError::PathNotFound)?]
-                }
-                path_element => current
-                    .into_iter()
-                    .map(|value| match (path_element, value) {
-                        (PathElement::Key(key), value) if value.is_object() => value
-                            .as_object()
-                            .unwrap()
-                            .get(key)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Key(_), _) => Err(JsonExtError::PathNotFound),
-                        (PathElement::Index(i), value) => value
-                            .as_array()
-                            .ok_or(JsonExtError::PathNotFound)?
-                            .get(*i)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Flatten, _) => unreachable!(),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-
-        Ok(current)
-    }
-
-    fn get_at_path_mut<'a, 'b>(
-        &'a mut self,
-        path: &'b Path,
-    ) -> Result<Vec<&'a mut Self>, JsonExtError> {
-        let mut current = vec![self];
-
-        for path_element in path.iter() {
-            current = match path_element {
-                PathElement::Flatten => current
-                    .into_iter()
-                    .map(|x| x.as_array_mut().ok_or(JsonExtError::InvalidFlatten))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                PathElement::Index(index) if !(current.len() == 1 && current[0].is_array()) => {
-                    vec![current
-                        .into_iter()
-                        .nth(*index)
-                        .ok_or(JsonExtError::PathNotFound)?]
-                }
-                path_element => current
-                    .into_iter()
-                    .map(|value| match (path_element, value) {
-                        (PathElement::Key(key), value) if value.is_object() => value
-                            .as_object_mut()
-                            .unwrap()
-                            .get_mut(key)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Key(_), _) => Err(JsonExtError::PathNotFound),
-                        (PathElement::Index(i), value) => value
-                            .as_array_mut()
-                            .ok_or(JsonExtError::PathNotFound)?
-                            .get_mut(*i)
-                            .ok_or(JsonExtError::PathNotFound),
-                        (PathElement::Flatten, _) => unreachable!(),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-
-        Ok(current)
-    }
-
     fn deep_merge(&mut self, other: Self) {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
@@ -138,9 +64,18 @@ impl ValueExt for Value {
                 }
             }
             (Value::Array(a), Value::Array(mut b)) => {
-                for ((_index, b_value), a_value) in b.drain(..).enumerate().zip(a.iter_mut()) {
+                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
                     a_value.deep_merge(b_value);
                 }
+
+                a.extend(b.into_iter());
+            }
+            (_, Value::Null) => {}
+            (Value::Object(_), Value::Array(_)) => {
+                failfast_debug!("trying to replace an object with an array");
+            }
+            (Value::Array(_), Value::Object(_)) => {
+                failfast_debug!("trying to replace an array with an object");
             }
             (a, b) => {
                 *a = b;
@@ -212,10 +147,220 @@ impl ValueExt for Value {
             (a, b) => a == b,
         }
     }
+
+    #[track_caller]
+    fn from_path(path: &Path, value: Value) -> Value {
+        let mut res_value = Value::default();
+        let mut current_node = &mut res_value;
+
+        for p in path.iter() {
+            match p {
+                PathElement::Flatten => {
+                    let a = Vec::new();
+                    *current_node = Value::Array(a);
+                }
+
+                &PathElement::Index(index) => match current_node {
+                    Value::Array(a) => {
+                        for _ in 0..index {
+                            a.push(Value::default());
+                        }
+                        a.push(Value::default());
+                        current_node = a
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    Value::Null => {
+                        let mut a = Vec::new();
+                        for _ in 0..index {
+                            a.push(Value::default());
+                        }
+                        a.push(Value::default());
+
+                        *current_node = Value::Array(a);
+                        current_node = current_node
+                            .as_array_mut()
+                            .expect("current_node was just set to a Value::Array")
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    other => unreachable!("unreachable node: {:?}", other),
+                },
+                PathElement::Key(k) => {
+                    let mut m = Map::new();
+                    m.insert(k.to_string(), Value::default());
+
+                    *current_node = Value::Object(m);
+                    current_node = current_node
+                        .as_object_mut()
+                        .expect("current_node was just set to a Value::Object")
+                        .get_mut(k)
+                        .expect("the value at that key was just inserted");
+                }
+            }
+        }
+
+        *current_node = value;
+        res_value
+    }
+
+    /// Insert a `value` at a `Path`
+    #[track_caller]
+    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
+        let mut current_node = self;
+
+        for p in path.iter() {
+            match p {
+                PathElement::Flatten => {
+                    if current_node.is_null() {
+                        let a = Vec::new();
+                        *current_node = Value::Array(a);
+                    } else if !current_node.is_array() {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an array".to_string(),
+                        });
+                    }
+                }
+
+                &PathElement::Index(index) => match current_node {
+                    Value::Array(a) => {
+                        // add more elements if the index is after the end
+                        for _ in a.len()..index + 1 {
+                            a.push(Value::default());
+                        }
+                        current_node = a
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    Value::Null => {
+                        let mut a = Vec::new();
+                        for _ in 0..index + 1 {
+                            a.push(Value::default());
+                        }
+
+                        *current_node = Value::Array(a);
+                        current_node = current_node
+                            .as_array_mut()
+                            .expect("current_node was just set to a Value::Array")
+                            .get_mut(index)
+                            .expect("we just created the value at that index");
+                    }
+                    _other => {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an array".to_string(),
+                        })
+                    }
+                },
+                PathElement::Key(k) => match current_node {
+                    Value::Object(o) => {
+                        current_node = o
+                            .get_mut(k)
+                            .expect("the value at that key was just inserted");
+                    }
+                    Value::Null => {
+                        let mut m = Map::new();
+                        m.insert(k.to_string(), Value::default());
+
+                        *current_node = Value::Object(m);
+                        current_node = current_node
+                            .as_object_mut()
+                            .expect("current_node was just set to a Value::Object")
+                            .get_mut(k)
+                            .expect("the value at that key was just inserted");
+                    }
+                    _other => {
+                        return Err(FetchError::ExecutionPathNotFound {
+                            reason: "expected an object".to_string(),
+                        })
+                    }
+                },
+            }
+        }
+
+        *current_node = value;
+        Ok(())
+    }
+
+    #[track_caller]
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F) -> Result<(), FetchError>
+    where
+        F: FnMut(Path, &'a Value),
+    {
+        iterate_path(&Path::default(), &path.0, self, &mut f)
+    }
+}
+
+fn iterate_path<'a, F>(
+    parent: &Path,
+    path: &'a [PathElement],
+    data: &'a Value,
+    f: &mut F,
+) -> Result<(), FetchError>
+where
+    F: FnMut(Path, &'a Value),
+{
+    match path.get(0) {
+        None => {
+            f(parent.clone(), data);
+            Ok(())
+        }
+        Some(PathElement::Flatten) => match data.as_array() {
+            None => Err(FetchError::ExecutionInvalidContent {
+                reason: "not an array".to_string(),
+            }),
+            Some(array) => {
+                for (i, value) in array.iter().enumerate() {
+                    iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        f,
+                    )?;
+                }
+                Ok(())
+            }
+        },
+        Some(PathElement::Index(i)) => {
+            if let Value::Array(a) = data {
+                if let Some(value) = a.get(*i) {
+                    iterate_path(
+                        &parent.join(Path::from(i.to_string())),
+                        &path[1..],
+                        value,
+                        f,
+                    )
+                } else {
+                    Err(FetchError::ExecutionPathNotFound {
+                        reason: format!("index {} not found", i),
+                    })
+                }
+            } else {
+                Err(FetchError::ExecutionInvalidContent {
+                    reason: "not an array".to_string(),
+                })
+            }
+        }
+        Some(PathElement::Key(k)) => {
+            if let Value::Object(o) = data {
+                if let Some(value) = o.get(k) {
+                    iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
+                } else {
+                    Err(FetchError::ExecutionPathNotFound {
+                        reason: format!("key {} not found", k),
+                    })
+                }
+            } else {
+                Err(FetchError::ExecutionInvalidContent {
+                    reason: "not an object".to_string(),
+                })
+            }
+        }
+    }
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
+#[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PathElement {
@@ -274,9 +419,10 @@ where
 /// A path into the result document.
 ///
 /// This can be composed of strings and numbers
+#[doc(hidden)]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub struct Path(Vec<PathElement>);
+pub struct Path(pub Vec<PathElement>);
 
 impl Path {
     pub fn from_slice<T: AsRef<str>>(s: &[T]) -> Self {
@@ -388,32 +534,31 @@ mod tests {
         };
     }
 
+    fn select_values<'a>(path: &'a Path, data: &'a Value) -> Result<Vec<&'a Value>, FetchError> {
+        let mut v = Vec::new();
+        data.select_values_and_paths(path, |_path, value| v.push(value))?;
+        Ok(v)
+    }
+
     #[test]
     fn test_get_at_path() {
-        let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(result, vec![&Value::Number(2.into())]);
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(result_mut, vec![&mut Value::Number(2.into())]);
     }
 
     #[test]
     fn test_get_at_path_flatmap() {
-        let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(
-            result_mut,
-            vec![&mut json!({"prop1":1}), &mut json!({"prop1":2})]
-        );
     }
 
     #[test]
     fn test_get_at_path_flatmap_nested() {
-        let mut json = json!({
+        let json = json!({
             "obj": {
                 "arr": [
                     {
@@ -432,7 +577,7 @@ mod tests {
             },
         });
         let path = Path::from("obj/arr/@/prop1/@/prop2");
-        let result = json.get_at_path(&path).unwrap();
+        let result = select_values(&path, &json).unwrap();
         assert_eq!(
             result,
             vec![
@@ -440,16 +585,6 @@ mod tests {
                 &json!({"prop3":2}),
                 &json!({"prop3":3}),
                 &json!({"prop3":4}),
-            ],
-        );
-        let result_mut = json.get_at_path_mut(&path).unwrap();
-        assert_eq!(
-            result_mut,
-            vec![
-                &mut json!({"prop3":1}),
-                &mut json!({"prop3":2}),
-                &mut json!({"prop3":3}),
-                &mut json!({"prop3":4}),
             ],
         );
     }
@@ -513,5 +648,21 @@ mod tests {
         assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
+    }
+
+    #[test]
+    fn test_from_path() {
+        let json = json!([{"prop1":1},{"prop1":2}]);
+        let path = Path::from("obj/arr/@");
+        let result = Value::from_path(&path, json);
+        assert_eq!(result, json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
+    }
+
+    #[test]
+    fn test_from_path_index() {
+        let json = json!({"prop1":1});
+        let path = Path::from("obj/arr/1");
+        let result = Value::from_path(&path, json);
+        assert_eq!(result, json!({"obj":{"arr":[null, {"prop1":1}]}}));
     }
 }

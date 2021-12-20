@@ -129,11 +129,7 @@ impl PreparedQuery for ApolloPreparedQuery {
     async fn execute(self, request: Arc<Request>) -> ResponseStream {
         let mut response = self
             .query_plan
-            .execute(
-                Arc::clone(&request),
-                Arc::clone(&self.service_registry),
-                Arc::clone(&self.schema),
-            )
+            .execute(&request, self.service_registry.as_ref(), &self.schema)
             .instrument(tracing::info_span!("execution"))
             .await;
 
