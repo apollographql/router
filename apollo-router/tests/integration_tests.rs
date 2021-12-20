@@ -7,6 +7,7 @@ use apollo_router_core::ValueExt;
 use futures::prelude::*;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
+use serde_json_bytes::ByteString;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -18,8 +19,8 @@ macro_rules! assert_federated_response {
             .query($query)
             .variables(Arc::new(
                 vec![
-                    ("topProductsFirst".to_string(), 2.into()),
-                    ("reviewsForAuthorAuthorId".to_string(), 1.into()),
+                    (ByteString::from("topProductsFirst"), 2.into()),
+                    (ByteString::from("reviewsForAuthorAuthorId"), 1.into()),
                 ]
                 .into_iter()
                 .collect(),

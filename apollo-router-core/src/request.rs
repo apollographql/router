@@ -48,6 +48,7 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
+    use serde_json_bytes::bjson;
     use test_log::test;
 
     #[test]

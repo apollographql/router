@@ -139,7 +139,7 @@ impl Query {
                     name,
                     selection_set,
                 } => {
-                    if let Some(input_value) = input.remove(name) {
+                    if let Some(input_value) = input.remove(name.as_str()) {
                         if let Some(selection_set) = selection_set {
                             match input_value {
                                 Value::Object(mut input_object) => {
@@ -220,14 +220,18 @@ impl Query {
                 .iter()
                 .fold(HashMap::new(), |mut acc, operation| {
                     if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                        acc.extend(operation.variables.iter())
+                        acc.extend(operation.variables.iter().map(|(k, v)| (k.as_str(), v)))
                     }
                     acc
                 });
 
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = operation_variable_types.keys().cloned().collect();
-            let provided_variables = request.variables.keys().collect::<HashSet<_>>();
+            let provided_variables = request
+                .variables
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<HashSet<_>>();
             let unknown_variables = provided_variables
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
@@ -242,7 +246,7 @@ impl Query {
         let errors = operation_variable_types
             .iter()
             .filter_map(|(name, ty)| {
-                let value = request.variables.get(name.as_str()).unwrap_or(&Value::Null);
+                let value = request.variables.get(*name).unwrap_or(&Value::Null);
                 ty.validate_value(value, schema).err().map(|_| {
                     FetchError::ValidationInvalidTypeVariable {
                         name: name.to_string(),
@@ -335,7 +339,7 @@ impl From<ast::OperationType> for OperationType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json_bytes::bjson;
     use test_log::test;
 
     macro_rules! assert_eq_and_ordered {

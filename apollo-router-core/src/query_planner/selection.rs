@@ -1,5 +1,6 @@
-use crate::{json::Entry, prelude::graphql::*};
+use crate::prelude::graphql::*;
 use serde::Deserialize;
+use serde_json_bytes::Entry;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -79,7 +80,7 @@ fn select_field(
     field: &Field,
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    match (content.get(&field.name), &field.selections) {
+    match (content.get(field.name.as_str()), &field.selections) {
         (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
         (Some(value), None) => Ok(Some(value.to_owned())),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
@@ -115,6 +116,7 @@ mod tests {
     use super::Selection;
     use super::*;
     use serde_json::json;
+    use serde_json_bytes::bjson;
 
     fn select<'a>(
         response: &Response,
