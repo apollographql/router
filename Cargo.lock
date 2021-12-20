@@ -3861,6 +3861,7 @@ dependencies = [
 [[package]]
 name = "usage_agent"
 version = "0.1.0"
+source = "git+https://github.com/garypen/usage_agent.git?rev=a2d54680b44267ef1a0cae3aff079f3741a2168c#a2d54680b44267ef1a0cae3aff079f3741a2168c"
 dependencies = [
  "bytes",
  "prost 0.9.0",
