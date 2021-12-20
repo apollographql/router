@@ -10,9 +10,9 @@
 //!
 //! # Examples
 //!
-//! ```no_run
+//! ```ignore
+//! use crate::apollo_telemetry;
 //! use opentelemetry::trace::Tracer;
-//! use opentelemetry::sdk::export::trace::stdout;
 //! use opentelemetry::global::shutdown_tracer_provider;
 //!
 //! fn main() {
@@ -50,7 +50,7 @@ pub struct PipelineBuilder {
     reporter: Reporter,
 }
 
-/// Create a new stdout exporter pipeline builder.
+/// Create a new apollo telemetry exporter pipeline builder.
 pub fn new_pipeline() -> PipelineBuilder {
     PipelineBuilder::default()
 }
@@ -59,17 +59,13 @@ impl Default for PipelineBuilder {
     /// Return the default pipeline builder.
     fn default() -> Self {
         let rt = Runtime::new().expect("Creating tokio runtime");
-        // let handle = rt.handle();
-        // let _guard = handle.enter();
         let jh = rt.spawn(async {
             Reporter::try_new("https://127.0.0.1:50051")
                 .await
                 .map_err::<ApolloError, _>(Into::into)
                 .expect("creating reporter")
         });
-        tracing::info!("ABOUT TO BLOCK ON");
         let reporter: Reporter = futures::executor::block_on(jh).expect("XXX");
-        tracing::info!("AFTER BLOCK ON");
         Self {
             trace_config: None,
             rt,
@@ -80,12 +76,14 @@ impl Default for PipelineBuilder {
 
 impl PipelineBuilder {
     /// Assign the SDK trace configuration.
+    #[allow(dead_code)]
     pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
         self.trace_config = Some(config);
         self
     }
 
     /// Specify the reporter to use.
+    #[allow(dead_code)]
     pub fn with_reporter(mut self, reporter: Reporter) -> Self {
         self.reporter = reporter;
         self
@@ -117,41 +115,14 @@ impl PipelineBuilder {
 #[derive(Debug)]
 pub struct Exporter {
     // We have to keep the runtime alive, but we don't use it directly
-    rt: Runtime,
+    _rt: Runtime,
     reporter: Reporter,
 }
 
 impl Exporter {
-    /// Create a new stdout `Exporter`.
+    /// Create a new apollo telemetry `Exporter`.
     pub fn new(rt: Runtime, reporter: Reporter) -> Self {
-        /*
-        let fut_values = async move {
-            println!("ABOUT TO WAIT");
-            let res = Reporter::try_new_with_static("https://127.0.0.1:50051")
-                .await
-                .expect("XXX");
-            println!("AFTER WAIT");
-            res
-        };
-
-        let handle = Handle::current();
-        let guard = handle.enter();
-        let hdl = handle.spawn(fut_values);
-        tracing::info!("ABOUT TO BLOCK ON");
-        // let reporter: Reporter = handle.spawn(hdl).expect("XXX");
-        tracing::info!("AFTER BLOCK ON");
-        drop(guard);
-        let hdl = handle.spawn_blocking(|| fut_values);
-        // let _ = handle.enter();
-        tracing::info!("ABOUT TO BLOCK ON");
-        // let current = Handle::current();
-        let reporter: Reporter = futures::executor::block_on(hdl).expect("XXX");
-        // let reporter: Reporter = current.spawn(fut_values);
-        tracing::info!("AFTER BLOCK ON");
-        */
-
-        // let rt = Runtime::new().expect("Creating tokio runtime");
-        Self { rt, reporter }
+        Self { _rt: rt, reporter }
     }
 }
 
@@ -168,7 +139,7 @@ impl ExportError for ApolloError {
 
 #[async_trait]
 impl SpanExporter for Exporter {
-    /// Export spans to stdout
+    /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
         /*
          * Break down batch and send to studio
@@ -215,17 +186,6 @@ impl SpanExporter for Exporter {
                     tracing::info!("server response: {}", msg);
                 }
             }
-            /*
-            if self.pretty_print {
-                self.writer
-                    .write_all(format!("{:#?}\n", span).as_bytes())
-                    .map_err::<Error, _>(Into::into)?;
-            } else {
-                self.writer
-                    .write_all(format!("{:?}\n", span).as_bytes())
-                    .map_err::<Error, _>(Into::into)?;
-            }
-            */
         }
 
         Ok(())
