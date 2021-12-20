@@ -36,10 +36,11 @@ use opentelemetry::{
     trace::TracerProvider,
 };
 use prost_types::Timestamp;
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::{collections::HashMap, time::Duration};
 use tokio::runtime::Runtime;
 use usage_agent::report::{Trace, TracesAndStats};
+use usage_agent::server::ReportServer;
 use usage_agent::{report::trace::CachePolicy, Reporter};
 
 /// Pipeline builder
@@ -59,13 +60,32 @@ impl Default for PipelineBuilder {
     /// Return the default pipeline builder.
     fn default() -> Self {
         let rt = Runtime::new().expect("Creating tokio runtime");
-        let jh = rt.spawn(async {
-            Reporter::try_new("https://127.0.0.1:50051")
-                .await
-                .map_err::<ApolloError, _>(Into::into)
-                .expect("creating reporter")
+        rt.spawn(async {
+            // XXX Hard-Code, spawn a server and expect it to succeed
+
+            let report_server =
+                ReportServer::new("0.0.0.0:50051".parse().expect("parsing server address"));
+            report_server.serve().await.expect("serving reports");
         });
-        let reporter: Reporter = futures::executor::block_on(jh).expect("XXX");
+
+        let jh = rt.spawn(async {
+            loop {
+                match Reporter::try_new("https://127.0.0.1:50051")
+                    .await
+                    .map_err::<ApolloError, _>(Into::into)
+                {
+                    Ok(r) => {
+                        tracing::info!("Connected to server, proceeding...");
+                        return r;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not connect to server({}), re-trying...", e);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                }
+            }
+        });
+        let reporter: Reporter = futures::executor::block_on(jh).expect("join task");
         Self {
             trace_config: None,
             rt,
