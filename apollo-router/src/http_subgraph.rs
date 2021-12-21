@@ -1,14 +1,8 @@
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
-use bytes::BytesMut;
 use derivative::Derivative;
 use futures::prelude::*;
-use std::pin::Pin;
 use tracing::Instrument;
-
-type BytesStream = Pin<
-    Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
->;
 
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
