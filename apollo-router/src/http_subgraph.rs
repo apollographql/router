@@ -39,66 +39,56 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    fn request_stream(&self, request: graphql::Request) -> BytesStream {
+    async fn request_stream(
+        &self,
+        request: graphql::Request,
+    ) -> Result<bytes::Bytes, graphql::FetchError> {
         // Perform the actual request and start streaming.
-        // Reqwest doesn't care if there is only one response, in this case it'll be a stream of
-        // one element.
-        let service = self.service.clone();
-        self.http_client
+        // assume for now that there will be only one response
+        let response = self
+            .http_client
             .post(self.url.clone())
             .json(&request)
             .send()
             .instrument(tracing::trace_span!("http-subgraph-request"))
-            // We have a future for the response, convert it to a future of the stream.
-            .map_ok(|r| r.bytes_stream().boxed())
-            // Convert the entire future to a stream, at this point we have a stream of a result of
-            // a single stream
-            .into_stream()
-            // Flatten the stream
-            .flat_map(|result| match result {
-                Ok(s) => s.map_err(Into::into).boxed(),
-                Err(err) => stream::iter(vec![Err(err)]).boxed(),
-            })
-            .map_err(move |err: reqwest_middleware::Error| {
+            .await
+            .map_err(|err| {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
                 graphql::FetchError::SubrequestHttpError {
-                    service: service.to_owned(),
+                    service: self.service.to_owned(),
                     reason: err.to_string(),
                 }
-            })
-            .boxed()
+            })?;
+
+        response.bytes().await.map_err(|err| {
+            tracing::error!(fetch_error = format!("{:?}", err).as_str());
+
+            graphql::FetchError::SubrequestHttpError {
+                service: self.service.to_owned(),
+                reason: err.to_string(),
+            }
+        })
     }
 
     fn map_to_graphql(
         service_name: String,
-        mut bytes_stream: BytesStream,
+        response: Result<bytes::Bytes, graphql::FetchError>,
     ) -> graphql::ResponseStream {
         Box::pin(
             async move {
-                let mut current_payload_bytes = BytesMut::new();
                 let is_primary = true;
-
-                while let Some(next_chunk) = bytes_stream.next().await {
-                    match next_chunk {
-                        Ok(bytes) => {
-                            current_payload_bytes.extend(&bytes);
-                        }
-                        Err(fetch_error) => {
-                            return fetch_error.to_response(is_primary);
-                        }
-                    }
+                match response {
+                    Err(e) => e.to_response(is_primary),
+                    Ok(bytes) => serde_json::from_slice::<graphql::Response>(&bytes)
+                        .unwrap_or_else(|error| {
+                            graphql::FetchError::SubrequestMalformedResponse {
+                                service: service_name.clone(),
+                                reason: error.to_string(),
+                            }
+                            .to_response(is_primary)
+                        }),
                 }
-
-                serde_json::from_slice::<graphql::Response>(&current_payload_bytes).unwrap_or_else(
-                    |error| {
-                        graphql::FetchError::SubrequestMalformedResponse {
-                            service: service_name.clone(),
-                            reason: error.to_string(),
-                        }
-                        .to_response(is_primary)
-                    },
-                )
             }
             .into_stream(),
         )
@@ -110,8 +100,8 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest fetch a stream of graphql results.
     async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
         let service_name = self.service.to_string();
-        let bytes_stream = self.request_stream(request);
-        Self::map_to_graphql(service_name, bytes_stream)
+        let response = self.request_stream(request).await;
+        Self::map_to_graphql(service_name, response)
     }
 }
 
