@@ -171,6 +171,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "typed-builder",
+ "url",
 ]
 
 [[package]]

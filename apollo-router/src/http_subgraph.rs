@@ -4,6 +4,7 @@ use derivative::Derivative;
 use futures::prelude::*;
 use std::pin::Pin;
 use tracing::Instrument;
+use url::Url;
 
 type BytesStream = Pin<
     Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
@@ -15,14 +16,14 @@ type BytesStream = Pin<
 #[derivative(Debug)]
 pub struct HttpSubgraphFetcher {
     service: String,
-    url: String,
+    url: Url,
     #[derivative(Debug = "ignore")]
     http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl HttpSubgraphFetcher {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: String, url: String) -> Self {
+    pub fn new(service: String, url: Url) -> Self {
         HttpSubgraphFetcher {
             http_client: reqwest_middleware::ClientBuilder::new(
                 reqwest::Client::builder()
@@ -181,7 +182,10 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&response);
         });
-        let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
+        let fetcher = HttpSubgraphFetcher::new(
+            "products".into(),
+            Url::parse(&server.url("/graphql")).expect("test"),
+        );
         let collect = fetcher
             .stream(
                 graphql::Request::builder()

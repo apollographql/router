@@ -36,6 +36,8 @@ pub enum ConfigurationError {
     MissingFeature(&'static str),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
+    /// Could not parse the URL for subgraph {0}
+    InvalidSubgraphUrl(String, String),
 }
 
 /// The configuration for the router.
@@ -82,15 +84,21 @@ impl Configuration {
                         errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
                         continue;
                     }
-                    self.subgraphs.insert(
-                        name.to_owned(),
-                        Subgraph {
-                            routing_url: schema_url.to_owned(),
-                        },
-                    );
+                    match Url::parse(schema_url) {
+                        Err(_e) => {
+                            errors.push(ConfigurationError::InvalidSubgraphUrl(
+                                name.to_owned(),
+                                schema_url.to_owned(),
+                            ));
+                        }
+                        Ok(routing_url) => {
+                            self.subgraphs
+                                .insert(name.to_owned(), Subgraph { routing_url });
+                        }
+                    }
                 }
                 Some(subgraph) => {
-                    if !schema_url.is_empty() && schema_url != &subgraph.routing_url {
+                    if !schema_url.is_empty() && schema_url != subgraph.routing_url.as_str() {
                         tracing::warn!("overriding URL from subgraph {} at {} with URL from the configuration file: {}",
                 name, schema_url, subgraph.routing_url);
                     }
@@ -114,7 +122,7 @@ impl Configuration {
 #[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 pub struct Subgraph {
     /// The url for the subgraph.
-    pub routing_url: String,
+    pub routing_url: Url,
 }
 
 /// Configuration options pertaining to the http server component.
@@ -418,13 +426,13 @@ mod tests {
                     (
                         "inventory".to_string(),
                         Subgraph {
-                            routing_url: "http://inventory/graphql".to_string(),
+                            routing_url: Url::parse("http://inventory/graphql").expect("test"),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
-                            routing_url: "http://products/graphql".to_string(),
+                            routing_url: Url::parse("http://products/graphql").expect("test"),
                         },
                     ),
                 ]
@@ -448,7 +456,12 @@ mod tests {
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            configuration.subgraphs.get("accounts").unwrap().routing_url,
+            configuration
+                .subgraphs
+                .get("accounts")
+                .unwrap()
+                .routing_url
+                .as_str(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
@@ -458,13 +471,19 @@ mod tests {
                 .subgraphs
                 .get("inventory")
                 .unwrap()
-                .routing_url,
+                .routing_url
+                .as_str(),
             "http://inventory/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            configuration.subgraphs.get("products").unwrap().routing_url,
+            configuration
+                .subgraphs
+                .get("products")
+                .unwrap()
+                .routing_url
+                .as_str(),
             "http://products/graphql"
         );
         // if the configuration has a no routing URL, and the supergraph
