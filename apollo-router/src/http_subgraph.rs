@@ -81,7 +81,9 @@ impl HttpSubgraphFetcher {
                 while let Some(next_chunk) = bytes_stream.next().await {
                     match next_chunk {
                         Ok(bytes) => {
-                            current_payload_bytes.extend(&bytes);
+                            tracing::debug_span!("aggregate_response_data").in_scope(|| {
+                                current_payload_bytes.extend(&bytes);
+                            })
                         }
                         Err(fetch_error) => {
                             return fetch_error.to_response(is_primary);
@@ -89,15 +91,16 @@ impl HttpSubgraphFetcher {
                     }
                 }
 
-                serde_json::from_slice::<graphql::Response>(&current_payload_bytes).unwrap_or_else(
-                    |error| {
-                        graphql::FetchError::SubrequestMalformedResponse {
-                            service: service_name.clone(),
-                            reason: error.to_string(),
-                        }
-                        .to_response(is_primary)
-                    },
-                )
+                tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                    serde_json::from_slice::<graphql::Response>(&current_payload_bytes)
+                        .unwrap_or_else(|error| {
+                            graphql::FetchError::SubrequestMalformedResponse {
+                                service: service_name.clone(),
+                                reason: error.to_string(),
+                            }
+                            .to_response(is_primary)
+                        })
+                })
             }
             .into_stream(),
         )

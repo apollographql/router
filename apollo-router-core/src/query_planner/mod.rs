@@ -324,14 +324,17 @@ mod fetch {
 
             let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-            let Variables { variables, paths } = Variables::new(
-                &self.requires,
-                self.variable_usages.as_ref(),
-                data,
-                current_dir,
-                request,
-                schema,
-            )?;
+            let Variables { variables, paths } =
+                tracing::debug_span!("make_variables").in_scope(|| {
+                    Variables::new(
+                        &self.requires,
+                        self.variable_usages.as_ref(),
+                        data,
+                        current_dir,
+                        request,
+                        schema,
+                    )
+                })?;
 
             let fetcher = service_registry
                 .get(service_name)
@@ -366,7 +369,7 @@ mod fetch {
             self.response_at_path(current_dir, paths, subgraph_response)
         }
 
-        #[instrument(level = "trace", name = "response_insert", skip_all)]
+        #[instrument(level = "debug", name = "response_insert", skip_all)]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
