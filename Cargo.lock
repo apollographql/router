@@ -157,7 +157,6 @@ dependencies = [
  "displaydoc",
  "futures",
  "include_dir",
- "indexmap",
  "insta",
  "lru",
  "miette",
