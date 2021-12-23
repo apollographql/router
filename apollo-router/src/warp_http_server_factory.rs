@@ -11,8 +11,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
+use tower::ServiceBuilder;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Span};
+use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -69,6 +71,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
+
+            let svc = ServiceBuilder::new()
+                // generate a tracing span that covers request parsing and response serializing
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                )
+                .service(svc);
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             let tcp_listener = if let Some(listener) = listener {
