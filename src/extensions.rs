@@ -1,121 +1,103 @@
-
-
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
+use anyhow::anyhow;
 use async_trait::async_trait;
-// Extensions will use chaining rather than than callbacks for start and end.
-// Callbacks have not been found to be a good fit to thread local based stuff such as OTel.
+use anyhow::Result;
+use opentelemetry::Context;
+use opentelemetry::trace::FutureExt;
 
-use crate::{Configuration, DownstreamRequestChain, ExtensionManager, QueryPlan, Request, Response, Schema};
-
-// Why have this at all when users can compose via RouterFactory?
-//
-struct Chain {}
-
-impl Chain {
-    pub async fn validate_response(&self, _response: Response) {
-        todo!()
-    }
-    pub async fn make_request(&self, _upstream_request: Request, _downstream_request: Request) -> Response {
-        todo!()
-    }
-    pub async fn plan_query(&self, _request: Request) -> QueryPlan {
-        todo!()
-    }
-    pub async fn schema_read(&self) -> Schema {
-        todo!()
-    }
-
-    pub async fn visit_query(&self) {}
-}
+use crate::{Chain, Configuration, Extension, QueryPlan, Request, Response, Schema};
 
 
-#[async_trait]
-trait Extension: Send + Sync {
-    async fn configure(&self, _configuration: Arc<dyn Configuration>) {}
-    async fn schema_read(&self, chain: Chain) -> Schema {
-        chain.schema_read().await
-    }
-    async fn plan_query(&self, chain: Chain, upstream_request: Request) -> QueryPlan {
-        chain.plan_query(upstream_request).await
-    }
-    async fn visit_query(&self, chain: Chain) -> () {
-        chain.visit_query().await
-    }
-    async fn make_downstream_request(&self, chain: DownstreamRequestChain, _upstream_request: &Request, downstream_request: Request) -> Response {
-
-        chain(downstream_request).await
-
-    }
-    async fn validate_response(&self, chain: Chain, response: Response) {
-        chain.validate_response(response).await
-    }
-}
-
-struct HeadersExtension {}
+pub struct HeadersExtension;
 
 #[async_trait]
 impl Extension for HeadersExtension {
-    async fn make_downstream_request(&self, chain: DownstreamRequestChain, upstream_request: &Request, mut downstream_request: Request) -> Response {
-        downstream_request.set_header("A", upstream_request.get_header("A"));
-        chain(downstream_request).await
-    }
-}
+    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, mut downstream_request: Request) -> Result<Response> {
+        //Propagate a header if it exists
+        upstream_request.get_header("A").and_then(|h|downstream_request.set_header("A", h));
 
-struct OtelExtension {}
-//
-// #[async_trait]
-// impl Extension for OtelExtension {
-//     async fn configure(&self, configuration: Arc<dyn Configuration>) {
-//         //Load config
-//     }
-//
-//     async fn make_downstream_request(&self, chain: DownstreamRequestChain, upstream_request: Request, mut downstream_request:Request) -> Response {
-//         //chain(downstream_request).await
-//     }
-// }
-//
-// struct NewRelicExtension {
-//
-// }
-//
-//
-// #[async_trait]
-// impl Extension for NewRelicExtension {
-//
-//     async fn configure(&self, configuration: Arc<dyn Configuration>) {
-//         //Load config
-//     }
-//
-//     async fn make_downstream_request(&self, chain: DownstreamRequestChain, upstream_request: Request, mut downstream_request:Request) -> Response {
-//         chain(downstream_request).await
-//     }
-// }
+        let result = chain.make_downstream_request(upstream_request, downstream_request).await;
 
-
-pub struct DefaultExtensionManager {
-    extensions: Vec<Box<dyn Extension>>,
-}
-
-impl DefaultExtensionManager {
-    pub fn new(_config: Arc<dyn Configuration>) -> Self {
-        println!("Creating DefaultExtensions");
-        Self {
-            extensions: Vec::default()
+        //Our extension has special handling if there was an error downstream
+        if result.is_err() {
+            return Ok(Response {
+                headers: Default::default(),
+                body: format!("Got error {}", result.err().unwrap())
+            })
         }
+        result
     }
 }
 
 
+pub struct SecurityExtension;
 #[async_trait]
-impl ExtensionManager for DefaultExtensionManager {
-    async fn do_make_downstream_request(&self, upstream_request: Request, downstream_request: Request, delegate: DownstreamRequestChain) -> Response {
-        let chain = self.extensions.iter().fold(delegate, |next, &extension| {
-            let next: DownstreamRequestChain = Box::pin(|downstream_request| {
-                let f = extension.make_downstream_request(next, &upstream_request, downstream_request);
-                Box::pin(f)
-            });
-            next
-        });
-        chain(downstream_request).await
+impl Extension for SecurityExtension {
+    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
+        //Only make the request if the header is present
+        if let Some(_header) = upstream_request.get_header("A") {
+            return chain.make_downstream_request(upstream_request, downstream_request).await
+        }
+        Err(anyhow!("Missing header: A"))
     }
 }
+
+pub struct RetryExtension;
+#[async_trait]
+impl Extension for RetryExtension {
+    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
+
+        for _i in [0..10] {
+            if let Ok(response) = chain.make_downstream_request(upstream_request, downstream_request.clone()).await {
+                return Ok(response);
+            }
+            sleep(Duration::from_millis(1000))
+        }
+
+        Err(anyhow!("Failed"))
+    }
+}
+
+
+pub struct OtelExtension;
+#[async_trait]
+impl Extension for OtelExtension {
+    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
+        //Add to the current context
+        //This context may be picked up later
+        let my_cx = Context::current_with_value(3);
+        chain.make_downstream_request(upstream_request, downstream_request.clone()).with_context(my_cx).await
+        //Context is dropped
+    }
+}
+
+pub struct WasmExtension;
+#[async_trait]
+impl Extension for WasmExtension {
+    async fn configure(&self, _configuration: Arc<dyn Configuration>) {
+        todo!()
+    }
+
+    async fn schema_read(&self, chain: Chain) -> Result<Schema> {
+        todo!()
+    }
+
+    async fn plan_query(&self, chain: Chain, upstream_request: Request) -> Result<QueryPlan> {
+        todo!()
+    }
+
+    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
+        todo!();
+    }
+
+    async fn validate_response(&self, chain: Chain, response: Response) -> Result<Response> {
+        todo!()
+    }
+}
+
+
+
+
+

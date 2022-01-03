@@ -9,3 +9,8 @@ edition = "2021"
 typed-builder = "0.9.1"
 async-trait = "0.1.52"
 tokio = { version = "1", features = ["full"] }
+anyhow = "1.0.52"
+lazy_static = "1.4.0"
+inventory = "0.2.1"
+opentelemetry = "0.16.0"
+futures = "0.3.18"
