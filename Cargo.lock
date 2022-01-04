@@ -69,8 +69,9 @@ checksum = "84450d0b4a8bd1ba4144ce8ce718fbc5d071358b1e5384bace6536b3d1f2d5b3"
 
 [[package]]
 name = "apollo-parser"
-version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=5f8a51b4c47e842bda5095604c6f60caefd4975b#5f8a51b4c47e842bda5095604c6f60caefd4975b"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7af0ceca8c288299eebfd05dca20495c664d3235f14e1a5e11210bfe566c1b67"
 dependencies = [
  "rowan",
 ]
