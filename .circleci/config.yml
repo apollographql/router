@@ -295,9 +295,9 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}
+            - rust-target-v3-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-v3-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-v3-test-windows-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -311,7 +311,7 @@ commands:
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+          key: rust-target-v3-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - C:\\Users\\circleci\.cargo
@@ -322,11 +322,11 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}
+            - rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
+            - rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -336,7 +336,7 @@ commands:
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          key: rust-target-v3-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - target/
             - ~/.cargo

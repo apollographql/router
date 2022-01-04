@@ -133,15 +133,19 @@ async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(
             r#"
-                query ExampleQuery($missingVariable: Int, $yetAnotherMissingVariable: ID!) {
-                    topProducts(first: $missingVariable) {
-                        name
-                        reviewsForAuthor(authorID: $yetAnotherMissingVariable) {
-                            body
-                        }
+            query ExampleQuery(
+                $missingVariable: Int!,
+                $yetAnotherMissingVariable: ID!,
+                $notRequiredVariable: Int,
+            ) {
+                topProducts(first: $missingVariable) {
+                    name
+                    reviewsForAuthor(authorID: $yetAnotherMissingVariable) {
+                        body
                     }
                 }
-                "#,
+            }
+            "#,
         )
         .build();
     let (response, _) = query_rust(request.clone()).await;
@@ -150,16 +154,16 @@ async fn missing_variables() {
         .collect::<Vec<_>>()
         .await;
     let expected = vec![
-        graphql::FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        graphql::FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationInvalidTypeVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
     ];
-    assert!(data.iter().all(|x| expected.contains(x)));
+    assert!(data.iter().all(|x| expected.contains(x)), "{:?}", data);
 }
 
 async fn query_node(request: graphql::Request) -> graphql::ResponseStream {

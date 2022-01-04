@@ -1,6 +1,0 @@
----
-source: apollo-router/src/warp_http_server_factory.rs
-expression: "hdrs[\"content-type\"].to_str().unwrap()"
-
----
-application/json
