@@ -118,7 +118,7 @@ dependencies = [
  "tracing-subscriber",
  "typed-builder",
  "url",
- "usage_agent",
+ "usage-agent",
  "uuid",
  "warp",
 ]
@@ -3850,9 +3850,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "usage_agent"
-version = "0.1.0"
-source = "git+https://github.com/garypen/usage_agent.git#8b9023638271676b6f84b9d217159ceba4b4a6c7"
+name = "usage-agent"
+version = "0.1.0-alpha.2"
 dependencies = [
  "bytes",
  "prost 0.9.0",

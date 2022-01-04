@@ -64,7 +64,7 @@ tracing-subscriber = { version = "0.3", features = ["json"] }
 
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
-usage_agent = { git = "https://github.com/garypen/usage_agent.git" }
+usage-agent = { path = "../usage-agent" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
