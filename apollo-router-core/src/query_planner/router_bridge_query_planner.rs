@@ -43,7 +43,11 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         .await???;
 
         match planner_result {
-            PlannerResult::QueryPlan { node } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::QueryPlan { node: None } => {
+                tracing::debug!("Empty query plan");
+                Err(QueryPlannerError::EmptyPlan)
+            }
             PlannerResult::Other => {
                 tracing::debug!("Unhandled planner result");
                 Err(QueryPlannerError::UnhandledPlannerResult)
@@ -101,6 +105,22 @@ mod tests {
         );
 
         assert_eq!(expected, actual);
+    }
+
+    #[test(tokio::test)]
+    async fn empty_query_plan_should_be_a_planner_error() {
+        let expected = "Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.";
+        let actual = RouterBridgeQueryPlanner::new(Arc::new(
+            include_str!("testdata/schema.graphql").parse().unwrap(),
+        ))
+        .get(
+            include_str!("testdata/unknown_introspection_query.graphql").into(),
+            None,
+            QueryPlanOptions::default(),
+        )
+        .await;
+
+        assert_eq!(expected, actual.unwrap_err().to_string());
     }
 
     #[test(tokio::test)]

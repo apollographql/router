@@ -17,7 +17,7 @@ pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
-    root: Option<PlanNode>,
+    root: PlanNode,
 }
 
 /// Query plans are composed of a set of nodes.
@@ -54,9 +54,7 @@ impl QueryPlan {
         let mut early_errors = Vec::new();
         for err in self
             .root
-            .as_ref()
-            .map(|node| node.validate_services_against_plan(Arc::clone(&service_registry)))
-            .unwrap_or_default()
+            .validate_services_against_plan(Arc::clone(&service_registry))
         {
             early_errors.push(err.to_graphql_error(None));
         }
@@ -77,12 +75,10 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
-        let (value, errors) = if let Some(node) = &self.root {
-            node.execute_recursively(&root, request, service_registry, schema, &Value::default())
-                .await
-        } else {
-            (Value::Null, Vec::new())
-        };
+        let (value, errors) = self
+            .root
+            .execute_recursively(&root, request, service_registry, schema, &Value::default())
+            .await;
 
         Response::builder().data(value).errors(errors).build()
     }
