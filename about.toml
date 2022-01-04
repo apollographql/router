@@ -50,3 +50,10 @@ license = "LicenseRef-ring"
 path = "LICENSE"
 license = "LicenseRef-ring"
 checksum = '76b39f9b371688eac9d8323f96ee80b3aef5ecbc2217f25377bd4e4a615296a9'
+
+[usage-agent.clarify]
+license = "LicenseRef-ELv2"
+[[usage-agent.clarify.files]]
+path = 'LICENSE'
+license = 'LicenseRef-ELv2'
+checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'

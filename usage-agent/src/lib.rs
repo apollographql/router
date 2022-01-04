@@ -83,7 +83,6 @@ impl Report {
 
 #[cfg(target_os = "windows")]
 fn get_uname() -> Result<String, std::io::Error> {
-    return "an error";
     // XXX Figure out at some point.
     Ok(format!(
         "{} {} {} {} {}",
