@@ -848,13 +848,13 @@ expression: get_span()
         }
       ],
       "children": {
-        "apollo_router_core::query_planner::validation - 8": {
+        "apollo_router_core::query_planner::validate - 8": {
           "id": 6755399441055746,
-          "name": "apollo_router_core::query_planner::validation",
+          "name": "apollo_router_core::query_planner::validate",
           "records": [
             [],
             {
-              "name": "validation",
+              "name": "validate",
               "target": "apollo_router_core::query_planner",
               "level": "DEBUG",
               "module_path": "apollo_router_core::query_planner",
