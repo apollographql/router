@@ -49,15 +49,15 @@ impl NaiveIntrospection {
         )
         .map_err(|deno_runtime_error| {
             tracing::warn!(
-                "router-bridge returned a deno runtime error: \n {}",
+                "router-bridge returned a deno runtime error:\n{}",
                 deno_runtime_error
             );
         })
-        .map(|global_introspection_result| {
+        .and_then(|global_introspection_result| {
             global_introspection_result
                 .map_err(|general_introspection_error| {
                     tracing::warn!(
-                        "introspection returned an error: \n {}",
+                        "Introspection returned an error:\n{}",
                         general_introspection_error
                     );
                 })
@@ -71,18 +71,14 @@ impl NaiveIntrospection {
                                 Some((cache_key.into(), response))
                             }
                             Err(graphql_errors) => {
-                                let errors = graphql_errors
-                                    .iter()
-                                    .map(std::string::ToString::to_string)
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                tracing::warn!("introspection returned errors: \n {}", errors);
+                                for error in graphql_errors {
+                                    tracing::warn!("Introspection returned error:\n{}", error);
+                                }
                                 None
                             }
                         })
                         .collect()
                 })
-                .unwrap_or_default()
         })
         .unwrap_or_default();
 

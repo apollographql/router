@@ -45,11 +45,11 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         match planner_result {
             PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
             PlannerResult::QueryPlan { node: None } => {
-                tracing::debug!("Empty query plan");
+                failfast_debug!("Empty query plan");
                 Err(QueryPlannerError::EmptyPlan)
             }
             PlannerResult::Other => {
-                tracing::debug!("Unhandled planner result");
+                failfast_debug!("Unhandled planner result");
                 Err(QueryPlannerError::UnhandledPlannerResult)
             }
         }
@@ -89,7 +89,7 @@ mod tests {
             .get(
                 include_str!("testdata/query.graphql").into(),
                 None,
-                QueryPlanOptions::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -98,37 +98,31 @@ mod tests {
 
     #[test]
     fn empty_query_plan() {
-        let expected = PlannerResult::QueryPlan { node: None };
-        let actual: PlannerResult = serde_json::from_value(json!({ "kind": "QueryPlan"})).expect(
+        serde_json::from_value::<PlannerResult>(json!({ "kind": "QueryPlan"})).expect(
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
-
-        assert_eq!(expected, actual);
     }
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let expected = "Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.";
-        let actual = RouterBridgeQueryPlanner::new(Arc::new(
-            include_str!("testdata/schema.graphql").parse().unwrap(),
-        ))
-        .get(
-            include_str!("testdata/unknown_introspection_query.graphql").into(),
-            None,
-            QueryPlanOptions::default(),
+        insta::assert_debug_snapshot!(
+            RouterBridgeQueryPlanner::new(Arc::new(
+                include_str!("testdata/schema.graphql").parse().unwrap(),
+            ))
+            .get(
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
+                None,
+                Default::default(),
+            )
+            .await
         )
-        .await;
-
-        assert_eq!(expected, actual.unwrap_err().to_string());
     }
 
     #[test(tokio::test)]
     async fn test_plan_error() {
         let planner = RouterBridgeQueryPlanner::new(Arc::new("".parse().unwrap()));
-        let result = planner
-            .get("".into(), None, QueryPlanOptions::default())
-            .await;
+        let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
