@@ -250,6 +250,7 @@ mod fetch {
     }
 
     impl Variables {
+        #[instrument(level = "debug", name = "make_variables", skip_all)]
         fn new(
             requires: &[Selection],
             variable_usages: &[String],
@@ -324,17 +325,14 @@ mod fetch {
 
             let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-            let Variables { variables, paths } =
-                tracing::debug_span!("make_variables").in_scope(|| {
-                    Variables::new(
-                        &self.requires,
-                        self.variable_usages.as_ref(),
-                        data,
-                        current_dir,
-                        request,
-                        schema,
-                    )
-                })?;
+            let Variables { variables, paths } = Variables::new(
+                &self.requires,
+                self.variable_usages.as_ref(),
+                data,
+                current_dir,
+                request,
+                schema,
+            )?;
 
             let fetcher = service_registry
                 .get(service_name)
