@@ -26,13 +26,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument(
-        skip_all,
-        fields(
-            errors = %response.errors.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(", ")
-        ),
-        level = "trace"
-    )]
+    #[tracing::instrument(skip_all, level = "trace")]
     pub fn format_response(
         &self,
         response: &mut Response,
