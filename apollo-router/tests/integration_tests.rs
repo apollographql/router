@@ -12,6 +12,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_log::test;
+use url::Url;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -156,8 +157,10 @@ async fn missing_variables() {
 }
 
 async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
-    let nodejs_impl =
-        HttpSubgraphFetcher::new("federated".into(), "http://localhost:4100/graphql".into());
+    let nodejs_impl = HttpSubgraphFetcher::new(
+        "federated",
+        Url::parse("http://localhost:4100/graphql").unwrap(),
+    );
     nodejs_impl.stream(request).await
 }
 
