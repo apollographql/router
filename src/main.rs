@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -19,6 +20,7 @@ pub struct Schema;
 pub struct QueryPlan;
 
 use http::{Request, Response, StatusCode};
+use http::header::HeaderName;
 use tower::layer::layer_fn;
 use tower::layer::util::Stack;
 
@@ -140,20 +142,21 @@ impl<S> Layer<S> for CacheLayer {
 }
 
 pub struct PropagateHeaderLayer {
-    header_name: String,
+    header_name: HeaderName,
 }
 
 impl<S> Layer<S> for PropagateHeaderLayer {
     type Service = PropagateHeaderService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        PropagateHeaderService { service }
+        PropagateHeaderService { service, header_name: self.header_name.to_owned() }
     }
 }
 
 
 pub struct PropagateHeaderService<S> {
     service: S,
+    header_name: HeaderName,
 }
 
 impl<S> Service<DownstreamGraphQLRequest> for PropagateHeaderService<S>
@@ -169,9 +172,12 @@ impl<S> Service<DownstreamGraphQLRequest> for PropagateHeaderService<S>
         todo!();
     }
 
-    fn call(&mut self, request: DownstreamGraphQLRequest) -> Self::Future {
+    fn call(&mut self, mut request: DownstreamGraphQLRequest) -> Self::Future {
         //Add the header to the request and pass it on to the service.
-        todo!();
+        if let Some(header) = request.upstream_request.request.headers().get(&self.header_name) {
+            request.request.headers_mut().insert(self.header_name.to_owned(), header.clone());
+        }
+        self.service.call(request)
     }
 }
 
@@ -191,7 +197,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     }
 
     fn propagate_header(self: ServiceBuilder<L>, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
-        self.layer(PropagateHeaderLayer { header_name: header_name.to_string() })
+        self.layer(PropagateHeaderLayer { header_name: HeaderName::from_str(header_name).unwrap() })
     }
 }
 
