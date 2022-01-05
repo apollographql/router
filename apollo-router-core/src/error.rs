@@ -186,8 +186,14 @@ pub enum QueryPlannerError {
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
+    /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    EmptyPlan,
+
     /// Unhandled planner result.
     UnhandledPlannerResult,
+
+    /// Router Bridge error: {0}
+    RouterBridgeError(router_bridge::error::Error),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {

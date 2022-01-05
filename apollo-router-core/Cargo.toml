@@ -17,12 +17,12 @@ async-trait = "0.1.52"
 atty = "0.2.14"
 derivative = "2.2.0"
 displaydoc = "0.2"
-futures = "0.3.18"
+futures = "0.3.19"
 include_dir = "0.7.2"
-lru = "0.7.1"
+lru = "0.7.2"
 miette = { version = "3.2.0", features = ["fancy"] }
 once_cell = "1.9.0"
-router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "e88ce2a8be6a9159370c972b462ef61d598c2f33" }
+router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "950eb931e38746bb7cfed05382d6970a22e43cc4" }
 serde = { version = "1.0.133", features = ["derive", "rc"] }
 serde_json = { version = "1.0.74", features = ["preserve_order"] }
 thiserror = "1.0.30"
@@ -33,7 +33,7 @@ typed-builder = "0.9.1"
 
 [dev-dependencies]
 insta = "1.9.0"
-mockall = "0.10.2"
+mockall = "0.11.0"
 static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 tokio = { version = "1", features = ["full"] }

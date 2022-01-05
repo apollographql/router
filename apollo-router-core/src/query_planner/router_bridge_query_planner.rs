@@ -23,7 +23,7 @@ impl RouterBridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for RouterBridgeQueryPlanner {
-    #[tracing::instrument(name = "plan", level = "debug")]
+    #[tracing::instrument(name = "plan", level = "debug", skip_all)]
     async fn get(
         &self,
         query: String,
@@ -38,14 +38,18 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
 
         let planner_result = tokio::task::spawn_blocking(|| {
             plan::plan::<PlannerResult>(context, options.into())
-                .map_err(|e| QueryPlannerError::PlanningErrors(Arc::new(e)))
+                .map_err(QueryPlannerError::RouterBridgeError)
         })
-        .await??;
+        .await???;
 
         match planner_result {
-            PlannerResult::QueryPlan { node } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::QueryPlan { node: None } => {
+                failfast_debug!("Empty query plan");
+                Err(QueryPlannerError::EmptyPlan)
+            }
             PlannerResult::Other => {
-                tracing::debug!("Unhandled planner result");
+                failfast_debug!("Unhandled planner result");
                 Err(QueryPlannerError::UnhandledPlannerResult)
             }
         }
@@ -64,7 +68,7 @@ impl From<QueryPlanOptions> for plan::QueryPlanOptions {
 enum PlannerResult {
     QueryPlan {
         /// The hierarchical nodes that make up the query plan
-        node: PlanNode,
+        node: Option<PlanNode>,
     },
     #[serde(other)]
     Other,
@@ -73,6 +77,7 @@ enum PlannerResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use test_log::test;
 
     #[test(tokio::test)]
@@ -84,19 +89,40 @@ mod tests {
             .get(
                 include_str!("testdata/query.graphql").into(),
                 None,
-                QueryPlanOptions::default(),
+                Default::default(),
             )
             .await
             .unwrap();
         insta::assert_debug_snapshot!(result);
     }
 
+    #[test]
+    fn empty_query_plan() {
+        serde_json::from_value::<PlannerResult>(json!({ "kind": "QueryPlan"})).expect(
+            "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
+                 Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
+        );
+    }
+
+    #[test(tokio::test)]
+    async fn empty_query_plan_should_be_a_planner_error() {
+        insta::assert_debug_snapshot!(
+            RouterBridgeQueryPlanner::new(Arc::new(
+                include_str!("testdata/schema.graphql").parse().unwrap(),
+            ))
+            .get(
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
+                None,
+                Default::default(),
+            )
+            .await
+        )
+    }
+
     #[test(tokio::test)]
     async fn test_plan_error() {
         let planner = RouterBridgeQueryPlanner::new(Arc::new("".parse().unwrap()));
-        let result = planner
-            .get("".into(), None, QueryPlanOptions::default())
-            .await;
+        let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
             "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",

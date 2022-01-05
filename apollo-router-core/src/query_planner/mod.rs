@@ -45,10 +45,9 @@ pub(crate) enum PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(name = "validation", level = "debug")]
+    #[tracing::instrument(name = "validation", level = "debug", skip_all)]
     pub fn validate_request(
         &self,
-        request: &Request,
         service_registry: Arc<dyn ServiceRegistry>,
     ) -> Result<(), Response> {
         let mut early_errors = Vec::new();
