@@ -7,7 +7,7 @@ QueryPlan {
     root: Fetch(
         FetchNode {
             service_name: "accounts",
-            requires: None,
+            requires: [],
             variable_usages: [],
             operation: "{me{name{first last}}}",
         },

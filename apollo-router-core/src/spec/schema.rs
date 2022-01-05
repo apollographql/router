@@ -7,7 +7,10 @@ pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, String>,
-    fragments: HashMap<String, Vec<Selection>>,
+    pub(crate) object_types: HashMap<String, ObjectType>,
+    interfaces: HashMap<String, Interface>,
+    pub(crate) custom_scalars: HashSet<String>,
+    pub(crate) fragments: Fragments,
 }
 
 impl std::str::FromStr for Schema {
@@ -16,19 +19,20 @@ impl std::str::FromStr for Schema {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parser = apollo_parser::Parser::new(s);
         let tree = parser.parse();
+        let errors = tree.errors().cloned().collect::<Vec<_>>();
 
-        if tree.errors().len() != 0 {
-            let errors = ParseErrors::new(s.to_string(), tree.errors());
-
+        if !errors.is_empty() {
+            let errors = ParseErrors {
+                raw_schema: s.to_string(),
+                errors,
+            };
             errors.print();
-
             return Err(SchemaError::Parse(errors));
         }
 
         let document = tree.document();
         let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
         let mut subgraphs = HashMap::new();
-        let mut fragments = HashMap::new();
 
         // the logic of this algorithm is inspired from the npm package graphql:
         // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
@@ -91,6 +95,7 @@ impl std::str::FromStr for Schema {
                 }
                 // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
                 ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
+                // Spec: https://spec.graphql.org/draft/#sec-Enums
                 ast::Definition::EnumTypeDefinition(enum_type) => {
                     if enum_type
                         .name()
@@ -149,58 +154,223 @@ impl std::str::FromStr for Schema {
                         }
                     }
                 }
-                // Spec: https://spec.graphql.org/draft/#FragmentDefinition
-                ast::Definition::FragmentDefinition(fragment_definition) => {
-                    let name = fragment_definition
-                        .fragment_name()
-                        .expect("the node FragmentName is not optional in the spec; qed")
-                        .name()
-                        .unwrap()
-                        .text()
-                        .to_string();
-                    let selection_set = fragment_definition
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed");
-
-                    fragments.insert(name, selection_set.selections().map(Into::into).collect());
-                }
                 _ => {}
             }
         }
+
+        macro_rules! implement_object_type_or_interface_map {
+            ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+                let mut map = document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_ty(definition) = definition {
+                            let instance = <$ty>::from(definition);
+                            Some((instance.name.clone(), instance))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<HashMap<String, $ty>>();
+
+                document
+                    .definitions()
+                    .filter_map(|definition| {
+                        if let $ast_extension_ty(extension) = definition {
+                            Some(<$ty>::from(extension))
+                        } else {
+                            None
+                        }
+                    })
+                    .for_each(|extension| {
+                        if let Some(instance) = map.get_mut(&extension.name) {
+                            instance.fields.extend(extension.fields);
+                            instance.interfaces.extend(extension.interfaces);
+                        } else {
+                            failfast_debug!(
+                                concat!(
+                                    "Extension exists for {:?} but ",
+                                    stringify!($ty),
+                                    " could not be found."
+                                ),
+                                extension.name,
+                            );
+                        }
+                    });
+
+                map
+            }};
+        }
+
+        let object_types = implement_object_type_or_interface_map!(
+            ObjectType,
+            ast::Definition::ObjectTypeDefinition,
+            ast::Definition::ObjectTypeExtension,
+        );
+
+        let interfaces = implement_object_type_or_interface_map!(
+            Interface,
+            ast::Definition::InterfaceTypeDefinition,
+            ast::Definition::InterfaceTypeExtension,
+        );
+
+        let custom_scalars = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#sec-Scalars
+                // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
+                ast::Definition::ScalarTypeDefinition(definition) => Some(
+                    definition
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                ast::Definition::ScalarTypeExtension(extension) => Some(
+                    extension
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string(),
+                ),
+                _ => None,
+            })
+            .collect();
+
+        let fragments = Fragments::from(&document);
 
         Ok(Self {
             subtype_map,
             string: s.to_owned(),
             subgraphs,
+            object_types,
+            interfaces,
+            custom_scalars,
             fragments,
         })
     }
 }
 
 impl Schema {
+    /// Read a [`Schema`] from a file at a path.
     pub fn read(path: impl AsRef<std::path::Path>) -> Result<Self, SchemaError> {
         std::fs::read_to_string(path)?.parse()
     }
 
+    /// Extracts a string slice containing the entire [`Schema`].
     pub fn as_str(&self) -> &str {
         &self.string
     }
 
-    pub fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
+    pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
         self.subtype_map
             .get(abstract_type)
             .map(|x| x.contains(maybe_subtype))
             .unwrap_or(false)
     }
 
+    /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
         self.subgraphs.iter()
     }
-
-    pub(crate) fn fragments(&self) -> impl Iterator<Item = (&String, &Vec<Selection>)> {
-        self.fragments.iter()
-    }
 }
+
+#[derive(Debug)]
+pub(crate) struct InvalidObject;
+
+macro_rules! implement_object_type_or_interface {
+    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
+        #[derive(Debug)]
+        $visibility struct $name {
+            name: String,
+            fields: HashMap<String, FieldType>,
+            interfaces: Vec<String>,
+        }
+
+        impl $name {
+            pub(crate) fn validate_object(
+                &self,
+                object: &Object,
+                schema: &Schema,
+            ) -> Result<(), InvalidObject> {
+                self
+                    .fields
+                    .iter()
+                    .try_for_each(|(name, ty)| {
+                        let value = object.get(name).unwrap_or(&Value::Null);
+                        ty.validate_value(value, schema)
+                    })
+                    .map_err(|_| InvalidObject)?;
+
+                self
+                    .interfaces
+                    .iter()
+                    .flat_map(|name| schema.interfaces.get(name))
+                    .try_for_each(|interface| interface.validate_object(object, schema))
+            }
+        }
+
+        $(
+        impl From<$ast_ty> for $name {
+            fn from(definition: $ast_ty) -> Self {
+                let name = definition
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let fields = definition
+                    .fields_definition()
+                    .iter()
+                    .flat_map(|x| x.field_definitions())
+                    .map(|x| {
+                        let name = x
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string();
+                        let ty = x
+                            .ty()
+                            .expect("the node Type is not optional in the spec; qed")
+                            .into();
+                        (name, ty)
+                    })
+                    .collect();
+                let interfaces = definition
+                    .implements_interfaces()
+                    .iter()
+                    .flat_map(|x| x.named_types())
+                    .map(|x| {
+                        x.name()
+                            .expect("neither Name neither NamedType are optionals; qed")
+                            .text()
+                            .to_string()
+                    })
+                    .collect();
+
+                $name {
+                    name,
+                    fields,
+                    interfaces,
+                }
+            }
+        }
+        )+
+    };
+}
+
+// Spec: https://spec.graphql.org/draft/#sec-Objects
+// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
+implement_object_type_or_interface!(
+    pub(crate) ObjectType =>
+    ast::ObjectTypeDefinition,
+    ast::ObjectTypeExtension,
+);
+// Spec: https://spec.graphql.org/draft/#sec-Interfaces
+// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
+implement_object_type_or_interface!(
+    Interface =>
+    ast::InterfaceTypeDefinition,
+    ast::InterfaceTypeExtension,
+);
 
 #[cfg(test)]
 mod tests {

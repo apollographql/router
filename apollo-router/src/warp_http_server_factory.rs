@@ -5,14 +5,16 @@ use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
+use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
+use tower::ServiceBuilder;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Span};
+use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -69,6 +71,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
+
+            let svc = ServiceBuilder::new()
+                // generate a tracing span that covers request parsing and response serializing
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                )
+                .service(svc);
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             let tcp_listener = if let Some(listener) = listener {
@@ -237,9 +247,10 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         .and(warp::path("apollo"))
         .and(warp::path("server-health"))
         .and_then(move || async {
-            let mut result = HashMap::new();
-            result.insert("status", "pass");
-            let reply = Box::new(warp::reply::json(&result)) as Box<dyn Reply>;
+            static RESULT: Lazy<serde_json::Value> =
+                Lazy::new(|| serde_json::json!({"status": "pass"}));
+
+            let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
             Ok::<_, Rejection>(reply)
         })
 }
@@ -352,7 +363,6 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use insta::{assert_json_snapshot, assert_snapshot};
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -409,8 +419,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
@@ -694,7 +705,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn it_provides_health_status_body() -> Result<(), FederatedServerError> {
+    async fn test_health_check() {
         let filter = get_health_request();
 
         let res = warp::test::request()
@@ -702,26 +713,6 @@ mod tests {
             .reply(&filter)
             .await;
 
-        assert_eq!(res.status(), 200);
-        assert_json_snapshot!(String::from_utf8_lossy(res.body()));
-
-        Ok(())
-    }
-
-    #[test(tokio::test)]
-    async fn it_provides_health_status_header() -> Result<(), FederatedServerError> {
-        let filter = get_health_request();
-
-        let res = warp::test::request()
-            .path("/.well-known/apollo/server-health")
-            .reply(&filter)
-            .await;
-
-        let hdrs = res.headers();
-
-        assert_eq!(res.status(), 200);
-        assert_snapshot!(hdrs["content-type"].to_str().unwrap());
-
-        Ok(())
+        insta::assert_debug_snapshot!(res);
     }
 }

@@ -120,7 +120,7 @@ where
                 (Startup { configuration, .. }, UpdateSchema(new_schema)) => {
                     self.maybe_transition_to_running(Startup {
                         configuration,
-                        schema: Some(new_schema),
+                        schema: Some(*new_schema),
                         phantom: PhantomData,
                     })
                     .await
@@ -190,7 +190,7 @@ where
                             tracing::info!("Reloading schema");
                             let derived_configuration = Arc::new(derived_configuration);
 
-                            let schema = Arc::new(new_schema);
+                            let schema = Arc::new(*new_schema);
                             let router = Arc::new(
                                 self.router_factory
                                     .create(
@@ -395,7 +395,6 @@ mod tests {
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
-    use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
     use test_log::test;
@@ -465,7 +464,7 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
                     Shutdown
                 ],
                 vec![
@@ -500,8 +499,8 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
-                    UpdateSchema(schema.parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(schema.parse().unwrap())),
                     Shutdown
                 ],
                 vec![
@@ -539,7 +538,7 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
                     UpdateConfiguration(
                         Configuration::builder()
                             .server(
@@ -606,12 +605,12 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
                             PRODUCTS @join__graph(name: "products" url: "")
                             INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     Shutdown
                 ],
                 vec![
@@ -680,10 +679,10 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     UpdateConfiguration(
                             Configuration::builder()
                                 .build()
@@ -743,14 +742,14 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
-                        }"#.parse().unwrap()),
-                    UpdateSchema(r#"
+                        }"#.parse().unwrap())),
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     Shutdown,
                 ],
                 vec![
@@ -797,8 +796,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
