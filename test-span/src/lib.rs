@@ -31,6 +31,7 @@ mod span_tests {
     type FieldName = String;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+    #[serde(untagged)]
     pub enum RecordedValue {
         Error(String),
         Value(serde_json::Value),

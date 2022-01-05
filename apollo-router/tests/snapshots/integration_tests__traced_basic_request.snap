@@ -27,9 +27,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -100,57 +98,39 @@ expression: get_span()
                         "entries": [
                           [
                             "http.method",
-                            {
-                              "Debug": "POST"
-                            }
+                            "POST"
                           ],
                           [
                             "http.scheme",
-                            {
-                              "Debug": "http"
-                            }
+                            "http"
                           ],
                           [
                             "http.host",
-                            {
-                              "Debug": "localhost"
-                            }
+                            "localhost"
                           ],
                           [
                             "net.host.port",
-                            {
-                              "Debug": "4003"
-                            }
+                            "4003"
                           ],
                           [
                             "otel.kind",
-                            {
-                              "Value": "client"
-                            }
+                            "client"
                           ],
                           [
                             "otel.name",
-                            {
-                              "Debug": "POST /graphql"
-                            }
+                            "POST /graphql"
                           ],
                           [
                             "otel.status_code",
-                            {
-                              "Value": "OK"
-                            }
+                            "OK"
                           ],
                           [
                             "http.status_code",
-                            {
-                              "Value": 200
-                            }
+                            200
                           ],
                           [
                             "http.user_agent",
-                            {
-                              "Value": ""
-                            }
+                            ""
                           ]
                         ],
                         "metadata": {
@@ -192,9 +172,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -272,9 +250,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -329,9 +305,7 @@ expression: get_span()
                     "entries": [
                       [
                         "service",
-                        {
-                          "Value": "products"
-                        }
+                        "products"
                       ]
                     ],
                     "metadata": {
@@ -361,9 +335,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -441,9 +413,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -503,9 +473,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -547,9 +515,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -585,23 +551,14 @@ expression: get_span()
               "id": 34,
               "name": "apollo_router_core::spec::query::format_response",
               "record": {
-                "entries": [
-                  [
-                    "errors",
-                    {
-                      "Debug": ""
-                    }
-                  ]
-                ],
+                "entries": [],
                 "metadata": {
                   "name": "format_response",
                   "target": "apollo_router_core::spec::query",
                   "level": "TRACE",
                   "module_path": "apollo_router_core::spec::query",
                   "fields": {
-                    "names": [
-                      "errors"
-                    ]
+                    "names": []
                   }
                 }
               },
@@ -618,9 +575,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -662,9 +617,7 @@ expression: get_span()
         "entries": [
           [
             "operation_name",
-            {
-              "Debug": ""
-            }
+            ""
           ]
         ],
         "metadata": {
@@ -861,57 +814,39 @@ expression: get_span()
             "entries": [
               [
                 "http.method",
-                {
-                  "Debug": "POST"
-                }
+                "POST"
               ],
               [
                 "http.scheme",
-                {
-                  "Debug": "http"
-                }
+                "http"
               ],
               [
                 "http.host",
-                {
-                  "Debug": "localhost"
-                }
+                "localhost"
               ],
               [
                 "net.host.port",
-                {
-                  "Debug": "4100"
-                }
+                "4100"
               ],
               [
                 "otel.kind",
-                {
-                  "Value": "client"
-                }
+                "client"
               ],
               [
                 "otel.name",
-                {
-                  "Debug": "POST /graphql"
-                }
+                "POST /graphql"
               ],
               [
                 "otel.status_code",
-                {
-                  "Value": "OK"
-                }
+                "OK"
               ],
               [
                 "http.status_code",
-                {
-                  "Value": 200
-                }
+                200
               ],
               [
                 "http.user_agent",
-                {
-                  "Value": ""
-                }
+                ""
               ]
             ],
             "metadata": {
