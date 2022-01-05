@@ -30,7 +30,6 @@ tokio = { version = "1.14.0", features = ["rt"] }
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
 typed-builder = "0.9.1"
-url = "2.2.2"
 
 [dev-dependencies]
 insta = "1.8.0"
