@@ -399,6 +399,7 @@ mod tests {
     use std::sync::Mutex;
     use test_log::test;
     use tokio::net::TcpListener;
+    use url::Url;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -588,13 +589,13 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     )
                                 ]
@@ -640,7 +641,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://accounts/graphql"
             })
             .times(1)
@@ -649,7 +655,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://localhost:4001/graphql"
             })
             .times(1)
@@ -668,7 +679,7 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     ),
                                 ]
@@ -715,7 +726,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://accounts/graphql"
             })
             .times(1)
@@ -725,7 +741,12 @@ mod tests {
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
                 println!("got configuration: {:#?}", configuration);
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://localhost:4001/graphql"
             })
             .times(1)

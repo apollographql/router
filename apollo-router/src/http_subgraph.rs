@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use derivative::Derivative;
 use futures::prelude::*;
 use tracing::Instrument;
+use url::Url;
 
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
@@ -10,14 +11,16 @@ use tracing::Instrument;
 #[derivative(Debug)]
 pub struct HttpSubgraphFetcher {
     service: String,
-    url: String,
+    url: Url,
     #[derivative(Debug = "ignore")]
     http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl HttpSubgraphFetcher {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: String, url: String) -> Self {
+    pub fn new(service: impl Into<String>, url: Url) -> Self {
+        let service = service.into();
+
         HttpSubgraphFetcher {
             http_client: reqwest_middleware::ClientBuilder::new(
                 reqwest::Client::builder()
@@ -164,7 +167,8 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&response);
         });
-        let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
+        let fetcher =
+            HttpSubgraphFetcher::new("products", Url::parse(&server.url("/graphql")).unwrap());
         let collect = fetcher
             .stream(
                 graphql::Request::builder()

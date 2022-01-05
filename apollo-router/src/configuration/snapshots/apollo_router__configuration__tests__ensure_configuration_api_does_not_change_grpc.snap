@@ -8,7 +8,7 @@ server:
   cors: ~
 subgraphs:
   example:
-    routing_url: foo
+    routing_url: "http://foo/"
 opentelemetry:
   otlp:
     tracing:
