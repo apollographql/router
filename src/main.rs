@@ -49,6 +49,7 @@ struct GraphQLResponse {
 
     //Stream stuff here for defer/stream
     //Our warp adapter will convert the entire response to a stream if this field is present.
+    //#[serde(skip_serializing)]
     stream: Option<Box<dyn Stream<Item=GraphQLPatchResponse>>>,
 }
 
@@ -78,7 +79,7 @@ impl Service<Request<GraphQLRequest>> for QueryPlannerService {
 
 struct QueryExecutionService {
     query_planner_service: BoxService<Request<GraphQLRequest>, PlannedGraphQLRequest, http::Error>,
-    services: Vec<BoxService<Request<GraphQLRequest>, Response<GraphQLResponse>, http::Error>>,
+    services: Vec<BoxService<DownstreamGraphQLRequest, Response<GraphQLResponse>, http::Error>>,
 }
 
 impl Service<Request<GraphQLRequest>> for QueryExecutionService {
@@ -99,7 +100,7 @@ pub struct GraphQLEndpointService {
     url: String,
 }
 
-impl Service<Request<GraphQLRequest>> for GraphQLEndpointService {
+impl Service<DownstreamGraphQLRequest> for GraphQLEndpointService {
     type Response = Response<GraphQLResponse>;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
@@ -108,7 +109,7 @@ impl Service<Request<GraphQLRequest>> for GraphQLEndpointService {
         todo!();
     }
 
-    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+    fn call(&mut self, request: DownstreamGraphQLRequest) -> Self::Future {
         todo!();
     }
 }
@@ -140,10 +141,10 @@ impl<S> Layer<S> for CacheLayer {
 
 pub struct PropagateHeaderLayer;
 
-impl<S> Layer<S> for PropagateHeaderLayer {
+impl Layer<GraphQLEndpointService> for PropagateHeaderLayer {
     type Service = GraphQLEndpointService;
 
-    fn layer(&self, service: S) -> Self::Service {
+    fn layer(&self, service: GraphQLEndpointService) -> Self::Service {
         todo!();
     }
 }
@@ -177,13 +178,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .rate_limit(2, Duration::from_secs(10))
         .service(QueryPlannerService {});
 
-    //Endpoint service takes a PlannedGraphQLRequest and outputs a GraphQLResponse
+    //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
     let mut book_service = ServiceBuilder::new()
         .rate_limit(2, Duration::from_secs(2))
         .layer(layer_fn(|f|f)) //Custom stuff that the user wants to develop
         .service(GraphQLEndpointService { url: "http://books".to_string() });
 
-    //Endpoint service takes a PlannedGraphQLRequest and outputs a GraphQLResponse
+    //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
     let mut author_service = ServiceBuilder::new()
         .propagate_header("A")
         .cache()
@@ -203,7 +204,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //We will provide an implementation based on Warp
     //It does hot reloading and config from yaml to build the services
     //Wasm/deno layers can be developed.
-    //We can reuse what we have already developed as this slots in to where Geffroy has added Tower in:
+    //We can reuse what we have already developed as this slots in to where Geoffroy has added Tower in:
     // https://github.com/apollographql/router/pull/293
     ApolloRouter::default().start().await;
 
