@@ -48,7 +48,6 @@ impl QueryPlan {
     #[tracing::instrument(name = "validation", level = "debug", skip_all)]
     pub fn validate_request(
         &self,
-        _request: &Request,
         service_registry: Arc<dyn ServiceRegistry>,
     ) -> Result<(), Response> {
         let mut early_errors = Vec::new();
