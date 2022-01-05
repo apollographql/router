@@ -590,13 +590,13 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").expect("test"),
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").expect("test")
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     )
                                 ]
@@ -680,7 +680,7 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").expect("test")
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     ),
                                 ]

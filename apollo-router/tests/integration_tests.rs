@@ -157,8 +157,8 @@ async fn missing_variables() {
 
 async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
     let nodejs_impl = HttpSubgraphFetcher::new(
-        "federated".into(),
-        Url::parse("http://localhost:4100/graphql").expect("test"),
+        "federated",
+        Url::parse("http://localhost:4100/graphql").unwrap(),
     );
     nodejs_impl.stream(request).await
 }

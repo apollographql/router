@@ -36,8 +36,11 @@ pub enum ConfigurationError {
     MissingFeature(&'static str),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// Could not parse the URL for subgraph {0}
-    InvalidSubgraphUrl(String, String),
+    /// Invalid URL for subgraph {subgraph}: {url}
+    InvalidSubgraphUrl {
+        subgraph: String,
+        url: String,
+    },
 }
 
 /// The configuration for the router.
@@ -86,10 +89,10 @@ impl Configuration {
                     }
                     match Url::parse(schema_url) {
                         Err(_e) => {
-                            errors.push(ConfigurationError::InvalidSubgraphUrl(
-                                name.to_owned(),
-                                schema_url.to_owned(),
-                            ));
+                            errors.push(ConfigurationError::InvalidSubgraphUrl {
+                                subgraph: name.to_owned(),
+                                url: schema_url.to_owned(),
+                            });
                         }
                         Ok(routing_url) => {
                             self.subgraphs
@@ -426,13 +429,13 @@ mod tests {
                     (
                         "inventory".to_string(),
                         Subgraph {
-                            routing_url: Url::parse("http://inventory/graphql").expect("test"),
+                            routing_url: Url::parse("http://inventory/graphql").unwrap(),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
-                            routing_url: Url::parse("http://products/graphql").expect("test"),
+                            routing_url: Url::parse("http://products/graphql").unwrap(),
                         },
                     ),
                 ]

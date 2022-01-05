@@ -184,7 +184,7 @@ mod tests {
         });
         let fetcher = HttpSubgraphFetcher::new(
             "products".into(),
-            Url::parse(&server.url("/graphql")).expect("test"),
+            Url::parse(&server.url("/graphql")).unwrap(),
         );
         let collect = fetcher
             .stream(

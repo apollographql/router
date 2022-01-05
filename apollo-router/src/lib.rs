@@ -558,8 +558,8 @@ mod tests {
 
     async fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
         HttpSubgraphFetcher::new(
-            "federated".into(),
-            Url::parse(&format!("http://{}/graphql", socket)).expect("test"),
+            "federated",
+            Url::parse(&format!("http://{}/graphql", socket)).unwrap(),
         )
         .stream(request)
         .await
