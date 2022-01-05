@@ -139,12 +139,38 @@ impl<S> Layer<S> for CacheLayer {
     }
 }
 
-pub struct PropagateHeaderLayer;
+pub struct PropagateHeaderLayer {
+    header_name: String,
+}
 
-impl Layer<GraphQLEndpointService> for PropagateHeaderLayer {
-    type Service = GraphQLEndpointService;
+impl<S> Layer<S> for PropagateHeaderLayer {
+    type Service = PropagateHeaderService<S>;
 
-    fn layer(&self, service: GraphQLEndpointService) -> Self::Service {
+    fn layer(&self, service: S) -> Self::Service {
+        PropagateHeaderService { service }
+    }
+}
+
+
+pub struct PropagateHeaderService<S> {
+    service: S,
+}
+
+impl<S> Service<DownstreamGraphQLRequest> for PropagateHeaderService<S>
+    where
+        S: Service<DownstreamGraphQLRequest>,
+
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!();
+    }
+
+    fn call(&mut self, request: DownstreamGraphQLRequest) -> Self::Future {
+        //Add the header to the request and pass it on to the service.
         todo!();
     }
 }
@@ -164,8 +190,8 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         todo!();
     }
 
-    fn propagate_header(self : ServiceBuilder<L>, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
-        todo!()
+    fn propagate_header(self: ServiceBuilder<L>, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
+        self.layer(PropagateHeaderLayer { header_name: header_name.to_string() })
     }
 }
 
@@ -181,7 +207,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
     let mut book_service = ServiceBuilder::new()
         .rate_limit(2, Duration::from_secs(2))
-        .layer(layer_fn(|f|f)) //Custom stuff that the user wants to develop
+        .layer(layer_fn(|f| f)) //Custom stuff that the user wants to develop
         .service(GraphQLEndpointService { url: "http://books".to_string() });
 
     //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
