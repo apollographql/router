@@ -10,6 +10,85 @@ expression: logs
       [
         "message",
         {
+          "Debug": "registering event source with poller: token=Token(0), interests=READABLE | WRITABLE"
+        }
+      ],
+      [
+        "log.target",
+        {
+          "Value": "mio::poll"
+        }
+      ],
+      [
+        "log.module_path",
+        {
+          "Value": "mio::poll"
+        }
+      ],
+      [
+        "log.file",
+        {
+          "Value": "/Users/ignition/.asdf/installs/rust/1.57.0/registry/src/github.com-1ecc6299db9ec823/mio-0.7.14/src/poll.rs"
+        }
+      ],
+      [
+        "log.line",
+        {
+          "Value": 478
+        }
+      ],
+      [
+        "message",
+        {
+          "Debug": "registering event source with poller: token=Token(0), interests=READABLE | WRITABLE"
+        }
+      ],
+      [
+        "log.target",
+        {
+          "Value": "mio::poll"
+        }
+      ],
+      [
+        "log.module_path",
+        {
+          "Value": "mio::poll"
+        }
+      ],
+      [
+        "log.file",
+        {
+          "Value": "/Users/ignition/.asdf/installs/rust/1.57.0/registry/src/github.com-1ecc6299db9ec823/mio-0.7.14/src/poll.rs"
+        }
+      ],
+      [
+        "log.line",
+        {
+          "Value": 478
+        }
+      ]
+    ],
+    "metadata": {
+      "name": "log event",
+      "target": "log",
+      "level": "TRACE",
+      "module_path": null,
+      "fields": {
+        "names": [
+          "message",
+          "log.target",
+          "log.module_path",
+          "log.file",
+          "log.line"
+        ]
+      }
+    }
+  },
+  {
+    "entries": [
+      [
+        "message",
+        {
           "Debug": "here i am again!"
         }
       ],

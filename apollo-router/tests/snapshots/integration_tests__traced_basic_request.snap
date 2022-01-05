@@ -1,22 +1,30 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 58
+assertion_line: 59
 expression: get_span()
 
 ---
 {
   "id": 0,
   "name": "root",
-  "records": [
-    [],
-    null
-  ],
+  "record": {
+    "entries": [],
+    "metadata": {
+      "name": "root",
+      "target": "",
+      "level": "",
+      "module_path": null,
+      "fields": {
+        "names": []
+      }
+    }
+  },
   "children": {
     "apollo_router::apollo_router::execute - 10": {
-      "id": 2251799813685249,
+      "id": 10,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -24,7 +32,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -35,14 +43,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
         "apollo_router::apollo_router::execution - 11": {
-          "id": 9007199254740994,
+          "id": 11,
           "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "execution",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -51,14 +59,14 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {
             "apollo_router_core::query_planner::fetch - 12": {
-              "id": 3,
+              "id": 12,
               "name": "apollo_router_core::query_planner::fetch",
-              "records": [
-                [],
-                {
+              "record": {
+                "entries": [],
+                "metadata": {
                   "name": "fetch",
                   "target": "apollo_router_core::query_planner",
                   "level": "INFO",
@@ -67,240 +75,106 @@ expression: get_span()
                     "names": []
                   }
                 }
-              ],
+              },
               "children": {
-                "apollo_router_core::query_planner::fetch::subfetch - 13": {
-                  "id": 4,
-                  "name": "apollo_router_core::query_planner::fetch::subfetch",
-                  "records": [
-                    [
-                      [
-                        "service",
-                        {
-                          "Value": "products"
-                        }
-                      ]
-                    ],
-                    {
-                      "name": "subfetch",
-                      "target": "apollo_router_core::query_planner::fetch",
-                      "level": "INFO",
-                      "module_path": "apollo_router_core::query_planner::fetch",
+                "apollo_router::http_subgraph::http-subgraph-request - 13": {
+                  "id": 13,
+                  "name": "apollo_router::http_subgraph::http-subgraph-request",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "http-subgraph-request",
+                      "target": "apollo_router::http_subgraph",
+                      "level": "TRACE",
+                      "module_path": "apollo_router::http_subgraph",
                       "fields": {
-                        "names": [
-                          "service"
-                        ]
+                        "names": []
                       }
                     }
-                  ],
+                  },
                   "children": {
-                    "apollo_router::http_subgraph::http-subgraph-request - 14": {
-                      "id": 5,
-                      "name": "apollo_router::http_subgraph::http-subgraph-request",
-                      "records": [
-                        [],
-                        {
-                          "name": "http-subgraph-request",
-                          "target": "apollo_router::http_subgraph",
-                          "level": "TRACE",
-                          "module_path": "apollo_router::http_subgraph",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      ],
-                      "children": {
-                        "reqwest_tracing::middleware::HTTP request - 15": {
-                          "id": 6,
-                          "name": "reqwest_tracing::middleware::HTTP request",
-                          "records": [
-                            [
-                              [
-                                "http.method",
-                                {
-                                  "Debug": "POST"
-                                }
-                              ],
-                              [
-                                "http.scheme",
-                                {
-                                  "Debug": "http"
-                                }
-                              ],
-                              [
-                                "http.host",
-                                {
-                                  "Debug": "localhost"
-                                }
-                              ],
-                              [
-                                "net.host.port",
-                                {
-                                  "Debug": "4003"
-                                }
-                              ],
-                              [
-                                "otel.kind",
-                                {
-                                  "Value": "client"
-                                }
-                              ],
-                              [
-                                "otel.name",
-                                {
-                                  "Debug": "POST /graphql"
-                                }
-                              ],
-                              [
-                                "otel.status_code",
-                                {
-                                  "Value": "OK"
-                                }
-                              ],
-                              [
-                                "http.status_code",
-                                {
-                                  "Value": 200
-                                }
-                              ],
-                              [
-                                "http.user_agent",
-                                {
-                                  "Value": ""
-                                }
-                              ]
-                            ],
+                    "reqwest_tracing::middleware::HTTP request - 14": {
+                      "id": 14,
+                      "name": "reqwest_tracing::middleware::HTTP request",
+                      "record": {
+                        "entries": [
+                          [
+                            "http.method",
                             {
-                              "name": "HTTP request",
-                              "target": "reqwest_tracing::middleware",
-                              "level": "INFO",
-                              "module_path": "reqwest_tracing::middleware",
-                              "fields": {
-                                "names": [
-                                  "http.method",
-                                  "http.scheme",
-                                  "http.host",
-                                  "net.host.port",
-                                  "otel.kind",
-                                  "otel.name",
-                                  "otel.status_code",
-                                  "http.user_agent",
-                                  "http.status_code",
-                                  "error.message",
-                                  "error.cause_chain"
-                                ]
-                              }
+                              "Debug": "POST"
                             }
                           ],
-                          "children": {}
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "apollo_router::apollo_router::execute - 16": {
-      "id": 2251799813685249,
-      "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
-          [
-            "operation_name",
-            {
-              "Debug": ""
-            }
-          ]
-        ],
-        {
-          "name": "execute",
-          "target": "apollo_router::apollo_router",
-          "level": "DEBUG",
-          "module_path": "apollo_router::apollo_router",
-          "fields": {
-            "names": [
-              "operation_name"
-            ]
-          }
-        }
-      ],
-      "children": {
-        "apollo_router::apollo_router::execution - 17": {
-          "id": 9007199254740994,
-          "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
-              "name": "execution",
-              "target": "apollo_router::apollo_router",
-              "level": "INFO",
-              "module_path": "apollo_router::apollo_router",
-              "fields": {
-                "names": []
-              }
-            }
-          ],
-          "children": {
-            "apollo_router_core::query_planner::fetch - 18": {
-              "id": 3,
-              "name": "apollo_router_core::query_planner::fetch",
-              "records": [
-                [],
-                {
-                  "name": "fetch",
-                  "target": "apollo_router_core::query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
-                  "fields": {
-                    "names": []
-                  }
-                }
-              ],
-              "children": {
-                "apollo_router_core::query_planner::fetch::subfetch - 19": {
-                  "id": 4,
-                  "name": "apollo_router_core::query_planner::fetch::subfetch",
-                  "records": [
-                    [
-                      [
-                        "service",
-                        {
-                          "Value": "products"
-                        }
-                      ]
-                    ],
-                    {
-                      "name": "subfetch",
-                      "target": "apollo_router_core::query_planner::fetch",
-                      "level": "INFO",
-                      "module_path": "apollo_router_core::query_planner::fetch",
-                      "fields": {
-                        "names": [
-                          "service"
-                        ]
-                      }
-                    }
-                  ],
-                  "children": {
-                    "apollo_router::http_subgraph::http-subgraph-request - 20": {
-                      "id": 5,
-                      "name": "apollo_router::http_subgraph::http-subgraph-request",
-                      "records": [
-                        [],
-                        {
-                          "name": "http-subgraph-request",
-                          "target": "apollo_router::http_subgraph",
-                          "level": "TRACE",
-                          "module_path": "apollo_router::http_subgraph",
+                          [
+                            "http.scheme",
+                            {
+                              "Debug": "http"
+                            }
+                          ],
+                          [
+                            "http.host",
+                            {
+                              "Debug": "localhost"
+                            }
+                          ],
+                          [
+                            "net.host.port",
+                            {
+                              "Debug": "4003"
+                            }
+                          ],
+                          [
+                            "otel.kind",
+                            {
+                              "Value": "client"
+                            }
+                          ],
+                          [
+                            "otel.name",
+                            {
+                              "Debug": "POST /graphql"
+                            }
+                          ],
+                          [
+                            "otel.status_code",
+                            {
+                              "Value": "OK"
+                            }
+                          ],
+                          [
+                            "http.status_code",
+                            {
+                              "Value": 200
+                            }
+                          ],
+                          [
+                            "http.user_agent",
+                            {
+                              "Value": ""
+                            }
+                          ]
+                        ],
+                        "metadata": {
+                          "name": "HTTP request",
+                          "target": "reqwest_tracing::middleware",
+                          "level": "INFO",
+                          "module_path": "reqwest_tracing::middleware",
                           "fields": {
-                            "names": []
+                            "names": [
+                              "http.method",
+                              "http.scheme",
+                              "http.host",
+                              "net.host.port",
+                              "otel.kind",
+                              "otel.name",
+                              "otel.status_code",
+                              "http.user_agent",
+                              "http.status_code",
+                              "error.message",
+                              "error.cause_chain"
+                            ]
                           }
                         }
-                      ],
+                      },
                       "children": {}
                     }
                   }
@@ -311,11 +185,11 @@ expression: get_span()
         }
       }
     },
-    "apollo_router::apollo_router::execute - 21": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 15": {
+      "id": 15,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -323,7 +197,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -334,14 +208,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::execution - 22": {
-          "id": 9007199254740994,
+        "apollo_router::apollo_router::execution - 16": {
+          "id": 16,
           "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "execution",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -350,14 +224,14 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {
-            "apollo_router_core::query_planner::fetch - 23": {
-              "id": 3,
+            "apollo_router_core::query_planner::fetch - 17": {
+              "id": 17,
               "name": "apollo_router_core::query_planner::fetch",
-              "records": [
-                [],
-                {
+              "record": {
+                "entries": [],
+                "metadata": {
                   "name": "fetch",
                   "target": "apollo_router_core::query_planner",
                   "level": "INFO",
@@ -366,13 +240,93 @@ expression: get_span()
                     "names": []
                   }
                 }
-              ],
+              },
               "children": {
-                "apollo_router_core::query_planner::fetch::subfetch - 24": {
-                  "id": 4,
+                "apollo_router::http_subgraph::http-subgraph-request - 18": {
+                  "id": 18,
+                  "name": "apollo_router::http_subgraph::http-subgraph-request",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "http-subgraph-request",
+                      "target": "apollo_router::http_subgraph",
+                      "level": "TRACE",
+                      "module_path": "apollo_router::http_subgraph",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo_router::apollo_router::execute - 19": {
+      "id": 19,
+      "name": "apollo_router::apollo_router::execute",
+      "record": {
+        "entries": [
+          [
+            "operation_name",
+            {
+              "Debug": ""
+            }
+          ]
+        ],
+        "metadata": {
+          "name": "execute",
+          "target": "apollo_router::apollo_router",
+          "level": "DEBUG",
+          "module_path": "apollo_router::apollo_router",
+          "fields": {
+            "names": [
+              "operation_name"
+            ]
+          }
+        }
+      },
+      "children": {
+        "apollo_router::apollo_router::execution - 20": {
+          "id": 20,
+          "name": "apollo_router::apollo_router::execution",
+          "record": {
+            "entries": [],
+            "metadata": {
+              "name": "execution",
+              "target": "apollo_router::apollo_router",
+              "level": "INFO",
+              "module_path": "apollo_router::apollo_router",
+              "fields": {
+                "names": []
+              }
+            }
+          },
+          "children": {
+            "apollo_router_core::query_planner::fetch - 21": {
+              "id": 21,
+              "name": "apollo_router_core::query_planner::fetch",
+              "record": {
+                "entries": [],
+                "metadata": {
+                  "name": "fetch",
+                  "target": "apollo_router_core::query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router_core::query_planner",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {
+                "apollo_router_core::query_planner::fetch::subfetch - 22": {
+                  "id": 22,
                   "name": "apollo_router_core::query_planner::fetch::subfetch",
-                  "records": [
-                    [
+                  "record": {
+                    "entries": [
                       [
                         "service",
                         {
@@ -380,7 +334,7 @@ expression: get_span()
                         }
                       ]
                     ],
-                    {
+                    "metadata": {
                       "name": "subfetch",
                       "target": "apollo_router_core::query_planner::fetch",
                       "level": "INFO",
@@ -391,7 +345,7 @@ expression: get_span()
                         ]
                       }
                     }
-                  ],
+                  },
                   "children": {}
                 }
               }
@@ -400,11 +354,11 @@ expression: get_span()
         }
       }
     },
-    "apollo_router::apollo_router::execute - 25": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 23": {
+      "id": 23,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -412,7 +366,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -423,14 +377,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::execution - 26": {
-          "id": 9007199254740994,
+        "apollo_router::apollo_router::execution - 24": {
+          "id": 24,
           "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "execution",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -439,14 +393,14 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {
-            "apollo_router_core::query_planner::fetch - 27": {
-              "id": 3,
+            "apollo_router_core::query_planner::fetch - 25": {
+              "id": 25,
               "name": "apollo_router_core::query_planner::fetch",
-              "records": [
-                [],
-                {
+              "record": {
+                "entries": [],
+                "metadata": {
                   "name": "fetch",
                   "target": "apollo_router_core::query_planner",
                   "level": "INFO",
@@ -455,14 +409,14 @@ expression: get_span()
                     "names": []
                   }
                 }
-              ],
+              },
               "children": {
-                "apollo_router_core::query_planner::fetch::response_insert - 28": {
-                  "id": 2251799813685252,
+                "apollo_router_core::query_planner::fetch::response_insert - 26": {
+                  "id": 26,
                   "name": "apollo_router_core::query_planner::fetch::response_insert",
-                  "records": [
-                    [],
-                    {
+                  "record": {
+                    "entries": [],
+                    "metadata": {
                       "name": "response_insert",
                       "target": "apollo_router_core::query_planner::fetch",
                       "level": "TRACE",
@@ -471,7 +425,7 @@ expression: get_span()
                         "names": []
                       }
                     }
-                  ],
+                  },
                   "children": {}
                 }
               }
@@ -480,11 +434,11 @@ expression: get_span()
         }
       }
     },
-    "apollo_router::apollo_router::execute - 29": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 27": {
+      "id": 27,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -492,7 +446,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -503,14 +457,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::execution - 30": {
-          "id": 9007199254740994,
+        "apollo_router::apollo_router::execution - 28": {
+          "id": 28,
           "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "execution",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -519,14 +473,14 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {
-            "apollo_router_core::query_planner::fetch - 31": {
-              "id": 3,
+            "apollo_router_core::query_planner::fetch - 29": {
+              "id": 29,
               "name": "apollo_router_core::query_planner::fetch",
-              "records": [
-                [],
-                {
+              "record": {
+                "entries": [],
+                "metadata": {
                   "name": "fetch",
                   "target": "apollo_router_core::query_planner",
                   "level": "INFO",
@@ -535,18 +489,18 @@ expression: get_span()
                     "names": []
                   }
                 }
-              ],
+              },
               "children": {}
             }
           }
         }
       }
     },
-    "apollo_router::apollo_router::execute - 32": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 30": {
+      "id": 30,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -554,7 +508,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -565,14 +519,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::execution - 33": {
-          "id": 9007199254740994,
+        "apollo_router::apollo_router::execution - 31": {
+          "id": 31,
           "name": "apollo_router::apollo_router::execution",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "execution",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -581,16 +535,16 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
-    "apollo_router::apollo_router::execute - 34": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 32": {
+      "id": 32,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -598,7 +552,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -609,14 +563,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::format_response - 35": {
-          "id": 11258999068426242,
+        "apollo_router::apollo_router::format_response - 33": {
+          "id": 33,
           "name": "apollo_router::apollo_router::format_response",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "format_response",
               "target": "apollo_router::apollo_router",
               "level": "DEBUG",
@@ -625,13 +579,13 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {
-            "apollo_router_core::spec::query::format_response - 36": {
-              "id": 2251799813685251,
+            "apollo_router_core::spec::query::format_response - 34": {
+              "id": 34,
               "name": "apollo_router_core::spec::query::format_response",
-              "records": [
-                [
+              "record": {
+                "entries": [
                   [
                     "errors",
                     {
@@ -639,7 +593,7 @@ expression: get_span()
                     }
                   ]
                 ],
-                {
+                "metadata": {
                   "name": "format_response",
                   "target": "apollo_router_core::spec::query",
                   "level": "TRACE",
@@ -650,18 +604,18 @@ expression: get_span()
                     ]
                   }
                 }
-              ],
+              },
               "children": {}
             }
           }
         }
       }
     },
-    "apollo_router::apollo_router::execute - 37": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 35": {
+      "id": 35,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -669,7 +623,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -680,14 +634,14 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {
-        "apollo_router::apollo_router::format_response - 38": {
-          "id": 11258999068426242,
+        "apollo_router::apollo_router::format_response - 36": {
+          "id": 36,
           "name": "apollo_router::apollo_router::format_response",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "format_response",
               "target": "apollo_router::apollo_router",
               "level": "DEBUG",
@@ -696,16 +650,16 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
-    "apollo_router::apollo_router::execute - 39": {
-      "id": 2251799813685249,
+    "apollo_router::apollo_router::execute - 37": {
+      "id": 37,
       "name": "apollo_router::apollo_router::execute",
-      "records": [
-        [
+      "record": {
+        "entries": [
           [
             "operation_name",
             {
@@ -713,7 +667,7 @@ expression: get_span()
             }
           ]
         ],
-        {
+        "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -724,15 +678,15 @@ expression: get_span()
             ]
           }
         }
-      ],
+      },
       "children": {}
     },
     "apollo_router::apollo_router::prepare_query - 1": {
       "id": 1,
       "name": "apollo_router::apollo_router::prepare_query",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -741,14 +695,14 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
         "apollo_router::apollo_router::query_parsing - 2": {
           "id": 2,
           "name": "apollo_router::apollo_router::query_parsing",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "query_parsing",
               "target": "apollo_router::apollo_router",
               "level": "INFO",
@@ -757,17 +711,17 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
     "apollo_router::apollo_router::prepare_query - 3": {
-      "id": 1,
+      "id": 3,
       "name": "apollo_router::apollo_router::prepare_query",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -776,14 +730,14 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
         "apollo_router_core::spec::query::validate_variables - 4": {
-          "id": 2251799813685250,
+          "id": 4,
           "name": "apollo_router_core::spec::query::validate_variables",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "validate_variables",
               "target": "apollo_router_core::spec::query",
               "level": "TRACE",
@@ -792,17 +746,17 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
     "apollo_router::apollo_router::prepare_query - 5": {
-      "id": 1,
+      "id": 5,
       "name": "apollo_router::apollo_router::prepare_query",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -811,14 +765,14 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
         "apollo_router_core::query_planner::router_bridge_query_planner::plan - 6": {
-          "id": 4503599627370498,
+          "id": 6,
           "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "plan",
               "target": "apollo_router_core::query_planner::router_bridge_query_planner",
               "level": "DEBUG",
@@ -827,17 +781,17 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
     "apollo_router::apollo_router::prepare_query - 7": {
-      "id": 1,
+      "id": 7,
       "name": "apollo_router::apollo_router::prepare_query",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -846,14 +800,14 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
         "apollo_router_core::query_planner::validate - 8": {
-          "id": 6755399441055746,
+          "id": 8,
           "name": "apollo_router_core::query_planner::validate",
-          "records": [
-            [],
-            {
+          "record": {
+            "entries": [],
+            "metadata": {
               "name": "validate",
               "target": "apollo_router_core::query_planner",
               "level": "DEBUG",
@@ -862,17 +816,17 @@ expression: get_span()
                 "names": []
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
     "apollo_router::apollo_router::prepare_query - 9": {
-      "id": 1,
+      "id": 9,
       "name": "apollo_router::apollo_router::prepare_query",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "prepare_query",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
@@ -881,15 +835,15 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {}
     },
-    "apollo_router::http_subgraph::http-subgraph-request - 40": {
-      "id": 4503599627370497,
+    "apollo_router::http_subgraph::http-subgraph-request - 38": {
+      "id": 38,
       "name": "apollo_router::http_subgraph::http-subgraph-request",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "http-subgraph-request",
           "target": "apollo_router::http_subgraph",
           "level": "TRACE",
@@ -898,13 +852,13 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
-        "reqwest_tracing::middleware::HTTP request - 41": {
-          "id": 13510798882111490,
+        "reqwest_tracing::middleware::HTTP request - 39": {
+          "id": 39,
           "name": "reqwest_tracing::middleware::HTTP request",
-          "records": [
-            [
+          "record": {
+            "entries": [
               [
                 "http.method",
                 {
@@ -960,7 +914,7 @@ expression: get_span()
                 }
               ]
             ],
-            {
+            "metadata": {
               "name": "HTTP request",
               "target": "reqwest_tracing::middleware",
               "level": "INFO",
@@ -981,17 +935,17 @@ expression: get_span()
                 ]
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
-    "apollo_router::http_subgraph::http-subgraph-request - 42": {
-      "id": 4503599627370497,
+    "apollo_router::http_subgraph::http-subgraph-request - 40": {
+      "id": 40,
       "name": "apollo_router::http_subgraph::http-subgraph-request",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "http-subgraph-request",
           "target": "apollo_router::http_subgraph",
           "level": "TRACE",
@@ -1000,7 +954,7 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {}
     }
   }

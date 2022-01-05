@@ -248,7 +248,7 @@ mod span_tests {
 
         pub fn for_metadata(&mut self, metadata: OwnedMetadata) -> Record {
             let mut r = Record::new(metadata.clone());
-            r.append(self.visitors.entry(metadata.clone()).or_default().0.clone());
+            r.append(self.visitors.entry(metadata).or_default().0.clone());
             r
         }
 
@@ -400,7 +400,7 @@ mod span_tests {
                 .lock()
                 .unwrap()
                 .get_mut(&id.into_u64())
-                .expect(format!("no record for id {}", id.into_u64()).as_str())
+                .unwrap_or_else(|| panic!("no record for id {}", id.into_u64()))
                 .record(record);
         }
 
