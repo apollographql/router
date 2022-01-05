@@ -37,10 +37,7 @@ pub enum ConfigurationError {
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
     /// Invalid URL for subgraph {subgraph}: {url}
-    InvalidSubgraphUrl {
-        subgraph: String,
-        url: String,
-    },
+    InvalidSubgraphUrl { subgraph: String, url: String },
 }
 
 /// The configuration for the router.
@@ -509,5 +506,13 @@ mod tests {
             }
             Ok(()) => panic!("expected missing subgraph URL for 'reviews'"),
         }
+    }
+
+    #[test]
+    fn invalid_subgraph_url() {
+        let err = serde_yaml::from_str::<Configuration>(include_str!("testdata/invalid_url.yaml"))
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "subgraphs.accounts.routing_url: invalid value: string \"abcd\", expected relative URL without a base at line 5 column 18");
     }
 }
