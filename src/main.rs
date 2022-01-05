@@ -5,250 +5,207 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use crate::custom_orchestration::MyRouterFactory;
-use crate::default_implementations::{DefaultConfiguration, DefaultQueryPlanner, DefaultRoutingHandler, DefaultRouterFactory, DefaultSchemaLoader, DefaultServiceRegistry, DefaultExtensionManager};
+use std::task::{Context, Poll};
+use std::time::Duration;
 use anyhow::Result;
-use crate::extensions::{HeadersExtension, SecurityExtension};
+use futures::future::BoxFuture;
+use futures::Stream;
+use tower::{Layer, Service, ServiceBuilder};
+use tower::util::BoxService;
 
-mod extensions;
-mod custom_orchestration;
-mod default_implementations;
 
 pub struct Schema;
 
 pub struct QueryPlan;
 
-#[derive(Debug, Clone)]
-pub struct Request {
-    headers: HashMap<String, String>,
+use http::{Request, Response, StatusCode};
+use tower::layer::layer_fn;
+use tower::layer::util::Stack;
+
+
+struct GraphQLRequest {
+    //Usual stuff here
 }
 
+struct PlannedGraphQLRequest {
+    // Planned request includes the original request
+    request: Request<GraphQLRequest>,
 
-impl Request {
-    pub(crate) fn get_header(&self, name: &str) -> Option<&String> {
-        self.headers.get(name)
+    // And also the query plan
+    query_plan: QueryPlan,
+}
+
+struct DownstreamGraphQLRequest {
+    //The request to make downstream
+    request: Request<GraphQLRequest>,
+
+    // Downstream requests includes the original request
+    upstream_request: PlannedGraphQLRequest,
+}
+
+struct GraphQLResponse {
+    //Usual stuff here
+
+
+    //Stream stuff here for defer/stream
+    //Our warp adapter will convert the entire response to a stream if this field is present.
+    stream: Option<Box<dyn Stream<Item=GraphQLPatchResponse>>>,
+}
+
+struct GraphQLPatchResponse {}
+
+struct QueryPlannerService;
+
+impl Service<Request<GraphQLRequest>> for QueryPlannerService {
+    type Response = PlannedGraphQLRequest;
+    type Error = http::Error;
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!();
     }
-    pub(crate) fn set_header(&mut self, name: &str, value: &str) -> Option<String> {
-        self.headers.insert(name.to_string(), value.to_string())
-    }
-}
 
-#[derive(Debug)]
-pub struct Response {
-    headers: HashMap<String, String>,
-    body: String
-}
+    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+        // create a response in a future.
+        let fut = async {
+            Ok(PlannedGraphQLRequest { request, query_plan: QueryPlan {} })
+        };
 
-impl Response {
-    pub(crate) fn get_header(&self, name: &str) -> Option<&String> {
-        self.headers.get(name)
-    }
-    pub(crate) fn set_header(&mut self, name: &str, value: &str) -> Option<String> {
-        self.headers.insert(name.to_string(), value.to_string())
-    }
-}
-
-pub trait Configuration: Send + Sync {}
-
-#[async_trait]
-pub trait ServiceRegistry: Send + Sync {
-    async fn make_request(&self, upstream_request: Request, downstream_request: Request) -> Result<Response>;
-}
-
-pub trait QueryPlanner: Send + Sync {}
-
-#[async_trait]
-pub trait RoutingHandler: Send + Sync {
-    async fn respond(&self, request: Request) -> Result<Response>;
-}
-
-
-#[async_trait]
-pub trait ExtensionManager: Send + Sync {
-
-    // async fn validate_response(&self, response: Response, delegate: Box<dyn Fn(Response)->dyn Future<Output=()> >);
-    async fn do_make_downstream_request(&self, upstream_request: &Request, downstream_request: Request, chain: DownstreamRequestChain) -> Result<Response>;
-    // async fn plan_query(&self, request: Request, delegate: Box<dyn Fn(Request)->dyn Future<Output=QueryPlan>>) -> QueryPlan;
-    //async fn do_read_schema(&self, delegate: Box<dyn Fn() -> Box<dyn Future<Output=Schema> + Send> + Send>) -> Schema;
-    // async fn visit_query(&self, delegate: Box<dyn Fn()->dyn Future<Output=()>>);
-}
-
-
-type DownstreamRequestChain = Box<dyn Fn(Request) -> Pin<Box<dyn Future<Output=Result<Response>> + Send + Sync + 'static>> + Send + Sync + 'static>;
-
-// This trait allows the user to supply a lambda when calling an extension on ExtensionManager
-#[async_trait]
-pub trait ExtensionManagerExt: ExtensionManager {
-    async fn make_downstream_request<F, T>(&self, upstream_request: Request, downstream_request: Request, f: F) -> Result<Response>
-        where
-            F: Fn(Request) -> T + Send + Sync + 'static,
-            T: Future<Output=Result<Response>> + Send + Sync + 'static,
-    {
-        self.do_make_downstream_request(&upstream_request, downstream_request, Box::new(move |r| Box::pin(f(r)))).await
+        // Return the response as an immediate future
+        Box::pin(fut)
     }
 }
 
-pub struct Chain {
-    extension_index: usize,
-    extensions: Arc<Vec<Box<dyn Extension>>>,
-    delegate: Arc<DownstreamRequestChain>,
+struct QueryExecutionService {
+    query_planner_service: BoxService<Request<GraphQLRequest>, PlannedGraphQLRequest, http::Error>,
+    services: Vec<BoxService<Request<GraphQLRequest>, Response<GraphQLResponse>, http::Error>>,
 }
 
-impl Chain {
-    pub async fn validate_response(&self, _response: Response) -> Result<Response>{
+impl Service<Request<GraphQLRequest>> for QueryExecutionService {
+    type Response = Response<GraphQLResponse>;
+    type Error = http::Error;
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!();
+    }
+
+    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+        todo!();
+    }
+}
+
+pub struct GraphQLEndpointService {
+    url: String,
+}
+
+impl Service<Request<GraphQLRequest>> for GraphQLEndpointService {
+    type Response = Response<GraphQLResponse>;
+    type Error = http::Error;
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!();
+    }
+
+    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+        todo!();
+    }
+}
+
+
+struct ApolloRouter {}
+
+impl ApolloRouter {
+    pub(crate) async fn start(&self) {
         todo!()
-    }
-    pub async fn make_downstream_request(&self, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
-        if self.extensions.len() == self.extension_index {
-            (self.delegate)(downstream_request).await
-        } else {
-            let current_extension = &mut self.extensions.get(self.extension_index).unwrap();
-            let next = Chain {
-                extension_index: self.extension_index + 1,
-                extensions: self.extensions.clone(),
-                delegate: self.delegate.clone(),
-            };
-            current_extension.make_downstream_request(next, upstream_request, downstream_request).await
-        }
-    }
-
-
-    pub async fn plan_query(&self, _request: Request) -> Result<QueryPlan> {
-        todo!();
-    }
-    pub async fn schema_read(&self) -> Result<Schema> {
-        todo!();
-    }
-
-
-}
-
-
-#[async_trait]
-pub trait Extension: Send + Sync {
-    async fn configure(&self, _configuration: Arc<dyn Configuration>) {}
-    async fn schema_read(&self, chain: Chain) -> Result<Schema> {
-        chain.schema_read().await
-    }
-    async fn plan_query(&self, chain: Chain, upstream_request: Request) -> Result<QueryPlan> {
-        chain.plan_query(upstream_request).await
-    }
-    async fn make_downstream_request(&self, chain: Chain, upstream_request: &Request, downstream_request: Request) -> Result<Response> {
-        chain.make_downstream_request(upstream_request, downstream_request).await
-    }
-    async fn validate_response(&self, chain: Chain, response: Response) -> Result<Response>{
-        chain.validate_response(response).await
-    }
-}
-
-impl ExtensionManagerExt for dyn ExtensionManager {}
-
-
-struct ApolloRouter {
-    router_factory: Box<dyn RouterFactory>,
-}
-
-
-impl ApolloRouter
-{
-    fn new(router_factory: impl RouterFactory + 'static) -> ApolloRouter {
-        Self {
-            router_factory: Box::new(router_factory)
-        }
     }
 }
 
 impl Default for ApolloRouter {
     fn default() -> Self {
-        ApolloRouter::new(DefaultRouterFactory::default())
+        todo!()
     }
 }
 
-#[async_trait]
-trait RouterFactory: Send + Sync {
-    async fn create_configuration(&mut self) -> Result<Arc<dyn Configuration>, Box<dyn Error>>
-    {
-        Ok(Arc::new(DefaultConfiguration::default()))
-    }
+pub struct CacheLayer;
 
-    async fn create_extensions_manager(&mut self, config: Arc<dyn Configuration>) -> Result<Arc<dyn ExtensionManager>> {
-        Ok(Arc::new(DefaultExtensionManager::new(config.to_owned(), None)))
-    }
+impl<S> Layer<S> for CacheLayer {
+    type Service = S;
 
-    async fn create_schema(&mut self, config: Arc<dyn Configuration>, extensions: Arc<dyn ExtensionManager>) -> Result<Schema> {
-        Ok(DefaultSchemaLoader::get(config.to_owned(), extensions.to_owned()).await)
-    }
-
-    async fn create_query_planner(&mut self, config: Arc<dyn Configuration>, extensions: Arc<dyn ExtensionManager>, schema: Arc<Schema>) -> Result<Arc<dyn QueryPlanner>> {
-        Ok(Arc::new(DefaultQueryPlanner::new(config.to_owned(), extensions.to_owned(), schema)))
-    }
-
-    async fn create_service_registry(&mut self, config: Arc<dyn Configuration>, extensions: Arc<dyn ExtensionManager>, schema: Arc<Schema>) -> Result<Arc<dyn ServiceRegistry>> {
-        Ok(Arc::new(DefaultServiceRegistry::new(config.to_owned(), extensions.to_owned(), schema)))
-    }
-
-    async fn create_routing_handler(&mut self) -> Result<Box<dyn RoutingHandler>, Box<dyn Error>> {
-        //Basic DI
-        //We do all the arc cloning so that users don't have to.
-        let config = self.create_configuration().await?;
-        let extensions_manager = self.create_extensions_manager(config.to_owned()).await?;
-        let schema = Arc::new(self.create_schema(config.to_owned(), extensions_manager.to_owned()).await?);
-        let query_planner = self.create_query_planner(config.to_owned(), extensions_manager.to_owned(), schema.to_owned()).await?;
-        let service_registry = self.create_service_registry(config.to_owned(), extensions_manager.to_owned(), schema.to_owned()).await?;
-        Ok(Box::new(DefaultRoutingHandler::new(config, extensions_manager, schema, query_planner, service_registry)))
+    fn layer(&self, service: S) -> Self::Service {
+        todo!();
     }
 }
 
-struct WarpAdapter {}
+pub struct PropagateHeaderLayer;
 
-impl WarpAdapter {
-    fn new(_handler: Box<dyn RoutingHandler>) {}
+impl<S> Layer<S> for PropagateHeaderLayer {
+    type Service = GraphQLEndpointService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        todo!();
+    }
 }
+
+
+trait ServiceBuilderExt<L> {
+    //Add extra stuff here to support our needs e.g. caching
+    fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>>;
+
+    //This will only compile for Endpoint services
+    fn propagate_header(self, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
+}
+
+impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
+    fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>> {
+        //Implement our caching stuff here
+        todo!();
+    }
+
+    fn propagate_header(self : ServiceBuilder<L>, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
+        todo!()
+    }
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    //The thing that most people will use
-    //It internally has warp, yaml config, etc.
-    ApolloRouter::default();
+    //Query planning is a service. It take GraphQLRequest and outputs PlannedGraphQLRequest
+    let mut query_planner_service = ServiceBuilder::new()
+        .cache()
+        .rate_limit(2, Duration::from_secs(10))
+        .service(QueryPlannerService {});
 
-    //User wants to customize one part of the router (see custom_orchestration.rs)
-    //Mostly it is our stuff though.
-    ApolloRouter::new(MyRouterFactory::default());
+    //Endpoint service takes a PlannedGraphQLRequest and outputs a GraphQLResponse
+    let mut book_service = ServiceBuilder::new()
+        .rate_limit(2, Duration::from_secs(2))
+        .layer(layer_fn(|f|f)) //Custom stuff that the user wants to develop
+        .service(GraphQLEndpointService { url: "http://books".to_string() });
 
-    //Embed the standard router
-    WarpAdapter::new(DefaultRouterFactory::default().create_routing_handler().await?);
+    //Endpoint service takes a PlannedGraphQLRequest and outputs a GraphQLResponse
+    let mut author_service = ServiceBuilder::new()
+        .propagate_header("A")
+        .cache()
+        .service(GraphQLEndpointService { url: "http://authors".to_string() });
 
-    //Embed a customized router (see custom_orchestration.rs)
-    WarpAdapter::new(MyRouterFactory::default().create_routing_handler().await?);
+    //Execution service takes a GraphQLRequest and outputs a GraphQLResponse
+    let mut query_execution_service = ServiceBuilder::new()
+        .service(QueryExecutionService {
+            query_planner_service: BoxService::new(query_planner_service), //Query planner service to use
+            services: vec!(BoxService::new(book_service), BoxService::new(author_service)), //The list of endpoints
+        });
 
 
+    // User can use an adapter that we provide or embed their own or use tower-http
+    query_execution_service.call(Request::new(GraphQLRequest {})).await;
 
-    ////////////////////////////////////////
-    // Demonstrate extensions (see extensions.rs)
-    // Note that extensions are expected to be interior mutable!!!!!!!
-    // This is not because I like this, it seems like a necessary tradeoff to prevent having to wrap every extension in a mutex.
-    // Maybe there is a better way?
-    //
-    // Extensions will generally be configured dynamically through config, but here we demonstrate programmatic config.
-    let routing_handler = DefaultRouterFactory::default()
-        .with_extension(HeadersExtension{})
-        .with_extension(SecurityExtension{})
-        .create_routing_handler().await?;
-
-    //Demonstrate header propagation extension
-    let mut custom_headers = HashMap::new();
-    custom_headers.insert("A".to_string(), "HEADER A".to_string());
-    let response = routing_handler.respond(Request{
-        headers: custom_headers
-    }).await?;
-    println!("{:?}", response);
-
-    //Demonstrate security extension
-    let response = routing_handler.respond(Request{
-        headers: Default::default()
-    }).await?;
-    println!("{:?}", response);
-
+    //We will provide an implementation based on Warp
+    //It does hot reloading and config from yaml to build the services
+    //Wasm/deno layers can be developed.
+    //We can reuse what we have already developed as this slots in to where Geffroy has added Tower in:
+    // https://github.com/apollographql/router/pull/293
+    ApolloRouter::default().start().await;
 
     Ok(())
 }
