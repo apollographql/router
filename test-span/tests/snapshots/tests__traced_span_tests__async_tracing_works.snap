@@ -1,58 +1,116 @@
 ---
 source: test-span/tests/tests.rs
+assertion_line: 138
 expression: logs
 
 ---
 [
-  [
-    [
-      "message",
-      {
-        "Debug": "here i am again!"
-      }
+  {
+    "entries": [
+      [
+        "message",
+        {
+          "Debug": "here i am again!"
+        }
+      ],
+      [
+        "message",
+        {
+          "Debug": "here i am again!"
+        }
+      ]
     ],
-    [
-      "message",
-      {
-        "Debug": "in a separate context!"
+    "metadata": {
+      "name": "event test-span/tests/tests.rs:184",
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": [
+          "message"
+        ]
       }
+    }
+  },
+  {
+    "entries": [
+      [
+        "message",
+        {
+          "Debug": "in a separate context!"
+        }
+      ],
+      [
+        "message",
+        {
+          "Debug": "in a separate context!"
+        }
+      ]
     ],
-    [
-      "message",
-      {
-        "Debug": "here i am!"
+    "metadata": {
+      "name": "event test-span/tests/tests.rs:167",
+      "target": "tests::traced_span_tests",
+      "level": "WARN",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": [
+          "message"
+        ]
       }
+    }
+  },
+  {
+    "entries": [
+      [
+        "message",
+        {
+          "Debug": "here i am!"
+        }
+      ],
+      [
+        "message",
+        {
+          "Debug": "here i am!"
+        }
+      ]
     ],
-    [
-      "number",
-      {
-        "Value": 52
+    "metadata": {
+      "name": "event test-span/tests/tests.rs:171",
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": [
+          "message"
+        ]
       }
+    }
+  },
+  {
+    "entries": [
+      [
+        "number",
+        {
+          "Value": 52
+        }
+      ],
+      [
+        "number",
+        {
+          "Value": 52
+        }
+      ]
     ],
-    [
-      "message",
-      {
-        "Debug": "here i am again!"
+    "metadata": {
+      "name": "event test-span/tests/tests.rs:173",
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": [
+          "number"
+        ]
       }
-    ],
-    [
-      "message",
-      {
-        "Debug": "in a separate context!"
-      }
-    ],
-    [
-      "message",
-      {
-        "Debug": "here i am!"
-      }
-    ],
-    [
-      "number",
-      {
-        "Value": 52
-      }
-    ]
-  ],
-  null
+    }
+  }
 ]

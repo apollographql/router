@@ -84,6 +84,7 @@ fn subscriber_boilerplate() -> TokenStream2 {
         ));
 
         let logs_clone = Arc::clone(&logs);
+        let span_logs_clone = Arc::clone(&logs);
         let spans_clone = Arc::clone(&all_spans);
         let id_sequence_clone = Arc::clone(&id_sequence);
 
@@ -93,8 +94,9 @@ fn subscriber_boilerplate() -> TokenStream2 {
         #[allow(unused)]
         let get_span = move || {
             let all_spans = spans_clone.lock().unwrap().clone();
+            let all_logs = span_logs_clone.lock().unwrap().clone();
             let id_sequence = id_sequence_clone.read().unwrap().clone();
-            Span::from_records(id_sequence, all_spans)
+            Span::from_records(id_sequence, all_logs, all_spans)
         };
     }
 }

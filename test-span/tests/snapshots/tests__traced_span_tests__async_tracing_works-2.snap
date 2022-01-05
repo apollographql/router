@@ -1,22 +1,31 @@
 ---
 source: test-span/tests/tests.rs
+assertion_line: 139
 expression: get_span()
 
 ---
 {
   "id": 0,
   "name": "root",
-  "records": [
-    [],
-    null
-  ],
+  "record": {
+    "entries": [],
+    "metadata": {
+      "name": "root",
+      "target": "",
+      "level": "",
+      "module_path": null,
+      "fields": {
+        "names": []
+      }
+    }
+  },
   "children": {
-    "tests::traced_span_tests::do_stuff - 2252074691592193": {
-      "id": 2252074691592193,
+    "tests::traced_span_tests::do_stuff - 1": {
+      "id": 1,
       "name": "tests::traced_span_tests::do_stuff",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",
           "level": "INFO",
@@ -25,13 +34,13 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
       "children": {
-        "my_crate::an_other_target::do_stuff2 - 2252074691592194": {
-          "id": 2252074691592194,
+        "my_crate::an_other_target::do_stuff2 - 2": {
+          "id": 2,
           "name": "my_crate::an_other_target::do_stuff2",
-          "records": [
-            [
+          "record": {
+            "entries": [
               [
                 "number",
                 {
@@ -39,7 +48,7 @@ expression: get_span()
                 }
               ]
             ],
-            {
+            "metadata": {
               "name": "do_stuff2",
               "target": "my_crate::an_other_target",
               "level": "INFO",
@@ -50,17 +59,17 @@ expression: get_span()
                 ]
               }
             }
-          ],
+          },
           "children": {}
         }
       }
     },
-    "tests::traced_span_tests::do_stuff - 274877906945": {
-      "id": 274877906945,
+    "tests::traced_span_tests::do_stuff - 3": {
+      "id": 3,
       "name": "tests::traced_span_tests::do_stuff",
-      "records": [
-        [],
-        {
+      "record": {
+        "entries": [],
+        "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",
           "level": "INFO",
@@ -69,13 +78,30 @@ expression: get_span()
             "names": []
           }
         }
-      ],
+      },
+      "children": {}
+    },
+    "tests::traced_span_tests::do_stuff - 4": {
+      "id": 4,
+      "name": "tests::traced_span_tests::do_stuff",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "do_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      },
       "children": {
-        "my_crate::an_other_target::do_stuff2 - 274877906946": {
-          "id": 274877906946,
+        "my_crate::an_other_target::do_stuff2 - 5": {
+          "id": 5,
           "name": "my_crate::an_other_target::do_stuff2",
-          "records": [
-            [
+          "record": {
+            "entries": [
               [
                 "number",
                 {
@@ -83,7 +109,7 @@ expression: get_span()
                 }
               ]
             ],
-            {
+            "metadata": {
               "name": "do_stuff2",
               "target": "my_crate::an_other_target",
               "level": "INFO",
@@ -94,10 +120,27 @@ expression: get_span()
                 ]
               }
             }
-          ],
+          },
           "children": {}
         }
       }
+    },
+    "tests::traced_span_tests::do_stuff - 6": {
+      "id": 6,
+      "name": "tests::traced_span_tests::do_stuff",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "do_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
     }
   }
 }
