@@ -9,15 +9,11 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "here i am again!"
-        }
+        "here i am again!"
       ],
       [
         "message",
-        {
-          "Debug": "here i am again!"
-        }
+        "here i am again!"
       ]
     ],
     "metadata": {
@@ -36,15 +32,11 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "in a separate context!"
-        }
+        "in a separate context!"
       ],
       [
         "message",
-        {
-          "Debug": "in a separate context!"
-        }
+        "in a separate context!"
       ]
     ],
     "metadata": {
@@ -63,15 +55,11 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "here i am!"
-        }
+        "here i am!"
       ],
       [
         "message",
-        {
-          "Debug": "here i am!"
-        }
+        "here i am!"
       ]
     ],
     "metadata": {
@@ -90,15 +78,11 @@ expression: logs
     "entries": [
       [
         "number",
-        {
-          "Value": 52
-        }
+        52
       ],
       [
         "number",
-        {
-          "Value": 52
-        }
+        52
       ]
     ],
     "metadata": {
