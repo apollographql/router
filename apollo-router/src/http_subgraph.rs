@@ -58,14 +58,18 @@ impl HttpSubgraphFetcher {
                 }
             })?;
 
-        response.bytes().await.map_err(|err| {
-            tracing::error!(fetch_error = format!("{:?}", err).as_str());
+        response
+            .bytes()
+            .instrument(tracing::debug_span!("aggregate_response_data"))
+            .await
+            .map_err(|err| {
+                tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-            graphql::FetchError::SubrequestHttpError {
-                service: self.service.to_owned(),
-                reason: err.to_string(),
-            }
-        })
+                graphql::FetchError::SubrequestHttpError {
+                    service: self.service.to_owned(),
+                    reason: err.to_string(),
+                }
+            })
     }
 
     fn map_to_graphql(
@@ -77,14 +81,17 @@ impl HttpSubgraphFetcher {
                 let is_primary = true;
                 match response {
                     Err(e) => e.to_response(is_primary),
-                    Ok(bytes) => serde_json::from_slice::<graphql::Response>(&bytes)
-                        .unwrap_or_else(|error| {
-                            graphql::FetchError::SubrequestMalformedResponse {
-                                service: service_name.clone(),
-                                reason: error.to_string(),
-                            }
-                            .to_response(is_primary)
-                        }),
+                    Ok(bytes) => tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                        serde_json::from_slice::<graphql::Response>(&bytes).unwrap_or_else(
+                            |error| {
+                                graphql::FetchError::SubrequestMalformedResponse {
+                                    service: service_name.clone(),
+                                    reason: error.to_string(),
+                                }
+                                .to_response(is_primary)
+                            },
+                        )
+                    }),
                 }
             }
             .into_stream(),
