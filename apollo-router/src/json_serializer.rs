@@ -4,22 +4,23 @@ use serde_json::Serializer;
 use std::{
     cmp::min,
     io::{self, Write},
-    str::from_utf8,
 };
+use tokio::sync::mpsc;
+
 pub enum Error {
     IO(std::io::Error),
     Serde(serde_json::Error),
 }
 
 pub struct BytesWriter {
-    sender: flume::Sender<Bytes>,
+    sender: mpsc::Sender<Bytes>,
     buffer: Option<BytesMut>,
     buffer_capacity: usize,
 }
 
 impl BytesWriter {
-    pub fn new(buffer_capacity: usize, channel_capacity: usize) -> (Self, flume::Receiver<Bytes>) {
-        let (sender, receiver) = flume::bounded(channel_capacity);
+    pub fn new(buffer_capacity: usize, channel_capacity: usize) -> (Self, mpsc::Receiver<Bytes>) {
+        let (sender, receiver) = mpsc::channel(channel_capacity);
 
         (
             BytesWriter {
@@ -65,7 +66,7 @@ impl Write for BytesWriter {
                 return Ok(size);
             } else {
                 //println!("=======> will send {}", from_utf8(&buffer).unwrap());
-                self.sender.send(buffer.freeze()).unwrap();
+                self.sender.blocking_send(buffer.freeze()).unwrap();
 
                 if sz == buf.len() {
                     //println!("wrote {} bytes", size);
@@ -81,7 +82,7 @@ impl Write for BytesWriter {
     fn flush(&mut self) -> io::Result<()> {
         if let Some(buffer) = self.buffer.take() {
             //println!("=======> will flush {}", from_utf8(&buffer).unwrap());
-            self.sender.send(buffer.freeze()).unwrap();
+            self.sender.blocking_send(buffer.freeze()).unwrap();
         }
         Ok(())
     }

@@ -352,7 +352,7 @@ where
             let (writer, rx) = crate::json_serializer::BytesWriter::new(2048, 10);
             let _jh = tokio::task::spawn_blocking(move || writer.serialize(res));
 
-            let stream = rx.into_stream();
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
             let s = stream.map(|bytes| Ok(bytes));
             s
         })
