@@ -130,6 +130,7 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
+ "async-trait",
  "criterion",
  "futures",
  "once_cell",
