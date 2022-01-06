@@ -291,7 +291,7 @@ where
     });
 
     async move {
-        let response_stream = stream_request(router, request)
+        let response_stream = stream_request2(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -331,6 +331,32 @@ where
             }
         })
     })
+}
+
+async fn stream_request2<Router, PreparedQuery>(
+    router: Arc<Router>,
+    request: graphql::Request,
+) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+where
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery,
+{
+    let stream = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(Arc::new(request)).await,
+        Err(stream) => stream,
+    };
+
+    stream
+        .enumerate()
+        .map(|(index, res)| {
+            let (writer, rx) = crate::json_serializer::BytesWriter::new(2048, 10);
+            let _jh = tokio::task::spawn_blocking(move || writer.serialize(res));
+
+            let stream = rx.into_stream();
+            let s = stream.map(|bytes| Ok(bytes));
+            s
+        })
+        .flatten()
 }
 
 fn prefers_html(accept_header: String) -> bool {

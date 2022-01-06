@@ -32,6 +32,7 @@ derivative = "2.2.0"
 derive_more = "0.99.17"
 directories = "4.0.1"
 displaydoc = "0.2"
+flume = "0.10.9"
 futures = { version = "0.3.19", features = ["thread-pool"] }
 hotwatch = "0.4.6"
 hyper = { version = "0.14.16", features = ["server"] }

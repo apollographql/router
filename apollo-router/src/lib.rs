@@ -6,6 +6,7 @@ mod files;
 mod http_server_factory;
 pub mod http_service_registry;
 pub mod http_subgraph;
+mod json_serializer;
 mod router_factory;
 mod state_machine;
 mod trace;
