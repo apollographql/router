@@ -7,7 +7,7 @@ mod agent {
 }
 
 use agent::reporter_client::ReporterClient;
-use agent::ReportResponse;
+use agent::{ReporterResponse, ReporterStats, ReporterTrace};
 pub use report::*;
 use std::error::Error;
 use sys_info::hostname;
@@ -140,23 +140,55 @@ impl Reporter {
         Ok(Self { client })
     }
 
-    pub async fn submit(&mut self, report: Report) -> Result<Response<ReportResponse>, Status> {
-        self.client.send_report(Request::new(report)).await
+    /// Relay stats onto the collector
+    pub async fn submit_stats(
+        &mut self,
+        q: String,
+        stats: ContextualizedStats,
+    ) -> Result<Response<ReporterResponse>, Status> {
+        self.client
+            .add_stats(Request::new(ReporterStats {
+                key: q,
+                stats: Some(stats),
+            }))
+            .await
+    }
+
+    /// Relay trace onto the collector
+    pub async fn submit_trace(
+        &mut self,
+        q: String,
+        trace: Trace,
+    ) -> Result<Response<ReporterResponse>, Status> {
+        self.client
+            .add_trace(Request::new(ReporterTrace {
+                key: q,
+                trace: Some(trace),
+            }))
+            .await
     }
 }
 
 pub mod server {
     use super::report;
+    use crate::{ReporterStats, ReporterTrace, TracesAndStats};
     use bytes::BytesMut;
+    use libflate::gzip::Encoder;
     use prost::Message;
+    use prost_types::Timestamp;
     use reqwest::Client;
     use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
     use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::Mutex;
+    use tokio::time::{interval, Duration, MissedTickBehavior};
     use tonic::transport::{Error, Server};
     use tonic::{Request, Response, Status};
 
     pub use crate::agent::reporter_server::{Reporter, ReporterServer};
-    use crate::agent::ReportResponse;
+    use crate::agent::ReporterResponse;
 
     #[derive(Debug, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -166,15 +198,52 @@ pub mod server {
 
     pub struct ReportServer {
         addr: SocketAddr,
-        client: Client,
+        tpq: Arc<Mutex<HashMap<String, report::TracesAndStats>>>,
     }
 
     impl ReportServer {
         pub fn new(addr: SocketAddr) -> Self {
-            Self {
-                addr,
-                client: Client::new(),
-            }
+            // Spawn a task which will check if there are reports to
+            // submit every interval.
+            let tpq = Arc::new(Mutex::new(HashMap::new()));
+            let task_tpq = tpq.clone();
+            tokio::task::spawn(async move {
+                let client = Client::new();
+                let mut interval = interval(Duration::from_secs(5));
+                interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                interval.tick().await;
+                loop {
+                    let mut tpq = task_tpq.lock().await;
+                    let current_tpq = std::mem::replace(&mut *tpq, HashMap::new());
+                    drop(tpq);
+                    tracing::info!("tpq contains: {} records", current_tpq.len());
+                    if !current_tpq.is_empty() {
+                        tracing::info!("submitting: {} records", current_tpq.len());
+                        tracing::info!("containing: {:?}", current_tpq);
+                        let mut report =
+                            crate::Report::try_new("Usage-Agent-uc0sri@current").expect("XXX");
+
+                        report.traces_per_query = current_tpq;
+                        let time = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards");
+                        let seconds = time.as_secs();
+                        let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
+                        let ts_end = Timestamp {
+                            seconds: seconds as i64,
+                            nanos: nanos as i32,
+                        };
+                        report.end_time = Some(ts_end);
+
+                        match ReportServer::submit_report(&client, report).await {
+                            Ok(v) => tracing::info!("Report submission succeeded: {:?}", v),
+                            Err(e) => tracing::error!("Report submission failed: {}", e),
+                        }
+                    }
+                    interval.tick().await;
+                }
+            });
+            Self { addr, tpq }
         }
 
         pub async fn serve(self) -> Result<(), Error> {
@@ -184,42 +253,101 @@ pub mod server {
                 .serve(addr)
                 .await
         }
-    }
 
-    #[tonic::async_trait]
-    impl Reporter for ReportServer {
-        async fn send_report(
-            &self,
-            request: Request<report::Report>,
-        ) -> Result<Response<ReportResponse>, Status> {
-            println!("received request: {:?}", request);
-            let msg = request.into_inner();
+        async fn submit_report(
+            client: &Client,
+            report: report::Report,
+        ) -> Result<Response<ReporterResponse>, Status> {
+            // Protobuf encode message as "content"
             let mut content = BytesMut::new();
-            msg.encode(&mut content)
+            report
+                .encode(&mut content)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
-            let res = self
-                .client
+            // Create a gzip encoder
+            let mut encoder =
+                Encoder::new(Vec::new()).map_err(|e| Status::internal(e.to_string()))?;
+            // Get a cursor to our protobuf encoded content
+            let mut cursor = std::io::Cursor::new(content.to_vec());
+            // Copy the protobuf content to our gzip encoder
+            std::io::copy(&mut cursor, &mut encoder)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            // Get our gzipped content
+            let compressed_content = encoder
+                .finish()
+                .into_result()
+                .map_err(|e| Status::internal(e.to_string()))?;
+            let res = client
                 .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
-                .body(content.to_vec())
+                .body(compressed_content)
                 .header(
                     "X-Api-Key",
                     std::env::var("X_API_KEY")
                         .map_err(|e| Status::unauthenticated(e.to_string()))?,
                 )
+                .header("Content-Encoding", "gzip")
                 .header("Content-Type", "application/protobuf")
                 .header("Accept", "application/json")
                 .send()
                 .await
                 .map_err(|e| Status::failed_precondition(e.to_string()))?;
             println!("result: {:?}", res);
+            let data = res
+                .text()
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            println!("text: {:?}", data);
+            /*
             let ar: ApolloResponse = res
                 .json()
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
             println!("json: {:?}", ar);
-            let response = ReportResponse {
+            */
+            let response = ReporterResponse {
                 message: "Report accepted".to_string(),
             };
+            Ok(Response::new(response))
+        }
+    }
+
+    #[tonic::async_trait]
+    impl Reporter for ReportServer {
+        async fn add_stats(
+            &self,
+            request: Request<ReporterStats>,
+        ) -> Result<Response<ReporterResponse>, Status> {
+            println!("received request: {:?}", request);
+            let msg = request.into_inner();
+            let response = ReporterResponse {
+                message: "Report accepted".to_string(),
+            };
+            let mut tpq = self.tpq.lock().await;
+            let entry = tpq.entry(msg.key).or_insert(TracesAndStats {
+                stats_with_context: vec![],
+                ..Default::default()
+            });
+            entry.stats_with_context.push(msg.stats.unwrap());
+
+            Ok(Response::new(response))
+        }
+
+        async fn add_trace(
+            &self,
+            request: Request<ReporterTrace>,
+        ) -> Result<Response<ReporterResponse>, Status> {
+            println!("received request: {:?}", request);
+            let msg = request.into_inner();
+            let response = ReporterResponse {
+                message: "Report accepted".to_string(),
+            };
+            let mut tpq = self.tpq.lock().await;
+            let entry = tpq.entry(msg.key).or_insert(TracesAndStats {
+                trace: vec![],
+                stats_with_context: vec![],
+                ..Default::default()
+            });
+            entry.trace.push(msg.trace.unwrap());
+
             Ok(Response::new(response))
         }
     }

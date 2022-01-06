@@ -5,9 +5,20 @@ import "proto/reports.proto";
 package Agent;
 
 service Reporter {
-    rpc SendReport(Report.Report) returns (ReportResponse) {}
+    rpc AddStats(ReporterStats) returns (ReporterResponse) {}
+    rpc AddTrace(ReporterTrace) returns (ReporterResponse) {}
 }
 
-message ReportResponse {
+message ReporterResponse {
     string message = 1;
+}
+
+message ReporterStats {
+    string key = 1;
+    Report.ContextualizedStats stats = 2;
+}
+
+message ReporterTrace {
+    string key = 1;
+    Report.Trace trace = 2;
 }

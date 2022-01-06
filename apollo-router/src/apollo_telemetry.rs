@@ -26,6 +26,7 @@
 //!     shutdown_tracer_provider(); // sending remaining spans
 //! }
 //! ```
+use apollo_parser::{ast, Parser};
 use async_trait::async_trait;
 use opentelemetry::{
     global, sdk,
@@ -34,14 +35,14 @@ use opentelemetry::{
         ExportError,
     },
     trace::TracerProvider,
+    Value,
 };
-use prost_types::Timestamp;
 use std::fmt::Debug;
-use std::{collections::HashMap, time::Duration};
 use tokio::runtime::Runtime;
-use usage_agent::report::{Trace, TracesAndStats};
+use tokio::time::{sleep, Duration};
+use usage_agent::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use usage_agent::server::ReportServer;
-use usage_agent::{report::trace::CachePolicy, Reporter};
+use usage_agent::Reporter;
 
 /// Pipeline builder
 #[derive(Debug)]
@@ -80,7 +81,7 @@ impl Default for PipelineBuilder {
                     }
                     Err(e) => {
                         tracing::warn!("Could not connect to server({}), re-trying...", e);
-                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        sleep(Duration::from_millis(50)).await;
                     }
                 }
             }
@@ -166,39 +167,43 @@ impl SpanExporter for Exporter {
          */
         for span in batch {
             if span.name == "prepare_query" {
+                tracing::info!("span: {:?}", span);
                 if let Some(q) = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
                 {
-                    eprintln!("TRACING OUT A QUERY: {}", q);
-                    let mut report =
-                        usage_agent::Report::try_new("Usage-Agent-uc0sri@current").expect("XXX");
-                    let ts_start: Timestamp = span.start_time.into();
-                    let ts_end: Timestamp = span.end_time.into();
+                    let busy = span
+                        .attributes
+                        .get(&opentelemetry::Key::from_static_str("busy_ns"))
+                        .unwrap();
+                    let busy_v = match busy {
+                        Value::I64(v) => v / 1_000,
+                        _ => panic!("value should be a signed integer"),
+                    };
+                    tracing::info!("query: {}", q);
+                    tracing::info!("busy: {}", busy_v);
 
-                    let mut tpq = HashMap::new();
-
-                    let trace = Trace {
-                        start_time: Some(ts_start),
-                        end_time: Some(ts_end.clone()),
-                        cache_policy: Some(CachePolicy {
-                            scope: 0,
-                            max_age_ns: 0,
+                    let stats = ContextualizedStats {
+                        context: Some(StatsContext {
+                            client_name: "client name".to_string(),
+                            client_version: "client version".to_string(),
+                        }),
+                        query_latency_stats: Some(QueryLatencyStats {
+                            latency_count: vec![busy_v],
+                            request_count: 1,
+                            ..Default::default()
                         }),
                         ..Default::default()
                     };
-                    let tns = TracesAndStats {
-                        trace: vec![trace],
-                        ..Default::default()
-                    };
-                    let hash_q = format!("# {}", q);
-                    tpq.insert(hash_q, tns);
-                    report.traces_per_query = tpq;
-                    report.end_time = Some(ts_end);
+                    let operation_name = span
+                        .attributes
+                        .get(&opentelemetry::Key::from_static_str("operation_name"));
+                    // XXX NEED TO NORMALISE THE QUERY
+                    let key = normalize(operation_name, &q.as_str());
 
                     let msg = self
                         .reporter
-                        .submit(report)
+                        .submit_stats(key, stats)
                         .await
                         .expect("XXX")
                         .into_inner()
@@ -209,5 +214,118 @@ impl SpanExporter for Exporter {
         }
 
         Ok(())
+    }
+}
+
+fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
+    // If we don't have an operation name, no point normalizing
+    // it. Just return the unprocessed input.
+    let op_name: String = match op {
+        Some(v) => v.as_str().into_owned(),
+        None => return q.to_string(),
+    };
+    let parser = Parser::new(q);
+    // compress *before* parsing to modify whitespaces/comments
+    let ast = parser.compress().parse();
+    tracing::info!("ast:\n {:?}", ast);
+    // If we can't parse the query, we definitely can't normalize it, so
+    // just return the un-processed input
+    if ast.errors().len() > 0 {
+        return q.to_string();
+    }
+    let doc = ast.document();
+    tracing::info!("{}", doc.format());
+    let definitions: Vec<_> = doc.definitions().into_iter().collect();
+    tracing::info!("looking for operation: {}", op_name);
+    let mut required_definitions: Vec<_> = definitions
+        .into_iter()
+        .filter(|x| {
+            if let ast::Definition::OperationDefinition(op_def) = x {
+                match op_def.name() {
+                    Some(v) => return v.text() == op_name,
+                    None => return false,
+                }
+            }
+            false
+        })
+        .collect();
+    tracing::info!("required definitions: {:?}", required_definitions);
+    assert_eq!(required_definitions.len(), 1);
+    let required_definition = required_definitions.pop().unwrap();
+    tracing::info!("required_definition: {:?}", required_definition);
+    // XXX Somehow find fragments...
+    let def = required_definition.format();
+    format!("# {} \n{}", op_name, def)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::borrow::Cow;
+
+    // Tests ported from TypeScript implementation in Apollo Server
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn basic_test() {
+        let q = r#"
+{
+    user {
+        name
+    }
+}
+"#;
+        let normalized = normalize(None, q);
+        insta::assert_snapshot!(normalized);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn basic_test_with_query() {
+        let q = r#"
+query {
+    user {
+        name
+    }
+}
+"#;
+        let normalized = normalize(None, q);
+        insta::assert_snapshot!(normalized);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn basic_with_operation_name() {
+        let q = r#"
+query OpName {
+    user {
+        name
+    }
+}
+"#;
+        let op_name = opentelemetry::Value::String(Cow::from("OpName"));
+        let normalized = normalize(Some(&op_name), q);
+        insta::assert_snapshot!(normalized);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn fragment() {
+        let q = r#"
+{
+  user {
+    name
+    ...Bar
+  }
+}
+fragment Bar on User {
+  asd
+}
+fragment Baz on User {
+  jkl
+}
+"#;
+        let normalized = normalize(None, q);
+        insta::assert_snapshot!(normalized);
     }
 }

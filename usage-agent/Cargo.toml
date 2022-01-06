@@ -9,6 +9,7 @@ license-file = "./LICENSE"
 
 [dependencies]
 bytes = "~1.1"
+libflate = "~1.1"
 prost = "0.9"
 prost-types = "0.9.0"
 reqwest = { version = "0.11", features = ["json"] }
@@ -17,6 +18,7 @@ serde_json = { version = "~1.0" }
 sys-info = "0.9"
 tonic = "0.6"
 tokio = { version = "~1.15", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1"

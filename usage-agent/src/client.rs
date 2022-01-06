@@ -1,14 +1,7 @@
-/*
-mod report {
-    tonic::include_proto!("report");
-}
-*/
-
 use prost_types::Timestamp;
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use usage_agent::report::trace::CachePolicy;
-use usage_agent::report::{Report, Trace, TracesAndStats};
+use usage_agent::report::Trace;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,7 +16,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         seconds: seconds as i64,
         nanos: nanos as i32,
     };
-    let mut tpq = HashMap::new();
 
     let start_time = ts.clone();
     let mut end_time = ts.clone();
@@ -38,25 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         ..Default::default()
     };
-    let tns = TracesAndStats {
-        trace: vec![trace],
-        ..Default::default()
-    };
-    tpq.insert(
-        "# query ExampleQuery {
+    let q_string = "# query ExampleQuery {
   topProducts {
     name
   }
 }"
-        .to_string(),
-        tns,
-    );
-    println!("tpq: {:?}", tpq);
-    let mut report = Report::try_new("Usage-Agent-uc0sri@current")?;
-    report.traces_per_query = tpq;
-    report.end_time = Some(ts);
-
-    let response = reporter.submit(report).await?;
+    .to_string();
+    let response = reporter.submit_trace(q_string, trace).await?;
     println!("response: {}", response.into_inner().message);
 
     Ok(())

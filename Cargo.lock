@@ -18,6 +18,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
+name = "adler32"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
+
+[[package]]
 name = "ahash"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -77,10 +83,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.2.0"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=ff317c7e85165bb6c380284b63c55d8af877fb7b#ff317c7e85165bb6c380284b63c55d8af877fb7b"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
 name = "apollo-router"
 version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
+ "apollo-parser 0.2.0 (git+https://github.com/apollographql/apollo-rs.git?rev=ff317c7e85165bb6c380284b63c55d8af877fb7b)",
  "apollo-router-core",
  "async-trait",
  "atty",
@@ -117,6 +132,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "tracing-test",
  "typed-builder",
  "url",
  "usage-agent",
@@ -142,7 +158,7 @@ dependencies = [
 name = "apollo-router-core"
 version = "0.1.0-alpha.2"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
  "atty",
  "derivative",
@@ -1775,6 +1791,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b03d17f364a3a042d5e5d46b053bbbf82c92c9430c592dd4c064dc6ee997125"
 
 [[package]]
+name = "libflate"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16364af76ebb39b5869bb32c81fa93573267cd8c62bb3474e28d78fac3fb141e"
+dependencies = [
+ "adler32",
+ "crc32fast",
+ "libflate_lz77",
+]
+
+[[package]]
+name = "libflate_lz77"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39a734c0493409afcd49deee13c006a04e3586b9761a03543c6272c9c51f2f5a"
+dependencies = [
+ "rle-decode-fast",
+]
+
+[[package]]
 name = "libnghttp2-sys"
 version = "0.1.7+1.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2808,6 +2844,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rle-decode-fast"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cabe4fa914dec5870285fa7f71f602645da47c486e68486d2b4ceb4a343e90ac"
+
+[[package]]
 name = "router-bridge"
 version = "0.1.0"
 source = "git+https://github.com/apollographql/federation.git?rev=e88ce2a8be6a9159370c972b462ef61d598c2f33#e88ce2a8be6a9159370c972b462ef61d598c2f33"
@@ -3749,6 +3791,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-test"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3eb7bda2e93bbc9c5b247034acc6a4b3d04f033a3d4b8fc1cb87d4d1c7c7ebd7"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4801dca35e4e2cee957c469bd4a1c370fadb7894c0d50721a40eba3523e6e91c"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3855,6 +3920,7 @@ name = "usage-agent"
 version = "0.1.0-alpha.2"
 dependencies = [
  "bytes",
+ "libflate",
  "prost 0.9.0",
  "prost-types 0.9.0",
  "reqwest",
@@ -3864,6 +3930,7 @@ dependencies = [
  "tokio",
  "tonic 0.6.2",
  "tonic-build",
+ "tracing",
  "uname",
 ]
 

@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/apollo_telemetry.rs
+assertion_line: 294
+expression: normalized
+
+---
+query { user { name } } 
