@@ -27,11 +27,9 @@ macro_rules! assert_federated_response {
             ))
             .build();
         let (mut actual, registry) = query_rust(request.clone()).await;
-        let mut expected = query_node(request.clone()).await;
+        let expected = query_node(request.clone()).await.unwrap();
 
         tracing::debug!("query:\n{}\n", request.query.as_str());
-
-        let expected = expected.next().await.unwrap();
 
         assert!(
             expected.data.is_object(),
@@ -155,7 +153,7 @@ async fn missing_variables() {
     assert!(data.iter().all(|x| expected.contains(x)), "{:?}", data);
 }
 
-async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
+async fn query_node(request: graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     let nodejs_impl = HttpSubgraphFetcher::new(
         "federated",
         Url::parse("http://localhost:4100/graphql").unwrap(),
