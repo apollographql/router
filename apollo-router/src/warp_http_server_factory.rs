@@ -291,45 +291,30 @@ where
     });
 
     async move {
-        let response_stream = stream_request(router, request)
+        let response = stream_request(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
-        Box::new(Response::new(Body::wrap_stream(response_stream))) as Box<dyn Reply>
+        Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
     }
 }
 
 async fn stream_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
-) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+) -> String
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
-    let stream = match router.prepare_query(&request).await {
+    let response = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,
-        Err(stream) => stream,
+        Err(response) => response,
     };
 
     let span = Span::current();
-    stream.enumerate().map(move |(index, res)| {
-        tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-            match serde_json::to_string(&res) {
-                Ok(bytes) => Ok(Bytes::from(bytes)),
-                Err(err) => {
-                    // We didn't manage to serialise the response!
-                    // Do our best to send some sort of error back.
-                    serde_json::to_string(
-                        &graphql::FetchError::MalformedResponse {
-                            reason: err.to_string(),
-                        }
-                        .to_response(index == 0),
-                    )
-                    .map(Bytes::from)
-                }
-            }
-        })
+    tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+        serde_json::to_string(&response).expect("serde_json::Value serialization will not fail")
     })
 }
 
@@ -437,7 +422,7 @@ mod tests {
             async fn prepare_query(
                 &self,
                 request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+            ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
 
@@ -447,7 +432,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+            async fn execute(self, request: Arc<graphql::Request>) -> graphql::Response;
         }
     }
 
