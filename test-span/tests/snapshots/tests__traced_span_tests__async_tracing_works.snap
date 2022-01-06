@@ -1,10 +1,33 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 134
+assertion_line: 131
 expression: logs
 
 ---
 [
+  {
+    "entries": [
+      [
+        "message",
+        "here i am!"
+      ],
+      [
+        "message",
+        "here i am!"
+      ]
+    ],
+    "metadata": {
+      "name": "event test-span/tests/tests.rs:155",
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": [
+          "message"
+        ]
+      }
+    }
+  },
   {
     "entries": [
       [
@@ -17,7 +40,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:180",
+      "name": "event test-span/tests/tests.rs:173",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -40,7 +63,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:163",
+      "name": "event test-span/tests/tests.rs:158",
       "target": "tests::traced_span_tests",
       "level": "WARN",
       "module_path": "tests::traced_span_tests",
@@ -54,29 +77,6 @@ expression: logs
   {
     "entries": [
       [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:167",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
         "number",
         52
       ],
@@ -86,7 +86,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:169",
+      "name": "event test-span/tests/tests.rs:162",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",

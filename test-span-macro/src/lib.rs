@@ -66,9 +66,9 @@ fn async_test() -> TokenStream2 {
 
 fn sync_test() -> TokenStream2 {
     quote! {
-        subscriber.init();
-
-        inner_test(get_logs, get_span)
+        tracing::subscriber::with_default(subscriber, || {
+            inner_test(get_logs, get_span)
+        });
     }
 }
 fn subscriber_boilerplate() -> TokenStream2 {

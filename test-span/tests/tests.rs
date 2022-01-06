@@ -17,12 +17,11 @@ mod traced_span_tests {
 
         dbg!(&logs);
 
-        assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
-        assert!(logs.contains_message("in a separate context!"));
-
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(get_span());
+
+        assert!(logs.contains_message("here i am!"));
+        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
     }
 
     #[test_span(tokio::test)]
@@ -67,24 +66,22 @@ mod traced_span_tests {
             Span::from_records(id_sequence, all_logs, all_spans)
         };
 
-        subscriber.init();
+        tracing::subscriber::with_default(subscriber, || {
+            let res = do_sync_stuff();
 
-        let res = do_sync_stuff();
+            assert_eq!(res, 104);
 
-        assert_eq!(res, 104);
+            let res2 = do_sync_stuff();
 
-        let res2 = do_sync_stuff();
-
-        assert_eq!(res2, 104);
-
+            assert_eq!(res2, 104);
+        });
         let logs = get_logs();
-
-        assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
-        assert!(logs.contains_message("in a separate context!"));
 
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(get_span());
+
+        assert!(logs.contains_message("here i am!"));
+        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
     }
 
     #[tokio::test]
@@ -137,12 +134,9 @@ mod traced_span_tests {
 
     #[tracing::instrument(level = "info")]
     fn do_sync_stuff() -> u8 {
-        let number = do_sync_stuff_2(42);
-
-        std::thread::spawn(|| tracing::warn!("in a separate context!"))
-            .join()
-            .unwrap();
         tracing::info!("here i am!");
+
+        let number = do_sync_stuff_2(42);
 
         tracing::info!(number);
 
@@ -158,14 +152,13 @@ mod traced_span_tests {
 
     #[tracing::instrument(name = "do_stuff", level = "info")]
     async fn do_stuff() -> u8 {
+        tracing::info!("here i am!");
         let number = do_stuff_2(42).await;
 
         tokio::task::spawn_blocking(|| async { tracing::warn!("in a separate context!") })
             .await
             .unwrap()
             .await;
-        tracing::info!("here i am!");
-
         tracing::info!(number);
 
         number * 2

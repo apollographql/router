@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 25
+assertion_line: 24
 expression: get_span()
 
 ---

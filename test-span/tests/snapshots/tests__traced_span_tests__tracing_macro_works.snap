@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 24
+assertion_line: 20
 expression: logs
 
 ---
@@ -9,74 +9,15 @@ expression: logs
     "entries": [
       [
         "message",
-        "registering event source with poller: token=Token(0), interests=READABLE | WRITABLE"
-      ],
-      [
-        "log.target",
-        "mio::poll"
-      ],
-      [
-        "log.module_path",
-        "mio::poll"
-      ],
-      [
-        "log.file",
-        "/Users/ignition/.asdf/installs/rust/1.57.0/registry/src/github.com-1ecc6299db9ec823/mio-0.7.14/src/poll.rs"
-      ],
-      [
-        "log.line",
-        478
+        "here i am!"
       ],
       [
         "message",
-        "registering event source with poller: token=Token(0), interests=READABLE | WRITABLE"
-      ],
-      [
-        "log.target",
-        "mio::poll"
-      ],
-      [
-        "log.module_path",
-        "mio::poll"
-      ],
-      [
-        "log.file",
-        "/Users/ignition/.asdf/installs/rust/1.57.0/registry/src/github.com-1ecc6299db9ec823/mio-0.7.14/src/poll.rs"
-      ],
-      [
-        "log.line",
-        478
+        "here i am!"
       ]
     ],
     "metadata": {
-      "name": "log event",
-      "target": "log",
-      "level": "TRACE",
-      "module_path": null,
-      "fields": {
-        "names": [
-          "message",
-          "log.target",
-          "log.module_path",
-          "log.file",
-          "log.line"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:154",
+      "name": "event test-span/tests/tests.rs:137",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -91,38 +32,15 @@ expression: logs
     "entries": [
       [
         "message",
-        "in a separate context!"
+        "here i am again!"
       ],
       [
         "message",
-        "in a separate context!"
+        "here i am again!"
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:142",
-      "target": "tests::traced_span_tests",
-      "level": "WARN",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:145",
+      "name": "event test-span/tests/tests.rs:148",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -145,7 +63,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:147",
+      "name": "event test-span/tests/tests.rs:141",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",

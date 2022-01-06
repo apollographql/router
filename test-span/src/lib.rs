@@ -2,7 +2,8 @@
 //!
 //! `get_logs()` that returns [`prelude::Records`]
 //!
-//! `get_span()` that returns a [`prelude::Span`], Which can be serialized and used with [insta](https://crates.io/crates/insta) for snapshot tests.
+//! `get_span()` that returns a [`prelude::Span`],
+//! Which can be serialized and used with [insta](https://crates.io/crates/insta) for snapshot tests.
 //!  Refer to the tests.rs file to see how it behaves.
 //!
 //! Example:
