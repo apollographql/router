@@ -3348,6 +3348,7 @@ name = "test-span"
 version = "0.1.0"
 dependencies = [
  "daggy",
+ "futures",
  "indexmap",
  "insta",
  "serde",
