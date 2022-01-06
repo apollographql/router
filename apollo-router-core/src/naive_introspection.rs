@@ -72,7 +72,11 @@ impl NaiveIntrospection {
                             }
                             Err(graphql_errors) => {
                                 for error in graphql_errors {
-                                    tracing::warn!("Introspection returned error:\n{}", error);
+                                    tracing::warn!(
+                                        "Introspection returned error:\n{}\n{}",
+                                        error,
+                                        cache_key
+                                    );
                                 }
                                 None
                             }
