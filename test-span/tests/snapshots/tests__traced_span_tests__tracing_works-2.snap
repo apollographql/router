@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 91
+assertion_line: 85
 expression: get_span()
 
 ---
@@ -43,9 +43,7 @@ expression: get_span()
             "entries": [
               [
                 "number",
-                {
-                  "Value": 42
-                }
+                42
               ]
             ],
             "metadata": {
@@ -104,9 +102,7 @@ expression: get_span()
             "entries": [
               [
                 "number",
-                {
-                  "Value": 42
-                }
+                42
               ]
             ],
             "metadata": {

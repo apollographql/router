@@ -27,13 +27,9 @@ mod traced_span_tests {
 
     #[test_span(tokio::test)]
     async fn async_tracing_macro_works() {
-        let res = do_stuff().await;
-
-        assert_eq!(res, 104);
-
-        let res2 = do_stuff().await;
-
-        assert_eq!(res2, 104);
+        let expected = (104, 104);
+        let actual = futures::join!(do_stuff(), do_stuff());
+        assert_eq!(expected, actual);
 
         let logs = get_logs();
 

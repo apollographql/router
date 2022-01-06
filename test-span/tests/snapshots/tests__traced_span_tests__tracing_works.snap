@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 90
+assertion_line: 86
 expression: logs
 
 ---
@@ -9,19 +9,15 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "here i am again!"
-        }
+        "here i am again!"
       ],
       [
         "message",
-        {
-          "Debug": "here i am again!"
-        }
+        "here i am again!"
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:158",
+      "name": "event test-span/tests/tests.rs:154",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -36,19 +32,15 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "in a separate context!"
-        }
+        "in a separate context!"
       ],
       [
         "message",
-        {
-          "Debug": "in a separate context!"
-        }
+        "in a separate context!"
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:146",
+      "name": "event test-span/tests/tests.rs:142",
       "target": "tests::traced_span_tests",
       "level": "WARN",
       "module_path": "tests::traced_span_tests",
@@ -63,19 +55,15 @@ expression: logs
     "entries": [
       [
         "message",
-        {
-          "Debug": "here i am!"
-        }
+        "here i am!"
       ],
       [
         "message",
-        {
-          "Debug": "here i am!"
-        }
+        "here i am!"
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:149",
+      "name": "event test-span/tests/tests.rs:145",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -90,19 +78,15 @@ expression: logs
     "entries": [
       [
         "number",
-        {
-          "Value": 52
-        }
+        52
       ],
       [
         "number",
-        {
-          "Value": 52
-        }
+        52
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:151",
+      "name": "event test-span/tests/tests.rs:147",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",

@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 138
+assertion_line: 134
 expression: logs
 
 ---
@@ -17,7 +17,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:184",
+      "name": "event test-span/tests/tests.rs:180",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -40,7 +40,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:167",
+      "name": "event test-span/tests/tests.rs:163",
       "target": "tests::traced_span_tests",
       "level": "WARN",
       "module_path": "tests::traced_span_tests",
@@ -63,7 +63,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:171",
+      "name": "event test-span/tests/tests.rs:167",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -86,7 +86,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:173",
+      "name": "event test-span/tests/tests.rs:169",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",

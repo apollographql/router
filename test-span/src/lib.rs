@@ -1,3 +1,52 @@
+//! the test span library provides you with two functions:
+//!
+//! `get_logs()` that returns [`prelude::Records`]
+//!
+//! `get_span()` that returns a [`prelude::Span`], Which can be serialized and used with [insta](https://crates.io/crates/insta) for snapshot tests.
+//!  Refer to the tests.rs file to see how it behaves.
+//!
+//! Example:
+//! ```ignore
+//! #[test_span]
+//! async fn test_it_works() {
+//!   futures::join!(do_stuff(), do_stuff())
+//! }
+//!
+//! #[tracing::instrument(name = "do_stuff", level = "info")]
+//! async fn do_stuff() -> u8 {
+//!     // ...
+//!     do_stuff2().await;
+//! }
+//!
+//! #[tracing::instrument(
+//!     name = "do_stuff2",
+//!     target = "my_crate::an_other_target",
+//!     level = "info"
+//! )]
+//! async fn do_stuff_2(number: u8) -> u8 {
+//!     // ...
+//! }
+//! ```
+//! ```text
+//! `get_span()` will provide you with:
+//!
+//!             ┌──────┐
+//!             │ root │
+//!             └──┬───┘
+//!                │
+//!        ┌───────┴───────┐
+//!        ▼               ▼
+//!   ┌──────────┐   ┌──────────┐
+//!   │ do_stuff │   │ do_stuff │
+//!   └────┬─────┘   └─────┬────┘
+//!        │               │
+//!        │               │
+//!        ▼               ▼
+//!  ┌───────────┐   ┌───────────┐
+//!  │ do_stuff2 │   │ do_stuff2 │
+//!  └───────────┘   └───────────┘
+//! ```
+
 pub mod prelude {
     pub use crate::reexports::tracing_futures::WithSubscriber;
     pub use crate::reexports::tracing_subscriber::prelude::*;
@@ -209,7 +258,8 @@ mod span_tests {
             })
         }
 
-        pub fn merge(self, other: Records) -> Self {
+        #[allow(dead_code)]
+        fn merge(self, other: Records) -> Self {
             Self(self.0.into_iter().chain(other.0.into_iter()).collect())
         }
     }
