@@ -139,7 +139,7 @@ impl Query {
                     name,
                     selection_set,
                 } => {
-                    if let Some(input_value) = input.remove(name) {
+                    if let Some((field_name, input_value)) = input.remove_entry(name) {
                         if let Some(selection_set) = selection_set {
                             match input_value {
                                 Value::Object(mut input_object) => {
@@ -150,7 +150,7 @@ impl Query {
                                         &mut output_object,
                                         schema,
                                     );
-                                    output.insert(name.to_string(), output_object.into());
+                                    output.insert(field_name, output_object.into());
                                 }
                                 Value::Array(input_array) => {
                                     let output_array = input_array
@@ -176,10 +176,10 @@ impl Query {
                                             }
                                         })
                                         .collect::<Value>();
-                                    output.insert(name.to_string(), output_array);
+                                    output.insert(field_name, output_array);
                                 }
                                 _ => {
-                                    output.insert(name.clone(), input_value);
+                                    output.insert(field_name, input_value);
                                     failfast_debug!(
                                         "Field is not an object nor an array of object: {}",
                                         name,
@@ -187,7 +187,7 @@ impl Query {
                                 }
                             }
                         } else {
-                            output.insert(name.to_string(), input_value);
+                            output.insert(field_name, input_value);
                         }
                     } else {
                         failfast_debug!("Missing field: {}", name);

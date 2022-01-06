@@ -312,22 +312,25 @@ where
         Err(stream) => stream,
     };
 
-    stream
-        .enumerate()
-        .map(|(index, res)| match serde_json::to_string(&res) {
-            Ok(bytes) => Ok(Bytes::from(bytes)),
-            Err(err) => {
-                // We didn't manage to serialise the response!
-                // Do our best to send some sort of error back.
-                serde_json::to_string(
-                    &graphql::FetchError::MalformedResponse {
-                        reason: err.to_string(),
-                    }
-                    .to_response(index == 0),
-                )
-                .map(Bytes::from)
+    let span = Span::current();
+    stream.enumerate().map(move |(index, res)| {
+        tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+            match serde_json::to_string(&res) {
+                Ok(bytes) => Ok(Bytes::from(bytes)),
+                Err(err) => {
+                    // We didn't manage to serialise the response!
+                    // Do our best to send some sort of error back.
+                    serde_json::to_string(
+                        &graphql::FetchError::MalformedResponse {
+                            reason: err.to_string(),
+                        }
+                        .to_response(index == 0),
+                    )
+                    .map(Bytes::from)
+                }
             }
         })
+    })
 }
 
 fn prefers_html(accept_header: String) -> bool {

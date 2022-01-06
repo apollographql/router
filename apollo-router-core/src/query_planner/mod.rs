@@ -46,11 +46,7 @@ pub(crate) enum PlanNode {
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, name = "validate", level = "debug")]
-    pub fn validate(
-        &self,
-        _request: &Request,
-        service_registry: Arc<dyn ServiceRegistry>,
-    ) -> Result<(), Response> {
+    pub fn validate(&self, service_registry: Arc<dyn ServiceRegistry>) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self
             .root
@@ -250,6 +246,7 @@ mod fetch {
     }
 
     impl Variables {
+        #[instrument(level = "debug", name = "make_variables", skip_all)]
         fn new(
             requires: &[Selection],
             variable_usages: &[String],
@@ -366,7 +363,7 @@ mod fetch {
             self.response_at_path(current_dir, paths, subgraph_response)
         }
 
-        #[instrument(level = "trace", name = "response_insert", skip_all)]
+        #[instrument(level = "debug", name = "response_insert", skip_all)]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
