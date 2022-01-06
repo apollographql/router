@@ -65,17 +65,17 @@ impl NaiveIntrospection {
                     KNOWN_INTROSPECTION_QUERIES
                         .iter()
                         .zip(responses)
-                        .filter_map(|(cache_key, response)| match response.into_result() {
+                        .filter_map(|(query, response)| match response.into_result() {
                             Ok(value) => {
                                 let response = Response::builder().data(value).build();
-                                Some((cache_key.into(), response))
+                                Some((query.into(), response))
                             }
                             Err(graphql_errors) => {
                                 for error in graphql_errors {
                                     tracing::warn!(
                                         "Introspection returned error:\n{}\n{}",
                                         error,
-                                        cache_key
+                                        query
                                     );
                                 }
                                 None
