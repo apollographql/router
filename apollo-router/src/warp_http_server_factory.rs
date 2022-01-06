@@ -551,7 +551,7 @@ mod tests {
                     route.expect_execute()
                         .times(1)
                         .return_once(move |_| {
-                            example_response.into()
+                            example_response
                         });
                     Ok(route)
                 })
@@ -605,7 +605,7 @@ mod tests {
                                 service: "Mock service".to_string(),
                                 reason: "Mock error".to_string(),
                             }
-                            .to_response(true).into()
+                            .to_response(true)
                         });
                     Ok(route)
                 })
