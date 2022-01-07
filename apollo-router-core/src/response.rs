@@ -48,6 +48,13 @@ fn skip_data_if(value: &Value) -> bool {
     }
 }
 
+pub fn from_value_bytes<'de, T: 'de>(value: Value) -> Result<T, serde_json::Error>
+where
+    T: Deserialize<'de>,
+{
+    T::deserialize(value)
+}
+
 impl Response {
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
@@ -65,11 +72,9 @@ impl Response {
                 reason: error.to_string(),
             })?;
 
-        serde_json_bytes::from_value(value).map_err(|error| {
-            FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: error.to_string(),
-            }
+        from_value_bytes(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+            service: service_name.to_string(),
+            reason: error.to_string(),
         })
     }
 }
