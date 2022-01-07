@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/apollo_telemetry.rs
+assertion_line: 341
+expression: normalized
+
+---
+
+query FourPrices { products(limit: 2) { review { body } related { price price1 price2 price3 } } }, price price1 price2 price3 variables:{}}
+

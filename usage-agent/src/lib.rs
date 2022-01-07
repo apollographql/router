@@ -214,7 +214,7 @@ pub mod server {
                 interval.tick().await;
                 loop {
                     let mut tpq = task_tpq.lock().await;
-                    let current_tpq = std::mem::replace(&mut *tpq, HashMap::new());
+                    let current_tpq = std::mem::take(&mut *tpq);
                     drop(tpq);
                     tracing::info!("tpq contains: {} records", current_tpq.len());
                     if !current_tpq.is_empty() {

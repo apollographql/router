@@ -235,9 +235,9 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
     }
     let doc = ast.document();
     tracing::info!("{}", doc.format());
-    let definitions: Vec<_> = doc.definitions().into_iter().collect();
     tracing::info!("looking for operation: {}", op_name);
-    let mut required_definitions: Vec<_> = definitions
+    let mut required_definitions: Vec<_> = doc
+        .definitions()
         .into_iter()
         .filter(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
@@ -266,7 +266,7 @@ mod test {
     // Tests ported from TypeScript implementation in Apollo Server
 
     #[test]
-    #[tracing_test::traced_test]
+    // #[tracing_test::traced_test]
     fn basic_test() {
         let q = r#"
 {
@@ -280,7 +280,7 @@ mod test {
     }
 
     #[test]
-    #[tracing_test::traced_test]
+    // #[tracing_test::traced_test]
     fn basic_test_with_query() {
         let q = r#"
 query {
@@ -294,7 +294,7 @@ query {
     }
 
     #[test]
-    #[tracing_test::traced_test]
+    // #[tracing_test::traced_test]
     fn basic_with_operation_name() {
         let q = r#"
 query OpName {
@@ -309,7 +309,7 @@ query OpName {
     }
 
     #[test]
-    #[tracing_test::traced_test]
+    // #[tracing_test::traced_test]
     fn fragment() {
         let q = r#"
 {
