@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 135
+assertion_line: 132
 expression: get_span()
 
 ---
@@ -24,7 +24,40 @@ expression: get_span()
       "id": 1,
       "name": "tests::traced_span_tests::do_stuff",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ],
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ]
+        ],
         "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",
@@ -66,7 +99,40 @@ expression: get_span()
       "id": 3,
       "name": "tests::traced_span_tests::do_stuff",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ],
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ]
+        ],
         "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",
@@ -83,7 +149,40 @@ expression: get_span()
       "id": 4,
       "name": "tests::traced_span_tests::do_stuff",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ],
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ]
+        ],
         "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",
@@ -125,7 +224,40 @@ expression: get_span()
       "id": 6,
       "name": "tests::traced_span_tests::do_stuff",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ],
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "here i am again!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ]
+        ],
         "metadata": {
           "name": "do_stuff",
           "target": "tests::traced_span_tests",

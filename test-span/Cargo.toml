@@ -15,6 +15,7 @@ tracing-futures = "0.2.5"
 tracing-subscriber = "0.3.3"
 test-span-macro = { path = "../test-span-macro" }
 indexmap = "1.6.0"
+derivative = "2.2.0"
 
 [dev-dependencies]
 insta = "1.8.0"

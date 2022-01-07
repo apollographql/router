@@ -68,7 +68,6 @@ mod span_tests {
     use ::daggy::{Dag, NodeIndex};
     use ::serde::{Deserialize, Serialize};
     use ::std::collections::BTreeMap;
-    use ::std::collections::HashMap;
     use ::std::sync::RwLock;
     use ::std::sync::{Arc, Mutex};
     use ::tracing::field::{Field, Visit};
@@ -191,6 +190,10 @@ mod span_tests {
         /// The names of the key-value fields attached to the described span or
         /// event.
         pub fields: OwnedFieldSet,
+
+        #[serde(skip_serializing)]
+        /// span_id when available, used to match logs and spans when applicable
+        pub span_id: Option<u64>,
     }
 
     impl From<&Metadata<'_>> for OwnedMetadata {
@@ -203,6 +206,16 @@ mod span_tests {
                 file: md.file().map(std::string::ToString::to_string),
                 line: md.line(),
                 fields: md.fields().into(),
+                span_id: None,
+            }
+        }
+    }
+
+    impl OwnedMetadata {
+        pub fn with_span_id(self, span_id: u64) -> Self {
+            Self {
+                span_id: Some(span_id),
+                ..self
             }
         }
     }
@@ -294,13 +307,33 @@ mod span_tests {
     }
 
     impl LogsRecorder {
-        pub fn event(&mut self, event: &Event<'_>) {
-            event.record(self.visitors.entry(event.metadata().into()).or_default())
+        pub fn event(&mut self, current_span_id: tracing::Id, event: &Event<'_>) {
+            event.record(
+                self.visitors
+                    .entry(
+                        OwnedMetadata::from(event.metadata())
+                            .with_span_id(current_span_id.into_u64()),
+                    )
+                    .or_default(),
+            )
         }
 
-        pub fn for_metadata(&mut self, metadata: OwnedMetadata) -> Record {
+        pub fn for_span_metadata(&mut self, metadata: OwnedMetadata) -> Record {
             let mut r = Record::new(metadata.clone());
-            r.append(self.visitors.entry(metadata).or_default().0.clone());
+
+            let all_records = self
+                .visitors
+                .iter()
+                .filter(|(log_metadata, _)| {
+                    metadata.target == log_metadata.target
+                        && metadata.module_path == log_metadata.module_path
+                        && metadata.file == log_metadata.file
+                })
+                .map(|(_, dump_visitor)| dump_visitor.0.clone())
+                .flatten()
+                .collect();
+
+            r.append(all_records);
             r
         }
 
@@ -322,14 +355,14 @@ mod span_tests {
     pub struct Layer {
         current_ids: Mutex<Vec<span::Id>>,
         id_sequence: Arc<RwLock<Vec<Vec<span::Id>>>>,
-        all_spans: Arc<Mutex<HashMap<u64, SpanEntry>>>,
+        all_spans: Arc<Mutex<IndexMap<u64, SpanEntry>>>,
         logs: Arc<Mutex<LogsRecorder>>,
     }
 
     impl Layer {
         pub fn new(
             id_sequence: Arc<RwLock<Vec<Vec<span::Id>>>>,
-            all_spans: Arc<Mutex<HashMap<u64, SpanEntry>>>,
+            all_spans: Arc<Mutex<IndexMap<u64, SpanEntry>>>,
             logs: Arc<Mutex<LogsRecorder>>,
         ) -> Self {
             Self {
@@ -362,9 +395,9 @@ mod span_tests {
         pub fn from_records(
             id_sequence: Vec<Vec<span::Id>>,
             mut all_logs: LogsRecorder,
-            all_spans: HashMap<u64, SpanEntry>,
+            all_spans: IndexMap<u64, SpanEntry>,
         ) -> Self {
-            let mut dag_mapping = HashMap::new();
+            let mut dag_mapping = IndexMap::new();
 
             let mut dag = Dag::new();
 
@@ -383,8 +416,7 @@ mod span_tests {
                         .expect("there should be a span recorder")
                         .contents();
 
-                    let logs = all_logs.for_metadata(spans_record.metadata()).entries;
-
+                    let logs = all_logs.for_span_metadata(spans_record.metadata()).entries;
                     spans_record.append(logs);
 
                     dag_mapping.insert(
@@ -403,11 +435,11 @@ mod span_tests {
 
     struct SpanBuilder {
         graph: DiGraph<u64, ()>,
-        spans: HashMap<usize, (usize, Record)>,
+        spans: IndexMap<usize, (usize, Record)>,
     }
 
     impl SpanBuilder {
-        fn new(graph: DiGraph<u64, ()>, spans: HashMap<usize, (usize, Record)>) -> Self {
+        fn new(graph: DiGraph<u64, ()>, spans: IndexMap<usize, (usize, Record)>) -> Self {
             Self { graph, spans }
         }
 
@@ -457,7 +489,10 @@ mod span_tests {
         }
 
         fn event(&self, event: &Event<'_>) {
-            self.logs.lock().unwrap().event(event);
+            self.logs
+                .lock()
+                .unwrap()
+                .event(self.current_span_id(), event);
         }
 
         fn attributes(&self, id: span::Id, attributes: &span::Attributes<'_>) {
@@ -493,6 +528,15 @@ mod span_tests {
 
         fn current_span_list(&self) -> Vec<span::Id> {
             self.current_ids.lock().unwrap().clone()
+        }
+
+        fn current_span_id(&self) -> span::Id {
+            self.current_ids
+                .lock()
+                .unwrap()
+                .last()
+                .expect("no id")
+                .clone()
         }
     }
 
