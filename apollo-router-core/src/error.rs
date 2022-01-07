@@ -1,4 +1,4 @@
-use crate::prelude::graphql::{self, *};
+use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
@@ -131,82 +131,11 @@ pub struct Error {
 
 impl Error {
     pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
-        let mut object = match value {
-            Value::Object(o) => o,
-            _ => {
-                return Err(FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: "expected a JSON object".to_string(),
-                })
+        serde_json_bytes::from_value(value).map_err(|error| {
+            FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
             }
-        };
-
-        let message = match object
-            .get("message")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-        {
-            Some(s) => s,
-            None => {
-                return Err(FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: "missing message field".to_string(),
-                })
-            }
-        };
-
-        let path = object
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.into());
-
-        let locations = Vec::new();
-
-        let mut errors = Vec::new();
-        match object.remove("locations") {
-            Some(Value::Array(v)) => {
-                for val in v.into_iter() {
-                    if let Value::Object(o) = val {
-                        if let (Some(line), Some(column)) = (
-                            o.get("line").and_then(|v| v.as_i64()),
-                            o.get("column").and_then(|v| v.as_i64()),
-                        ) {
-                            errors.push(Location {
-                                line: line as i32,
-                                column: column as i32,
-                            });
-                            continue;
-                        }
-                    }
-                    return Err(FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_string(),
-                        reason: "missing location value".to_string(),
-                    });
-                }
-            }
-            _ => {
-                return Err(FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: "missing errors field".to_string(),
-                })
-            }
-        };
-
-        let extensions = match object.remove("extensions") {
-            Some(Value::Object(o)) => o,
-            _ => {
-                return Err(FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: "missing extensions field".to_string(),
-                })
-            }
-        };
-
-        Ok(Error {
-            message,
-            locations,
-            path,
-            extensions,
         })
     }
 }
