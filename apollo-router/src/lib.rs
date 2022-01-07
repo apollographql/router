@@ -527,6 +527,7 @@ mod tests {
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
+    use url::Url;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =
@@ -558,9 +559,12 @@ mod tests {
     }
 
     async fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
-        HttpSubgraphFetcher::new("federated".into(), format!("http://{}/graphql", socket))
-            .stream(request)
-            .await
+        HttpSubgraphFetcher::new(
+            "federated",
+            Url::parse(&format!("http://{}/graphql", socket)).unwrap(),
+        )
+        .stream(request)
+        .await
     }
 
     #[test(tokio::test)]

@@ -83,6 +83,12 @@ expression = "LicenseRef-ELv2"
 version = "0.1.0-alpha.2"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
+[[licenses.clarify]]
+name = "encoding_rs"
+version = "*"
+expression = "(Apache-2.0 OR MIT) AND BSD-3-Clause"
+license-files = [{ path = "COPYRIGHT", hash = 0x39f8ad31 }]
+
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html

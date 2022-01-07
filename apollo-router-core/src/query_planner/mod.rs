@@ -249,6 +249,7 @@ mod fetch {
     }
 
     impl Variables {
+        #[instrument(skip_all, level = "debug", name = "make_variables")]
         fn new(
             requires: &[Selection],
             variable_usages: &[String],
@@ -365,7 +366,7 @@ mod fetch {
             self.response_at_path(current_dir, paths, subgraph_response)
         }
 
-        #[instrument(level = "trace", name = "response_insert", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,

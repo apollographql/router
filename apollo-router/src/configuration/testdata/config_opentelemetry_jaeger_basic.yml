@@ -2,6 +2,6 @@ server:
   listen: 1.2.3.4:5
 subgraphs:
   example:
-    routing_url: foo
+    routing_url: http://foo
 opentelemetry:
   jaeger:

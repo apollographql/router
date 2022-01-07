@@ -47,26 +47,42 @@ impl NaiveIntrospection {
             schema.as_str(),
             KNOWN_INTROSPECTION_QUERIES.iter().cloned().collect(),
         )
-        .map(|responses| {
-            KNOWN_INTROSPECTION_QUERIES
-                .iter()
-                .zip(responses)
-                .filter_map(|(cache_key, response)| match response.into_result() {
-                    Ok(value) => {
-                        let response = Response::builder().data(value).build();
-                        Some((cache_key.into(), response))
-                    }
-                    Err(e) => {
-                        let errors = e
-                            .iter()
-                            .map(std::string::ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        tracing::warn!("introspection returned errors: \n {}", errors);
-                        None
-                    }
+        .map_err(|deno_runtime_error| {
+            tracing::warn!(
+                "router-bridge returned a deno runtime error:\n{}",
+                deno_runtime_error
+            );
+        })
+        .and_then(|global_introspection_result| {
+            global_introspection_result
+                .map_err(|general_introspection_error| {
+                    tracing::warn!(
+                        "Introspection returned an error:\n{}",
+                        general_introspection_error
+                    );
                 })
-                .collect()
+                .map(|responses| {
+                    KNOWN_INTROSPECTION_QUERIES
+                        .iter()
+                        .zip(responses)
+                        .filter_map(|(query, response)| match response.into_result() {
+                            Ok(value) => {
+                                let response = Response::builder().data(value).build();
+                                Some((query.into(), response))
+                            }
+                            Err(graphql_errors) => {
+                                for error in graphql_errors {
+                                    tracing::warn!(
+                                        "Introspection returned error:\n{}\n{}",
+                                        error,
+                                        query
+                                    );
+                                }
+                                None
+                            }
+                        })
+                        .collect()
+                })
         })
         .unwrap_or_default();
 

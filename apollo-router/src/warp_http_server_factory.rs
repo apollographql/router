@@ -11,8 +11,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
+use tower::ServiceBuilder;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Span};
+use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -69,6 +71,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
+
+            let svc = ServiceBuilder::new()
+                // generate a tracing span that covers request parsing and response serializing
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                )
+                .service(svc);
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             let tcp_listener = if let Some(listener) = listener {
@@ -302,22 +312,25 @@ where
         Err(stream) => stream,
     };
 
-    stream
-        .enumerate()
-        .map(|(index, res)| match serde_json::to_string(&res) {
-            Ok(bytes) => Ok(Bytes::from(bytes)),
-            Err(err) => {
-                // We didn't manage to serialise the response!
-                // Do our best to send some sort of error back.
-                serde_json::to_string(
-                    &graphql::FetchError::MalformedResponse {
-                        reason: err.to_string(),
-                    }
-                    .to_response(index == 0),
-                )
-                .map(Bytes::from)
+    let span = Span::current();
+    stream.enumerate().map(move |(index, res)| {
+        tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+            match serde_json::to_string(&res) {
+                Ok(bytes) => Ok(Bytes::from(bytes)),
+                Err(err) => {
+                    // We didn't manage to serialise the response!
+                    // Do our best to send some sort of error back.
+                    serde_json::to_string(
+                        &graphql::FetchError::MalformedResponse {
+                            reason: err.to_string(),
+                        }
+                        .to_response(index == 0),
+                    )
+                    .map(Bytes::from)
+                }
             }
         })
+    })
 }
 
 fn prefers_html(accept_header: String) -> bool {
@@ -409,8 +422,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
         }
     }
 
