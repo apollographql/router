@@ -3,7 +3,6 @@
 mod apollo_router;
 mod apollo_telemetry;
 pub mod configuration;
-mod custom;
 mod files;
 mod http_server_factory;
 pub mod http_service_registry;
