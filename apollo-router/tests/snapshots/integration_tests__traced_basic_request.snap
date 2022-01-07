@@ -58,12 +58,7 @@ expression: get_span()
           "id": 3,
           "name": "apollo_router::apollo_router::query_parsing",
           "record": {
-            "entries": [
-              [
-                "message",
-                "query plan\nQueryPlan {\n    root: Fetch(\n        FetchNode {\n            service_name: \"products\",\n            requires: [],\n            variable_usages: [],\n            operation: \"{topProducts{name name2:name}}\",\n        },\n    ),\n}"
-              ]
-            ],
+            "entries": [],
             "metadata": {
               "name": "query_parsing",
               "target": "apollo_router::apollo_router",
