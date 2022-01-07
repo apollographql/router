@@ -286,8 +286,10 @@ mod span_tests {
     }
 
     impl Recorder {
-        pub fn attributes(&mut self, attributes: &span::Attributes<'_>) {
-            self.metadata = Some(attributes.metadata().into());
+        pub fn attributes(&mut self, span_id: tracing::Id, attributes: &span::Attributes<'_>) {
+            let mut owned_metadata: OwnedMetadata = attributes.metadata().into();
+            owned_metadata.span_id = Some(span_id.into_u64());
+            self.metadata = Some(owned_metadata);
             attributes.record(&mut self.visitor)
         }
 
@@ -320,20 +322,15 @@ mod span_tests {
         }
 
         pub fn for_span_metadata(&mut self, metadata: OwnedMetadata) -> Record {
-            let mut r = Record::new(metadata.clone());
-
             let all_records = self
                 .visitors
                 .iter()
-                .filter(|(log_metadata, _)| {
-                    metadata.target == log_metadata.target
-                        && metadata.module_path == log_metadata.module_path
-                        && metadata.file == log_metadata.file
-                })
+                .filter(|(log_metadata, _)| log_metadata.span_id == metadata.span_id)
                 .map(|(_, dump_visitor)| dump_visitor.0.clone())
                 .flatten()
                 .collect();
 
+            let mut r = Record::new(metadata);
             r.append(all_records);
             r
         }
@@ -502,13 +499,13 @@ mod span_tests {
                 .event(self.current_span_id(), event);
         }
 
-        fn attributes(&self, id: span::Id, attributes: &span::Attributes<'_>) {
+        fn attributes(&self, span_id: span::Id, attributes: &span::Attributes<'_>) {
             self.all_spans
                 .lock()
                 .unwrap()
-                .entry(id.into_u64())
+                .entry(span_id.into_u64())
                 .or_default()
-                .attributes(attributes);
+                .attributes(span_id, attributes);
         }
 
         fn enter_id(&self, id: span::Id) {

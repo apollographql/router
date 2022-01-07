@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 81
+assertion_line: 79
 expression: get_span()
 
 ---
@@ -12,22 +12,6 @@ expression: get_span()
       [
         "message",
         "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "number",
-        52
-      ],
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
       ],
       [
         "number",
@@ -53,6 +37,10 @@ expression: get_span()
           [
             "number",
             42
+          ],
+          [
+            "message",
+            "here i am again!"
           ]
         ],
         "metadata": {

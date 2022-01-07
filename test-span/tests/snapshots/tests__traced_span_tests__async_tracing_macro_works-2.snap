@@ -1,49 +1,16 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 40
+assertion_line: 38
 expression: get_span()
 
 ---
 {
   "id": 1,
-  "name": "tests::traced_span_tests::do_stuff",
+  "name": "tests::traced_span_tests::root",
   "record": {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "message",
-        "in a separate context!"
-      ],
-      [
-        "number",
-        52
-      ],
-      [
-        "message",
-        "in a separate context!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
+    "entries": [],
     "metadata": {
-      "name": "do_stuff",
+      "name": "root",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -53,29 +20,64 @@ expression: get_span()
     }
   },
   "children": {
-    "my_crate::an_other_target::do_stuff2 - 2": {
+    "tests::traced_span_tests::do_stuff - 2": {
       "id": 2,
-      "name": "my_crate::an_other_target::do_stuff2",
+      "name": "tests::traced_span_tests::do_stuff",
       "record": {
         "entries": [
           [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
             "number",
-            42
+            52
           ]
         ],
         "metadata": {
-          "name": "do_stuff2",
-          "target": "my_crate::an_other_target",
+          "name": "do_stuff",
+          "target": "tests::traced_span_tests",
           "level": "INFO",
           "module_path": "tests::traced_span_tests",
           "fields": {
-            "names": [
-              "number"
-            ]
+            "names": []
           }
         }
       },
-      "children": {}
+      "children": {
+        "my_crate::an_other_target::do_stuff2 - 3": {
+          "id": 3,
+          "name": "my_crate::an_other_target::do_stuff2",
+          "record": {
+            "entries": [
+              [
+                "number",
+                42
+              ],
+              [
+                "message",
+                "here i am again!"
+              ]
+            ],
+            "metadata": {
+              "name": "do_stuff2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "children": {}
+        }
+      }
     }
   }
 }

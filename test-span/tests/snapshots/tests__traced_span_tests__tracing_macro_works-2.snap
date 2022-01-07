@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 21
+assertion_line: 19
 expression: get_span()
 
 ---
@@ -8,32 +8,7 @@ expression: get_span()
   "id": 1,
   "name": "tests::traced_span_tests::root",
   "record": {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "number",
-        52
-      ],
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "here i am again!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
+    "entries": [],
     "metadata": {
       "name": "root",
       "target": "tests::traced_span_tests",
@@ -53,22 +28,6 @@ expression: get_span()
           [
             "message",
             "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ],
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
           ],
           [
             "number",
@@ -94,6 +53,10 @@ expression: get_span()
               [
                 "number",
                 42
+              ],
+              [
+                "message",
+                "here i am again!"
               ]
             ],
             "metadata": {
