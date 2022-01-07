@@ -34,7 +34,7 @@ use opentelemetry::{
         trace::{ExportResult, SpanData, SpanExporter},
         ExportError,
     },
-    trace::TracerProvider,
+    trace::{TraceError, TracerProvider},
     Value,
 };
 use std::fmt::Debug;
@@ -166,7 +166,7 @@ impl SpanExporter for Exporter {
          * Break down batch and send to studio
          */
         for span in batch {
-            if span.name == "prepare_query" {
+            if span.name == "execute" {
                 tracing::info!("span: {:?}", span);
                 if let Some(q) = span
                     .attributes
@@ -205,7 +205,7 @@ impl SpanExporter for Exporter {
                         .reporter
                         .submit_stats(key, stats)
                         .await
-                        .expect("XXX")
+                        .map_err::<TraceError, _>(|e| e.to_string().into())?
                         .into_inner()
                         .message;
                     tracing::info!("server response: {}", msg);
