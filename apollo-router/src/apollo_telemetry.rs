@@ -37,6 +37,7 @@ use opentelemetry::{
     trace::{TraceError, TracerProvider},
     Value,
 };
+use std::borrow::Cow;
 use std::fmt::Debug;
 use tokio::runtime::Runtime;
 use tokio::time::{sleep, Duration};
@@ -183,10 +184,19 @@ impl SpanExporter for Exporter {
                     tracing::info!("query: {}", q);
                     tracing::info!("busy: {}", busy_v);
 
+                    let not_found = Value::String(Cow::from("not found"));
                     let stats = ContextualizedStats {
                         context: Some(StatsContext {
-                            client_name: "client name".to_string(),
-                            client_version: "client version".to_string(),
+                            client_name: span
+                                .attributes
+                                .get(&opentelemetry::Key::from_static_str("client_name"))
+                                .unwrap_or(&not_found)
+                                .to_string(),
+                            client_version: span
+                                .attributes
+                                .get(&opentelemetry::Key::from_static_str("client_version"))
+                                .unwrap_or(&not_found)
+                                .to_string(),
                         }),
                         query_latency_stats: Some(QueryLatencyStats {
                             latency_count: vec![busy_v],

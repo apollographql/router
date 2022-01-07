@@ -216,7 +216,6 @@ pub mod server {
                     let mut tpq = task_tpq.lock().await;
                     let current_tpq = std::mem::take(&mut *tpq);
                     drop(tpq);
-                    tracing::info!("tpq contains: {} records", current_tpq.len());
                     if !current_tpq.is_empty() {
                         tracing::info!("submitting: {} records", current_tpq.len());
                         tracing::info!("containing: {:?}", current_tpq);
