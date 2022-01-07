@@ -2989,9 +2989,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "869a3829bcf10ef77abff6ca0356a7190d141597c30e9f2da91bb10753006d62"
+checksum = "4d15f4b9181e4b323d820a89dacc7699a824b58ae34a3abb4c27416976abfa88"
 dependencies = [
  "bytes",
  "indexmap",
