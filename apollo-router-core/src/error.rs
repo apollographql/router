@@ -130,11 +130,11 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn from_value(service_name: &str, value: Value) -> Result<Error, graphql::FetchError> {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
         let mut object = match value {
             Value::Object(o) => o,
             _ => {
-                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "expected a JSON object".to_string(),
                 })
@@ -148,7 +148,7 @@ impl Error {
         {
             Some(s) => s,
             None => {
-                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "missing message field".to_string(),
                 })
@@ -178,14 +178,14 @@ impl Error {
                             continue;
                         }
                     }
-                    return Err(graphql::FetchError::SubrequestMalformedResponse {
+                    return Err(FetchError::SubrequestMalformedResponse {
                         service: service_name.to_string(),
                         reason: "missing location value".to_string(),
                     });
                 }
             }
             _ => {
-                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "missing errors field".to_string(),
                 })
@@ -195,7 +195,7 @@ impl Error {
         let extensions = match object.remove("extensions") {
             Some(Value::Object(o)) => o,
             _ => {
-                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "missing extensions field".to_string(),
                 })
