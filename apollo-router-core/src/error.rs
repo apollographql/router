@@ -1,4 +1,4 @@
-use crate::prelude::graphql::{self, *};
+use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
