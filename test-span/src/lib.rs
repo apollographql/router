@@ -49,6 +49,7 @@
 //! ```
 
 pub mod prelude {
+    pub use crate::reexports::tracing::Instrument;
     pub use crate::reexports::tracing_futures::WithSubscriber;
     pub use crate::reexports::tracing_subscriber::prelude::*;
     pub use crate::span_tests::{Layer, OwnedMetadata, RecordEntry, RecordedValue, Records, Span};
@@ -444,11 +445,17 @@ mod span_tests {
         }
 
         fn into_span(self) -> Span {
-            let mut root_span = Span::from("root".to_string(), 0, Record::for_root());
-
-            self.dfs_insert(&mut root_span, NodeIndex::from(0));
-
-            root_span
+            if let Some((node_index, (_, node_record))) = self.spans.first() {
+                let span_name = format!(
+                    "{}::{}",
+                    node_record.metadata.target, node_record.metadata.name
+                );
+                let mut root_span = Span::from(span_name, *node_index, node_record.clone());
+                self.dfs_insert(&mut root_span, NodeIndex::new(*node_index));
+                root_span
+            } else {
+                Span::from("root".to_string(), 0, Record::for_root())
+            }
         }
 
         fn dfs_insert(&self, current_span: &mut Span, current_node: NodeIndex) {
@@ -535,7 +542,7 @@ mod span_tests {
                 .lock()
                 .unwrap()
                 .last()
-                .expect("no id")
+                .expect("traced_tests create a root span, this should never happen.")
                 .clone()
         }
     }

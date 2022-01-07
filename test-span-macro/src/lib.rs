@@ -59,15 +59,20 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn async_test() -> TokenStream2 {
     quote! {
-        inner_test(get_logs, get_span)
-            .with_subscriber(subscriber).await
+        async {
+            let root_span = test_span::reexports::tracing::span!(::tracing::Level::INFO, "root");
+            inner_test(get_logs, get_span)
+                .instrument(root_span).await
+        }.with_subscriber(subscriber).await
     }
 }
 
 fn sync_test() -> TokenStream2 {
     quote! {
-        tracing::subscriber::with_default(subscriber, || {
-            inner_test(get_logs, get_span)
+        test_span::reexports::tracing::subscriber::with_default(subscriber, || {
+            test_span::reexports::tracing::span!(tracing::Level::INFO, "root").in_scope(|| {
+                inner_test(get_logs, get_span)
+            });
         });
     }
 }

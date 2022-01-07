@@ -15,8 +15,6 @@ mod traced_span_tests {
 
         let logs = get_logs();
 
-        dbg!(&logs);
-
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(get_span());
 

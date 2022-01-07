@@ -5,23 +5,48 @@ expression: get_span()
 
 ---
 {
-  "id": 0,
-  "name": "root",
+  "id": 1,
+  "name": "tests::traced_span_tests::root",
   "record": {
-    "entries": [],
+    "entries": [
+      [
+        "message",
+        "here i am!"
+      ],
+      [
+        "message",
+        "here i am again!"
+      ],
+      [
+        "number",
+        52
+      ],
+      [
+        "message",
+        "here i am!"
+      ],
+      [
+        "message",
+        "here i am again!"
+      ],
+      [
+        "number",
+        52
+      ]
+    ],
     "metadata": {
       "name": "root",
-      "target": "",
-      "level": "",
-      "module_path": null,
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
       "fields": {
         "names": []
       }
     }
   },
   "children": {
-    "tests::traced_span_tests::do_sync_stuff - 1": {
-      "id": 1,
+    "tests::traced_span_tests::do_sync_stuff - 2": {
+      "id": 2,
       "name": "tests::traced_span_tests::do_sync_stuff",
       "record": {
         "entries": [
@@ -61,8 +86,8 @@ expression: get_span()
         }
       },
       "children": {
-        "my_crate::an_other_target::do_sync_stuff_2 - 2": {
-          "id": 2,
+        "my_crate::an_other_target::do_sync_stuff_2 - 3": {
+          "id": 3,
           "name": "my_crate::an_other_target::do_sync_stuff_2",
           "record": {
             "entries": [
@@ -86,157 +111,6 @@ expression: get_span()
           "children": {}
         }
       }
-    },
-    "tests::traced_span_tests::do_sync_stuff - 3": {
-      "id": 3,
-      "name": "tests::traced_span_tests::do_sync_stuff",
-      "record": {
-        "entries": [
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ],
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ]
-        ],
-        "metadata": {
-          "name": "do_sync_stuff",
-          "target": "tests::traced_span_tests",
-          "level": "INFO",
-          "module_path": "tests::traced_span_tests",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {}
-    },
-    "tests::traced_span_tests::do_sync_stuff - 4": {
-      "id": 4,
-      "name": "tests::traced_span_tests::do_sync_stuff",
-      "record": {
-        "entries": [
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ],
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ]
-        ],
-        "metadata": {
-          "name": "do_sync_stuff",
-          "target": "tests::traced_span_tests",
-          "level": "INFO",
-          "module_path": "tests::traced_span_tests",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {
-        "my_crate::an_other_target::do_sync_stuff_2 - 5": {
-          "id": 5,
-          "name": "my_crate::an_other_target::do_sync_stuff_2",
-          "record": {
-            "entries": [
-              [
-                "number",
-                42
-              ]
-            ],
-            "metadata": {
-              "name": "do_sync_stuff_2",
-              "target": "my_crate::an_other_target",
-              "level": "INFO",
-              "module_path": "tests::traced_span_tests",
-              "fields": {
-                "names": [
-                  "number"
-                ]
-              }
-            }
-          },
-          "children": {}
-        }
-      }
-    },
-    "tests::traced_span_tests::do_sync_stuff - 6": {
-      "id": 6,
-      "name": "tests::traced_span_tests::do_sync_stuff",
-      "record": {
-        "entries": [
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ],
-          [
-            "message",
-            "here i am!"
-          ],
-          [
-            "message",
-            "here i am again!"
-          ],
-          [
-            "number",
-            52
-          ]
-        ],
-        "metadata": {
-          "name": "do_sync_stuff",
-          "target": "tests::traced_span_tests",
-          "level": "INFO",
-          "module_path": "tests::traced_span_tests",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {}
     }
   }
 }

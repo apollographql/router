@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 39
+assertion_line: 37
 expression: logs
 
 ---
@@ -13,7 +13,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:155",
+      "name": "event test-span/tests/tests.rs:153",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -32,7 +32,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:173",
+      "name": "event test-span/tests/tests.rs:171",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -51,7 +51,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:155",
+      "name": "event test-span/tests/tests.rs:153",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -70,7 +70,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:173",
+      "name": "event test-span/tests/tests.rs:171",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -89,7 +89,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:158",
+      "name": "event test-span/tests/tests.rs:156",
       "target": "tests::traced_span_tests",
       "level": "WARN",
       "module_path": "tests::traced_span_tests",
@@ -108,7 +108,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:162",
+      "name": "event test-span/tests/tests.rs:160",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -127,7 +127,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:158",
+      "name": "event test-span/tests/tests.rs:156",
       "target": "tests::traced_span_tests",
       "level": "WARN",
       "module_path": "tests::traced_span_tests",
@@ -146,7 +146,7 @@ expression: logs
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:162",
+      "name": "event test-span/tests/tests.rs:160",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
