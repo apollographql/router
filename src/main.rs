@@ -1,5 +1,7 @@
+#[macro_use]
+extern crate maplit;
+
 use std::collections::HashMap;
-use async_trait::async_trait;
 use std::error::Error;
 use std::fmt::Debug;
 use std::future::Future;
@@ -8,59 +10,69 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+
 use anyhow::Result;
+use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::Stream;
+use http::{Request, Response, StatusCode};
+use http::header::HeaderName;
 use tower::{Layer, Service, ServiceBuilder};
+use tower::layer::layer_fn;
+use tower::layer::util::Stack;
 use tower::util::BoxService;
-
+use typed_builder::TypedBuilder;
 
 pub struct Schema;
 
 pub struct QueryPlan;
 
-use http::{Request, Response, StatusCode};
-use http::header::HeaderName;
-use tower::layer::layer_fn;
-use tower::layer::util::Stack;
+mod graphql {
+    use futures::Stream;
+
+    pub struct Request {
+        //Usual stuff here
+    }
+    pub struct Response {
+        //Usual stuff here
 
 
-struct GraphQLRequest {
-    //Usual stuff here
+        //Stream stuff here for defer/stream
+        //Our warp adapter will convert the entire response to a stream if this field is present.
+        //#[serde(skip_serializing)]
+        stream: Option<Box<dyn Stream<Item=Patch>>>,
+    }
+
+
+    pub struct Patch {}
+
+
 }
 
-struct PlannedGraphQLRequest {
+
+struct PlannedRequest {
     // Planned request includes the original request
-    request: Request<GraphQLRequest>,
+    request: Request<graphql::Request>,
 
     // And also the query plan
     query_plan: QueryPlan,
 }
 
-struct DownstreamGraphQLRequest {
+struct SubgraphRequest {
     //The request to make downstream
-    request: Request<GraphQLRequest>,
+    backend_request: Request<graphql::Request>,
 
     // Downstream requests includes the original request
-    upstream_request: PlannedGraphQLRequest,
+    frontend_request: Arc<PlannedRequest>,
 }
 
-struct GraphQLResponse {
-    //Usual stuff here
-
-
-    //Stream stuff here for defer/stream
-    //Our warp adapter will convert the entire response to a stream if this field is present.
-    //#[serde(skip_serializing)]
-    stream: Option<Box<dyn Stream<Item=GraphQLPatchResponse>>>,
-}
-
-struct GraphQLPatchResponse {}
 
 struct QueryPlannerService;
 
-impl Service<Request<GraphQLRequest>> for QueryPlannerService {
-    type Response = PlannedGraphQLRequest;
+
+
+impl Service<Request<graphql::Request>> for QueryPlannerService {
+    type Response = PlannedRequest;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
 
@@ -68,10 +80,10 @@ impl Service<Request<GraphQLRequest>> for QueryPlannerService {
         todo!();
     }
 
-    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+    fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
         // create a response in a future.
         let fut = async {
-            Ok(PlannedGraphQLRequest { request, query_plan: QueryPlan {} })
+            Ok(PlannedRequest { request, query_plan: QueryPlan {} })
         };
 
         // Return the response as an immediate future
@@ -79,13 +91,18 @@ impl Service<Request<GraphQLRequest>> for QueryPlannerService {
     }
 }
 
-struct QueryExecutionService {
-    query_planner_service: BoxService<Request<GraphQLRequest>, PlannedGraphQLRequest, http::Error>,
-    services: Vec<BoxService<DownstreamGraphQLRequest, Response<GraphQLResponse>, http::Error>>,
+#[derive(TypedBuilder)]
+struct RouterService<QueryPlanner, QueryExecution> {
+    query_planner_service: QueryPlanner,
+    query_execution_service: QueryExecution,
 }
 
-impl Service<Request<GraphQLRequest>> for QueryExecutionService {
-    type Response = Response<GraphQLResponse>;
+impl<QueryPlanner, QueryExecution> Service<Request<graphql::Request>> for RouterService<QueryPlanner, QueryExecution>
+    where
+        QueryPlanner: Service<Request<graphql::Request>, Response=PlannedRequest, Error=http::Error>,
+        QueryExecution: Service<PlannedRequest, Response=Response<graphql::Response>, Error=http::Error>
+{
+    type Response = Response<graphql::Response>;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
 
@@ -93,17 +110,17 @@ impl Service<Request<GraphQLRequest>> for QueryExecutionService {
         todo!();
     }
 
-    fn call(&mut self, request: Request<GraphQLRequest>) -> Self::Future {
+    fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
         todo!();
     }
 }
 
-pub struct GraphQLEndpointService {
+pub struct SubgraphService {
     url: String,
 }
 
-impl Service<DownstreamGraphQLRequest> for GraphQLEndpointService {
-    type Response = Response<GraphQLResponse>;
+impl Service<SubgraphRequest> for SubgraphService {
+    type Response = Response<graphql::Response>;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
 
@@ -111,25 +128,11 @@ impl Service<DownstreamGraphQLRequest> for GraphQLEndpointService {
         todo!();
     }
 
-    fn call(&mut self, request: DownstreamGraphQLRequest) -> Self::Future {
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         todo!();
     }
 }
 
-
-struct ApolloRouter {}
-
-impl ApolloRouter {
-    pub(crate) async fn start(&self) {
-        todo!()
-    }
-}
-
-impl Default for ApolloRouter {
-    fn default() -> Self {
-        todo!()
-    }
-}
 
 pub struct CacheLayer;
 
@@ -159,9 +162,9 @@ pub struct PropagateHeaderService<S> {
     header_name: HeaderName,
 }
 
-impl<S> Service<DownstreamGraphQLRequest> for PropagateHeaderService<S>
+impl<S> Service<SubgraphRequest> for PropagateHeaderService<S>
     where
-        S: Service<DownstreamGraphQLRequest>,
+        S: Service<SubgraphRequest>,
 
 {
     type Response = S::Response;
@@ -172,10 +175,10 @@ impl<S> Service<DownstreamGraphQLRequest> for PropagateHeaderService<S>
         todo!();
     }
 
-    fn call(&mut self, mut request: DownstreamGraphQLRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         //Add the header to the request and pass it on to the service.
-        if let Some(header) = request.upstream_request.request.headers().get(&self.header_name) {
-            request.request.headers_mut().insert(self.header_name.to_owned(), header.clone());
+        if let Some(header) = request.frontend_request.request.headers().get(&self.header_name) {
+            request.backend_request.headers_mut().insert(self.header_name.to_owned(), header.clone());
         }
         self.service.call(request)
     }
@@ -202,43 +205,106 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 }
 
 
+#[derive(TypedBuilder)]
+struct ApolloRouter {
+    //extensions: Vec<Box<dyn Extension>>,
+}
+
+impl ApolloRouter {
+    pub(crate) async fn start(&self) {
+        todo!()
+    }
+}
+
+impl Default for ApolloRouter {
+    fn default() -> Self {
+        todo!()
+    }
+}
+
+
+struct ExecutionService {
+    subgraphs: HashMap<String, BoxService<SubgraphRequest, Response<graphql::Response>, http::Error>>,
+}
+
+impl Service<PlannedRequest> for ExecutionService {
+    type Response = Response<graphql::Response>;
+    type Error = http::Error;
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+        todo!()
+    }
+
+    fn call(&mut self, req: PlannedRequest) -> Self::Future {
+        todo!()
+    }
+}
+
+struct Configuration {
+
+}
+
+trait Extension {
+    fn configure(configuration: Configuration);
+}
+
+struct DynamicExtensionsLayer {
+
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    //Query planning is a service. It take GraphQLRequest and outputs PlannedGraphQLRequest
+
+    let dynamic_extensions = DynamicExtensions::default();
+
+    //Query planning is a service. It take graphql::Request and outputs Plannedgraphql::Request
     let mut query_planner_service = ServiceBuilder::new()
         .cache()
         .rate_limit(2, Duration::from_secs(10))
         .service(QueryPlannerService {});
 
-    //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
+    //Endpoint service takes a Downstreamgraphql::Request and outputs a graphql::Response
     let mut book_service = ServiceBuilder::new()
         .rate_limit(2, Duration::from_secs(2))
         .layer(layer_fn(|f| f)) //Custom stuff that the user wants to develop
-        .service(GraphQLEndpointService { url: "http://books".to_string() });
+        .service(SubgraphService { url: "http://books".to_string() });
 
-    //Endpoint service takes a DownstreamGraphQLRequest and outputs a GraphQLResponse
+    //Endpoint service takes a Downstreamgraphql::Request and outputs a graphql::Response
     let mut author_service = ServiceBuilder::new()
         .propagate_header("A")
         .cache()
-        .service(GraphQLEndpointService { url: "http://authors".to_string() });
+        .service(SubgraphService { url: "http://authors".to_string() });
 
-    //Execution service takes a GraphQLRequest and outputs a GraphQLResponse
-    let mut query_execution_service = ServiceBuilder::new()
-        .service(QueryExecutionService {
-            query_planner_service: BoxService::new(query_planner_service), //Query planner service to use
-            services: vec!(BoxService::new(book_service), BoxService::new(author_service)), //The list of endpoints
+    let mut execution_service = ServiceBuilder::new()
+        .cache()
+        .rate_limit(2, Duration::from_secs(10))
+        .service(ExecutionService {
+            subgraphs: hashmap! {
+            "book".to_string()=> BoxService::new(book_service),
+            "author".to_string()=> BoxService::new(author_service)
+            }
         });
 
 
+    //Execution service takes a graphql::Request and outputs a graphql::Response
+    let mut router_service = RouterService::builder()
+        .query_planner_service(query_planner_service)
+        .query_execution_service(execution_service).build();
+
     // User can use an adapter that we provide or embed their own or use tower-http
-    query_execution_service.call(Request::new(GraphQLRequest {})).await;
+    router_service.call(Request::new(graphql::Request {})).await;
 
     //We will provide an implementation based on Warp
     //It does hot reloading and config from yaml to build the services
     //Wasm/deno layers can be developed.
     //We can reuse what we have already developed as this slots in to where Geoffroy has added Tower in:
     // https://github.com/apollographql/router/pull/293
-    ApolloRouter::default().start().await;
+    ApolloRouter::builder()
+        .extensions()
+        .build()
+        .start().await;
+
 
     Ok(())
 }

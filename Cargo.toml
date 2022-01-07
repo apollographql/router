@@ -16,3 +16,4 @@ opentelemetry = "0.16.0"
 futures = "0.3.18"
 tower = {version="0.4.11", features=["limit", "util"]}
 http = "0.2.5"
+maplit = "1.0.2"
