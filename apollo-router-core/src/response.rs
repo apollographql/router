@@ -1,11 +1,6 @@
 use crate::prelude::graphql::*;
-use futures::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use typed_builder::TypedBuilder;
-
-/// A graph response stream consists of one primary response and any number of patch responses.
-pub type ResponseStream = Pin<Box<dyn futures::Stream<Item = Response> + Send>>;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
@@ -60,12 +55,6 @@ impl Response {
     /// append_errors default the errors `path` with the one provided.
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
-    }
-}
-
-impl From<Response> for ResponseStream {
-    fn from(response: Response) -> Self {
-        stream::once(future::ready(response)).boxed()
     }
 }
 
