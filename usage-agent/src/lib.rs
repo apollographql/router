@@ -218,7 +218,7 @@ pub mod server {
                     drop(tpq);
                     if !current_tpq.is_empty() {
                         tracing::info!("submitting: {} records", current_tpq.len());
-                        tracing::info!("containing: {:?}", current_tpq);
+                        tracing::debug!("containing: {:?}", current_tpq);
                         let mut report =
                             crate::Report::try_new("Usage-Agent-uc0sri@current").expect("XXX");
 
@@ -235,7 +235,7 @@ pub mod server {
                         report.end_time = Some(ts_end);
 
                         match ReportServer::submit_report(&client, report).await {
-                            Ok(v) => tracing::info!("Report submission succeeded: {:?}", v),
+                            Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                             Err(e) => tracing::error!("Report submission failed: {}", e),
                         }
                     }
@@ -257,6 +257,7 @@ pub mod server {
             client: &Client,
             report: report::Report,
         ) -> Result<Response<ReporterResponse>, Status> {
+            tracing::debug!("submitting report: {:?}", report);
             // Protobuf encode message as "content"
             let mut content = BytesMut::new();
             report

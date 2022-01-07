@@ -168,7 +168,7 @@ impl SpanExporter for Exporter {
          */
         for span in batch {
             if span.name == "execute" {
-                tracing::info!("span: {:?}", span);
+                tracing::debug!("span: {:?}", span);
                 if let Some(q) = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
@@ -178,11 +178,11 @@ impl SpanExporter for Exporter {
                         .get(&opentelemetry::Key::from_static_str("busy_ns"))
                         .unwrap();
                     let busy_v = match busy {
-                        Value::I64(v) => v / 1_000,
+                        Value::I64(v) => v / 1_000_000,
                         _ => panic!("value should be a signed integer"),
                     };
-                    tracing::info!("query: {}", q);
-                    tracing::info!("busy: {}", busy_v);
+                    tracing::debug!("query: {}", q);
+                    tracing::debug!("busy: {}", busy_v);
 
                     let not_found = Value::String(Cow::from("not found"));
                     let stats = ContextualizedStats {
@@ -237,7 +237,7 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
     let parser = Parser::new(q);
     // compress *before* parsing to modify whitespaces/comments
     let ast = parser.compress().parse();
-    tracing::info!("ast:\n {:?}", ast);
+    tracing::debug!("ast:\n {:?}", ast);
     // If we can't parse the query, we definitely can't normalize it, so
     // just return the un-processed input
     if ast.errors().len() > 0 {
@@ -259,10 +259,10 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
             false
         })
         .collect();
-    tracing::info!("required definitions: {:?}", required_definitions);
+    tracing::debug!("required definitions: {:?}", required_definitions);
     assert_eq!(required_definitions.len(), 1);
     let required_definition = required_definitions.pop().unwrap();
-    tracing::info!("required_definition: {:?}", required_definition);
+    tracing::debug!("required_definition: {:?}", required_definition);
     // XXX Somehow find fragments...
     let def = required_definition.format();
     format!("# {} \n{}", op_name, def)
