@@ -1,12 +1,7 @@
-use crate::prelude::graphql::{self, *};
+use crate::prelude::graphql::*;
 use bytes::Bytes;
-use futures::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use typed_builder::TypedBuilder;
-
-/// A graph response stream consists of one primary response and any number of patch responses.
-pub type ResponseStream = Pin<Box<dyn futures::Stream<Item = Response> + Send>>;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
@@ -63,18 +58,17 @@ impl Response {
         self.errors.append(errors)
     }
 
-    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, graphql::FetchError> {
-        let value = Value::from_bytes(b).map_err(|error| {
-            graphql::FetchError::SubrequestMalformedResponse {
+    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+        let value =
+            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
-            }
-        })?;
+            })?;
 
         let mut object = match value {
             Value::Object(o) => o,
             _ => {
-                return Err(graphql::FetchError::SubrequestMalformedResponse {
+                return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
                     reason: "expected a JSON object".to_string(),
                 })
@@ -119,12 +113,6 @@ impl Response {
             errors,
             extensions,
         })
-    }
-}
-
-impl From<Response> for ResponseStream {
-    fn from(response: Response) -> Self {
-        stream::once(future::ready(response)).boxed()
     }
 }
 

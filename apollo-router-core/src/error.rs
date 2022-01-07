@@ -1,6 +1,5 @@
 use crate::prelude::graphql::{self, *};
 use displaydoc::Display;
-use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
@@ -293,9 +292,9 @@ impl From<CacheResolverError> for QueryPlannerError {
     }
 }
 
-impl From<QueryPlannerError> for ResponseStream {
+impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
-        stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
+        FetchError::from(err).to_response(true)
     }
 }
 
