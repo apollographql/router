@@ -1,9 +1,9 @@
 use ::daggy::{Dag, NodeIndex};
 use ::serde::{Deserialize, Serialize};
-use ::std::collections::BTreeMap;
 use daggy::petgraph::graph::DefaultIx;
 use daggy::Walker;
 use indexmap::IndexMap;
+use linked_hash_map::LinkedHashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -20,7 +20,7 @@ pub struct Span {
     id: u64,
     name: String,
     record: RecordWithMetadata,
-    children: BTreeMap<String, Span>,
+    children: LinkedHashMap<String, Span>,
 }
 
 impl Span {
@@ -149,14 +149,20 @@ impl Report {
         current_node: NodeIndex,
         level: &tracing::Level,
     ) {
-        current_span.children = self
+        let mut children = self
             .dag
             .children(current_node)
             .iter(&self.dag)
+            .collect::<Vec<_>>();
+
+        children.sort_by(|(_, index_a), (_, index_b)| index_a.cmp(index_b));
+
+        current_span.children = children
+            .iter()
             .filter_map(|(_, child_node)| {
                 let child_id = self
                     .node_to_id
-                    .get(&child_node)
+                    .get(child_node)
                     .expect("couldn't find span id for node");
                 let child_recorder = self
                     .spans
@@ -184,7 +190,7 @@ impl Report {
                 contents.append(self.logs.record_for_span_id_and_level(*child_id, level));
 
                 let mut child_span = Span::from(span_name, *child_id, contents);
-                self.dfs_span_insert(&mut child_span, child_node, level);
+                self.dfs_span_insert(&mut child_span, *child_node, level);
 
                 Some((span_key, child_span))
             })
