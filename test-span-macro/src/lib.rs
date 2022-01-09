@@ -39,13 +39,16 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let ret = quote! {#output_type};
 
-    let subscriber_boilerplate = subscriber_boilerplate();
+    // TODO[igni]: parse this from the macro attrs
+    let tracing_level = quote!(::tracing::Level::DEBUG);
+
+    let subscriber_boilerplate = subscriber_boilerplate(tracing_level);
 
     quote! {
       #[#macro_attrs]
       #(#fn_attrs)*
       #maybe_async fn #test_name() #ret {
-        #maybe_async fn inner_test(get_logs: impl Fn() -> Records, get_span: impl Fn() -> Span) #ret
+        #maybe_async fn inner_test(get_telemetry: impl Fn() -> (Span, Records), get_logs: impl Fn() -> Records, get_spans: impl Fn() -> Span) #ret
           #body
 
 
@@ -59,49 +62,36 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn async_test() -> TokenStream2 {
     quote! {
-        async {
-            let root_span = test_span::reexports::tracing::span!(::tracing::Level::INFO, "root");
-            inner_test(get_logs, get_span)
-                .instrument(root_span).await
-        }.with_subscriber(subscriber).await
+        inner_test(get_telemetry, get_logs, get_spans)
+            .instrument(root_span).await
     }
 }
 
 fn sync_test() -> TokenStream2 {
     quote! {
-        test_span::reexports::tracing::subscriber::with_default(subscriber, || {
-            test_span::reexports::tracing::span!(tracing::Level::INFO, "root").in_scope(|| {
-                inner_test(get_logs, get_span)
-            });
+        root_span.in_scope(|| {
+            inner_test(get_telemetry, get_logs, get_spans)
         });
     }
 }
-fn subscriber_boilerplate() -> TokenStream2 {
+fn subscriber_boilerplate(level: TokenStream2) -> TokenStream2 {
     quote! {
-        let id_sequence = Default::default();
-        let all_spans = Default::default();
-        let logs = Default::default();
+        test_span::init();
 
-        let subscriber = tracing_subscriber::registry().with(Layer::new(
-            Arc::clone(&id_sequence),
-            Arc::clone(&all_spans),
-            Arc::clone(&logs),
-        ));
+        let level = &#level;
 
-        let logs_clone = Arc::clone(&logs);
-        let span_logs_clone = Arc::clone(&logs);
-        let spans_clone = Arc::clone(&all_spans);
-        let id_sequence_clone = Arc::clone(&id_sequence);
+        let root_span = test_span::reexports::tracing::span!(#level, "root");
+
+        let root_id = root_span.id().clone().expect("couldn't get root span id; this cannot happen.");
 
         #[allow(unused)]
-        let get_logs = move || logs_clone.lock().unwrap().contents();
+        let get_telemetry = || test_span::get_telemetry_for_root(&root_id, level);
 
         #[allow(unused)]
-        let get_span = move || {
-            let all_spans = spans_clone.lock().unwrap().clone();
-            let all_logs = span_logs_clone.lock().unwrap().clone();
-            let id_sequence = id_sequence_clone.read().unwrap().clone();
-            Span::from_records(id_sequence, all_logs, all_spans)
-        };
+        let get_logs = || test_span::get_logs_for_root(&root_id, level);
+
+
+        #[allow(unused)]
+        let get_spans = || test_span::get_spans_for_root(&root_id, level);
     }
 }

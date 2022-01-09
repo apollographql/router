@@ -47,18 +47,6 @@ macro_rules! assert_federated_response {
     };
 }
 
-#[test_span(tokio::test)]
-async fn traced_basic_request() {
-    assert_federated_response!(
-        r#"{ topProducts { name name2:name } }"#,
-        hashmap! {
-            "products".to_string()=>1,
-        },
-    );
-
-    insta::assert_json_snapshot!(get_span());
-}
-
 #[tokio::test]
 async fn basic_request() {
     assert_federated_response!(
@@ -79,6 +67,30 @@ async fn basic_composition() {
             "accounts".to_string()=>1,
         },
     );
+}
+
+#[test_span(tokio::test)]
+async fn traced_basic_request() {
+    assert_federated_response!(
+        r#"{ topProducts { name name2:name } }"#,
+        hashmap! {
+            "products".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!(get_spans());
+}
+
+#[test_span(tokio::test)]
+async fn traced_basic_composition() {
+    assert_federated_response!(
+        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
+        hashmap! {
+            "products".to_string()=>2,
+            "reviews".to_string()=>1,
+            "accounts".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!(get_spans());
 }
 
 #[tokio::test]
@@ -104,7 +116,7 @@ async fn basic_mutation() {
     );
 }
 
-#[test_log::test(tokio::test)]
+#[test_span(tokio::test)]
 async fn variables() {
     assert_federated_response!(
         r#"

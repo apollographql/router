@@ -48,11 +48,41 @@
 //!  └───────────┘   └───────────┘
 //! ```
 
+use once_cell::sync::Lazy;
+use prelude::*;
+use span_tests::Report;
+use tracing::Level;
+use tracing_subscriber::util::TryInitError;
+
+static INIT: Lazy<Result<(), TryInitError>> =
+    Lazy::new(|| tracing_subscriber::registry().with(Layer {}).try_init());
+
+pub fn init() {
+    Lazy::force(&INIT).as_ref().expect("couldn't set span-test subscriber as a default, maybe tracing has already been initialized somewhere else ?");
+}
+
+pub fn get_telemetry_for_root(
+    root_id: &crate::reexports::tracing::Id,
+    level: &Level,
+) -> (Span, Records) {
+    let report = Report::from_root(root_id.into_u64());
+
+    (report.spans(level), report.logs(level))
+}
+
+pub fn get_spans_for_root(root_id: &crate::reexports::tracing::Id, level: &Level) -> Span {
+    Report::from_root(root_id.into_u64()).spans(level)
+}
+
+pub fn get_logs_for_root(root_id: &crate::reexports::tracing::Id, level: &Level) -> Records {
+    Report::from_root(root_id.into_u64()).logs(level)
+}
 pub mod prelude {
-    pub use crate::reexports::tracing::Instrument;
+    pub use crate::reexports::tracing::{Instrument, Level};
     pub use crate::reexports::tracing_futures::WithSubscriber;
     pub use crate::reexports::tracing_subscriber::prelude::*;
     pub use crate::span_tests::{Layer, OwnedMetadata, RecordEntry, RecordedValue, Records, Span};
+    pub use crate::{get_logs_for_root, get_spans_for_root, get_telemetry_for_root};
     pub use test_span_macro::test_span;
 }
 
@@ -65,18 +95,29 @@ pub mod reexports {
 }
 
 mod span_tests {
-    use ::daggy::petgraph::graph::DiGraph;
     use ::daggy::{Dag, NodeIndex};
     use ::serde::{Deserialize, Serialize};
     use ::std::collections::BTreeMap;
-    use ::std::sync::RwLock;
     use ::std::sync::{Arc, Mutex};
     use ::tracing::field::{Field, Visit};
     use ::tracing::span;
     use ::tracing::{Event, Metadata};
+    use daggy::petgraph::graph::DefaultIx;
+    use daggy::Walker;
     use indexmap::IndexMap;
+    use once_cell::sync::Lazy;
+    use std::collections::HashSet;
+    use tracing_subscriber::layer::Context;
 
-    pub type SpanEntry = Recorder;
+    type LazyMutex<T> = Lazy<Arc<Mutex<T>>>;
+
+    pub(crate) static ALL_SPANS: LazyMutex<IndexMap<u64, Recorder>> = Lazy::new(Default::default);
+    pub(crate) static ALL_LOGS: LazyMutex<LogsRecorder> = Lazy::new(Default::default);
+    pub(crate) static ALL_DAGS: LazyMutex<IndexMap<u64, Dag<u64, ()>>> =
+        Lazy::new(Default::default);
+    pub(crate) static SPAN_ID_TO_ROOT_AND_NODE_INDEX: LazyMutex<
+        IndexMap<u64, (u64, daggy::NodeIndex)>,
+    > = Lazy::new(Default::default);
 
     type FieldName = String;
 
@@ -221,7 +262,7 @@ mod span_tests {
         }
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Record {
         entries: Vec<RecordEntry>,
         metadata: OwnedMetadata,
@@ -257,7 +298,7 @@ mod span_tests {
             self.entries.append(&mut entries)
         }
     }
-    #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+    #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
     pub struct Records(Vec<Record>);
 
     impl Records {
@@ -273,9 +314,8 @@ mod span_tests {
             })
         }
 
-        #[allow(dead_code)]
-        fn merge(self, other: Records) -> Self {
-            Self(self.0.into_iter().chain(other.0.into_iter()).collect())
+        fn push(&mut self, record: Record) {
+            self.0.push(record)
         }
     }
 
@@ -297,9 +337,19 @@ mod span_tests {
             record.record(&mut self.visitor)
         }
 
-        pub fn contents(&self) -> Record {
+        pub fn contents(&self, level: &tracing::Level) -> Record {
             let mut r = Record::new(self.metadata.clone().unwrap());
-            r.append(self.visitor.0.clone());
+
+            if &r
+                .metadata
+                .level
+                .clone()
+                .parse::<tracing::Level>()
+                .expect("invalid level")
+                <= level
+            {
+                r.append(self.visitor.0.clone());
+            }
             r
         }
     }
@@ -310,78 +360,75 @@ mod span_tests {
     }
 
     impl LogsRecorder {
-        pub fn event(&mut self, current_span_id: tracing::Id, event: &Event<'_>) {
-            event.record(
-                self.visitors
-                    .entry(
-                        OwnedMetadata::from(event.metadata())
-                            .with_span_id(current_span_id.into_u64()),
-                    )
-                    .or_default(),
-            )
+        pub fn event(&mut self, current_span_id: Option<tracing::Id>, event: &Event<'_>) {
+            let metadata = OwnedMetadata::from(event.metadata());
+            let metadata = if let Some(id) = current_span_id {
+                metadata.with_span_id(id.into_u64())
+            } else {
+                metadata
+            };
+            event.record(self.visitors.entry(metadata).or_default())
         }
 
-        pub fn for_span_metadata(&mut self, metadata: OwnedMetadata) -> Record {
-            let all_records = self
-                .visitors
-                .iter()
-                .filter(|(log_metadata, _)| log_metadata.span_id == metadata.span_id)
-                .map(|(_, dump_visitor)| dump_visitor.0.clone())
-                .flatten()
-                .collect();
-
-            let mut r = Record::new(metadata);
-            r.append(all_records);
-            r
-        }
-
-        pub fn contents(&self) -> Records {
-            Records(
-                self.visitors
+        pub fn for_spans(&self, spans: HashSet<u64>) -> Self {
+            Self {
+                visitors: self
+                    .visitors
                     .iter()
-                    .map(|(metadata, records)| {
-                        let mut r = Record::new(metadata.clone());
-                        r.append(records.0.clone());
-                        r
+                    .filter_map(|(log_metadata, visitor)| match log_metadata.span_id {
+                        Some(id) if spans.contains(&id) => {
+                            Some((log_metadata.clone(), visitor.clone()))
+                        }
+                        _ => None,
                     })
                     .collect(),
-            )
+            }
+        }
+
+        pub fn record_for_span_id_and_level(
+            &self,
+            span_id: u64,
+            level: &tracing::Level,
+        ) -> Vec<RecordEntry> {
+            self.visitors
+                .iter()
+                .filter_map(|(log_metadata, visitor)| {
+                    if &log_metadata
+                        .level
+                        .parse::<tracing::Level>()
+                        .expect("invalid level")
+                        <= level
+                    {
+                        match log_metadata.span_id {
+                            Some(id) if id == span_id => Some(visitor.0.clone()),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .collect()
         }
     }
 
     #[derive(Debug)]
-    pub struct Layer {
-        current_ids: Mutex<Vec<span::Id>>,
-        id_sequence: Arc<RwLock<Vec<Vec<span::Id>>>>,
-        all_spans: Arc<Mutex<IndexMap<u64, SpanEntry>>>,
-        logs: Arc<Mutex<LogsRecorder>>,
-    }
+    struct SpanGraph {}
 
-    impl Layer {
-        pub fn new(
-            id_sequence: Arc<RwLock<Vec<Vec<span::Id>>>>,
-            all_spans: Arc<Mutex<IndexMap<u64, SpanEntry>>>,
-            logs: Arc<Mutex<LogsRecorder>>,
-        ) -> Self {
-            Self {
-                current_ids: Default::default(),
-                id_sequence,
-                all_spans,
-                logs,
-            }
-        }
-    }
+    #[derive(Debug, Default)]
+    pub struct Layer {}
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Span {
-        id: usize,
+        #[serde(skip_serializing)]
+        id: u64,
         name: String,
         record: Record,
         children: BTreeMap<String, Span>,
     }
 
     impl Span {
-        pub fn from(name: String, id: usize, record: Record) -> Self {
+        pub fn from(name: String, id: u64, record: Record) -> Self {
             Self {
                 name,
                 id,
@@ -389,94 +436,164 @@ mod span_tests {
                 children: Default::default(),
             }
         }
+    }
 
-        pub fn from_records(
-            id_sequence: Vec<Vec<span::Id>>,
-            mut all_logs: LogsRecorder,
-            all_spans: IndexMap<u64, SpanEntry>,
-        ) -> Self {
-            let mut dag_mapping = IndexMap::new();
+    pub struct Report {
+        root_index: NodeIndex,
+        root_id: u64,
+        dag: Dag<u64, (), DefaultIx>,
+        spans: IndexMap<u64, Recorder>,
+        logs: LogsRecorder,
+        node_to_id: IndexMap<NodeIndex, u64>,
+    }
 
-            let mut dag = Dag::new();
+    impl Report {
+        pub fn from_root(root_node: u64) -> Self {
+            let id_to_node = SPAN_ID_TO_ROOT_AND_NODE_INDEX.lock().unwrap().clone();
+            let (global_root, root_node_index) = id_to_node
+                .get(&root_node)
+                .map(std::clone::Clone::clone)
+                .expect("couldn't find rood node");
 
-            let root = dag.add_node(0);
+            let node_to_id: IndexMap<NodeIndex, u64> = id_to_node
+                .into_iter()
+                .filter_map(|(key, (root, value))| (root == global_root).then(|| (value, key)))
+                .collect();
 
-            for span_ids in id_sequence {
-                let mut parent = root;
+            let relevant_spans = node_to_id.values().cloned().collect::<HashSet<_>>();
 
-                for id in span_ids {
-                    let (_, child_index) = dag.add_child(parent, (), id.into_u64());
-                    parent = child_index;
+            let spans = ALL_SPANS
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .filter(|(span_id, _)| relevant_spans.contains(span_id))
+                .collect();
 
-                    let mut spans_record = all_spans
-                        .get(&id.into_u64())
-                        .map(std::clone::Clone::clone)
-                        .expect("there should be a span recorder")
-                        .contents();
+            let logs = ALL_LOGS.lock().unwrap().for_spans(relevant_spans);
 
-                    let logs = all_logs.for_span_metadata(spans_record.metadata()).entries;
-                    spans_record.append(logs);
+            let dag = ALL_DAGS
+                .lock()
+                .unwrap()
+                .get(&global_root)
+                .expect("no dag for root")
+                .clone();
 
-                    dag_mapping.insert(
-                        child_index.index(),
-                        (
-                            id.into_u64().try_into().expect("32 bits platform :/"),
-                            spans_record,
-                        ),
-                    );
-                }
+            Self {
+                root_index: root_node_index,
+                root_id: root_node,
+                dag,
+                spans,
+                node_to_id,
+                logs,
             }
-
-            SpanBuilder::new(dag.into_graph(), dag_mapping).into_span()
-        }
-    }
-
-    struct SpanBuilder {
-        graph: DiGraph<u64, ()>,
-        spans: IndexMap<usize, (usize, Record)>,
-    }
-
-    impl SpanBuilder {
-        fn new(graph: DiGraph<u64, ()>, spans: IndexMap<usize, (usize, Record)>) -> Self {
-            Self { graph, spans }
         }
 
-        fn into_span(self) -> Span {
-            if let Some((node_index, (_, node_record))) = self.spans.first() {
-                let span_name = format!(
-                    "{}::{}",
-                    node_record.metadata.target, node_record.metadata.name
-                );
-                let mut root_span = Span::from(span_name, *node_index, node_record.clone());
-                self.dfs_insert(&mut root_span, NodeIndex::new(*node_index));
+        pub fn logs(&self, level: &tracing::Level) -> Records {
+            if let Some(recorder) = self.spans.get(&self.root_id) {
+                let mut contents = recorder.contents(level);
+                contents.append(self.logs.record_for_span_id_and_level(self.root_id, level));
+
+                let mut records = Records(vec![contents]);
+
+                for (_, child_node) in self.dag.children(self.root_index).iter(&self.dag) {
+                    let child_id = self
+                        .node_to_id
+                        .get(&child_node)
+                        .expect("couldn't find span id for node");
+
+                    let mut child_record = self
+                        .spans
+                        .get(child_id)
+                        .expect("graph and hashmap are tied; qed")
+                        .contents(level);
+
+                    if &child_record
+                        .metadata
+                        .level
+                        .parse::<tracing::Level>()
+                        .expect("invalid tracing level")
+                        > level
+                    {
+                        continue;
+                    }
+
+                    child_record.append(self.logs.record_for_span_id_and_level(*child_id, level));
+
+                    records.push(child_record.clone());
+                }
+
+                records
+            } else {
+                Default::default()
+            }
+        }
+
+        pub fn spans(&self, level: &tracing::Level) -> Span {
+            if let Some(recorder) = self.spans.get(&self.root_id) {
+                let metadata = recorder
+                    .metadata
+                    .as_ref()
+                    .map(std::clone::Clone::clone)
+                    .expect("recorder without metadata");
+                let span_name = format!("{}::{}", metadata.target, metadata.name);
+
+                let mut root_span = Span::from(span_name, self.root_id, recorder.contents(level));
+
+                self.dfs_span_insert(&mut root_span, self.root_index, level);
+
                 root_span
             } else {
                 Span::from("root".to_string(), 0, Record::for_root())
             }
         }
 
-        fn dfs_insert(&self, current_span: &mut Span, current_node: NodeIndex) {
+        fn dfs_span_insert(
+            &self,
+            current_span: &mut Span,
+            current_node: NodeIndex,
+            level: &tracing::Level,
+        ) {
             current_span.children = self
-                .graph
-                .neighbors(current_node)
-                .map(|child_node| {
-                    let (_, child_record) = self
+                .dag
+                .children(current_node)
+                .iter(&self.dag)
+                .filter_map(|(_, child_node)| {
+                    let child_id = self
+                        .node_to_id
+                        .get(&child_node)
+                        .expect("couldn't find span id for node");
+                    let child_recorder = self
                         .spans
-                        .get(&child_node.index())
+                        .get(child_id)
                         .expect("graph and hashmap are tied; qed");
 
-                    let span_name = format!(
-                        "{}::{}",
-                        child_record.metadata.target, child_record.metadata.name
-                    );
+                    let metadata = child_recorder
+                        .metadata
+                        .as_ref()
+                        .map(std::clone::Clone::clone)
+                        .expect("couldn't find metadata for child record");
+
+                    if &metadata
+                        .level
+                        .parse::<tracing::Level>()
+                        .expect("invalid tracing level")
+                        > level
+                    {
+                        return None;
+                    }
+
+                    let span_name = format!("{}::{}", metadata.target, metadata.name);
 
                     let span_key = format!("{} - {}", span_name, child_node.index());
 
-                    let mut child_span =
-                        Span::from(span_name, child_node.index(), child_record.clone());
+                    let mut contents = child_recorder.contents(level);
+                    contents.append(self.logs.record_for_span_id_and_level(*child_id, level));
 
-                    self.dfs_insert(&mut child_span, child_node);
-                    (span_key, child_span)
+                    let mut child_span = Span::from(span_name, *child_id, contents);
+                    self.dfs_span_insert(&mut child_span, child_node, level);
+
+                    Some((span_key, child_span))
                 })
                 .collect();
         }
@@ -484,7 +601,7 @@ mod span_tests {
 
     impl Layer {
         fn record(&self, id: span::Id, record: &span::Record<'_>) {
-            self.all_spans
+            ALL_SPANS
                 .lock()
                 .unwrap()
                 .get_mut(&id.into_u64())
@@ -492,55 +609,60 @@ mod span_tests {
                 .record(record);
         }
 
-        fn event(&self, event: &Event<'_>) {
-            self.logs
-                .lock()
-                .unwrap()
-                .event(self.current_span_id(), event);
+        fn event(&self, event: &Event<'_>, ctx: Context<'_, impl tracing::Subscriber>) {
+            let current_span = ctx.current_span();
+            let current_span = current_span.id().map(std::clone::Clone::clone);
+            ALL_LOGS.lock().unwrap().event(current_span, event);
         }
 
-        fn attributes(&self, span_id: span::Id, attributes: &span::Attributes<'_>) {
-            self.all_spans
+        fn attributes(
+            &self,
+            span_id: span::Id,
+            attributes: &span::Attributes<'_>,
+            parent_id: Option<span::Id>,
+        ) {
+            let raw_span_id = span_id.into_u64();
+
+            if let Some(id) = parent_id {
+                // We have a parent, we can store the span in the right DAG
+                let raw_parent_id = id.into_u64();
+
+                let mut id_to_node_index = SPAN_ID_TO_ROOT_AND_NODE_INDEX.lock().unwrap();
+
+                let (root_span_id, parent_node_index) = id_to_node_index
+                    .get(&raw_parent_id)
+                    .map(std::clone::Clone::clone)
+                    .unwrap_or_else(|| panic!("missing parent attributes for {}.", raw_parent_id));
+
+                let (_, node_index) =
+                    if let Some(span_dag) = ALL_DAGS.lock().unwrap().get_mut(&root_span_id) {
+                        span_dag.add_child(parent_node_index, (), raw_span_id)
+                    } else {
+                        panic!("missing dag for root {}", root_span_id);
+                    };
+
+                id_to_node_index.insert(raw_span_id, (root_span_id, node_index));
+            } else {
+                // We're dealing with a root, let's create a new DAG
+                let mut new_dag: Dag<u64, ()> = Default::default();
+                let root_index = new_dag.add_node(raw_span_id);
+
+                // The span is the root here
+                SPAN_ID_TO_ROOT_AND_NODE_INDEX
+                    .lock()
+                    .unwrap()
+                    .insert(raw_span_id, (raw_span_id, root_index));
+
+                let mut all_dags = ALL_DAGS.lock().unwrap();
+                all_dags.insert(raw_span_id, new_dag);
+            }
+
+            ALL_SPANS
                 .lock()
                 .unwrap()
-                .entry(span_id.into_u64())
+                .entry(raw_span_id)
                 .or_default()
                 .attributes(span_id, attributes);
-        }
-
-        fn enter_id(&self, id: span::Id) {
-            self.current_ids.lock().unwrap().push(id);
-        }
-
-        fn exit_id(&self, id: span::Id) {
-            {
-                let mut current = self.current_ids.lock().unwrap();
-                *current = current
-                    .iter()
-                    .take_while(|parent_id| parent_id != &&id)
-                    .map(std::clone::Clone::clone)
-                    .collect();
-            }
-        }
-
-        fn close_id(&self, id: span::Id) {
-            let mut with_close_id = self.current_span_list();
-            with_close_id.push(id.clone());
-            self.id_sequence.write().unwrap().push(with_close_id);
-            self.exit_id(id);
-        }
-
-        fn current_span_list(&self) -> Vec<span::Id> {
-            self.current_ids.lock().unwrap().clone()
-        }
-
-        fn current_span_id(&self) -> span::Id {
-            self.current_ids
-                .lock()
-                .unwrap()
-                .last()
-                .expect("traced_tests create a root span, this should never happen.")
-                .clone()
         }
     }
 
@@ -548,8 +670,6 @@ mod span_tests {
     where
         S: tracing::Subscriber,
     {
-        fn on_layer(&mut self, _subscriber: &mut S) {}
-
         fn register_callsite(
             &self,
             _metadata: &'static Metadata<'static>,
@@ -557,25 +677,18 @@ mod span_tests {
             tracing::subscriber::Interest::always()
         }
 
-        fn enabled(
-            &self,
-            _metadata: &Metadata<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) -> bool {
-            true
-        }
-
         fn on_new_span(
             &self,
             attrs: &span::Attributes<'_>,
             id: &span::Id,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ctx: tracing_subscriber::layer::Context<'_, S>,
         ) {
-            self.attributes(id.clone(), attrs)
-        }
+            let maybe_parent_id = attrs
+                .parent()
+                .map(std::clone::Clone::clone)
+                .or_else(|| ctx.current_span().id().map(std::clone::Clone::clone));
 
-        fn max_level_hint(&self) -> Option<tracing::metadata::LevelFilter> {
-            None
+            self.attributes(id.clone(), attrs, maybe_parent_id)
         }
 
         fn on_record(
@@ -587,36 +700,8 @@ mod span_tests {
             self.record(span.clone(), values)
         }
 
-        fn on_follows_from(
-            &self,
-            _span: &span::Id,
-            _follows: &span::Id,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
-        }
-
-        fn on_event(&self, event: &Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
-            self.event(event)
-        }
-
-        fn on_enter(&self, id: &span::Id, _ctx: tracing_subscriber::layer::Context<'_, S>) {
-            self.enter_id(id.clone());
-        }
-
-        fn on_exit(&self, id: &span::Id, _ctx: tracing_subscriber::layer::Context<'_, S>) {
-            self.exit_id(id.clone());
-        }
-
-        fn on_close(&self, id: span::Id, _ctx: tracing_subscriber::layer::Context<'_, S>) {
-            self.close_id(id);
-        }
-
-        fn on_id_change(
-            &self,
-            _old: &span::Id,
-            _new: &span::Id,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
+        fn on_event(&self, event: &Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+            self.event(event, ctx)
         }
     }
 }

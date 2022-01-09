@@ -1,29 +1,15 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 130
-expression: get_span()
+assertion_line: 112
+expression: spans
 
 ---
 {
-  "id": 1,
-  "name": "tests::traced_span_tests::do_stuff",
+  "name": "tests::traced_span_tests::root",
   "record": {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "in a separate context!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
+    "entries": [],
     "metadata": {
-      "name": "do_stuff",
+      "name": "root",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
@@ -33,33 +19,119 @@ expression: get_span()
     }
   },
   "children": {
-    "my_crate::an_other_target::do_stuff2 - 2": {
-      "id": 2,
-      "name": "my_crate::an_other_target::do_stuff2",
+    "tests::traced_span_tests::do_async_stuff - 1": {
+      "name": "tests::traced_span_tests::do_async_stuff",
       "record": {
         "entries": [
           [
-            "number",
-            42
+            "message",
+            "here i am!"
           ],
           [
             "message",
-            "here i am again!"
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
           ]
         ],
         "metadata": {
-          "name": "do_stuff2",
-          "target": "my_crate::an_other_target",
+          "name": "do_async_stuff",
+          "target": "tests::traced_span_tests",
           "level": "INFO",
           "module_path": "tests::traced_span_tests",
           "fields": {
-            "names": [
-              "number"
-            ]
+            "names": []
           }
         }
       },
-      "children": {}
+      "children": {
+        "my_crate::an_other_target::do_async_stuff2 - 2": {
+          "name": "my_crate::an_other_target::do_async_stuff2",
+          "record": {
+            "entries": [
+              [
+                "number",
+                42
+              ],
+              [
+                "message",
+                "here i am again!"
+              ]
+            ],
+            "metadata": {
+              "name": "do_async_stuff2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "children": {}
+        }
+      }
+    },
+    "tests::traced_span_tests::do_async_stuff - 3": {
+      "name": "tests::traced_span_tests::do_async_stuff",
+      "record": {
+        "entries": [
+          [
+            "message",
+            "here i am!"
+          ],
+          [
+            "message",
+            "in a separate context!"
+          ],
+          [
+            "number",
+            52
+          ]
+        ],
+        "metadata": {
+          "name": "do_async_stuff",
+          "target": "tests::traced_span_tests",
+          "level": "INFO",
+          "module_path": "tests::traced_span_tests",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {
+        "my_crate::an_other_target::do_async_stuff2 - 4": {
+          "name": "my_crate::an_other_target::do_async_stuff2",
+          "record": {
+            "entries": [
+              [
+                "number",
+                42
+              ],
+              [
+                "message",
+                "here i am again!"
+              ]
+            ],
+            "metadata": {
+              "name": "do_async_stuff2",
+              "target": "my_crate::an_other_target",
+              "level": "INFO",
+              "module_path": "tests::traced_span_tests",
+              "fields": {
+                "names": [
+                  "number"
+                ]
+              }
+            }
+          },
+          "children": {}
+        }
+      }
     }
   }
 }

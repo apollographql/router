@@ -1,64 +1,19 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 18
+assertion_line: 20
 expression: logs
 
 ---
 [
   {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ]
-    ],
+    "entries": [],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:135",
+      "name": "root",
       "target": "tests::traced_span_tests",
-      "level": "INFO",
+      "level": "DEBUG",
       "module_path": "tests::traced_span_tests",
       "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am again!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:146",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:139",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "number"
-        ]
+        "names": []
       }
     }
   },
@@ -67,17 +22,19 @@ expression: logs
       [
         "message",
         "here i am!"
+      ],
+      [
+        "number",
+        52
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:135",
+      "name": "do_sync_stuff",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
       "fields": {
-        "names": [
-          "message"
-        ]
+        "names": []
       }
     }
   },
@@ -85,37 +42,20 @@ expression: logs
     "entries": [
       [
         "message",
-        "here i am again!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:146",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
+        "here i am!"
+      ],
       [
         "number",
         52
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:139",
+      "name": "do_sync_stuff",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
       "fields": {
-        "names": [
-          "number"
-        ]
+        "names": []
       }
     }
   }

@@ -1,83 +1,19 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 129
+assertion_line: 111
 expression: logs
 
 ---
 [
   {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ]
-    ],
+    "entries": [],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:153",
+      "name": "root",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
       "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am again!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:171",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "in a separate context!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:156",
-      "target": "tests::traced_span_tests",
-      "level": "WARN",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:160",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "number"
-        ]
+        "names": []
       }
     }
   },
@@ -86,74 +22,48 @@ expression: logs
       [
         "message",
         "here i am!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:153",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am again!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:171",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
+      ],
       [
         "message",
         "in a separate context!"
-      ]
-    ],
-    "metadata": {
-      "name": "event test-span/tests/tests.rs:156",
-      "target": "tests::traced_span_tests",
-      "level": "WARN",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": [
-          "message"
-        ]
-      }
-    }
-  },
-  {
-    "entries": [
+      ],
       [
         "number",
         52
       ]
     ],
     "metadata": {
-      "name": "event test-span/tests/tests.rs:160",
+      "name": "do_async_stuff",
       "target": "tests::traced_span_tests",
       "level": "INFO",
       "module_path": "tests::traced_span_tests",
       "fields": {
-        "names": [
-          "number"
-        ]
+        "names": []
+      }
+    }
+  },
+  {
+    "entries": [
+      [
+        "message",
+        "here i am!"
+      ],
+      [
+        "message",
+        "in a separate context!"
+      ],
+      [
+        "number",
+        52
+      ]
+    ],
+    "metadata": {
+      "name": "do_async_stuff",
+      "target": "tests::traced_span_tests",
+      "level": "INFO",
+      "module_path": "tests::traced_span_tests",
+      "fields": {
+        "names": []
       }
     }
   }

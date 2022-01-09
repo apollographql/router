@@ -3352,11 +3352,13 @@ dependencies = [
  "futures",
  "indexmap",
  "insta",
+ "once_cell",
  "serde",
  "serde_json",
  "test-span-macro",
  "tokio",
  "tracing",
+ "tracing-core",
  "tracing-futures",
  "tracing-subscriber",
 ]
