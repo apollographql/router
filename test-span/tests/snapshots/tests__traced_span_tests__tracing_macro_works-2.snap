@@ -11,7 +11,7 @@ expression: spans
     "metadata": {
       "name": "root",
       "target": "tests::traced_span_tests",
-      "level": "INFO",
+      "level": "DEBUG",
       "module_path": "tests::traced_span_tests",
       "fields": {
         "names": []

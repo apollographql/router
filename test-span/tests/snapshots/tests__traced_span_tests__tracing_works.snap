@@ -1,62 +1,24 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 76
+assertion_line: 75
 expression: logs
 
 ---
 [
-  {
-    "entries": [],
-    "metadata": {
-      "name": "root",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "do_sync_stuff",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "do_sync_stuff",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  }
+  [
+    "message",
+    "here i am!"
+  ],
+  [
+    "number",
+    52
+  ],
+  [
+    "message",
+    "here i am!"
+  ],
+  [
+    "number",
+    52
+  ]
 ]

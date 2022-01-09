@@ -1,70 +1,32 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 111
+assertion_line: 115
 expression: logs
 
 ---
 [
-  {
-    "entries": [],
-    "metadata": {
-      "name": "root",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "in a separate context!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "do_async_stuff",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  },
-  {
-    "entries": [
-      [
-        "message",
-        "here i am!"
-      ],
-      [
-        "message",
-        "in a separate context!"
-      ],
-      [
-        "number",
-        52
-      ]
-    ],
-    "metadata": {
-      "name": "do_async_stuff",
-      "target": "tests::traced_span_tests",
-      "level": "INFO",
-      "module_path": "tests::traced_span_tests",
-      "fields": {
-        "names": []
-      }
-    }
-  }
+  [
+    "message",
+    "here i am!"
+  ],
+  [
+    "message",
+    "in a separate context!"
+  ],
+  [
+    "number",
+    52
+  ],
+  [
+    "message",
+    "here i am!"
+  ],
+  [
+    "message",
+    "in a separate context!"
+  ],
+  [
+    "number",
+    52
+  ]
 ]

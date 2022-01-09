@@ -15,7 +15,7 @@ mod traced_span_tests {
         let (spans, logs) = get_telemetry();
 
         assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
+        assert!(logs.contains_value("number", RecordValue::Value(52.into())));
 
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(spans);
@@ -33,7 +33,7 @@ mod traced_span_tests {
         let (spans, logs) = get_telemetry();
 
         assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
+        assert!(logs.contains_value("number", RecordValue::Value(52.into())));
         assert!(logs.contains_message("in a separate context!"));
 
         insta::assert_json_snapshot!(logs);
@@ -55,7 +55,6 @@ mod traced_span_tests {
                 .expect("couldn't get root span id; this cannot happen.");
             root_span.in_scope(|| {
                 let res = do_sync_stuff();
-
                 assert_eq!(res, 104);
 
                 let res2 = do_sync_stuff();
@@ -70,7 +69,7 @@ mod traced_span_tests {
         let (spans, logs) = get_telemetry();
 
         assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
+        assert!(logs.contains_value("number", RecordValue::Value(52.into())));
 
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(spans);
@@ -103,7 +102,7 @@ mod traced_span_tests {
         let (spans, logs) = get_telemetry();
 
         assert!(logs.contains_message("here i am!"));
-        assert!(logs.contains_value("number", RecordedValue::Value(52.into())));
+        assert!(logs.contains_value("number", RecordValue::Value(52.into())));
         assert!(logs.contains_message("in a separate context!"));
 
         insta::assert_json_snapshot!(logs);
