@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 77
+assertion_line: 75
 expression: spans
 
 ---
@@ -19,7 +19,7 @@ expression: spans
     }
   },
   "children": {
-    "tests::traced_span_tests::do_sync_stuff - 1": {
+    "1": {
       "name": "tests::traced_span_tests::do_sync_stuff",
       "record": {
         "entries": [
@@ -43,7 +43,7 @@ expression: spans
         }
       },
       "children": {
-        "my_crate::an_other_target::do_sync_stuff2 - 2": {
+        "2": {
           "name": "my_crate::an_other_target::do_sync_stuff2",
           "record": {
             "entries": [
@@ -72,7 +72,7 @@ expression: spans
         }
       }
     },
-    "tests::traced_span_tests::do_sync_stuff - 3": {
+    "3": {
       "name": "tests::traced_span_tests::do_sync_stuff",
       "record": {
         "entries": [
@@ -96,7 +96,7 @@ expression: spans
         }
       },
       "children": {
-        "my_crate::an_other_target::do_sync_stuff2 - 4": {
+        "4": {
           "name": "my_crate::an_other_target::do_sync_stuff2",
           "record": {
             "entries": [
