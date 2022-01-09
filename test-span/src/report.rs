@@ -20,7 +20,7 @@ pub struct Span {
     id: u64,
     name: String,
     record: RecordWithMetadata,
-    children: BTreeMap<usize, Span>,
+    children: BTreeMap<String, Span>,
 }
 
 impl Span {
@@ -178,7 +178,7 @@ impl Report {
 
                 let span_name = format!("{}::{}", metadata.target, metadata.name);
 
-                let span_key = child_node.index();
+                let span_key = format!("{} - {}", span_name, child_node.index());
 
                 let mut contents = child_recorder.contents(level);
                 contents.append(self.logs.record_for_span_id_and_level(*child_id, level));

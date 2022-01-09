@@ -43,24 +43,13 @@ impl Layer {
     ) {
         let raw_span_id = span_id.into_u64();
 
-        dbg!(&raw_span_id, &parent_id);
-        ALL_SPANS
-            .lock()
-            .unwrap()
-            .entry(raw_span_id)
-            .or_default()
-            .attributes(span_id, attributes);
-
-        // grab the lock regardless of whether the span has a parent or not
-        // so we make sure spans will always be inserted in the right order.
-        let mut span_id_to_root_and_node_index = SPAN_ID_TO_ROOT_AND_NODE_INDEX.lock().unwrap();
-
         if let Some(id) = parent_id {
             // We have a parent, we can store the span in the right DAG
             let raw_parent_id = id.into_u64();
 
-            // Make sure we release this lock before we grab ALL_DAGs
-            let (root_span_id, parent_node_index) = span_id_to_root_and_node_index
+            let mut id_to_node_index = SPAN_ID_TO_ROOT_AND_NODE_INDEX.lock().unwrap();
+
+            let (root_span_id, parent_node_index) = id_to_node_index
                 .get(&raw_parent_id)
                 .map(std::clone::Clone::clone)
                 .unwrap_or_else(|| panic!("missing parent attributes for {}.", raw_parent_id));
@@ -72,18 +61,28 @@ impl Layer {
                     panic!("missing dag for root {}", root_span_id);
                 };
 
-            span_id_to_root_and_node_index.insert(raw_span_id, (root_span_id, node_index));
+            id_to_node_index.insert(raw_span_id, (root_span_id, node_index));
         } else {
             // We're dealing with a root, let's create a new DAG
             let mut new_dag: Dag<u64, ()> = Default::default();
             let root_index = new_dag.add_node(raw_span_id);
 
+            // The span is the root here
+            SPAN_ID_TO_ROOT_AND_NODE_INDEX
+                .lock()
+                .unwrap()
+                .insert(raw_span_id, (raw_span_id, root_index));
+
             let mut all_dags = ALL_DAGS.lock().unwrap();
             all_dags.insert(raw_span_id, new_dag);
-
-            // The span is the root here
-            span_id_to_root_and_node_index.insert(raw_span_id, (raw_span_id, root_index));
         }
+
+        ALL_SPANS
+            .lock()
+            .unwrap()
+            .entry(raw_span_id)
+            .or_default()
+            .attributes(span_id, attributes);
     }
 }
 
