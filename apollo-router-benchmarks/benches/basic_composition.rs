@@ -1,12 +1,11 @@
 use apollo_router::ApolloRouter;
 use apollo_router_core::{
-    Fetcher, PreparedQuery, Request, Response, ResponseStream, Router, RouterBridgeQueryPlanner,
-    ServiceRegistry,
+    FetchError, Fetcher, PreparedQuery, Request, Response, Router, ServiceRegistry,
 };
+use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::prelude::*;
 use once_cell::sync::OnceCell;
-use std::{pin::Pin, sync::Arc};
+use std::sync::Arc;
 
 macro_rules! generate_registry {
     ($name:ident => $( $service_name:ident : $service_struct:ident , )+) => {
@@ -75,11 +74,12 @@ macro_rules! generate_service {
             }
         }
 
+        #[async_trait]
         impl Fetcher for $name {
-            fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>> {
+            async fn stream(&self, request: Request) -> Result<Response, FetchError> {
                 let res = match request.query.as_str() {
                     $(
-                    $query => stream::iter(vec![$id.get().unwrap().clone()]).boxed(),
+                    $query => Ok($id.get().unwrap().clone()),
                     )+
                     other => todo!(
                         "query for service {:?} not implemented:\n{}\nvariables:\n{}\n",
@@ -88,7 +88,7 @@ macro_rules! generate_service {
                         serde_json::to_string(&request.variables).unwrap(),
                     ),
                 };
-                Box::pin(async { res })
+                res
             }
         }
     };
@@ -129,25 +129,23 @@ async fn basic_composition_benchmark(federated: &ApolloRouter) {
         ))
         .build();
     let _result = match federated.prepare_query(&request).await {
-        Ok(prepared_query) => prepared_query
-            .execute(Arc::new(request))
-            .await
-            .next()
-            .await
-            .unwrap(),
+        Ok(prepared_query) => prepared_query.execute(Arc::new(request)).await,
         Err(_) => panic!("should have prepared a query"),
     };
     // expected: Response { label: None, data: Object({"topProducts": Array([Object({"upc": String("1"), "name": String("Table"), "__typename": String("Product"), "reviews": Array([Object({"id": String("1"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})}), Object({"id": String("4"), "product": Object({"__typename": String("Product"), "upc": String("1"), "name": String("Table")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])}), Object({"upc": String("2"), "name": String("Couch"), "__typename": String("Product"), "reviews": Array([Object({"id": String("2"), "product": Object({"__typename": String("Product"), "upc": String("2"), "name": String("Couch")}), "author": Object({"id": String("1"), "__typename": String("User"), "name": String("Ada Lovelace")})})])}), Object({"upc": String("3"), "name": String("Chair"), "__typename": String("Product"), "reviews": Array([Object({"id": String("3"), "product": Object({"__typename": String("Product"), "upc": String("3"), "name": String("Chair")}), "author": Object({"id": String("2"), "__typename": String("User"), "name": String("Alan Turing")})})])})])}), path: None, has_next: None, errors: [], extensions: {} }
 }
 
 fn from_elem(c: &mut Criterion) {
-    let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
-    let planner = RouterBridgeQueryPlanner::new(Arc::clone(&schema));
     let registry = Arc::new(MockRegistry::new());
-    let federated = ApolloRouter::new(Arc::new(planner), registry.clone(), schema);
 
-    c.bench_function("basic_composition_benchmark", |b| {
+    c.bench_function("basic_composition_benchmark", move |b| {
         let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
+
+        let federated = ApolloRouter::new(registry.clone(), schema, None);
+
+        let federated = runtime.block_on(federated);
 
         b.to_async(runtime)
             .iter(|| basic_composition_benchmark(&federated));

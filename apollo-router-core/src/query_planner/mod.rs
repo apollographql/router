@@ -215,7 +215,6 @@ mod fetch {
     use std::sync::Arc;
 
     use super::selection::{select_object, Selection};
-    use futures::prelude::*;
     use serde::Deserialize;
     use tracing::{instrument, Instrument};
 
@@ -336,34 +335,24 @@ mod fetch {
                 .get(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
-            let (res, _tail) = fetcher
+            let response = fetcher
                 .stream(
                     Request::builder()
                         .query(operation)
                         .variables(Arc::new(variables))
                         .build(),
                 )
-                .await
-                .into_future()
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
-                .await;
+                .await?;
 
             query_span.in_scope(|| {
-                let subgraph_response = match res {
-                    Some(response) if !response.is_primary() => {
-                        return Err(FetchError::SubrequestUnexpectedPatchResponse {
-                            service: service_name.to_owned(),
-                        });
-                    }
-                    Some(subgraph_response) => subgraph_response,
-                    None => {
-                        return Err(FetchError::SubrequestNoResponse {
-                            service: service_name.to_string(),
-                        })
-                    }
-                };
+                if !response.is_primary() {
+                    return Err(FetchError::SubrequestUnexpectedPatchResponse {
+                        service: service_name.to_owned(),
+                    });
+                }
 
-                self.response_at_path(current_dir, paths, subgraph_response)
+                self.response_at_path(current_dir, paths, response)
             })
         }
 

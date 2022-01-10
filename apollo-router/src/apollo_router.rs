@@ -1,9 +1,7 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
-use futures::prelude::*;
 use std::sync::Arc;
 use tracing::Instrument;
-use tracing_futures::WithSubscriber;
 
 /// The default router of Apollo, suitable for most use cases.
 #[derive(Derivative)]
@@ -74,14 +72,10 @@ impl ApolloRouter {
 
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
-    #[tracing::instrument(skip_all, level = "debug")]
-
-    async fn prepare_query(
-        &self,
-        request: &Request,
-    ) -> Result<ApolloPreparedQuery, ResponseStream> {
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
-            return Err(response.into());
+            return Err(response);
         }
 
         let query = self
@@ -127,7 +121,7 @@ pub struct ApolloPreparedQuery {
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute(self, request: Arc<Request>) -> ResponseStream {
+    async fn execute(self, request: Arc<Request>) -> Response {
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)
@@ -144,6 +138,6 @@ impl PreparedQuery for ApolloPreparedQuery {
             });
         }
 
-        stream::once(async move { response }.with_current_subscriber()).boxed()
+        response
     }
 }

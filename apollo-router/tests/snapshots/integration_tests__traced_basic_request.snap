@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 80
+assertion_line: 76
 expression: get_spans()
 
 ---
@@ -172,7 +172,7 @@ expression: get_spans()
                       },
                       "children": {}
                     },
-                    "apollo_router_core::query_planner::fetch::subfetch_stream - 14": {
+                    "apollo_router_core::query_planner::fetch::subfetch_stream - 11": {
                       "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
                       "record": {
                         "entries": [],
@@ -187,6 +187,22 @@ expression: get_spans()
                         }
                       },
                       "children": {
+                        "apollo_router::http_subgraph::aggregate_response_data - 14": {
+                          "name": "apollo_router::http_subgraph::aggregate_response_data",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "aggregate_response_data",
+                              "target": "apollo_router::http_subgraph",
+                              "level": "DEBUG",
+                              "module_path": "apollo_router::http_subgraph",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {}
+                        },
                         "apollo_router::http_subgraph::parse_subgraph_response - 15": {
                           "name": "apollo_router::http_subgraph::parse_subgraph_response",
                           "record": {
@@ -222,22 +238,6 @@ expression: get_spans()
                       "children": {}
                     }
                   }
-                },
-                "apollo_router::http_subgraph::aggregate_response_data - 13": {
-                  "name": "apollo_router::http_subgraph::aggregate_response_data",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "aggregate_response_data",
-                      "target": "apollo_router::http_subgraph",
-                      "level": "DEBUG",
-                      "module_path": "apollo_router::http_subgraph",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {}
                 }
               }
             }

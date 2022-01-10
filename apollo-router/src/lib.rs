@@ -549,14 +549,16 @@ mod tests {
 
     async fn assert_federated_response(socket: &SocketAddr, request: &str) {
         let request = graphql::Request::builder().query(request).build();
-        let mut expected = query(socket, request.clone()).await;
+        let expected = query(socket, request.clone()).await.unwrap();
 
-        let expected = expected.next().await.unwrap();
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
-    async fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
+    async fn query(
+        socket: &SocketAddr,
+        request: graphql::Request,
+    ) -> Result<graphql::Response, graphql::FetchError> {
         HttpSubgraphFetcher::new(
             "federated",
             Url::parse(&format!("http://{}/graphql", socket)).unwrap(),

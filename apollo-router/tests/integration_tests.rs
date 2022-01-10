@@ -4,7 +4,6 @@ use apollo_router::http_subgraph::HttpSubgraphFetcher;
 use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ValueExt;
-use futures::prelude::*;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
@@ -26,19 +25,16 @@ macro_rules! assert_federated_response {
                 .collect(),
             ))
             .build();
-        let (mut actual, registry) = query_rust(request.clone()).await;
-        let mut expected = query_node(request.clone()).await;
+        let (actual, registry) = query_rust(request.clone()).await;
+        let expected = query_node(request.clone()).await.unwrap();
 
         tracing::debug!("query:\n{}\n", request.query.as_str());
-
-        let expected = expected.next().await.unwrap();
 
         assert!(
             expected.data.is_object(),
             "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
-        let actual = actual.next().await.unwrap();
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
@@ -162,10 +158,6 @@ async fn missing_variables() {
         )
         .build();
     let (response, _) = query_rust(request.clone()).await;
-    let data = response
-        .flat_map(|x| stream::iter(x.errors))
-        .collect::<Vec<_>>()
-        .await;
     let expected = vec![
         graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -176,10 +168,14 @@ async fn missing_variables() {
         }
         .to_graphql_error(None),
     ];
-    assert!(data.iter().all(|x| expected.contains(x)), "{:?}", data);
+    assert!(
+        response.errors.iter().all(|x| expected.contains(x)),
+        "{:?}",
+        response.errors
+    );
 }
 
-async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
+async fn query_node(request: graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     let nodejs_impl = HttpSubgraphFetcher::new(
         "federated",
         Url::parse("http://localhost:4100/graphql").unwrap(),
@@ -189,7 +185,7 @@ async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
 
 async fn query_rust(
     request: graphql::Request,
-) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
+) -> (graphql::Response, Arc<CountingServiceRegistry>) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
