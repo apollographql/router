@@ -579,6 +579,7 @@ mod tests {
         .into_stream()
         .boxed();
 
+        tokio::time::sleep(Duration::from_secs(1)).await;
         // First update is guaranteed
         assert!(matches!(
             stream.next().await.unwrap(),
@@ -587,6 +588,7 @@ mod tests {
 
         // Modify the file and try again
         write_and_flush(&mut file, contents).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -594,6 +596,7 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":").await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(stream.into_future().now_or_never().is_none());
     }
 
