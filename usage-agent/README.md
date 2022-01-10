@@ -1,5 +1,5 @@
 # usage_agent
-Temporary home until I decide where to put it
+Relay statistics from router to apollo studio ingress.
 
 ## Authentication
 
@@ -34,7 +34,7 @@ in-process or an out of process usage agent.
 A gRPC server which accepts "Reports" and regularly (every 5 seconds)
 submits the collected Reports to the Apollo Reporting ingress.
 
-The agent can be configuration to work either in our out of process. If
+The agent can be configured to work either in or out of process. If
 in-process, this is more convenient, but less robust. If out of process,
 then a single agent can be relaying statistics for multiple clients
 (routers).

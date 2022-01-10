@@ -173,12 +173,14 @@ pub mod server {
     use super::report;
     use crate::{ReporterStats, ReporterTrace, TracesAndStats};
     use bytes::BytesMut;
-    use libflate::gzip::Encoder;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use prost::Message;
     use prost_types::Timestamp;
     use reqwest::Client;
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
+    use std::io::Write;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -258,23 +260,20 @@ pub mod server {
             report: report::Report,
         ) -> Result<Response<ReporterResponse>, Status> {
             tracing::debug!("submitting report: {:?}", report);
-            // Protobuf encode message as "content"
+            // Protobuf encode message
             let mut content = BytesMut::new();
             report
                 .encode(&mut content)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
             // Create a gzip encoder
-            let mut encoder =
-                Encoder::new(Vec::new()).map_err(|e| Status::internal(e.to_string()))?;
-            // Get a cursor to our protobuf encoded content
-            let mut cursor = std::io::Cursor::new(content.to_vec());
-            // Copy the protobuf content to our gzip encoder
-            std::io::copy(&mut cursor, &mut encoder)
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            // Write our content to our encoder
+            encoder
+                .write_all(&content)
                 .map_err(|e| Status::internal(e.to_string()))?;
-            // Get our gzipped content
+            // Finish encoding and retrieve content
             let compressed_content = encoder
                 .finish()
-                .into_result()
                 .map_err(|e| Status::internal(e.to_string()))?;
             let res = client
                 .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
