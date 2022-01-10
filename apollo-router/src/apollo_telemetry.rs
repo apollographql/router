@@ -124,7 +124,7 @@ impl PipelineBuilder {
         }
         let provider = provider_builder.build();
         let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
-        let _ = global::set_tracer_provider(provider);
+        let _prev_global_provider = global::set_tracer_provider(provider);
 
         tracer
     }
