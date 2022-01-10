@@ -16,7 +16,35 @@ mod traced_span_tests {
 
         assert!(logs.contains_message("here i am!"));
         assert!(logs.contains_value("number", RecordValue::Value(52.into())));
+        assert!(logs.contains_message("here i am again!"));
+        assert!(logs.contains_message("debug: here i am again!"),);
 
+        insta::assert_json_snapshot!(logs);
+        insta::assert_json_snapshot!(spans);
+
+        assert_eq!(spans, get_spans());
+        assert_eq!(logs, get_logs());
+    }
+
+    #[test_span]
+    #[level(tracing::Level::INFO)]
+    fn tracing_macro_works_with_other_level() {
+        let res = do_sync_stuff();
+
+        assert_eq!(res, 104);
+
+        let res2 = do_sync_stuff();
+
+        assert_eq!(res2, 104);
+
+        let (spans, logs) = get_telemetry();
+
+        assert!(logs.contains_message("here i am!"));
+        assert!(logs.contains_value("number", RecordValue::Value(52.into())));
+        assert!(
+            !logs.contains_message("debug: here i am again!"),
+            "DEBUG logs shouldn't appear since we explicitly asked for INFO and below.",
+        );
         insta::assert_json_snapshot!(logs);
         insta::assert_json_snapshot!(spans);
 
@@ -48,7 +76,7 @@ mod traced_span_tests {
         test_span::init();
 
         let root_id = {
-            let root_span = test_span::reexports::tracing::span!(::tracing::Level::INFO, "root");
+            let root_span = test_span::reexports::tracing::span!(::tracing::Level::DEBUG, "root");
 
             let root_id = root_span
                 .id()
@@ -128,6 +156,8 @@ mod traced_span_tests {
     fn do_sync_stuff_2(number: u8) -> u8 {
         tracing::info!("here i am again!");
 
+        tracing::debug!("debug: here i am again!");
+
         number + 10
     }
 
@@ -151,7 +181,7 @@ mod traced_span_tests {
         level = "info"
     )]
     async fn do_async_stuff_2(number: u8) -> u8 {
-        tracing::info!("here i am again!");
+        tracing::debug!("here i am again!");
 
         number + 10
     }

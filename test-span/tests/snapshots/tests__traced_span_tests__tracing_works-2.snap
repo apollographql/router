@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 77
+assertion_line: 103
 expression: spans
 
 ---
@@ -11,7 +11,7 @@ expression: spans
     "metadata": {
       "name": "root",
       "target": "tests::traced_span_tests",
-      "level": "INFO",
+      "level": "DEBUG",
       "module_path": "tests::traced_span_tests",
       "fields": {
         "names": []
@@ -54,6 +54,10 @@ expression: spans
               [
                 "message",
                 "here i am again!"
+              ],
+              [
+                "message",
+                "debug: here i am again!"
               ]
             ],
             "metadata": {
@@ -107,6 +111,10 @@ expression: spans
               [
                 "message",
                 "here i am again!"
+              ],
+              [
+                "message",
+                "debug: here i am again!"
               ]
             ],
             "metadata": {

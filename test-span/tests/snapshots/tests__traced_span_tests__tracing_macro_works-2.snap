@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 21
+assertion_line: 23
 expression: spans
 
 ---
@@ -54,6 +54,10 @@ expression: spans
               [
                 "message",
                 "here i am again!"
+              ],
+              [
+                "message",
+                "debug: here i am again!"
               ]
             ],
             "metadata": {
@@ -107,6 +111,10 @@ expression: spans
               [
                 "message",
                 "here i am again!"
+              ],
+              [
+                "message",
+                "debug: here i am again!"
               ]
             ],
             "metadata": {

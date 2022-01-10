@@ -5,6 +5,7 @@ use quote::quote;
 use syn::parse_macro_input;
 use syn::AttributeArgs;
 use syn::ItemFn;
+use syn::Path;
 use syn::ReturnType;
 
 #[proc_macro_attribute]
@@ -19,6 +20,26 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let fn_attrs = &test_fn.attrs;
+
+    let mut tracing_level = quote!(::tracing::Level::DEBUG);
+
+    // Get tracing level from #[level(tracing::Level::INFO)]
+    let fn_attrs = fn_attrs
+        .into_iter()
+        .filter_map(|attr| {
+            let path = &attr.path;
+            if quote!(#path).to_string().as_str() == "level" {
+                let value: Path = attr.parse_args().expect(
+                    "wrong level attribute synthax. Example: #[level(tracing::Level::INFO)]",
+                );
+                tracing_level = quote!(#value);
+                None
+            } else {
+                Some(attr)
+            }
+        })
+        .collect::<Vec<_>>();
+
     let maybe_async = &test_fn.sig.asyncness;
 
     let body = &test_fn.block;
@@ -38,9 +59,6 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let ret = quote! {#output_type};
-
-    // TODO[igni]: parse this from the macro attrs
-    let tracing_level = quote!(::tracing::Level::DEBUG);
 
     let subscriber_boilerplate = subscriber_boilerplate(tracing_level);
 

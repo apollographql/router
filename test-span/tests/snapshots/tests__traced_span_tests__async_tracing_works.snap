@@ -1,6 +1,6 @@
 ---
 source: test-span/tests/tests.rs
-assertion_line: 115
+assertion_line: 136
 expression: logs
 
 ---
@@ -18,6 +18,10 @@ expression: logs
     52
   ],
   [
+    "number",
+    42
+  ],
+  [
     "message",
     "here i am!"
   ],
@@ -28,5 +32,9 @@ expression: logs
   [
     "number",
     52
+  ],
+  [
+    "number",
+    42
   ]
 ]

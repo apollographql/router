@@ -91,32 +91,7 @@ impl Report {
 
             let mut records: Vec<_> = contents.entries().cloned().collect();
 
-            for (_, child_node) in self.dag.children(self.root_index).iter(&self.dag) {
-                let child_id = self
-                    .node_to_id
-                    .get(&child_node)
-                    .expect("couldn't find span id for node");
-
-                let mut child_record = self
-                    .spans
-                    .get(child_id)
-                    .expect("graph and hashmap are tied; qed")
-                    .contents(level);
-
-                if &child_record
-                    .metadata()
-                    .level
-                    .parse::<tracing::Level>()
-                    .expect("invalid tracing level")
-                    > level
-                {
-                    continue;
-                }
-
-                child_record.append(self.logs.record_for_span_id_and_level(*child_id, level));
-
-                records.extend(child_record.entries().cloned().into_iter());
-            }
+            self.dfs_logs_insert(&mut records, self.root_index, level);
 
             Records::new(records)
         } else {
@@ -143,26 +118,42 @@ impl Report {
         }
     }
 
+    fn dfs_logs_insert(
+        &self,
+        records: &mut Vec<Record>,
+        current_node: NodeIndex,
+        level: &tracing::Level,
+    ) {
+        for child_node in self.sorted_children(current_node) {
+            let child_id = self
+                .node_to_id
+                .get(&child_node)
+                .expect("couldn't find span id for node");
+
+            let mut child_record = self
+                .spans
+                .get(child_id)
+                .expect("graph and hashmap are tied; qed")
+                .contents(level);
+
+            child_record.append(self.logs.record_for_span_id_and_level(*child_id, level));
+            records.extend(child_record.entries().cloned().into_iter());
+            self.dfs_logs_insert(records, child_node, level);
+        }
+    }
+
     fn dfs_span_insert(
         &self,
         current_span: &mut Span,
         current_node: NodeIndex,
         level: &tracing::Level,
     ) {
-        let mut children = self
-            .dag
-            .children(current_node)
-            .iter(&self.dag)
-            .collect::<Vec<_>>();
-
-        children.sort_by(|(_, index_a), (_, index_b)| index_a.cmp(index_b));
-
-        current_span.children = children
-            .iter()
-            .filter_map(|(_, child_node)| {
+        current_span.children = self
+            .sorted_children(current_node)
+            .filter_map(|child_node| {
                 let child_id = self
                     .node_to_id
-                    .get(child_node)
+                    .get(&child_node)
                     .expect("couldn't find span id for node");
                 let child_recorder = self
                     .spans
@@ -190,11 +181,24 @@ impl Report {
                 contents.append(self.logs.record_for_span_id_and_level(*child_id, level));
 
                 let mut child_span = Span::from(span_name, *child_id, contents);
-                self.dfs_span_insert(&mut child_span, *child_node, level);
+                self.dfs_span_insert(&mut child_span, child_node, level);
 
                 Some((span_key, child_span))
             })
             .collect();
+    }
+
+    fn sorted_children(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> {
+        let mut children = self
+            .dag
+            .children(node)
+            .iter(&self.dag)
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+
+        children.sort();
+
+        children.into_iter()
     }
 }
 
