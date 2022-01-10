@@ -40,6 +40,19 @@ pub struct Response {
     pub extensions: Object,
 }
 
+/// temporary structure to help deserializing errors
+#[derive(Deserialize)]
+struct ResponseMeta {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    label: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    path: Option<Path>,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    has_next: Option<bool>,
+}
+
 fn skip_data_if(value: &Value) -> bool {
     match value {
         Value::Object(o) => o.is_empty(),
@@ -59,14 +72,42 @@ impl Response {
     }
 
     pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
-        let value =
+        let mut value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
 
-        let mut object = match value {
-            Value::Object(o) => o,
+        let (data, errors, extensions) = match &mut value {
+            Value::Object(object) => (
+                object.remove("data").unwrap_or_default(),
+                match object.remove("errors") {
+                    Some(Value::Array(v)) => {
+                        let res: Result<Vec<Error>, FetchError> = v
+                            .into_iter()
+                            .map(|v| Error::from_value(service_name, v))
+                            .collect();
+                        res?
+                    }
+                    None => Vec::new(),
+                    _ => {
+                        return Err(FetchError::SubrequestMalformedResponse {
+                            service: service_name.to_string(),
+                            reason: "expected a JSON array".to_string(),
+                        })
+                    }
+                },
+                match object.remove("extensions") {
+                    Some(Value::Object(o)) => o,
+                    None => Object::default(),
+                    _ => {
+                        return Err(FetchError::SubrequestMalformedResponse {
+                            service: service_name.to_string(),
+                            reason: "expected a JSON object".to_string(),
+                        })
+                    }
+                },
+            ),
             _ => {
                 return Err(FetchError::SubrequestMalformedResponse {
                     service: service_name.to_string(),
@@ -75,35 +116,16 @@ impl Response {
             }
         };
 
-        // FIXME: we should check that if label is there, it should be a string
-        let label = object
-            .get("label")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let data = object.remove("data").unwrap_or_default();
-
-        let path = object
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.into());
-        let has_next = object.get("has_next").and_then(|v| v.as_bool());
-
-        let errors = match object.remove("errors") {
-            Some(Value::Array(v)) => {
-                let res: Result<Vec<Error>, FetchError> = v
-                    .into_iter()
-                    .map(|v| Error::from_value(service_name, v))
-                    .collect();
-                res?
+        let ResponseMeta {
+            label,
+            path,
+            has_next,
+        } = serde_json_bytes::from_value(value).map_err(|error| {
+            FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
             }
-            _ => Vec::new(),
-        };
-
-        let extensions = match object.remove("extensions") {
-            Some(Value::Object(o)) => o,
-            _ => Object::new(),
-        };
+        })?;
 
         Ok(Response {
             label,
