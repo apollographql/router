@@ -1,9 +1,7 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
-use futures::prelude::*;
 use std::sync::Arc;
 use tracing::Instrument;
-use tracing_futures::WithSubscriber;
 
 /// The default router of Apollo, suitable for most use cases.
 #[derive(Derivative)]
@@ -75,12 +73,9 @@ impl ApolloRouter {
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
     #[tracing::instrument(skip_all, level = "debug")]
-    async fn prepare_query(
-        &self,
-        request: &Request,
-    ) -> Result<ApolloPreparedQuery, ResponseStream> {
+    async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
-            return Err(response.into());
+            return Err(response);
         }
 
         let query = self
@@ -103,7 +98,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);
-        query_plan.validate_request(Arc::clone(&self.service_registry))?;
+        query_plan.validate(Arc::clone(&self.service_registry))?;
 
         Ok(ApolloPreparedQuery {
             query_plan,
@@ -126,7 +121,7 @@ pub struct ApolloPreparedQuery {
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(skip_all, fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()), client_name, client_version), level = "debug")]
-    async fn execute(self, request: Arc<Request>) -> ResponseStream {
+    async fn execute(self, request: Arc<Request>) -> Response {
         let client_name = "CLIENT NAME TO BE DONE";
         // Record the client name as part of the current span
         tracing::Span::current().record("client_name", &client_name);
@@ -149,6 +144,6 @@ impl PreparedQuery for ApolloPreparedQuery {
             });
         }
 
-        stream::once(async move { response }.with_current_subscriber()).boxed()
+        response
     }
 }

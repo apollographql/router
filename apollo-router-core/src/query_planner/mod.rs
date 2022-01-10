@@ -45,11 +45,8 @@ pub(crate) enum PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(skip_all, name = "validation", level = "debug")]
-    pub fn validate_request(
-        &self,
-        service_registry: Arc<dyn ServiceRegistry>,
-    ) -> Result<(), Response> {
+    #[tracing::instrument(skip_all, name = "validate", level = "debug")]
+    pub fn validate(&self, service_registry: Arc<dyn ServiceRegistry>) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self
             .root
@@ -218,7 +215,6 @@ mod fetch {
     use std::sync::Arc;
 
     use super::selection::{select_object, Selection};
-    use futures::prelude::*;
     use serde::Deserialize;
     use tracing::{instrument, Instrument};
 
@@ -324,46 +320,40 @@ mod fetch {
 
             let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
 
-            let Variables { variables, paths } = Variables::new(
-                &self.requires,
-                self.variable_usages.as_ref(),
-                data,
-                current_dir,
-                request,
-                schema,
-            )?;
+            let Variables { variables, paths } = query_span.in_scope(|| {
+                Variables::new(
+                    &self.requires,
+                    self.variable_usages.as_ref(),
+                    data,
+                    current_dir,
+                    request,
+                    schema,
+                )
+            })?;
 
             let fetcher = service_registry
                 .get(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
-            let (res, _tail) = fetcher
+            let response = fetcher
                 .stream(
                     Request::builder()
                         .query(operation)
                         .variables(Arc::new(variables))
                         .build(),
                 )
-                .await
-                .into_future()
-                .instrument(query_span)
-                .await;
+                .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
+                .await?;
 
-            let subgraph_response = match res {
-                Some(response) if !response.is_primary() => {
+            query_span.in_scope(|| {
+                if !response.is_primary() {
                     return Err(FetchError::SubrequestUnexpectedPatchResponse {
                         service: service_name.to_owned(),
                     });
                 }
-                Some(subgraph_response) => subgraph_response,
-                None => {
-                    return Err(FetchError::SubrequestNoResponse {
-                        service: service_name.to_string(),
-                    })
-                }
-            };
 
-            self.response_at_path(current_dir, paths, subgraph_response)
+                self.response_at_path(current_dir, paths, response)
+            })
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]
