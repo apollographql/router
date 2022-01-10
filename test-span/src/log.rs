@@ -48,7 +48,17 @@ impl LogsRecorder {
             .iter()
             .filter_map(|(log_metadata, recorders)| {
                 (log_metadata.is_enabled(level) && log_metadata.span_id == Some(span_id))
-                    .then(|| recorders.contents().cloned().collect::<Vec<_>>())
+                    .then(|| recorders.contents().cloned())
+            })
+            .flatten()
+            .collect()
+    }
+
+    pub fn all_records_for_level(&self, level: &tracing::Level) -> Vec<Record> {
+        self.recorders
+            .iter()
+            .filter_map(|(log_metadata, recorders)| {
+                (log_metadata.is_enabled(level)).then(|| recorders.contents().cloned())
             })
             .flatten()
             .collect()

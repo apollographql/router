@@ -25,17 +25,17 @@ pub fn test_span(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Get tracing level from #[level(tracing::Level::INFO)]
     let fn_attrs = fn_attrs
-        .into_iter()
-        .filter_map(|attr| {
+        .iter()
+        .filter(|attr| {
             let path = &attr.path;
             if quote!(#path).to_string().as_str() == "level" {
                 let value: Path = attr.parse_args().expect(
                     "wrong level attribute synthax. Example: #[level(tracing::Level::INFO)]",
                 );
                 tracing_level = quote!(#value);
-                None
+                false
             } else {
-                Some(attr)
+                true
             }
         })
         .collect::<Vec<_>>();

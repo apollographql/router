@@ -137,6 +137,28 @@ mod traced_span_tests {
         insta::assert_json_snapshot!(spans);
     }
 
+    #[test_span]
+    fn get_all_logs_to_have_thread_support() {
+        std::thread::spawn(|| {
+            tracing::info!("will only show up in get_all_logs!");
+            tracing::debug!("will only show up in DEBUG get_all_logs!");
+        })
+        .join()
+        .unwrap();
+
+        let test_run_logs = get_logs();
+        assert!(!test_run_logs.contains_message("will only show up in get_all_logs!"));
+        assert!(!test_run_logs.contains_message("will only show up in DEBUG get_all_logs!"));
+
+        let all_logs = test_span::get_all_logs(&tracing::Level::INFO);
+        assert!(all_logs.contains_message("will only show up in get_all_logs!"));
+        assert!(!all_logs.contains_message("will only show up in DEBUG get_all_logs!"));
+
+        let all_debug_logs = test_span::get_all_logs(&tracing::Level::DEBUG);
+        assert!(all_debug_logs.contains_message("will only show up in get_all_logs!"));
+        assert!(all_debug_logs.contains_message("will only show up in DEBUG get_all_logs!"));
+    }
+
     #[tracing::instrument(name = "do_sync_stuff", level = "info")]
     fn do_sync_stuff() -> u8 {
         tracing::info!("here i am!");

@@ -4,6 +4,7 @@ use ::tracing::{Event, Metadata};
 use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
 
 use crate::log::LogsRecorder;
 use crate::record::Recorder;
@@ -88,7 +89,7 @@ impl Layer {
 
 impl<S> tracing_subscriber::Layer<S> for Layer
 where
-    S: tracing::Subscriber,
+    S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
     fn register_callsite(
         &self,

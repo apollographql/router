@@ -67,6 +67,12 @@ pub fn init() {
     Lazy::force(&INIT).as_ref().expect("couldn't set span-test subscriber as a default, maybe tracing has already been initialized somewhere else ?");
 }
 
+pub fn get_all_logs(level: &Level) -> Records {
+    let logs = layer::ALL_LOGS.lock().unwrap().clone();
+
+    Records::new(logs.all_records_for_level(level))
+}
+
 pub fn get_telemetry_for_root(
     root_id: &crate::reexports::tracing::Id,
     level: &Level,
@@ -90,7 +96,7 @@ pub mod prelude {
     pub use crate::reexports::tracing_futures::WithSubscriber;
     pub use crate::reexports::tracing_subscriber::prelude::*;
     pub use crate::report::{Records, Report, Span};
-    pub use crate::{get_logs_for_root, get_spans_for_root, get_telemetry_for_root};
+    pub use crate::{get_all_logs, get_logs_for_root, get_spans_for_root, get_telemetry_for_root};
     pub use test_span_macro::test_span;
 }
 
