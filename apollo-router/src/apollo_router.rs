@@ -98,7 +98,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);
-        query_plan.validate_request(Arc::clone(&self.service_registry))?;
+        query_plan.validate(Arc::clone(&self.service_registry))?;
 
         Ok(ApolloPreparedQuery {
             query_plan,
