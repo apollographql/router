@@ -76,7 +76,7 @@ maplit = "1.0.2"
 mockall = "0.11.0"
 reqwest = { version = "0.11.8", features = ["json", "stream"] }
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
-test-span = "0.1.0"
+test-span = "0.1.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
