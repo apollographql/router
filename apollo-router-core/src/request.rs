@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use bytes::Bytes;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -42,6 +43,52 @@ where
     D: serde::Deserializer<'de>,
 {
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
+}
+
+#[derive(Deserialize)]
+struct RequestMeta {
+    query: String,
+    operation_name: Option<String>,
+}
+
+impl Request {
+    pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {
+        let mut value = Value::from_bytes(b)?;
+
+        let (variables, extensions) = match &mut value {
+            Value::Object(object) => (
+                match object.remove("variables") {
+                    Some(Value::Object(o)) => o,
+                    None => Object::default(),
+                    _ => {
+                        return Err(serde::de::Error::custom("expected a JSON object"));
+                    }
+                },
+                match object.remove("extensions") {
+                    Some(Value::Object(o)) => o,
+                    None => Object::default(),
+                    _ => {
+                        return Err(serde::de::Error::custom("expected a JSON object"));
+                    }
+                },
+            ),
+            _ => {
+                return Err(serde::de::Error::custom("expected a JSON object"));
+            }
+        };
+
+        let RequestMeta {
+            query,
+            operation_name,
+        } = serde_json_bytes::from_value(value)?;
+
+        Ok(Request {
+            query,
+            operation_name,
+            variables: Arc::new(variables),
+            extensions,
+        })
+    }
 }
 
 #[cfg(test)]
