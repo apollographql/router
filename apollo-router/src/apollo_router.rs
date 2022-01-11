@@ -1,6 +1,8 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
-use std::sync::Arc;
+use futures::Future;
+use std::{marker::PhantomData, pin::Pin, sync::Arc};
+use tower::Service;
 use tracing::Instrument;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -140,4 +142,73 @@ impl PreparedQuery for ApolloPreparedQuery {
 
         response
     }
+}
+
+//#[derive(Clone)]
+pub struct ApolloRouterService<Router, PreparedQuery> {
+    inner: Arc<Router>,
+    _phantom: PhantomData<PreparedQuery>,
+}
+
+impl<Router, PreparedQuery> Clone for ApolloRouterService<Router, PreparedQuery> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _phantom: self._phantom.clone(),
+        }
+    }
+}
+
+impl<R, P> ApolloRouterService<R, P>
+where
+    R: Router<P> + 'static,
+    P: PreparedQuery + 'static,
+{
+    pub fn new(inner: Arc<R>) -> Self {
+        ApolloRouterService {
+            inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<
+        Router: apollo_router_core::Router<PreparedQuery> + 'static,
+        PreparedQuery: apollo_router_core::PreparedQuery,
+    > Service<Request> for ApolloRouterService<Router, PreparedQuery>
+{
+    type Response = Response;
+
+    type Error = ();
+
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let router = self.inner.clone();
+
+        Box::pin(async move {
+            match router.prepare_query(&req).await {
+                Ok(route) => Ok(route.execute(Arc::new(req)).await),
+                Err(response) => Ok(response),
+            }
+        })
+    }
+}
+
+fn test_clone<R, P>(router: Arc<R>) -> Pin<Box<dyn Future<Output = ()> + Send>>
+where
+    R: Router<P> + 'static,
+    P: PreparedQuery + 'static,
+{
+    Box::pin(async move {
+        let service = ApolloRouterService::new(router);
+        let other = service.clone();
+    })
 }

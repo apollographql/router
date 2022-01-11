@@ -115,6 +115,7 @@ dependencies = [
  "tonic",
  "tower",
  "tower-http",
+ "tower-service",
  "tracing",
  "tracing-futures",
  "tracing-opentelemetry",
