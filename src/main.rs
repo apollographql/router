@@ -137,11 +137,7 @@ impl ApolloRouter {
             .boxed_clone()
             .buffer(1000)
             .rate_limit(2, Duration::from_secs(2))
-            .service(
-                SubgraphService::builder()
-                    .url("http://books".to_string())
-                    .build(),
-            );
+            .service(SubgraphService::builder().url("http://books").build());
 
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let author_service = ServiceBuilder::new()
@@ -149,11 +145,7 @@ impl ApolloRouter {
             .buffer(1000)
             .propagate_header("A")
             .cache()
-            .service(
-                SubgraphService::builder()
-                    .url("http://authors".to_string())
-                    .build(),
-            );
+            .service(SubgraphService::builder().url("http://authors").build());
 
         //ExecutionService takes a PlannedRequest and outputs a graphql::Response
         let execution_service = ServiceBuilder::new()
@@ -177,8 +169,8 @@ impl ApolloRouter {
             .timeout(Duration::from_secs(1))
             .service(
                 RouterService::builder()
-                    .query_planner_service(Option::Some(query_planner_service))
-                    .query_execution_service(Option::Some(execution_service))
+                    .query_planner_service(query_planner_service)
+                    .query_execution_service(execution_service)
                     .build(),
             );
         Self { router_service }
@@ -217,7 +209,13 @@ async fn main() -> Result<(), BoxError> {
 
     let response = router
         .call(Request::new(graphql::Request {
-            body: "Hello".to_string(),
+            body: "Hello1".to_string(),
+        }))
+        .await?;
+    println!("{:?}", response);
+    let response = router
+        .call(Request::new(graphql::Request {
+            body: "Hello2".to_string(),
         }))
         .await?;
     println!("{:?}", response);
