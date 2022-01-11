@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.0 (git+https://github.com/apollographql/apollo-rs.git?rev=ff317c7e85165bb6c380284b63c55d8af877fb7b)",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "apollo-parser 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
