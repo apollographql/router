@@ -170,14 +170,14 @@ impl Service<PlannedRequest> for ExecutionService {
                 service_name,
                 &query_plan,
                 &frontend_request,
-                "body1",
+                &format!("req1: {}", &frontend_request.body().body),
             );
             let req2 = Self::make_request(
                 &context,
                 service_name,
                 &query_plan,
                 &frontend_request,
-                "body2",
+                &format!("req2: {}", &frontend_request.body().body),
             );
             let mut service1 = this.subgraph_services[&req1.service_name].clone();
             let mut service2 = this.subgraph_services[&req2.service_name].clone();
@@ -187,7 +187,7 @@ impl Service<PlannedRequest> for ExecutionService {
 
             Ok(Response::new(graphql::Response {
                 body: format!(
-                    "sg1:{} sg2:{}",
+                    "{{\"{}\", \"{}\"}}",
                     f1.unwrap().body().body,
                     f2.unwrap().body().body
                 ),
