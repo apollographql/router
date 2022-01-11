@@ -1,5 +1,6 @@
 use crate::apollo_telemetry::new_pipeline;
 use std::sync::Arc;
+use std::time::Duration;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};
 use std::str::FromStr;
@@ -29,10 +30,20 @@ pub(crate) fn try_initialize_subscriber(
         .json()
         .finish();
 
+    tracing::info!("config: {:?}", config.server.studio);
     // Add studio agent as an OT pipeline
-    let tracer = new_pipeline()
+    let tracer = match new_pipeline()
+        .with_studio_config(&config.server.studio)
         // .with_reporter(XXXWRITETHISCODEXXX())
-        .install_simple();
+        .install_simple()
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("error installing studio telemetry: {}", e);
+            std::thread::sleep(Duration::from_secs(5));
+            return Err(Box::new(e));
+        }
+    };
     let agent = tracing_opentelemetry::layer().with_tracer(tracer);
     tracing::info!("Adding agent telemetry");
     let base_layer = subscriber.with(agent);

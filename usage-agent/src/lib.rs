@@ -11,6 +11,7 @@ use agent::{ReporterResponse, ReporterStats, ReporterTrace};
 pub use report::*;
 use std::error::Error;
 use sys_info::hostname;
+use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Response, Status};
@@ -52,6 +53,15 @@ impl From<std::io::Error> for ReporterError {
 
 impl From<sys_info::Error> for ReporterError {
     fn from(error: sys_info::Error) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl From<JoinError> for ReporterError {
+    fn from(error: JoinError) -> Self {
         ReporterError {
             msg: error.to_string(),
             source: Box::new(error),
@@ -289,18 +299,18 @@ pub mod server {
                 .send()
                 .await
                 .map_err(|e| Status::failed_precondition(e.to_string()))?;
-            println!("result: {:?}", res);
+            tracing::debug!("result: {:?}", res);
             let data = res
                 .text()
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
-            println!("text: {:?}", data);
+            tracing::debug!("text: {:?}", data);
             /*
             let ar: ApolloResponse = res
                 .json()
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
-            println!("json: {:?}", ar);
+            tracing::debug!("json: {:?}", ar);
             */
             let response = ReporterResponse {
                 message: "Report accepted".to_string(),
@@ -315,7 +325,7 @@ pub mod server {
             &self,
             request: Request<ReporterStats>,
         ) -> Result<Response<ReporterResponse>, Status> {
-            println!("received request: {:?}", request);
+            tracing::debug!("received request: {:?}", request);
             let msg = request.into_inner();
             let response = ReporterResponse {
                 message: "Report accepted".to_string(),
@@ -334,7 +344,7 @@ pub mod server {
             &self,
             request: Request<ReporterTrace>,
         ) -> Result<Response<ReporterResponse>, Status> {
-            println!("received request: {:?}", request);
+            tracing::debug!("received request: {:?}", request);
             let msg = request.into_inner();
             let response = ReporterResponse {
                 message: "Report accepted".to_string(),

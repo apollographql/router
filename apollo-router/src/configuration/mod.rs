@@ -64,6 +64,11 @@ pub struct Configuration {
     #[builder(default)]
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
+
+    /// Studio Usage configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub usage: Option<StudioUsage>,
 }
 
 fn default_listen() -> SocketAddr {
@@ -139,6 +144,11 @@ pub struct Server {
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+
+    /// Studio Usage.
+    #[serde(default)]
+    #[builder(default)]
+    pub studio: Option<StudioUsage>,
 }
 
 /// Cross origin request configuration.
@@ -210,6 +220,18 @@ impl Cors {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
         }
     }
+}
+
+fn default_collector() -> String {
+    "https://127.0.0.1:50051".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct StudioUsage {
+    pub(crate) external_agent: bool,
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

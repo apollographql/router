@@ -3996,6 +3996,7 @@ dependencies = [
  "tonic 0.6.2",
  "tonic-build",
  "tracing",
+ "tracing-subscriber",
  "uname",
 ]
 
