@@ -221,6 +221,8 @@ commands:
       - run: cargo sweep -s
       - install_extra_tools:
           os: << parameters.os >>
+      # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
+      - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
       - run: cargo sweep -f
       - save_cache:
