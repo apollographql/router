@@ -280,14 +280,16 @@ impl Extension for MyExtension {
         name: &str,
         service: BoxService<SubgraphRequest, Response<graphql::Response>, BoxError>,
     ) -> BoxService<SubgraphRequest, Response<graphql::Response>, BoxError> {
-        if name == "books" {
+        if name == "book" {
             ServiceBuilder::new()
                 .propagate_header("A")
-                .propagate_header("B")
                 .service(service)
                 .boxed()
         } else {
-            service
+            ServiceBuilder::new()
+                .propagate_header("B")
+                .service(service)
+                .boxed()
         }
     }
 }
@@ -299,9 +301,14 @@ async fn main() -> Result<(), BoxError> {
         .build();
 
     let response = router
-        .call(Request::new(graphql::Request {
-            body: "Hello1".to_string(),
-        }))
+        .call(
+            Request::builder()
+                .header("A", "HEADER_A")
+                .body(graphql::Request {
+                    body: "Hello1".to_string(),
+                })
+                .unwrap(),
+        )
         .await?;
     println!("{:?}", response);
     let response = router
