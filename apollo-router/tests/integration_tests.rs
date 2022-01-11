@@ -10,7 +10,7 @@ use serde_json_bytes::ByteString;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use test_log::test;
+use test_span::prelude::*;
 use url::Url;
 
 macro_rules! assert_federated_response {
@@ -44,7 +44,7 @@ macro_rules! assert_federated_response {
     };
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -54,7 +54,7 @@ async fn basic_request() {
     );
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -66,7 +66,31 @@ async fn basic_composition() {
     );
 }
 
-#[test(tokio::test)]
+#[test_span(tokio::test)]
+async fn traced_basic_request() {
+    assert_federated_response!(
+        r#"{ topProducts { name name2:name } }"#,
+        hashmap! {
+            "products".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!(get_spans());
+}
+
+#[test_span(tokio::test)]
+async fn traced_basic_composition() {
+    assert_federated_response!(
+        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
+        hashmap! {
+            "products".to_string()=>2,
+            "reviews".to_string()=>1,
+            "accounts".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!(get_spans());
+}
+
+#[tokio::test]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -89,7 +113,7 @@ async fn basic_mutation() {
     );
 }
 
-#[test(tokio::test)]
+#[test_span(tokio::test)]
 async fn variables() {
     assert_federated_response!(
         r#"
@@ -114,7 +138,7 @@ async fn variables() {
     );
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(
