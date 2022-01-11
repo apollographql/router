@@ -262,8 +262,8 @@ mod fetch {
                 variables.extend(variable_usages.iter().filter_map(|key| {
                     request
                         .variables
-                        .get(key.as_str())
-                        .map(|value| (key.as_str().into(), value.clone()))
+                        .get_key_value(key.as_str())
+                        .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
                 let mut paths = Vec::new();
@@ -296,8 +296,8 @@ mod fetch {
                         .filter_map(|key| {
                             request
                                 .variables
-                                .get(key.as_str())
-                                .map(|value| (key.as_str().into(), value.clone()))
+                                .get_key_value(key.as_str())
+                                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                         })
                         .collect::<Object>(),
                     paths: Vec::new(),
