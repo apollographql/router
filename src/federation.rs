@@ -16,7 +16,7 @@ pub struct QueryPlannerService;
 
 impl Service<UnplannedRequest> for QueryPlannerService {
     type Response = PlannedRequest;
-    type Error = http::Error;
+    type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -102,7 +102,7 @@ pub struct SubgraphService {
 
 impl Service<SubgraphRequest> for SubgraphService {
     type Response = Response<graphql::Response>;
-    type Error = http::Error;
+    type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -113,6 +113,7 @@ impl Service<SubgraphRequest> for SubgraphService {
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let url = self.url.clone();
         let fut = async move {
+            println!("Making requestto {} {:?}", url, request.backend_request);
             Ok(Response::new(graphql::Response {
                 body: format!("{} World from {}", request.backend_request.body().body, url),
             }))
