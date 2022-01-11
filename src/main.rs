@@ -135,7 +135,7 @@ struct DynamicExtensionsLayer {}
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    //Query planning is a service. It take graphql::Request and outputs Plannedgraphql::Request
+    //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
     let query_planner_service = ServiceBuilder::new()
         .boxed_clone()
         .buffer(1000)
@@ -143,7 +143,7 @@ async fn main() -> Result<(), BoxError> {
         .rate_limit(2, Duration::from_secs(10))
         .service(QueryPlannerService::default());
 
-    //Endpoint service takes a Downstreamgraphql::Request and outputs a graphql::Response
+    //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
     let book_service = ServiceBuilder::new()
         .boxed_clone()
         .buffer(1000)
@@ -154,7 +154,7 @@ async fn main() -> Result<(), BoxError> {
                 .build(),
         );
 
-    //Endpoint service takes a Downstreamgraphql::Request and outputs a graphql::Response
+    //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
     let author_service = ServiceBuilder::new()
         .boxed_clone()
         .buffer(1000)
@@ -166,6 +166,7 @@ async fn main() -> Result<(), BoxError> {
                 .build(),
         );
 
+    //ExecutionService takes a PlannedRequest and outputs a graphql::Response
     let execution_service = ServiceBuilder::new()
         .boxed_clone()
         .buffer(1000)
@@ -180,7 +181,7 @@ async fn main() -> Result<(), BoxError> {
                 .build(),
         );
 
-    //Execution service takes a graphql::Request and outputs a graphql::Response
+    //Router service takes a graphql::Request and outputs a graphql::Response
     let mut router_service = ServiceBuilder::new()
         .timeout(Duration::from_secs(1))
         .service(
@@ -192,7 +193,6 @@ async fn main() -> Result<(), BoxError> {
                 .build(),
         );
 
-    // User can use an adapter that we provide or embed their own or use tower-http
     let response = router_service
         .ready()
         .await?
