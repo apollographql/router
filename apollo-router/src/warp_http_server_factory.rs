@@ -65,7 +65,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .unwrap_or_default();
 
             let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(Arc::clone(&router)))
+                .or(redirect_to_studio())
+                .or(get_graphql_request(Arc::clone(&router)))
                 .or(post_graphql_request(router))
                 .with(cors);
 
@@ -178,7 +179,40 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-fn get_graphql_request_or_redirect<Router, PreparedQuery>(
+fn redirect_to_studio() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
+    warp::get()
+        .and(warp::path::end().or(warp::path("graphql")).unify())
+        .and(warp::header::exact_ignore_case("accept", "text/html"))
+        .and(warp::host::optional())
+        .and_then(move |host: Option<Authority>| async move {
+            let reply: Box<dyn Reply> = if host.is_some() {
+                if let Ok(uri) = format!(
+                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                    // we made sure host.is_some() above
+                    host.unwrap()
+                )
+                .parse::<Uri>()
+                {
+                    Box::new(warp::redirect::temporary(uri))
+                } else {
+                    Box::new(warp::reply::with_status(
+                        "Invalid host to redirect to",
+                        StatusCode::BAD_REQUEST,
+                    ))
+                }
+            } else {
+                Box::new(warp::reply::with_status(
+                    "Invalid host to redirect to",
+                    StatusCode::BAD_REQUEST,
+                ))
+            };
+
+            Ok::<_, warp::reject::Rejection>(reply)
+        })
+        .boxed()
+}
+
+fn get_graphql_request<Router, PreparedQuery>(
     router: Arc<Router>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
@@ -187,58 +221,24 @@ where
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
-        .and(warp::header::optional::<String>("accept"))
-        .and(warp::host::optional())
         .and(warp::body::bytes())
         .and(warp::header::headers_cloned())
-        .and_then(
-            move |accept: Option<String>,
-                  host: Option<Authority>,
-                  body: Bytes,
-                  header_map: HeaderMap| {
-                let router = Arc::clone(&router);
-                async move {
-                    let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                        redirect_to_studio(host)
-                    } else if let Ok(request) = serde_json::from_slice(&body) {
-                        run_graphql_request(router, request, header_map).await
-                    } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid GraphQL request",
-                            StatusCode::BAD_REQUEST,
-                        ))
-                    };
+        .and_then(move |body: Bytes, header_map: HeaderMap| {
+            let router = Arc::clone(&router);
+            async move {
+                let reply: Box<dyn Reply> = if let Ok(request) = serde_json::from_slice(&body) {
+                    run_graphql_request(router, request, header_map).await
+                } else {
+                    Box::new(warp::reply::with_status(
+                        "Invalid GraphQL request",
+                        StatusCode::BAD_REQUEST,
+                    ))
+                };
 
-                    Ok::<_, warp::reject::Rejection>(reply)
-                }
-            },
-        )
+                Ok::<_, warp::reject::Rejection>(reply)
+            }
+        })
         .boxed()
-}
-
-fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
-    // Try to redirect to Studio
-    if host.is_some() {
-        if let Ok(uri) = format!(
-            "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-            // we made sure host.is_some() above
-            host.unwrap()
-        )
-        .parse::<Uri>()
-        {
-            Box::new(warp::redirect::temporary(uri))
-        } else {
-            Box::new(warp::reply::with_status(
-                "Invalid host to redirect to",
-                StatusCode::BAD_REQUEST,
-            ))
-        }
-    } else {
-        Box::new(warp::reply::with_status(
-            "Invalid host to redirect to",
-            StatusCode::BAD_REQUEST,
-        ))
-    }
 }
 
 fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
@@ -316,14 +316,6 @@ where
     tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
         serde_json::to_string(&response).expect("serde_json::Value serialization will not fail")
     })
-}
-
-fn prefers_html(accept_header: String) -> bool {
-    accept_header
-        .split(',')
-        .map(|a| a.trim())
-        .find(|a| ["text/html", "application/json"].contains(a))
-        == Some("text/html")
 }
 
 struct HeaderMapCarrier<'a>(&'a HeaderMap);
@@ -678,18 +670,6 @@ mod tests {
         }
 
         server.shutdown().await
-    }
-
-    #[test]
-    fn test_prefers_html() {
-        use super::prefers_html;
-        ["text/html,application/json", " text/html,application/json"]
-            .iter()
-            .for_each(|accepts| assert!(prefers_html(accepts.to_string())));
-
-        ["application/json", "application/json,text/html"]
-            .iter()
-            .for_each(|accepts| assert!(!prefers_html(accepts.to_string())));
     }
 
     #[test(tokio::test)]
