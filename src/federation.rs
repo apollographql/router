@@ -151,9 +151,10 @@ impl Service<PlannedRequest> for ExecutionService {
         &mut self,
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<std::result::Result<(), Self::Error>> {
-        // We break backpressure here
-        // It is difficult for us to support real backpressure as we can't know the number of
-        // subrequests a query is going to make until it has been planned.
+        // We break backpressure here.
+        // We can implement backpressure, but we need to think about what we want out of it.
+        // For instance, should be block all services if one downstream service is not ready?
+        // This may not make sense if you have hundreds of services.
         Poll::Ready(Ok(()))
     }
 
