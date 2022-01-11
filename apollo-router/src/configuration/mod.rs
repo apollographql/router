@@ -68,7 +68,7 @@ pub struct Configuration {
     /// Studio Usage configuration.
     #[serde(default)]
     #[builder(default)]
-    pub usage: Option<StudioUsage>,
+    pub studio: Option<StudioUsage>,
 }
 
 fn default_listen() -> SocketAddr {
@@ -144,11 +144,6 @@ pub struct Server {
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
-
-    /// Studio Usage.
-    #[serde(default)]
-    #[builder(default)]
-    pub studio: Option<StudioUsage>,
 }
 
 /// Cross origin request configuration.

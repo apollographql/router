@@ -58,14 +58,21 @@ expression: get_spans()
         "apollo_router_core::query_planner::router_bridge_query_planner::plan - 4": {
           "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
           "record": {
-            "entries": [],
+            "entries": [
+              [
+                "query",
+                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+              ]
+            ],
             "metadata": {
               "name": "plan",
               "target": "apollo_router_core::query_planner::router_bridge_query_planner",
               "level": "DEBUG",
               "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
               "fields": {
-                "names": []
+                "names": [
+                  "query"
+                ]
               }
             }
           },
@@ -92,14 +99,36 @@ expression: get_spans()
     "apollo_router::apollo_router::execute - 6": {
       "name": "apollo_router::apollo_router::execute",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "query",
+            "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+          ],
+          [
+            "operation_name",
+            ""
+          ],
+          [
+            "client_name",
+            "CLIENT NAME TO BE DONE"
+          ],
+          [
+            "client_version",
+            "CLIENT VERSION TO BE DONE"
+          ]
+        ],
         "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
           "module_path": "apollo_router::apollo_router",
           "fields": {
-            "names": []
+            "names": [
+              "query",
+              "operation_name",
+              "client_name",
+              "client_version"
+            ]
           }
         }
       },

@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -3982,7 +3982,7 @@ dependencies = [
 
 [[package]]
 name = "usage-agent"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "bytes",
  "flate2",

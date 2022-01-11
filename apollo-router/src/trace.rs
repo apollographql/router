@@ -30,10 +30,10 @@ pub(crate) fn try_initialize_subscriber(
         .json()
         .finish();
 
-    tracing::info!("config: {:?}", config.server.studio);
+    tracing::info!("config: {:?}", config.studio);
     // Add studio agent as an OT pipeline
     let tracer = match new_pipeline()
-        .with_studio_config(&config.server.studio)
+        .with_studio_config(&config.studio)
         // .with_reporter(XXXWRITETHISCODEXXX())
         .install_simple()
     {

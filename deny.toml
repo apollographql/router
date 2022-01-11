@@ -80,7 +80,7 @@ license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
 [[licenses.clarify]]
 name = "usage-agent"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
