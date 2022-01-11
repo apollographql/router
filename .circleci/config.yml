@@ -11,13 +11,19 @@ orbs:
 
 executors:
   rust_linux: &rust_linux_executor
+    environment:
+      CARGO_NET_GIT_FETCH_WITH_CLI: true
     docker:
       - image: cimg/base:stable
     resource_class: medium+
   rust_macos: &rust_macos_executor
+    environment:
+      CARGO_NET_GIT_FETCH_WITH_CLI: true
     macos:
       xcode: 11.4
   rust_windows: &rust_windows_executor
+    environment:
+      CARGO_NET_GIT_FETCH_WITH_CLI: true
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
@@ -221,8 +227,6 @@ commands:
       - run: cargo sweep -s
       - install_extra_tools:
           os: << parameters.os >>
-      # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
-      - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
       - run: cargo sweep -f
       - save_cache:
@@ -458,6 +462,7 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     environment:
+      CARGO_NET_GIT_FETCH_WITH_CLI: true
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
       RELEASE_BIN: router
