@@ -9,12 +9,12 @@ use tower::util::BoxCloneService;
 use tower::{BoxError, Service, ServiceExt};
 use typed_builder::TypedBuilder;
 
-use crate::{graphql, Context, PlannedRequest, QueryPlan, SubgraphRequest};
+use crate::{graphql, Context, PlannedRequest, QueryPlan, SubgraphRequest, UnplannedRequest};
 
 #[derive(Default)]
 pub struct QueryPlannerService;
 
-impl Service<Request<graphql::Request>> for QueryPlannerService {
+impl Service<UnplannedRequest> for QueryPlannerService {
     type Response = PlannedRequest;
     type Error = http::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -23,15 +23,15 @@ impl Service<Request<graphql::Request>> for QueryPlannerService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
+    fn call(&mut self, request: UnplannedRequest) -> Self::Future {
         // create a response in a future.
         let fut = async {
             Ok(PlannedRequest {
-                request,
+                request: request.request,
                 query_plan: QueryPlan {
                     service_name: "book".to_string(), //Hard coded
                 },
-                context: Context::default(),
+                context: request.context,
             })
         };
 
@@ -42,10 +42,10 @@ impl Service<Request<graphql::Request>> for QueryPlannerService {
 
 #[derive(TypedBuilder)]
 pub struct RouterService {
-    query_planner_service: BoxCloneService<Request<graphql::Request>, PlannedRequest, BoxError>,
+    query_planner_service: BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>,
     query_execution_service: BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>,
     ready_query_planner_service:
-        Option<BoxCloneService<Request<graphql::Request>, PlannedRequest, BoxError>>,
+        Option<BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>>,
     ready_query_execution_service:
         Option<BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>>,
 }
@@ -75,8 +75,14 @@ impl Service<Request<graphql::Request>> for RouterService {
     fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
+        //Here we convert to an unplanned request, this is where context gets created
         let fut = async move {
-            let planned_query = planning.call(request).await;
+            let planned_query = planning
+                .call(UnplannedRequest {
+                    request,
+                    context: Context::default(),
+                })
+                .await;
             match planned_query {
                 Ok(planned_query) => execution.call(planned_query).await,
                 Err(err) => Err(err),
@@ -105,8 +111,7 @@ impl Service<SubgraphRequest> for SubgraphService {
         let url = self.url.clone();
         let fut = async move {
             Ok(Response::new(graphql::Response {
-                body: format!("{} World from {}", request.backend_request.body().body, url)
-                    ,
+                body: format!("{} World from {}", request.backend_request.body().body, url),
             }))
         };
 
@@ -123,6 +128,7 @@ pub struct ExecutionService {
 
 impl ExecutionService {
     fn make_request(
+        context: &Arc<Context>,
         service_name: &str,
         query_plan: &Arc<QueryPlan>,
         frontend_request: &Arc<Request<graphql::Request>>,
@@ -135,7 +141,7 @@ impl ExecutionService {
             }),
             query_plan: query_plan.clone(),
             frontend_request: frontend_request.clone(),
-            context: Default::default(),
+            context: context.clone(),
         }
     }
 }
@@ -158,11 +164,25 @@ impl Service<PlannedRequest> for ExecutionService {
     fn call(&mut self, req: PlannedRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
+            // Fan out, context becomes immutable at this point.
             let service_name = &req.query_plan.service_name.to_string();
             let query_plan = Arc::new(req.query_plan);
             let frontend_request = Arc::new(req.request);
-            let req1 = Self::make_request(service_name, &query_plan, &frontend_request, "body1");
-            let req2 = Self::make_request(service_name, &query_plan, &frontend_request, "body2");
+            let context = Arc::new(req.context);
+            let req1 = Self::make_request(
+                &context,
+                service_name,
+                &query_plan,
+                &frontend_request,
+                "body1",
+            );
+            let req2 = Self::make_request(
+                &context,
+                service_name,
+                &query_plan,
+                &frontend_request,
+                "body2",
+            );
             let mut service1 = this.subgraph_services[&req1.service_name].clone();
             let mut service2 = this.subgraph_services[&req2.service_name].clone();
 

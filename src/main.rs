@@ -1,31 +1,24 @@
-mod cache;
-mod federation;
-mod header_propagation;
-
 #[macro_use]
 extern crate maplit;
 
 use std::any::Any;
-
 use std::collections::HashMap;
-
 use std::sync::Arc;
-
 use std::time::Duration;
+
+use anyhow::Result;
+use http::Request;
+use tower::layer::util::Stack;
+use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
+use typed_builder::TypedBuilder;
 
 use crate::cache::CacheLayer;
 use crate::federation::{ExecutionService, QueryPlannerService, RouterService, SubgraphService};
 use crate::header_propagation::PropagateHeaderLayer;
-use anyhow::Result;
 
-use futures::future::FutureExt;
-
-use http::Request;
-
-use tower::layer::util::Stack;
-
-use tower::{BoxError, Layer, Service, ServiceBuilder, ServiceExt};
-use typed_builder::TypedBuilder;
+mod cache;
+mod federation;
+mod header_propagation;
 
 pub struct Schema;
 
@@ -45,18 +38,12 @@ mod graphql {
     pub struct Response {
         //Usual stuff here
         pub body: String,
-        //Stream stuff here for defer/stream
-        //Our warp adapter will convert the entire response to a stream if this field is present.
-        //#[serde(skip_serializing)]
-        //stream: Option<Box<dyn Stream<Item = Patch>>>,
     }
-
-    pub struct Patch {}
 }
 
 #[derive(Default)]
 pub struct Context {
-    content: HashMap<String, Box<dyn Any + Send>>,
+    content: HashMap<String, Box<dyn Any + Send + Sync>>,
 }
 
 impl Context {
@@ -64,46 +51,45 @@ impl Context {
         self.content.get(name).map(|d| d.downcast_ref()).flatten()
     }
 
-    pub fn insert<T: Send + 'static>(
+    pub fn insert<T: Send + Sync + 'static>(
         &mut self,
         name: &str,
         value: T,
-    ) -> Option<Box<dyn Any + Send>> {
+    ) -> Option<Box<dyn Any + Send + Sync>> {
         self.content.insert(name.to_string(), Box::new(value))
     }
 }
-
 pub struct UnplannedRequest {
     // The original request
-    request: Request<graphql::Request>,
+    pub request: Request<graphql::Request>,
 
-    context: Context,
+    pub context: Context,
 }
 
 pub struct PlannedRequest {
     // Planned request includes the original request
-    request: Request<graphql::Request>,
+    pub request: Request<graphql::Request>,
 
     // And also the query plan
-    query_plan: QueryPlan,
+    pub query_plan: QueryPlan,
 
     // Cloned from UnplannedRequest
-    context: Context,
+    pub context: Context,
 }
 
 pub struct SubgraphRequest {
-    service_name: String,
+    pub service_name: String,
     // The request to make downstream
-    backend_request: Request<graphql::Request>,
+    pub backend_request: Request<graphql::Request>,
 
     // And also the query plan
-    query_plan: Arc<QueryPlan>,
+    pub query_plan: Arc<QueryPlan>,
 
     // Downstream requests includes the original request
-    frontend_request: Arc<Request<graphql::Request>>,
+    pub frontend_request: Arc<Request<graphql::Request>>,
 
     // Cloned from PlannedRequest
-    context: Context,
+    pub context: Arc<Context>,
 }
 
 #[derive(TypedBuilder)]
