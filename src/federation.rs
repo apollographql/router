@@ -9,12 +9,14 @@ use tower::util::BoxCloneService;
 use tower::{BoxError, Service, ServiceExt};
 use typed_builder::TypedBuilder;
 
-use crate::{graphql, Context, PlannedRequest, QueryPlan, SubgraphRequest, UnplannedRequest};
+use crate::{
+    graphql, Context, PlannedRequest, QueryPlan, RouterRequest, RouterResponse, SubgraphRequest,
+};
 
 #[derive(Default)]
 pub struct QueryPlannerService;
 
-impl Service<UnplannedRequest> for QueryPlannerService {
+impl Service<RouterRequest> for QueryPlannerService {
     type Response = PlannedRequest;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -23,7 +25,7 @@ impl Service<UnplannedRequest> for QueryPlannerService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: UnplannedRequest) -> Self::Future {
+    fn call(&mut self, request: RouterRequest) -> Self::Future {
         // create a response in a future.
         let fut = async {
             Ok(PlannedRequest {
@@ -42,18 +44,17 @@ impl Service<UnplannedRequest> for QueryPlannerService {
 
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService {
-    query_planner_service: BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>,
-    query_execution_service: BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>,
+    query_planner_service: BoxCloneService<RouterRequest, PlannedRequest, BoxError>,
+    query_execution_service: BoxCloneService<PlannedRequest, RouterResponse, BoxError>,
     #[builder(default)]
-    ready_query_planner_service:
-        Option<BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>>,
+    ready_query_planner_service: Option<BoxCloneService<RouterRequest, PlannedRequest, BoxError>>,
     #[builder(default)]
     ready_query_execution_service:
-        Option<BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>>,
+        Option<BoxCloneService<PlannedRequest, RouterResponse, BoxError>>,
 }
 
-impl Service<Request<graphql::Request>> for RouterService {
-    type Response = Response<graphql::Response>;
+impl Service<RouterRequest> for RouterService {
+    type Response = RouterResponse;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -74,17 +75,12 @@ impl Service<Request<graphql::Request>> for RouterService {
         Poll::Pending
     }
 
-    fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
+    fn call(&mut self, request: RouterRequest) -> Self::Future {
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
         //Here we convert to an unplanned request, this is where context gets created
         let fut = async move {
-            let planned_query = planning
-                .call(UnplannedRequest {
-                    request,
-                    context: Context::default(),
-                })
-                .await;
+            let planned_query = planning.call(request).await;
             match planned_query {
                 Ok(planned_query) => execution.call(planned_query).await,
                 Err(err) => Err(err),
@@ -101,7 +97,7 @@ pub struct SubgraphService {
 }
 
 impl Service<SubgraphRequest> for SubgraphService {
-    type Response = Response<graphql::Response>;
+    type Response = RouterResponse;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -113,10 +109,18 @@ impl Service<SubgraphRequest> for SubgraphService {
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let url = self.url.clone();
         let fut = async move {
-            println!("Making requestto {} {:?}", url, request.backend_request);
-            Ok(Response::new(graphql::Response {
-                body: format!("{} World from {}", request.backend_request.body().body, url),
-            }))
+            println!("Making requestto {} {:?}", url, request.subgraph_request);
+            Ok(RouterResponse {
+                request: request.request,
+                response: Response::new(graphql::Response {
+                    body: format!(
+                        "{} World from {}",
+                        request.subgraph_request.body().body,
+                        url
+                    ),
+                }),
+                context: request.context,
+            })
         };
 
         // Return the response as an immediate future
@@ -126,13 +130,12 @@ impl Service<SubgraphRequest> for SubgraphService {
 
 #[derive(TypedBuilder, Clone)]
 pub struct ExecutionService {
-    subgraph_services:
-        HashMap<String, BoxCloneService<SubgraphRequest, Response<graphql::Response>, BoxError>>,
+    subgraph_services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>,
 }
 
 impl ExecutionService {
     fn make_request(
-        context: &Arc<Context>,
+        context: &Context,
         service_name: &str,
         query_plan: &Arc<QueryPlan>,
         frontend_request: &Arc<Request<graphql::Request>>,
@@ -140,18 +143,18 @@ impl ExecutionService {
     ) -> SubgraphRequest {
         SubgraphRequest {
             service_name: service_name.to_string(),
-            backend_request: Request::new(graphql::Request {
+            subgraph_request: Request::new(graphql::Request {
                 body: body.to_string(),
             }),
             query_plan: query_plan.clone(),
-            frontend_request: frontend_request.clone(),
+            request: frontend_request.clone(),
             context: context.clone(),
         }
     }
 }
 
 impl Service<PlannedRequest> for ExecutionService {
-    type Response = Response<graphql::Response>;
+    type Response = RouterResponse;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -194,13 +197,17 @@ impl Service<PlannedRequest> for ExecutionService {
             let f1 = service1.ready().await.unwrap().call(req1).await;
             let f2 = service2.ready().await.unwrap().call(req2).await;
 
-            Ok(Response::new(graphql::Response {
-                body: format!(
-                    "{{\"{}\", \"{}\"}}",
-                    f1.unwrap().body().body,
-                    f2.unwrap().body().body
-                ),
-            }))
+            Ok(RouterResponse {
+                request: frontend_request.clone(),
+                response: Response::new(graphql::Response {
+                    body: format!(
+                        "{{\"{}\", \"{}\"}}",
+                        f1.unwrap().response.body().body,
+                        f2.unwrap().response.body().body
+                    ),
+                }),
+                context: Default::default(),
+            })
         };
         Box::pin(fut)
     }

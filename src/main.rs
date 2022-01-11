@@ -43,9 +43,9 @@ mod graphql {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Context {
-    content: HashMap<String, Box<dyn Any + Send + Sync>>,
+    content: HashMap<String, Arc<dyn Any + Send + Sync>>,
 }
 
 impl Context {
@@ -57,13 +57,22 @@ impl Context {
         &mut self,
         name: &str,
         value: T,
-    ) -> Option<Box<dyn Any + Send + Sync>> {
-        self.content.insert(name.to_string(), Box::new(value))
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.content.insert(name.to_string(), Arc::new(value))
     }
 }
-pub struct UnplannedRequest {
+pub struct RouterRequest {
     // The original request
     pub request: Request<graphql::Request>,
+
+    pub context: Context,
+}
+
+pub struct RouterResponse {
+    // The original request
+    pub request: Arc<Request<graphql::Request>>,
+
+    pub response: Response<graphql::Response>,
 
     pub context: Context,
 }
@@ -75,23 +84,23 @@ pub struct PlannedRequest {
     // And also the query plan
     pub query_plan: QueryPlan,
 
-    // Cloned from UnplannedRequest
+    // Cloned from RouterRequest
     pub context: Context,
 }
 
 pub struct SubgraphRequest {
     pub service_name: String,
     // The request to make downstream
-    pub backend_request: Request<graphql::Request>,
+    pub subgraph_request: Request<graphql::Request>,
 
     // And also the query plan
     pub query_plan: Arc<QueryPlan>,
 
     // Downstream requests includes the original request
-    pub frontend_request: Arc<Request<graphql::Request>>,
+    pub request: Arc<Request<graphql::Request>>,
 
     // Cloned from PlannedRequest
-    pub context: Arc<Context>,
+    pub context: Context,
 }
 
 trait ServiceBuilderExt<L> {
@@ -165,21 +174,28 @@ impl ApolloRouterBuilder {
 
         //Router service takes a graphql::Request and outputs a graphql::Response
         let mut router_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
-            self.extensions.iter_mut().fold(
-                RouterService::builder()
-                    .query_planner_service(query_planner_service)
-                    .query_execution_service(execution_service)
-                    .build()
-                    .boxed(),
-                |acc, e| e.router_service(acc),
-            ),
+            self.extensions
+                .iter_mut()
+                .fold(
+                    RouterService::builder()
+                        .query_planner_service(query_planner_service)
+                        .query_execution_service(execution_service)
+                        .build()
+                        .boxed(),
+                    |acc, e| e.router_service(acc),
+                )
+                .map_request(|request| RouterRequest {
+                    request,
+                    context: Context::default(),
+                })
+                .map_response(|response| response.response),
         );
 
         ApolloRouter { router_service }
     }
 
-    fn subgraph_services(
-    ) -> HashMap<String, BoxService<SubgraphRequest, Response<graphql::Response>, BoxError>> {
+    fn subgraph_services() -> HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>
+    {
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let book_service = ServiceBuilder::new()
             .service(SubgraphService::builder().url("http://books").build())
@@ -230,30 +246,30 @@ impl ApolloRouter {
 trait Extension {
     fn router_service(
         &mut self,
-        service: BoxService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
-    ) -> BoxService<Request<graphql::Request>, Response<graphql::Response>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         service
     }
 
     fn query_planning_service(
         &mut self,
-        service: BoxService<UnplannedRequest, PlannedRequest, BoxError>,
-    ) -> BoxService<UnplannedRequest, PlannedRequest, BoxError> {
+        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
+    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
         service
     }
 
     fn execution_service(
         &mut self,
-        service: BoxService<PlannedRequest, Response<graphql::Response>, BoxError>,
-    ) -> BoxService<PlannedRequest, Response<graphql::Response>, BoxError> {
+        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
+    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
         service
     }
 
     fn subgraph_service(
         &mut self,
         name: &str,
-        service: BoxService<SubgraphRequest, Response<graphql::Response>, BoxError>,
-    ) -> BoxService<SubgraphRequest, Response<graphql::Response>, BoxError> {
+        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
         service
     }
 }
@@ -263,13 +279,17 @@ struct MyExtension;
 impl Extension for MyExtension {
     fn router_service(
         &mut self,
-        service: BoxService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
-    ) -> BoxService<Request<graphql::Request>, Response<graphql::Response>, BoxError> {
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         ServiceBuilder::new()
             .rate_limit(100, Duration::from_secs(2))
+            .map_request(|mut r: RouterRequest| {
+                r.context.insert("foo", "bar".to_string());
+                r
+            })
             .service(service)
             .map_response(|mut r| {
-                r.body_mut().body = format!("Hi, {}", r.body_mut().body);
+                r.response.body_mut().body = format!("Hi, {}", r.response.body().body);
                 r
             })
             .boxed()
@@ -278,11 +298,16 @@ impl Extension for MyExtension {
     fn subgraph_service(
         &mut self,
         name: &str,
-        service: BoxService<SubgraphRequest, Response<graphql::Response>, BoxError>,
-    ) -> BoxService<SubgraphRequest, Response<graphql::Response>, BoxError> {
+        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
         if name == "book" {
             ServiceBuilder::new()
                 .propagate_header("A")
+                .map_request(|mut r: SubgraphRequest| {
+                    let f: Option<&String> = r.context.get("foo");
+                    println!("Propagated context {:?}", f);
+                    r
+                })
                 .service(service)
                 .boxed()
         } else {

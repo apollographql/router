@@ -46,9 +46,9 @@ where
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         //Add the header to the request and pass it on to the service.
-        if let Some(header) = request.frontend_request.headers().get(&self.header_name) {
+        if let Some(header) = request.request.headers().get(&self.header_name) {
             request
-                .backend_request
+                .subgraph_request
                 .headers_mut()
                 .insert(self.header_name.to_owned(), header.clone());
         }
