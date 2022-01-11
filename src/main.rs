@@ -7,8 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use http::Request;
+use http::{Request, Response};
 use tower::layer::util::Stack;
+use tower::make::Shared;
+use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
 use typed_builder::TypedBuilder;
 
@@ -92,17 +94,6 @@ pub struct SubgraphRequest {
     pub context: Arc<Context>,
 }
 
-#[derive(TypedBuilder)]
-struct ApolloRouter {
-    //extensions: Vec<Box<dyn Extension>>,
-}
-
-impl ApolloRouter {
-    pub(crate) async fn start(&self) {
-        todo!()
-    }
-}
-
 trait ServiceBuilderExt<L> {
     //Add extra stuff here to support our needs e.g. caching
     fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>>;
@@ -111,9 +102,9 @@ trait ServiceBuilderExt<L> {
     fn propagate_header(self, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
 }
 
+//Demonstrate adding reusable stuff to ServiceBuilder.
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>> {
-        //Implement our caching stuff here
         self.layer(CacheLayer {})
     }
 
@@ -122,6 +113,93 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         header_name: &str,
     ) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
         self.layer(PropagateHeaderLayer::new(header_name))
+    }
+}
+
+#[derive(TypedBuilder)]
+struct ApolloRouter {
+    router_service:
+        BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
+}
+
+impl ApolloRouter {
+    fn new() -> Self {
+        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        let query_planner_service = ServiceBuilder::new()
+            .boxed_clone()
+            .buffer(1000)
+            .cache()
+            .rate_limit(2, Duration::from_secs(10))
+            .service(QueryPlannerService::default());
+
+        //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
+        let book_service = ServiceBuilder::new()
+            .boxed_clone()
+            .buffer(1000)
+            .rate_limit(2, Duration::from_secs(2))
+            .service(
+                SubgraphService::builder()
+                    .url("http://books".to_string())
+                    .build(),
+            );
+
+        //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
+        let author_service = ServiceBuilder::new()
+            .boxed_clone()
+            .buffer(1000)
+            .propagate_header("A")
+            .cache()
+            .service(
+                SubgraphService::builder()
+                    .url("http://authors".to_string())
+                    .build(),
+            );
+
+        //ExecutionService takes a PlannedRequest and outputs a graphql::Response
+        let execution_service = ServiceBuilder::new()
+            .boxed_clone()
+            .buffer(1000)
+            .cache()
+            .rate_limit(2, Duration::from_secs(10))
+            .service(
+                ExecutionService::builder()
+                    .subgraph_services(hashmap! {
+                    "book".to_string()=> book_service,
+                    "author".to_string()=> author_service
+                    })
+                    .build(),
+            );
+
+        //Router service takes a graphql::Request and outputs a graphql::Response
+        let mut router_service = ServiceBuilder::new()
+            .boxed_clone()
+            .buffer(1000)
+            .timeout(Duration::from_secs(1))
+            .service(
+                RouterService::builder()
+                    .query_planner_service(Option::Some(query_planner_service))
+                    .query_execution_service(Option::Some(execution_service))
+                    .build(),
+            );
+        Self { router_service }
+    }
+
+    pub async fn start(&self) {
+        todo!()
+    }
+
+    //This function probably won't exist, but is available for demonstration
+    pub async fn call(
+        &self,
+        request: Request<graphql::Request>,
+    ) -> Result<Response<graphql::Response>, BoxError> {
+        self.router_service
+            .clone()
+            .ready()
+            .await
+            .unwrap()
+            .call(request)
+            .await
     }
 }
 
@@ -135,67 +213,9 @@ struct DynamicExtensionsLayer {}
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-    let query_planner_service = ServiceBuilder::new()
-        .boxed_clone()
-        .buffer(1000)
-        .cache()
-        .rate_limit(2, Duration::from_secs(10))
-        .service(QueryPlannerService::default());
+    let router = ApolloRouter::new();
 
-    //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
-    let book_service = ServiceBuilder::new()
-        .boxed_clone()
-        .buffer(1000)
-        .rate_limit(2, Duration::from_secs(2))
-        .service(
-            SubgraphService::builder()
-                .url("http://books".to_string())
-                .build(),
-        );
-
-    //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
-    let author_service = ServiceBuilder::new()
-        .boxed_clone()
-        .buffer(1000)
-        .propagate_header("A")
-        .cache()
-        .service(
-            SubgraphService::builder()
-                .url("http://authors".to_string())
-                .build(),
-        );
-
-    //ExecutionService takes a PlannedRequest and outputs a graphql::Response
-    let execution_service = ServiceBuilder::new()
-        .boxed_clone()
-        .buffer(1000)
-        .cache()
-        .rate_limit(2, Duration::from_secs(10))
-        .service(
-            ExecutionService::builder()
-                .subgraph_services(hashmap! {
-                "book".to_string()=> book_service,
-                "author".to_string()=> author_service
-                })
-                .build(),
-        );
-
-    //Router service takes a graphql::Request and outputs a graphql::Response
-    let mut router_service = ServiceBuilder::new()
-        .timeout(Duration::from_secs(1))
-        .service(
-            RouterService::builder()
-                .query_planner_service(query_planner_service)
-                .query_execution_service(execution_service)
-                .ready_query_execution_service(None)
-                .ready_query_planner_service(None)
-                .build(),
-        );
-
-    let response = router_service
-        .ready()
-        .await?
+    let response = router
         .call(Request::new(graphql::Request {
             body: "Hello".to_string(),
         }))

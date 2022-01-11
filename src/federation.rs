@@ -40,28 +40,24 @@ impl Service<UnplannedRequest> for QueryPlannerService {
     }
 }
 
-#[derive(TypedBuilder)]
+#[derive(TypedBuilder, Clone)]
 pub struct RouterService {
-    query_planner_service: BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>,
-    query_execution_service: BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>,
-    ready_query_planner_service:
-        Option<BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>>,
-    ready_query_execution_service:
+    query_planner_service: Option<BoxCloneService<UnplannedRequest, PlannedRequest, BoxError>>,
+    query_execution_service:
         Option<BoxCloneService<PlannedRequest, Response<graphql::Response>, BoxError>>,
 }
 
 impl Service<Request<graphql::Request>> for RouterService {
     type Response = Response<graphql::Response>;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if vec![
-            self.ready_query_planner_service
-                .get_or_insert_with(|| self.query_planner_service.clone())
-                .poll_ready(cx),
-            self.ready_query_execution_service
-                .get_or_insert_with(|| self.query_execution_service.clone())
+            self.query_planner_service.as_mut().unwrap().poll_ready(cx),
+            self.query_execution_service
+                .as_mut()
+                .unwrap()
                 .poll_ready(cx),
         ]
         .iter()
@@ -73,8 +69,8 @@ impl Service<Request<graphql::Request>> for RouterService {
     }
 
     fn call(&mut self, request: Request<graphql::Request>) -> Self::Future {
-        let mut planning = self.ready_query_planner_service.take().unwrap();
-        let mut execution = self.ready_query_execution_service.take().unwrap();
+        let mut planning = self.query_planner_service.take().unwrap();
+        let mut execution = self.query_execution_service.take().unwrap();
         //Here we convert to an unplanned request, this is where context gets created
         let fut = async move {
             let planned_query = planning
