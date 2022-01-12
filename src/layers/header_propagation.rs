@@ -1,6 +1,6 @@
 use crate::SubgraphRequest;
 use http::header::HeaderName;
-use std::str::FromStr;
+
 use std::task::Poll;
 use tower::{Layer, Service};
 
@@ -9,10 +9,8 @@ pub struct PropagateHeaderLayer {
 }
 
 impl PropagateHeaderLayer {
-    pub(crate) fn new(header_name: &str) -> PropagateHeaderLayer {
-        Self {
-            header_name: HeaderName::from_str(header_name).unwrap(),
-        }
+    pub(crate) fn new(header_name: HeaderName) -> PropagateHeaderLayer {
+        Self { header_name }
     }
 }
 

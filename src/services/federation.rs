@@ -31,7 +31,7 @@ impl Service<RouterRequest> for QueryPlannerService {
             Ok(PlannedRequest {
                 request: request.request,
                 query_plan: QueryPlan {
-                    service_name: "book".to_string(), //Hard coded
+                    service_name: "books".to_string(), //Hard coded
                 },
                 context: request.context,
             })
@@ -109,7 +109,7 @@ impl Service<SubgraphRequest> for SubgraphService {
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let url = self.url.clone();
         let fut = async move {
-            println!("Making requestto {} {:?}", url, request.subgraph_request);
+            println!("Making request to {} {:?}", url, request.subgraph_request);
             Ok(RouterResponse {
                 request: request.request,
                 response: Response::new(graphql::Response {

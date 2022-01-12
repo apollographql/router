@@ -3,24 +3,25 @@ extern crate maplit;
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::future::Future;
+
+use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
+use crate::layers::cache::CacheLayer;
+use crate::layers::header_propagation::PropagateHeaderLayer;
+use crate::services::federation::{
+    ExecutionService, QueryPlannerService, RouterService, SubgraphService,
+};
 use anyhow::Result;
+use http::header::{HeaderName, COOKIE};
 use http::{Request, Response};
-use tower::layer::util::{Identity, Stack};
-use tower::util::{BoxCloneService, BoxLayer, BoxService};
-use tower::{BoxError, Layer, Service, ServiceBuilder, ServiceExt};
-use typed_builder::TypedBuilder;
+use tower::layer::util::Stack;
+use tower::util::{BoxCloneService, BoxService};
+use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
 
-use crate::cache::CacheLayer;
-use crate::federation::{ExecutionService, QueryPlannerService, RouterService, SubgraphService};
-use crate::header_propagation::PropagateHeaderLayer;
-
-mod cache;
-mod federation;
-mod header_propagation;
+mod demos;
+mod layers;
+mod services;
 
 pub struct Schema;
 
@@ -109,6 +110,7 @@ trait ServiceBuilderExt<L> {
 
     //This will only compile for Endpoint services
     fn propagate_header(self, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
+    fn propagate_cookies(self) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
 }
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
@@ -121,7 +123,13 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self: ServiceBuilder<L>,
         header_name: &str,
     ) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
-        self.layer(PropagateHeaderLayer::new(header_name))
+        self.layer(PropagateHeaderLayer::new(
+            HeaderName::from_str(header_name).unwrap(),
+        ))
+    }
+
+    fn propagate_cookies(self) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
+        self.layer(PropagateHeaderLayer::new(COOKIE))
     }
 }
 
@@ -146,7 +154,7 @@ impl ApolloRouterBuilder {
                 }),
         );
 
-        //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
+        //SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = Self::subgraph_services()
             .into_iter()
             .map(|(name, s)| {
@@ -161,7 +169,7 @@ impl ApolloRouterBuilder {
             })
             .collect();
 
-        //ExecutionService takes a PlannedRequest and outputs a graphql::Response
+        //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let execution_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
             self.extensions.iter_mut().fold(
                 ExecutionService::builder()
@@ -173,7 +181,7 @@ impl ApolloRouterBuilder {
         );
 
         //Router service takes a graphql::Request and outputs a graphql::Response
-        let mut router_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
+        let router_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
             self.extensions
                 .iter_mut()
                 .fold(
@@ -206,8 +214,8 @@ impl ApolloRouterBuilder {
             .service(SubgraphService::builder().url("http://authors").build())
             .boxed();
         hashmap! {
-        "book".to_string()=> book_service,
-        "author".to_string()=> author_service
+        "books".to_string()=> book_service,
+        "authors".to_string()=> author_service
         }
     }
 }
@@ -267,63 +275,16 @@ trait Extension {
 
     fn subgraph_service(
         &mut self,
-        name: &str,
+        _name: &str,
         service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
         service
     }
 }
 
-#[derive(Default)]
-struct MyExtension;
-impl Extension for MyExtension {
-    fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        ServiceBuilder::new()
-            .rate_limit(100, Duration::from_secs(2))
-            .map_request(|mut r: RouterRequest| {
-                r.context.insert("foo", "bar".to_string());
-                r
-            })
-            .service(service)
-            .map_response(|mut r| {
-                r.response.body_mut().body = format!("Hi, {}", r.response.body().body);
-                r
-            })
-            .boxed()
-    }
-
-    fn subgraph_service(
-        &mut self,
-        name: &str,
-        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
-        if name == "book" {
-            ServiceBuilder::new()
-                .propagate_header("A")
-                .map_request(|mut r: SubgraphRequest| {
-                    let f: Option<&String> = r.context.get("foo");
-                    println!("Propagated context {:?}", f);
-                    r
-                })
-                .service(service)
-                .boxed()
-        } else {
-            ServiceBuilder::new()
-                .propagate_header("B")
-                .service(service)
-                .boxed()
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    let router = ApolloRouter::builder()
-        .with_extension(MyExtension::default())
-        .build();
+    let router = ApolloRouter::builder().build();
 
     let response = router
         .call(
