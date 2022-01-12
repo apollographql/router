@@ -129,7 +129,7 @@ pub struct Error {
     pub extensions: Object,
 }
 
-/// temporary structure to help deserializing errors
+// temporary structure to help deserializing errors
 #[derive(Deserialize)]
 struct ErrorMeta {
     message: String,
