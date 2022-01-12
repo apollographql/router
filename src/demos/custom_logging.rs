@@ -40,7 +40,6 @@ impl Extension for MyExtension {
             .map_future(move |f| {
                 async move {
                     //Actually tracing-rs would be used.
-                    //Actually tracing-rs would be used.
                     println!("Before router planning service");
                     let r = f.await;
                     println!("After router planning service");
