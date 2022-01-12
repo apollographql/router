@@ -68,17 +68,23 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let tcp_listener = if let Some(listener) = listener {
                 listener
             } else {
+                #[cfg(unix)]
                 match listen_address {
-                    ListenAddr::SocketAddr(addr) => AnyListener::Left(
+                    ListenAddr::SocketAddr(addr) => Either::Left(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => AnyListener::Right(
+                    ListenAddr::UnixSocket(path) => Either::Right(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
+                }
+                #[cfg(not(unix))]
+                match listen_address {
+                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
+                        .await
+                        .map_err(FederatedServerError::ServerCreationError)?,
                 }
             };
             let actual_listen_address = tcp_listener
@@ -113,6 +119,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
                                 let (stream, _) = res.unwrap();
+                                #[cfg(unix)]
                                 match stream {
                                     Either::Left(ref stream) => {
                                         stream
@@ -123,6 +130,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     }
                                     Either::Right(_) => {}
                                 }
+                                #[cfg(not(unix))]
+                                stream
+                                    .set_nodelay(true)
+                                    .expect(
+                                        "this should not fail unless the socket is invalid",
+                                    );
 
                                 let connection = Http::new()
                                     .http1_keep_alive(true)

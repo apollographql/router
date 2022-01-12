@@ -101,16 +101,17 @@ impl HttpServerHandle {
         tracing::info!("previous server is closed");
 
         // we keep the TCP listener if it is compatible with the new configuration
+        #[cfg(unix)]
         let listener = match (&self.listen_address, &configuration.server.listen) {
             (AnyAddr::Left(a), ListenAddr::SocketAddr(b)) if a == b => listener.ok(),
             (AnyAddr::Right(a), ListenAddr::UnixSocket(b)) if a.as_pathname() == Some(b) => {
                 listener.ok()
             }
             _ => None,
+            // TODO log
         };
-        // TODO log
-        /*
-            if self.listen_address != configuration.server.listen {
+        #[cfg(not(unix))]
+        let listener = if &self.listen_address != &configuration.server.listen {
             None
         } else {
             match listener {
@@ -121,11 +122,11 @@ impl HttpServerHandle {
                 }
             }
         };
-        */
 
         let handle = factory
             .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
             .await?;
+        #[cfg(unix)]
         match handle.listen_address() {
             AnyAddr::Left(tcp_addr) => {
                 tracing::debug!("Restarted on {}", tcp_addr)
@@ -134,6 +135,8 @@ impl HttpServerHandle {
                 tracing::debug!("Restarted on {:?}", unix_addr)
             }
         }
+        #[cfg(not(unix))]
+        tracing::debug!("Restarted on {}", handle.listen_address());
 
         Ok(handle)
     }
@@ -178,6 +181,7 @@ impl Listener for tokio::net::TcpListener {
     }
 }
 
+#[cfg(unix)]
 impl Listener for tokio::net::UnixListener {
     type Io = tokio::net::UnixStream;
     type Addr = tokio::net::unix::SocketAddr;
@@ -240,8 +244,14 @@ where
     }
 }
 
+#[cfg(unix)]
 pub(crate) type AnyListener = Either<tokio::net::TcpListener, tokio::net::UnixListener>;
+#[cfg(unix)]
 pub(crate) type AnyAddr = Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>;
+#[cfg(not(unix))]
+pub(crate) type AnyListener = tokio::net::TcpListener;
+#[cfg(not(unix))]
+pub(crate) type AnyAddr = std::net::SocketAddr;
 
 /*
 impl Listener for BoxedListener {

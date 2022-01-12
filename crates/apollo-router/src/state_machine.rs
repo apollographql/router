@@ -63,12 +63,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: match server_handle.listen_address() {
-                    Either::Left(socket_addr) => ListenAddr::SocketAddr(socket_addr.to_owned()),
-                    Either::Right(unix_addr) => {
-                        ListenAddr::UnixSocket(unix_addr.as_pathname().expect("todo").to_owned())
-                    }
-                },
+                address: server_handle.listen_address().into(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -343,6 +338,7 @@ where
                         .await
                     {
                         Ok(server_handle) => {
+                            #[cfg(unix)]
                             match server_handle.listen_address() {
                                 AnyAddr::Left(tcp_addr) => {
                                     tracing::debug!("Started on {}", tcp_addr)
@@ -351,6 +347,8 @@ where
                                     tracing::debug!("Started on {:?}", unix_addr)
                                 }
                             }
+                            #[cfg(not(unix))]
+                            tracing::debug!("Started on {}", server_handle.listen_address());
                             Running {
                                 configuration,
                                 schema,

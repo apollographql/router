@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio_util::either::Either;
 use typed_builder::TypedBuilder;
 use url::Url;
 
@@ -152,6 +153,34 @@ pub enum ListenAddr {
 impl From<SocketAddr> for ListenAddr {
     fn from(addr: SocketAddr) -> Self {
         Self::SocketAddr(addr)
+    }
+}
+
+impl From<&SocketAddr> for ListenAddr {
+    fn from(addr: &SocketAddr) -> Self {
+        Self::SocketAddr(addr.to_owned())
+    }
+}
+
+#[cfg(unix)]
+impl From<&Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>> for ListenAddr {
+    fn from(either: &Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>) -> Self {
+        match either {
+            Either::Left(socket_addr) => ListenAddr::SocketAddr(socket_addr.to_owned()),
+            Either::Right(unix_addr) => {
+                ListenAddr::UnixSocket(unix_addr.as_pathname().expect("todo").to_owned())
+            }
+        }
+    }
+}
+
+impl PartialEq<ListenAddr> for SocketAddr {
+    fn eq(&self, other: &ListenAddr) -> bool {
+        match other {
+            ListenAddr::SocketAddr(addr) => addr == self,
+            #[cfg(unix)]
+            ListenAddr::UnixSocket(addr) => false,
+        }
     }
 }
 
