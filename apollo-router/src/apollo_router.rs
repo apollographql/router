@@ -1,7 +1,12 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::Future;
-use std::{marker::PhantomData, pin::Pin, sync::Arc};
+use std::{
+    marker::PhantomData,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tower::Service;
 use tracing::Instrument;
 
@@ -75,7 +80,7 @@ impl ApolloRouter {
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
+    async fn prepare_query(&self, request: Arc<Request>) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response);
         }
@@ -87,7 +92,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
             .await;
 
         if let Some(query) = query.as_ref() {
-            query.validate_variables(request, &self.schema)?;
+            query.validate_variables(&request, &self.schema)?;
         }
 
         let query_plan = self
@@ -168,7 +173,7 @@ unsafe impl<Router, PreparedQuery> Sync for ApolloRouterService<Router, Prepared
 impl<R, P> ApolloRouterService<R, P>
 where
     R: Router<P> + 'static,
-    P: PreparedQuery + 'static,
+    P: PreparedQuery + Send + 'static,
 {
     pub fn new(inner: Arc<R>) -> Self {
         ApolloRouterService {
@@ -180,7 +185,7 @@ where
 
 impl<
         Router: apollo_router_core::Router<PreparedQuery> + 'static,
-        PreparedQuery: apollo_router_core::PreparedQuery,
+        PreparedQuery: apollo_router_core::PreparedQuery + Send + 'static,
     > Service<Request> for ApolloRouterService<Router, PreparedQuery>
 {
     type Response = Response;
@@ -189,6 +194,11 @@ impl<
 
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    /*type Future = ApolloRouterServiceFuture<
+        Pin<Box<dyn Future<Output = Result<PreparedQuery, Response>> + Send>>,
+        PreparedQuery,
+    >;*/
 
     fn poll_ready(
         &mut self,
@@ -200,11 +210,75 @@ impl<
     fn call(&mut self, req: Request) -> Self::Future {
         let router = self.inner.clone();
 
+        let req = Arc::new(req);
+        /*let r2 = r.clone();
+        let future = router.prepare_query(r);
+        ApolloRouterServiceFuture {
+            state: State::Prepare { req: r2, future },
+        }*/
+
         Box::pin(async move {
-            match router.prepare_query(&req).await {
-                Ok(route) => Ok(route.execute(Arc::new(req)).await),
+            match router.prepare_query(req.clone()).await {
+                Ok(route) => Ok(route.execute(req).await),
                 Err(response) => Ok(response),
             }
         })
+    }
+}
+
+#[pin_project::pin_project]
+struct ApolloRouterServiceFuture<F, P>
+where
+    F: Future<Output = Result<P, Response>> + Send,
+    P: PreparedQuery + Send + 'static,
+{
+    #[pin]
+    state: State<F, P>,
+}
+
+#[pin_project::pin_project(project = StateProj)]
+enum State<F, P>
+where
+    F: Future<Output = Result<P, Response>> + Send,
+    P: PreparedQuery + Send + 'static,
+{
+    Prepare {
+        req: Arc<Request>,
+        #[pin]
+        future: F,
+    },
+    Execute {
+        #[pin]
+        exec: Pin<Box<dyn Future<Output = Response> + Send>>,
+    },
+}
+
+impl<F, P> Future for ApolloRouterServiceFuture<F, P>
+where
+    F: Future<Output = Result<P, Response>> + Send,
+    P: PreparedQuery + Send + 'static,
+{
+    type Output = Result<Response, ()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        loop {
+            match this.state.as_mut().project() {
+                StateProj::Prepare { req, future } => match future.poll(cx) {
+                    Poll::Ready(res) => match res {
+                        Err(response) => return Poll::Ready(Ok(response)),
+                        Ok(prepared) => {
+                            let exec = prepared.execute(req.clone());
+                            this.state.set(State::Execute { exec })
+                        }
+                    },
+                    Poll::Pending => {
+                        return Poll::Pending;
+                    }
+                },
+                StateProj::Execute { exec } => return exec.poll(cx).map(Ok),
+            }
+        }
     }
 }

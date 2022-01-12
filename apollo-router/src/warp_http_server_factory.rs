@@ -45,7 +45,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         Router: graphql::Router<PreparedQuery> + 'static,
-        PreparedQuery: graphql::PreparedQuery + 'static,
+        PreparedQuery: graphql::PreparedQuery + Send + 'static,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -217,14 +217,11 @@ fn get_graphql_request<Router>(
     router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<
-            graphql::Request,
-            Response = graphql::Response,
-            Error = (),
-            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
-        > + Clone
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
+        + Clone
         + Send
         + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -265,14 +262,11 @@ fn post_graphql_request<Router>(
     router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<
-            graphql::Request,
-            Response = graphql::Response,
-            Error = (),
-            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
-        > + Clone
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
+        + Clone
         + Send
         + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -293,13 +287,8 @@ fn run_graphql_request<Router>(
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    Router: Service<
-            graphql::Request,
-            Response = graphql::Response,
-            Error = (),
-            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
-        > + Send
-        + 'static,
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -318,6 +307,7 @@ where
 async fn stream_request<Router>(mut router: Router, request: graphql::Request) -> String
 where
     Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     let response = router
         .call(request)
@@ -425,7 +415,7 @@ mod tests {
         impl graphql::Router<MockMyRoute> for MyRouter {
             async fn prepare_query(
                 &self,
-                request: &graphql::Request,
+                request: Arc<graphql::Request>,
             ) -> Result<MockMyRoute, graphql::Response>;
         }
     }

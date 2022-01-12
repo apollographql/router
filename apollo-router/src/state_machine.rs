@@ -831,7 +831,7 @@ mod tests {
         impl graphql::Router<MockMyRoute> for MyRouter {
             async fn prepare_query(
                 &self,
-                request: &graphql::Request,
+                request: Arc<graphql::Request>,
             ) -> Result<MockMyRoute, graphql::Response>;
         }
     }

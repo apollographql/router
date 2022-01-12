@@ -77,7 +77,7 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 /// not use the HTTP error codes, therefore it always return a response even if it fails.
 #[async_trait::async_trait]
 pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
-    async fn prepare_query(&self, request: &Request) -> Result<T, Response>;
+    async fn prepare_query(&self, request: Arc<Request>) -> Result<T, Response>;
 }
 
 /// An object that can be executed to return a [`Response`].
