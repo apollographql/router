@@ -99,36 +99,14 @@ expression: get_spans()
     "apollo_router::apollo_router::execute - 6": {
       "name": "apollo_router::apollo_router::execute",
       "record": {
-        "entries": [
-          [
-            "query",
-            "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
-          ],
-          [
-            "operation_name",
-            ""
-          ],
-          [
-            "client_name",
-            "CLIENT NAME TO BE DONE"
-          ],
-          [
-            "client_version",
-            "CLIENT VERSION TO BE DONE"
-          ]
-        ],
+        "entries": [],
         "metadata": {
           "name": "execute",
           "target": "apollo_router::apollo_router",
           "level": "DEBUG",
           "module_path": "apollo_router::apollo_router",
           "fields": {
-            "names": [
-              "query",
-              "operation_name",
-              "client_name",
-              "client_version"
-            ]
+            "names": []
           }
         }
       },

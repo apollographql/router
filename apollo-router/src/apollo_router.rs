@@ -120,14 +120,8 @@ pub struct ApolloPreparedQuery {
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
-    #[tracing::instrument(skip_all, fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()), client_name, client_version), level = "debug")]
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn execute(self, request: Arc<Request>) -> Response {
-        let client_name = "CLIENT NAME TO BE DONE";
-        // Record the client name as part of the current span
-        tracing::Span::current().record("client_name", &client_name);
-        let client_version = "CLIENT VERSION TO BE DONE";
-        // Record the client version as part of the current span
-        tracing::Span::current().record("client_version", &client_version);
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)

@@ -138,7 +138,7 @@ impl PipelineBuilder {
         let reporter: Reporter = match futures::executor::block_on(jh).expect("join agent") {
             Ok(r) => r,
             Err(e) => {
-                // tracing::error!("Could not connect to server: {}", e);
+                // If we have an internal server, abort before dropping runtime
                 if let Some(jh) = jh_s {
                     jh.abort();
                 }
@@ -152,7 +152,6 @@ impl PipelineBuilder {
                 return Err(e);
             }
         };
-        // let reporter: Reporter = futures::executor::block_on(jh)??;
         tracing::debug!("after block");
 
         let exporter = Exporter::new(rt, reporter);
@@ -219,13 +218,20 @@ impl SpanExporter for Exporter {
         /*
          * Break down batch and send to studio
          */
-        for span in batch {
-            if span.name == "execute" {
+        for (index, span) in batch.into_iter().enumerate() {
+            tracing::debug!("index: {}, span: {:?}", index, span);
+            if span.name == "run_graphql_request" {
                 tracing::debug!("span: {:?}", span);
                 if let Some(q) = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
                 {
+                    let busy_v = span
+                        .end_time
+                        .duration_since(span.start_time)
+                        .unwrap()
+                        .as_micros() as i64;
+                    /*
                     let busy = span
                         .attributes
                         .get(&opentelemetry::Key::from_static_str("busy_ns"))
@@ -234,6 +240,7 @@ impl SpanExporter for Exporter {
                         Value::I64(v) => v / 1_000_000,
                         _ => panic!("value should be a signed integer"),
                     };
+                    */
                     tracing::debug!("query: {}", q);
                     tracing::debug!("busy: {}", busy_v);
 
