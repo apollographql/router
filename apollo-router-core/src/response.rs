@@ -40,7 +40,7 @@ pub struct Response {
     pub extensions: Object,
 }
 
-/// temporary structure to help deserializing errors
+// temporary structure to help deserializing errors
 #[derive(Deserialize)]
 struct ResponseMeta {
     #[serde(skip_serializing_if = "Option::is_none", default)]
