@@ -1,6 +1,6 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
-use crate::FederatedServerError;
+use crate::{ApolloRouterService, FederatedServerError};
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
-use tower::ServiceBuilder;
+use tower::{Service, ServiceBuilder};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level, Span};
@@ -64,9 +64,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(tracing::Dispatch::new)
                 .unwrap_or_default();
 
+            let router = ApolloRouterService::new(router);
+
             let routes = get_health_request()
                 .or(redirect_to_studio())
-                .or(get_graphql_request(Arc::clone(&router)))
+                .or(get_graphql_request(router.clone()))
                 .or(post_graphql_request(router))
                 .with(cors);
 
@@ -209,22 +211,27 @@ fn redirect_to_studio() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
 
             Ok::<_, warp::reject::Rejection>(reply)
         })
-        .boxed()
 }
 
-fn get_graphql_request<Router, PreparedQuery>(
-    router: Arc<Router>,
+fn get_graphql_request<Router>(
+    router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery + 'static,
+    Router: Service<
+            graphql::Request,
+            Response = graphql::Response,
+            Error = (),
+            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
+        > + Clone
+        + Send
+        + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::bytes())
         .and(warp::header::headers_cloned())
         .and_then(move |body: Bytes, header_map: HeaderMap| {
-            let router = Arc::clone(&router);
+            let router = router.clone();
             async move {
                 let reply: Box<dyn Reply> = if let Ok(request) = serde_json::from_slice(&body) {
                     run_graphql_request(router, request, header_map).await
@@ -238,7 +245,6 @@ where
                 Ok::<_, warp::reject::Rejection>(reply)
             }
         })
-        .boxed()
 }
 
 fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
@@ -255,35 +261,45 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         })
 }
 
-fn post_graphql_request<Router, PreparedQuery>(
-    router: Arc<Router>,
+fn post_graphql_request<Router>(
+    router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery + 'static,
+    Router: Service<
+            graphql::Request,
+            Response = graphql::Response,
+            Error = (),
+            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
+        > + Clone
+        + Send
+        + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let router = Arc::clone(&router);
+            let router = router.clone();
             async move {
                 let reply = run_graphql_request(router, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
-            .boxed()
         })
 }
 
-fn run_graphql_request<Router, PreparedQuery>(
-    router: Arc<Router>,
+fn run_graphql_request<Router>(
+    router: Router,
     request: graphql::Request,
     header_map: HeaderMap,
-) -> impl Future<Output = Box<dyn Reply>>
+) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery + 'static,
+    Router: Service<
+            graphql::Request,
+            Response = graphql::Response,
+            Error = (),
+            Future = Pin<Box<dyn Future<Output = Result<graphql::Response, ()>> + Send + 'static>>,
+        > + Send
+        + 'static,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -299,18 +315,14 @@ where
     }
 }
 
-async fn stream_request<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> String
+async fn stream_request<Router>(mut router: Router, request: graphql::Request) -> String
 where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send,
 {
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
-        Err(response) => response,
-    };
+    let response = router
+        .call(request)
+        .await
+        .expect("the router always returns a Response");
 
     let span = Span::current();
     tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {

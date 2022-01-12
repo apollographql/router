@@ -144,12 +144,13 @@ impl PreparedQuery for ApolloPreparedQuery {
     }
 }
 
-//#[derive(Clone)]
 pub struct ApolloRouterService<Router, PreparedQuery> {
     inner: Arc<Router>,
     _phantom: PhantomData<PreparedQuery>,
 }
 
+// we cannot derive Clone directly because that would require the Router and
+// PreparedQuery types to be Clone
 impl<Router, PreparedQuery> Clone for ApolloRouterService<Router, PreparedQuery> {
     fn clone(&self) -> Self {
         Self {
@@ -158,6 +159,11 @@ impl<Router, PreparedQuery> Clone for ApolloRouterService<Router, PreparedQuery>
         }
     }
 }
+
+//Sync is not derived for ApolloRouterService due to the PhantomData of PreparedQuery
+// but that type does not actually affect the struct itself, it is only generated from
+// inside Service::call
+unsafe impl<Router, PreparedQuery> Sync for ApolloRouterService<Router, PreparedQuery> {}
 
 impl<R, P> ApolloRouterService<R, P>
 where
@@ -181,7 +187,8 @@ impl<
 
     type Error = ();
 
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(
         &mut self,
@@ -200,15 +207,4 @@ impl<
             }
         })
     }
-}
-
-fn test_clone<R, P>(router: Arc<R>) -> Pin<Box<dyn Future<Output = ()> + Send>>
-where
-    R: Router<P> + 'static,
-    P: PreparedQuery + 'static,
-{
-    Box::pin(async move {
-        let service = ApolloRouterService::new(router);
-        let other = service.clone();
-    })
 }
