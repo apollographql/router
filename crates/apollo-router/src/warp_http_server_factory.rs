@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
+use crate::http_server_factory::{AnyListener, HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
@@ -11,6 +11,7 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
+use tokio_util::either::Either;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -39,7 +40,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
-        listener: Option<Box<dyn Listener>>,
+        listener: Option<AnyListener>,
     ) -> future::BoxFuture<'static, Result<HttpServerHandle, FederatedServerError>>
     where
         F: graphql::Fetcher + 'static,
@@ -68,16 +69,16 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listener
             } else {
                 match listen_address {
-                    ListenAddr::SocketAddr(addr) => Box::new(
+                    ListenAddr::SocketAddr(addr) => AnyListener::Left(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
-                    ) as _,
+                    ),
                     #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => Box::new(
+                    ListenAddr::UnixSocket(path) => AnyListener::Right(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
-                    ) as _,
+                    ),
                 }
             };
             let actual_listen_address = tcp_listener
@@ -111,12 +112,21 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // more file descriptors, network interface is down...)
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
-                                let (tcp_stream, _) = res.unwrap();
-                                tcp_stream.set_nodelay(true).expect("this should not fail unless the socket is invalid");
+                                let (stream, _) = res.unwrap();
+                                match stream {
+                                    Either::Left(ref stream) => {
+                                        stream
+                                            .set_nodelay(true)
+                                            .expect(
+                                                "this should not fail unless the socket is invalid",
+                                            );
+                                    }
+                                    Either::Right(_) => {}
+                                }
 
                                 let connection = Http::new()
                                     .http1_keep_alive(true)
-                                    .serve_connection(tcp_stream, svc);
+                                    .serve_connection(stream, svc);
 
                                 tokio::pin!(connection);
                                 tokio::select! {

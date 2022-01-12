@@ -7,10 +7,9 @@ use futures::prelude::*;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
-#[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
+use tokio_util::either::Either;
 
 /// Factory for creating the http server component.
 ///
@@ -22,7 +21,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         graph: Arc<F>,
         configuration: Arc<Configuration>,
-        listener: Option<Box<dyn Listener>>,
+        listener: Option<AnyListener>,
     ) -> future::BoxFuture<'static, Result<HttpServerHandle, FederatedServerError>>
     where
         F: graphql::Fetcher + 'static;
@@ -40,19 +39,19 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: future::BoxFuture<'static, Result<Box<dyn Listener>, FederatedServerError>>,
+    server_future: future::BoxFuture<'static, Result<AnyListener, FederatedServerError>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
     #[allow(dead_code)]
-    listen_address: ListenAddr,
+    listen_address: AnyAddr,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: future::BoxFuture<'static, Result<Box<dyn Listener>, FederatedServerError>>,
-        listen_address: ListenAddr,
+        server_future: future::BoxFuture<'static, Result<AnyListener, FederatedServerError>>,
+        listen_address: AnyAddr,
     ) -> Self {
         Self {
             shutdown_sender,
@@ -70,8 +69,10 @@ impl HttpServerHandle {
         #[cfg(unix)]
         {
             let local_addr = listener.local_addr();
-            if let Ok(ListenAddr::UnixSocket(path)) = local_addr {
-                let _ = tokio::fs::remove_file(path).await;
+            if let Ok(AnyAddr::Right(unix_addr)) = local_addr {
+                if let Some(path) = unix_addr.as_pathname() {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
             }
         }
         Ok(())
@@ -100,7 +101,16 @@ impl HttpServerHandle {
         tracing::info!("previous server is closed");
 
         // we keep the TCP listener if it is compatible with the new configuration
-        let listener = if self.listen_address != configuration.server.listen {
+        let listener = match (&self.listen_address, &configuration.server.listen) {
+            (AnyAddr::Left(a), ListenAddr::SocketAddr(b)) if a == b => listener.ok(),
+            (AnyAddr::Right(a), ListenAddr::UnixSocket(b)) if a.as_pathname() == Some(b) => {
+                listener.ok()
+            }
+            _ => None,
+        };
+        // TODO log
+        /*
+            if self.listen_address != configuration.server.listen {
             None
         } else {
             match listener {
@@ -111,72 +121,145 @@ impl HttpServerHandle {
                 }
             }
         };
+        */
 
         let handle = factory
             .create(Arc::clone(&graph), Arc::clone(&configuration), listener)
             .await?;
-        tracing::debug!("Restarted on {}", handle.listen_address());
+        match handle.listen_address() {
+            AnyAddr::Left(tcp_addr) => {
+                tracing::debug!("Restarted on {}", tcp_addr)
+            }
+            AnyAddr::Right(unix_addr) => {
+                tracing::debug!("Restarted on {:?}", unix_addr)
+            }
+        }
 
         Ok(handle)
     }
 
-    pub(crate) fn listen_address(&self) -> &ListenAddr {
+    pub(crate) fn listen_address(&self) -> &AnyAddr {
         &self.listen_address
     }
 }
 
-pub(crate) trait Listener: Send + Unpin {
-    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>>;
-    fn local_addr(&self) -> io::Result<ListenAddr>;
+/// A trait for a listener: `TcpListener` and `UnixListener`.
+pub trait Listener: Send + Unpin {
+    /// The stream's type of this listener.
+    type Io: tokio::io::AsyncRead + tokio::io::AsyncWrite;
+    /// The socket address type of this listener.
+    type Addr;
+
+    /// Accepts a new incoming connection from this listener.
+    fn accept<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send + 'a>>;
+
+    /// Returns the local address that this listener is bound to.
+    fn local_addr(&self) -> io::Result<Self::Addr>;
 }
 
-impl Listener for TcpListener {
-    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>> {
-        self.accept()
-            .map(|res| {
-                let (stream, addr) = res?;
-                Ok((Box::new(stream) as Box<_>, addr.into()))
-            })
-            .boxed()
+impl Listener for tokio::net::TcpListener {
+    type Io = tokio::net::TcpStream;
+    type Addr = std::net::SocketAddr;
+
+    fn accept<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send + 'a>> {
+        let accept = self.accept();
+        Box::pin(async {
+            let (stream, addr) = accept.await?;
+            Ok((stream, addr.into()))
+        })
     }
-    fn local_addr(&self) -> io::Result<ListenAddr> {
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
         self.local_addr().map(Into::into)
     }
 }
 
-#[cfg(unix)]
-impl Listener for UnixListener {
-    fn accept(&self) -> future::BoxFuture<io::Result<(BoxAsyncReadWrite, ListenAddr)>> {
-        self.accept()
-            .map(|res| {
-                let (stream, addr) = res?;
-                Ok((Box::new(stream) as Box<_>, addr.into()))
-            })
-            .boxed()
+impl Listener for tokio::net::UnixListener {
+    type Io = tokio::net::UnixStream;
+    type Addr = tokio::net::unix::SocketAddr;
+
+    fn accept<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send + 'a>> {
+        let accept = self.accept();
+        Box::pin(async {
+            let (stream, addr) = accept.await?;
+            Ok((stream, addr.into()))
+        })
     }
-    fn local_addr(&self) -> io::Result<ListenAddr> {
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
         self.local_addr().map(Into::into)
     }
 }
 
-pub(crate) trait AsyncReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite {
-    fn set_nodelay(&self, nodelay: bool) -> io::Result<()>;
-}
+impl<L, R> Listener for Either<L, R>
+where
+    L: Listener,
+    R: Listener,
+{
+    type Io = Either<<L as Listener>::Io, <R as Listener>::Io>;
+    type Addr = Either<<L as Listener>::Addr, <R as Listener>::Addr>;
 
-pub(crate) type BoxAsyncReadWrite = Box<dyn AsyncReadWrite + Send + Unpin + 'static>;
+    fn accept<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send + 'a>> {
+        match self {
+            Either::Left(listener) => {
+                let fut = listener.accept();
+                Box::pin(async move {
+                    let (stream, addr) = fut.await?;
+                    Ok((Either::Left(stream), Either::Left(addr)))
+                })
+            }
+            Either::Right(listener) => {
+                let fut = listener.accept();
+                Box::pin(async move {
+                    let (stream, addr) = fut.await?;
+                    Ok((Either::Right(stream), Either::Right(addr)))
+                })
+            }
+        }
+    }
 
-impl AsyncReadWrite for TcpStream {
-    fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        self.set_nodelay(nodelay)
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        match self {
+            Either::Left(listener) => {
+                let addr = listener.local_addr()?;
+                Ok(Either::Left(addr))
+            }
+            Either::Right(listener) => {
+                let addr = listener.local_addr()?;
+                Ok(Either::Right(addr))
+            }
+        }
     }
 }
 
-#[cfg(unix)]
-impl AsyncReadWrite for UnixStream {
-    fn set_nodelay(&self, _nodelay: bool) -> io::Result<()> {
-        Ok(())
-    }
+pub(crate) type AnyListener = Either<tokio::net::TcpListener, tokio::net::UnixListener>;
+pub(crate) type AnyAddr = Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>;
+
+/*
+impl Listener for BoxedListener {
+    type Io = BoxedListenerStream;
 }
+*/
+
+/*
+pub trait ErasedListener {
+    /// Accepts a new incoming connection from this listener.
+    fn accept<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send + 'a>>;
+
+    /// Returns the local address that this listener is bound to.
+    fn local_addr(&self) -> io::Result<Self::Addr>;
+}
+*/
 
 #[cfg(test)]
 mod tests {

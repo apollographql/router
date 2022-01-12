@@ -450,7 +450,7 @@ enum Event {
 
 /// Public state that the client can be notified with via state listener
 /// This is useful for waiting until the server is actually serving requests.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum State {
     /// The server is starting up.
     Startup,
@@ -463,6 +463,19 @@ pub enum State {
 
     /// The server has errored.
     Errored,
+}
+
+// TODO make sure this is useful
+impl PartialEq for State {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Startup, Self::Startup) => true,
+            (Self::Running { .. }, Self::Running { .. }) => true,
+            (Self::Stopped, Self::Stopped) => true,
+            (Self::Errored, Self::Errored) => true,
+            _ => false,
+        }
+    }
 }
 
 /// A handle that allows the client to await for various server events.
@@ -480,7 +493,7 @@ impl FederatedServerHandle {
     /// This method can only be called once, and is not designed for use in dynamic configuration
     /// scenarios.
     ///
-    /// returns: Option<SocketAddr>
+    /// returns: Option<ListenAddr>
     pub async fn ready(&mut self) -> Option<ListenAddr> {
         self.state_receiver()
             .map(|state| {
@@ -490,7 +503,7 @@ impl FederatedServerHandle {
                     None
                 }
             })
-            .filter(|socket| future::ready(socket != &None))
+            .filter(|socket| future::ready(socket.is_some()))
             .map(|s| s.unwrap())
             .next()
             .boxed()

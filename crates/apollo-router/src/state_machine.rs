@@ -1,15 +1,16 @@
 use super::graph_factory::GraphFactory;
-use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use super::http_server_factory::{AnyAddr, HttpServerFactory, HttpServerHandle};
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ListenAddr};
 use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use tokio_util::either::Either;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -62,7 +63,12 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address().to_owned(),
+                address: match server_handle.listen_address() {
+                    Either::Left(socket_addr) => ListenAddr::SocketAddr(socket_addr.to_owned()),
+                    Either::Right(unix_addr) => {
+                        ListenAddr::UnixSocket(unix_addr.as_pathname().expect("todo").to_owned())
+                    }
+                },
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -337,7 +343,14 @@ where
                         .await
                     {
                         Ok(server_handle) => {
-                            tracing::debug!("Started on {}", server_handle.listen_address());
+                            match server_handle.listen_address() {
+                                AnyAddr::Left(tcp_addr) => {
+                                    tracing::debug!("Started on {}", tcp_addr)
+                                }
+                                AnyAddr::Right(unix_addr) => {
+                                    tracing::debug!("Started on {:?}", unix_addr)
+                                }
+                            }
                             Running {
                                 configuration,
                                 schema,
