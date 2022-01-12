@@ -116,6 +116,27 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
     }
 }
 
+struct Planner {
+    router: Arc<ApolloRouter>,
+}
+impl Service<Arc<Request>> for Planner {
+    type Response = ApolloPreparedQuery;
+
+    type Error = Response;
+
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Arc<Request>) -> Self::Future {
+        let router = self.router.clone();
+        Box::pin(async move { router.prepare_query(req).await })
+    }
+}
+
 // The default route used with [`ApolloRouter`], suitable for most use cases.
 #[derive(Debug)]
 pub struct ApolloPreparedQuery {
@@ -192,13 +213,10 @@ impl<
 
     type Error = ();
 
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    /*type Future = ApolloRouterServiceFuture<
+    type Future = ApolloRouterServiceFuture<
         Pin<Box<dyn Future<Output = Result<PreparedQuery, Response>> + Send>>,
         PreparedQuery,
-    >;*/
+    >;
 
     fn poll_ready(
         &mut self,
@@ -211,23 +229,16 @@ impl<
         let router = self.inner.clone();
 
         let req = Arc::new(req);
-        /*let r2 = r.clone();
-        let future = router.prepare_query(r);
+        let r2 = req.clone();
+        let future = Box::pin(async move { router.prepare_query(req).await });
         ApolloRouterServiceFuture {
             state: State::Prepare { req: r2, future },
-        }*/
-
-        Box::pin(async move {
-            match router.prepare_query(req.clone()).await {
-                Ok(route) => Ok(route.execute(req).await),
-                Err(response) => Ok(response),
-            }
-        })
+        }
     }
 }
 
 #[pin_project::pin_project]
-struct ApolloRouterServiceFuture<F, P>
+pub struct ApolloRouterServiceFuture<F, P>
 where
     F: Future<Output = Result<P, Response>> + Send,
     P: PreparedQuery + Send + 'static,
