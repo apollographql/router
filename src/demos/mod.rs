@@ -1,4 +1,5 @@
 mod call_external_service;
+mod context_propagation;
 mod custom_logging;
 mod demo_template;
 mod header_manipulation;
