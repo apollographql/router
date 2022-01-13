@@ -122,11 +122,34 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 #[derive(Default)]
 pub struct ApolloRouterBuilder {
     extensions: Vec<Box<dyn Extension>>,
+    services: Vec<(
+        String,
+        BoxService<SubgraphRequest, RouterResponse, BoxError>,
+    )>,
 }
 
 impl ApolloRouterBuilder {
     pub fn with_extension<E: Extension + 'static>(mut self, extension: E) -> ApolloRouterBuilder {
         self.extensions.push(Box::new(extension));
+        self
+    }
+
+    pub fn with_service<
+        S: Service<
+                SubgraphRequest,
+                Response = RouterResponse,
+                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
+            > + Send
+            + 'static,
+    >(
+        mut self,
+        name: &str,
+        service: S,
+    ) -> ApolloRouterBuilder
+    where
+        <S as Service<SubgraphRequest>>::Future: Send,
+    {
+        self.services.push((name.to_string(), service.boxed()));
         self
     }
 
@@ -141,8 +164,9 @@ impl ApolloRouterBuilder {
         );
 
         //SubgraphService takes a SubgraphRequest and outputs a RouterResponse
-        let subgraphs = Self::subgraph_services()
+        let subgraphs = Self::default_services()
             .into_iter()
+            .chain(self.services.into_iter())
             .map(|(name, s)| {
                 (
                     name.clone(),
@@ -188,7 +212,7 @@ impl ApolloRouterBuilder {
         ApolloRouter { router_service }
     }
 
-    fn subgraph_services() -> HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>
+    fn default_services() -> HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>
     {
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let book_service = ServiceBuilder::new()
