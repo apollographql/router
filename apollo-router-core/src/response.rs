@@ -100,7 +100,7 @@ impl Response {
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
-        let has_next = extract_key_value_from_object!(object, "path", Value::Bool(b) => b)
+        let has_next = extract_key_value_from_object!(object, "has_next", Value::Bool(b) => b)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: err.to_string(),
