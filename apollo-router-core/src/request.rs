@@ -57,20 +57,12 @@ impl Request {
 
         let (variables, extensions) = match &mut value {
             Value::Object(object) => (
-                match object.remove("variables") {
-                    Some(Value::Object(o)) => o,
-                    None => Object::default(),
-                    _ => {
-                        return Err(serde::de::Error::custom("expected a JSON object"));
-                    }
-                },
-                match object.remove("extensions") {
-                    Some(Value::Object(o)) => o,
-                    None => Object::default(),
-                    _ => {
-                        return Err(serde::de::Error::custom("expected a JSON object"));
-                    }
-                },
+                extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
+                    .map_err(serde::de::Error::custom)?
+                    .unwrap_or_default(),
+                extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                    .map_err(serde::de::Error::custom)?
+                    .unwrap_or_default(),
             ),
             _ => {
                 return Err(serde::de::Error::custom("expected a JSON object"));

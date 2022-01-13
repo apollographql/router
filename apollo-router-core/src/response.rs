@@ -80,33 +80,22 @@ impl Response {
 
         let (data, errors, extensions) = match &mut value {
             Value::Object(object) => (
-                object.remove("data").unwrap_or_default(),
-                match object.remove("errors") {
-                    Some(Value::Array(v)) => {
-                        let res: Result<Vec<Error>, FetchError> = v
-                            .into_iter()
-                            .map(|v| Error::from_value(service_name, v))
-                            .collect();
-                        res?
-                    }
-                    None => Vec::new(),
-                    _ => {
-                        return Err(FetchError::SubrequestMalformedResponse {
-                            service: service_name.to_string(),
-                            reason: "expected a JSON array".to_string(),
-                        })
-                    }
-                },
-                match object.remove("extensions") {
-                    Some(Value::Object(o)) => o,
-                    None => Object::default(),
-                    _ => {
-                        return Err(FetchError::SubrequestMalformedResponse {
-                            service: service_name.to_string(),
-                            reason: "expected a JSON object".to_string(),
-                        })
-                    }
-                },
+                extract_key_value_from_object!(object, "data").unwrap_or_default(),
+                extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
+                    .map_err(|err| FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    })?
+                    .into_iter()
+                    .flatten()
+                    .map(|v| Error::from_value(service_name, v))
+                    .collect::<Result<Vec<Error>, FetchError>>()?,
+                extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                    .map_err(|err| FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_string(),
+                        reason: err.to_string(),
+                    })?
+                    .unwrap_or_default(),
             ),
             _ => {
                 return Err(FetchError::SubrequestMalformedResponse {
