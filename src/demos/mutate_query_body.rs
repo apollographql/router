@@ -1,11 +1,11 @@
-use crate::{graphql, ApolloRouter, Extension, RouterResponse, SubgraphRequest};
+use crate::{graphql, ApolloRouter, Plugin, RouterResponse, SubgraphRequest};
 use http::Request;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
 #[derive(Default)]
-struct MyExtension;
-impl Extension for MyExtension {
+struct MyPlugin;
+impl Plugin for MyPlugin {
     fn subgraph_service(
         &mut self,
         _name: &str,
@@ -25,7 +25,7 @@ impl Extension for MyExtension {
 #[tokio::test]
 async fn mutate_query_body() -> Result<(), BoxError> {
     let router = ApolloRouter::builder()
-        .with_extension(MyExtension::default())
+        .with_plugin(MyPlugin::default())
         .build();
 
     let response = router

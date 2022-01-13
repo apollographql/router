@@ -1,15 +1,15 @@
-use crate::{graphql, ApolloRouter, Extension};
+use crate::{graphql, ApolloRouter, Plugin};
 use http::Request;
 use tower::BoxError;
 
 #[derive(Default)]
-struct MyExtension;
-impl Extension for MyExtension {}
+struct MyPlugin;
+impl Plugin for MyPlugin {}
 
 #[tokio::test]
 async fn demo() -> Result<(), BoxError> {
     let router = ApolloRouter::builder()
-        .with_extension(MyExtension::default())
+        .with_plugin(MyPlugin::default())
         .build();
 
     let response = router

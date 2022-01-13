@@ -177,7 +177,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
 #[derive(Default)]
 pub struct ApolloRouterBuilder {
-    extensions: Vec<Box<dyn Extension>>,
+    plugins: Vec<Box<dyn Plugin>>,
     services: Vec<(
         String,
         BoxService<SubgraphRequest, RouterResponse, BoxError>,
@@ -185,8 +185,8 @@ pub struct ApolloRouterBuilder {
 }
 
 impl ApolloRouterBuilder {
-    pub fn with_extension<E: Extension + 'static>(mut self, extension: E) -> ApolloRouterBuilder {
-        self.extensions.push(Box::new(extension));
+    pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> ApolloRouterBuilder {
+        self.plugins.push(Box::new(plugin));
         self
     }
 
@@ -212,7 +212,7 @@ impl ApolloRouterBuilder {
     pub fn build(mut self) -> ApolloRouter {
         //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let query_planner_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
-            self.extensions
+            self.plugins
                 .iter_mut()
                 .fold(QueryPlannerService::default().boxed(), |acc, e| {
                     e.query_planning_service(acc)
@@ -227,7 +227,7 @@ impl ApolloRouterBuilder {
                 (
                     name.clone(),
                     ServiceBuilder::new().boxed_clone().buffer(1000).service(
-                        self.extensions
+                        self.plugins
                             .iter_mut()
                             .fold(s, |acc, e| e.subgraph_service(&name, acc)),
                     ),
@@ -237,7 +237,7 @@ impl ApolloRouterBuilder {
 
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let execution_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
-            self.extensions.iter_mut().fold(
+            self.plugins.iter_mut().fold(
                 ExecutionService::builder()
                     .subgraph_services(subgraphs)
                     .build()
@@ -248,7 +248,7 @@ impl ApolloRouterBuilder {
 
         //Router service takes a graphql::Request and outputs a graphql::Response
         let router_service = ServiceBuilder::new().boxed_clone().buffer(1000).service(
-            self.extensions
+            self.plugins
                 .iter_mut()
                 .fold(
                     RouterService::builder()
@@ -325,7 +325,7 @@ impl ApolloRouter {
     }
 }
 
-pub trait Extension {
+pub trait Plugin {
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,

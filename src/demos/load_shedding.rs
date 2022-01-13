@@ -4,11 +4,11 @@ use std::time::Duration;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
-use crate::{graphql, ApolloRouter, Extension, RouterResponse, SubgraphRequest};
+use crate::{graphql, ApolloRouter, Plugin, RouterResponse, SubgraphRequest};
 
 #[derive(Default)]
-struct MyExtension;
-impl Extension for MyExtension {
+struct MyPlugin;
+impl Plugin for MyPlugin {
     fn subgraph_service(
         &mut self,
         name: &str,
@@ -30,7 +30,7 @@ impl Extension for MyExtension {
 #[tokio::test]
 async fn load_shedding() -> Result<(), BoxError> {
     let router = ApolloRouter::builder()
-        .with_extension(MyExtension::default())
+        .with_plugin(MyPlugin::default())
         .build();
 
     let response = router
