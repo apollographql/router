@@ -1,6 +1,5 @@
 use crate::apollo_telemetry::new_pipeline;
 use std::sync::Arc;
-use std::time::Duration;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};
 use std::str::FromStr;
@@ -31,22 +30,7 @@ pub(crate) fn try_initialize_subscriber(
         .finish();
 
     tracing::info!("config: {:?}", config.studio);
-    // Add studio agent as an OT pipeline
-    let tracer = match new_pipeline()
-        .with_studio_config(&config.studio)
-        // .with_reporter(XXXWRITETHISCODEXXX())
-        .install_simple()
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("error installing studio telemetry: {}", e);
-            std::thread::sleep(Duration::from_secs(5));
-            return Err(Box::new(e));
-        }
-    };
-    let agent = tracing_opentelemetry::layer().with_tracer(tracer);
-    tracing::info!("Adding agent telemetry");
-    let base_layer = subscriber.with(agent);
+    let studio_config = &config.studio;
 
     match config.opentelemetry.as_ref() {
         Some(OpenTelemetry::Jaeger(config)) => {
@@ -83,7 +67,22 @@ pub(crate) fn try_initialize_subscriber(
             if let Some(trace_config) = &config.trace_config {
                 builder = builder.with_config(trace_config.trace_config());
             }
-            let provider = builder.with_span_processor(batch).build();
+            // Add an apollo exporter into the mix
+            let apollo_exporter = match new_pipeline()
+                .with_studio_config(studio_config)
+                .get_exporter()
+            {
+                Ok(x) => x,
+                Err(e) => {
+                    tracing::error!("error installing studio telemetry: {}", e);
+                    return Err(Box::new(e));
+                }
+            };
+            let provider = builder
+                .with_span_processor(batch)
+                .with_simple_exporter(apollo_exporter)
+                // .with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
+                .build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
             let _ = opentelemetry::global::set_tracer_provider(provider);
@@ -92,7 +91,7 @@ pub(crate) fn try_initialize_subscriber(
 
             opentelemetry::global::set_error_handler(handle_error)?;
 
-            Ok(Arc::new(base_layer.with(telemetry)))
+            Ok(Arc::new(subscriber.with(telemetry)))
         }
         #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
@@ -103,9 +102,25 @@ pub(crate) fn try_initialize_subscriber(
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
             opentelemetry::global::set_error_handler(handle_error)?;
-            Ok(Arc::new(base_layer.with(telemetry)))
+            Ok(Arc::new(subscriber.with(telemetry)))
         }
-        None => Ok(Arc::new(base_layer)),
+        None => {
+            // Add studio agent as an OT pipeline
+            let tracer = match new_pipeline()
+                .with_studio_config(studio_config)
+                .install_simple()
+                // .install_batch()
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!("error installing studio telemetry: {}", e);
+                    return Err(Box::new(e));
+                }
+            };
+            let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+            tracing::info!("Adding agent telemetry");
+            Ok(Arc::new(subscriber.with(agent)))
+        }
     }
 }
 

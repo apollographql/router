@@ -14,7 +14,7 @@ use tokio::sync::Notify;
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Level, Span};
+use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -276,7 +276,6 @@ where
         })
 }
 
-#[tracing::instrument(skip_all, fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()), client_name, client_version), level = "debug")]
 fn run_graphql_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
@@ -285,6 +284,28 @@ fn run_graphql_request<Router, PreparedQuery>(
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery + 'static,
+{
+    // retrieve and reuse the potential trace id from the caller
+    opentelemetry::global::get_text_map_propagator(|injector| {
+        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
+    });
+
+    async move {
+        let response = stream_request(router, request, header_map).await;
+
+        Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
+    }
+}
+
+#[tracing::instrument(skip_all, name = "graphql_request", fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()), client_name, client_version), level = "info")]
+async fn stream_request<Router, PreparedQuery>(
+    router: Arc<Router>,
+    request: graphql::Request,
+    header_map: HeaderMap,
+) -> String
+where
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery,
 {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
@@ -298,28 +319,6 @@ where
         );
     }
 
-    // retrieve and reuse the potential trace id from the caller
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
-    });
-
-    async move {
-        let response = stream_request(router, request)
-            .instrument(tracing::info_span!("graphql_request"))
-            .await;
-
-        Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
-    }
-}
-
-async fn stream_request<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> String
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
     let response = match router.prepare_query(&request).await {
         Ok(route) => route.execute(Arc::new(request)).await,
         Err(response) => response,

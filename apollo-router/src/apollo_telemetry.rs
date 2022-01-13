@@ -29,7 +29,9 @@
 use apollo_parser::{ast, Parser};
 use async_trait::async_trait;
 use opentelemetry::{
-    global, sdk,
+    global,
+    runtime::Tokio,
+    sdk,
     sdk::export::{
         trace::{ExportResult, SpanData, SpanExporter},
         ExportError,
@@ -77,14 +79,48 @@ impl PipelineBuilder {
     }
 
     /// Assign studio reporting configuration
-    #[allow(dead_code)]
     pub fn with_studio_config(mut self, config: &Option<StudioUsage>) -> Self {
         self.studio_config = config.clone();
         self
     }
 
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
+    #[allow(dead_code)]
+    pub fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
+        let exporter = self.get_exporter()?;
+
+        let mut provider_builder =
+            sdk::trace::TracerProvider::builder().with_batch_exporter(exporter, Tokio);
+        if let Some(config) = self.trace_config.take() {
+            provider_builder = provider_builder.with_config(config);
+        }
+        let provider = provider_builder.build();
+
+        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
+        let _prev_global_provider = global::set_tracer_provider(provider);
+
+        Ok(tracer)
+    }
+
+    /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
+        let exporter = self.get_exporter()?;
+
+        let mut provider_builder =
+            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
+        if let Some(config) = self.trace_config.take() {
+            provider_builder = provider_builder.with_config(config);
+        }
+        let provider = provider_builder.build();
+
+        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
+        let _prev_global_provider = global::set_tracer_provider(provider);
+
+        Ok(tracer)
+    }
+
+    /// Do some stuff and get an exporter
+    pub fn get_exporter(&self) -> Result<Exporter, ApolloError> {
         // XXX Trying to avoid overhead of spawning another runtime, however
         // if I don't spawn a runtime this doesn't work. It just blocks when
         // I call block_on() below. Also: cleaning up the spawned server might
@@ -107,7 +143,10 @@ impl PipelineBuilder {
             }
         };
 
-        let (collector, external_agent) = match self.studio_config {
+        // Tie tokio::spawn to the executor we just found
+        let _guard = hdl.enter();
+
+        let (collector, external_agent) = match self.studio_config.clone() {
             Some(cfg) => (cfg.collector, cfg.external_agent),
             None => ("https://127.0.0.1:50051".to_string(), false),
         };
@@ -119,23 +158,33 @@ impl PipelineBuilder {
         if !external_agent {
             tracing::debug!("spawning server");
             jh_s = Some(hdl.spawn(async {
-                // XXX Hard-Code, spawn a server and expect it to succeed
+                tracing::info!("spawning an internal report server");
+                // Spawn a server to relay statistics
+                let addr = match "0.0.0.0:50051".parse() {
+                    Ok(a) => a,
+                    Err(e) => {
+                        tracing::error!("could not parse report server address: {}", e);
+                        return;
+                    }
+                };
 
-                let report_server =
-                    ReportServer::new("0.0.0.0:50051".parse().expect("parsing server address"));
-                report_server.serve().await.expect("serving reports");
+                let report_server = ReportServer::new(addr);
+
+                if let Err(e) = report_server.serve().await {
+                    tracing::error!("report server did not terminate normally: {}", e);
+                }
             }));
         }
 
         tracing::debug!("spawning client");
-        let jh = hdl.spawn(async move {
-            Reporter::try_new(collector.clone())
+        let jh = async {
+            tracing::info!("TRYING...");
+            Reporter::try_new(collector)
                 .await
                 .map_err::<ApolloError, _>(Into::into)
-        });
-
+        };
         tracing::debug!("about to block");
-        let reporter: Reporter = match futures::executor::block_on(jh).expect("join agent") {
+        let reporter: Reporter = match futures::executor::block_on(jh) {
             Ok(r) => r,
             Err(e) => {
                 // If we have an internal server, abort before dropping runtime
@@ -152,21 +201,10 @@ impl PipelineBuilder {
                 return Err(e);
             }
         };
+
         tracing::debug!("after block");
 
-        let exporter = Exporter::new(rt, reporter);
-
-        let mut provider_builder =
-            sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
-        if let Some(config) = self.trace_config.take() {
-            provider_builder = provider_builder.with_config(config);
-        }
-        let provider = provider_builder.build();
-
-        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
-        let _prev_global_provider = global::set_tracer_provider(provider);
-
-        Ok(tracer)
+        Ok(Exporter::new(rt, reporter))
     }
 }
 
@@ -219,8 +257,9 @@ impl SpanExporter for Exporter {
          * Break down batch and send to studio
          */
         for (index, span) in batch.into_iter().enumerate() {
-            tracing::debug!("index: {}, span: {:?}", index, span);
-            if span.name == "run_graphql_request" {
+            // tracing::debug!("index: {}, span: {:?}", index, span);
+            tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
+            if span.name == "graphql_request" {
                 tracing::debug!("span: {:?}", span);
                 if let Some(q) = span
                     .attributes
