@@ -1,9 +1,16 @@
 [package]
-name = "strawdog"
+name = "apollo_router_rs"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "apollo_router_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "apollo_router_bin"
+path = "src/bin/bin.rs"
 
 [dependencies]
 typed-builder = "0.9.1"

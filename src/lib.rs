@@ -20,6 +20,7 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
 
 mod demos;
+pub mod graphql;
 mod layers;
 mod services;
 
@@ -27,21 +28,6 @@ pub struct Schema;
 
 pub struct QueryPlan {
     service_name: String,
-}
-
-mod graphql {
-
-    #[derive(Debug)]
-    pub struct Request {
-        //Usual stuff here
-        pub body: String,
-    }
-
-    #[derive(Debug)]
-    pub struct Response {
-        //Usual stuff here
-        pub body: String,
-    }
 }
 
 #[derive(Default, Clone)]
@@ -134,7 +120,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 }
 
 #[derive(Default)]
-struct ApolloRouterBuilder {
+pub struct ApolloRouterBuilder {
     extensions: Vec<Box<dyn Extension>>,
 }
 
@@ -220,13 +206,13 @@ impl ApolloRouterBuilder {
     }
 }
 
-struct ApolloRouter {
+pub struct ApolloRouter {
     router_service:
         BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
 }
 
 impl ApolloRouter {
-    fn builder() -> ApolloRouterBuilder {
+    pub fn builder() -> ApolloRouterBuilder {
         ApolloRouterBuilder::default()
     }
 }
@@ -251,7 +237,7 @@ impl ApolloRouter {
     }
 }
 
-trait Extension {
+pub trait Extension {
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -280,29 +266,4 @@ trait Extension {
     ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
         service
     }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), BoxError> {
-    let router = ApolloRouter::builder().build();
-
-    let response = router
-        .call(
-            Request::builder()
-                .header("A", "HEADER_A")
-                .body(graphql::Request {
-                    body: "Hello1".to_string(),
-                })
-                .unwrap(),
-        )
-        .await?;
-    println!("{:?}", response);
-    let response = router
-        .call(Request::new(graphql::Request {
-            body: "Hello2".to_string(),
-        }))
-        .await?;
-    println!("{:?}", response);
-
-    Ok(())
 }

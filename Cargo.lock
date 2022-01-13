@@ -15,6 +15,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84450d0b4a8bd1ba4144ce8ce718fbc5d071358b1e5384bace6536b3d1f2d5b3"
 
 [[package]]
+name = "apollo_router_rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "http",
+ "inventory",
+ "lazy_static",
+ "maplit",
+ "opentelemetry",
+ "reqwest",
+ "tokio",
+ "tower",
+ "typed-builder",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1008,24 +1026,6 @@ checksum = "5dc90fe6c7be1a323296982db1836d1ea9e47b6839496dde9a541bc496df3516"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "strawdog"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "http",
- "inventory",
- "lazy_static",
- "maplit",
- "opentelemetry",
- "reqwest",
- "tokio",
- "tower",
- "typed-builder",
 ]
 
 [[package]]
