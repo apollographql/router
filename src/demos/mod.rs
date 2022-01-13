@@ -4,5 +4,6 @@ mod demo_template;
 mod header_manipulation;
 mod load_shedding;
 mod mutate_query_body;
+mod override_service_url;
 mod rate_limiting;
 mod timeouts;

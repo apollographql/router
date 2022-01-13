@@ -14,7 +14,7 @@ use crate::services::federation::{
 };
 use anyhow::Result;
 use http::header::{HeaderName, COOKIE};
-use http::{HeaderValue, Request, Response};
+use http::{HeaderValue, Request, Response, Uri};
 use tower::layer::util::Stack;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
@@ -77,6 +77,10 @@ pub struct PlannedRequest {
 
 pub struct SubgraphRequest {
     pub service_name: String,
+
+    //Set this to override the URL of the service
+    pub url_override: Option<Uri>,
+
     // The request to make downstream
     pub subgraph_request: Request<graphql::Request>,
 
@@ -268,12 +272,20 @@ impl ApolloRouterBuilder {
     {
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let book_service = ServiceBuilder::new()
-            .service(SubgraphService::builder().url("http://books").build())
+            .service(
+                SubgraphService::builder()
+                    .url(Uri::from_str("http://books").unwrap())
+                    .build(),
+            )
             .boxed();
 
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let author_service = ServiceBuilder::new()
-            .service(SubgraphService::builder().url("http://authors").build())
+            .service(
+                SubgraphService::builder()
+                    .url(Uri::from_str("http://authors").unwrap())
+                    .build(),
+            )
             .boxed();
         hashmap! {
         "books".to_string()=> book_service,

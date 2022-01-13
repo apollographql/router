@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 
-use http::{Request, Response};
+use http::{Request, Response, Uri};
 use tower::util::BoxCloneService;
 use tower::{BoxError, Service, ServiceExt};
 use typed_builder::TypedBuilder;
@@ -93,7 +93,7 @@ impl Service<RouterRequest> for RouterService {
 #[derive(TypedBuilder)]
 pub struct SubgraphService {
     #[builder(setter(into))]
-    url: String,
+    url: Uri,
 }
 
 impl Service<SubgraphRequest> for SubgraphService {
@@ -107,7 +107,7 @@ impl Service<SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let url = self.url.clone();
+        let url = request.url_override.unwrap_or(self.url.clone());
         let fut = async move {
             println!("Making request to {} {:?}", url, request.subgraph_request);
             Ok(RouterResponse {
@@ -143,6 +143,7 @@ impl ExecutionService {
     ) -> SubgraphRequest {
         SubgraphRequest {
             service_name: service_name.to_string(),
+            url_override: None,
             subgraph_request: Request::new(graphql::Request {
                 body: body.to_string(),
             }),
