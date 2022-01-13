@@ -1,6 +1,10 @@
+use std::pin::Pin;
+
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
+use futures::Future;
+use tower::Service;
 use tracing::Instrument;
 use url::Url;
 
@@ -35,16 +39,15 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    async fn request_stream(
-        &self,
-        request: graphql::Request,
+    fn create_request(&self, request: graphql::Request) -> reqwest_middleware::RequestBuilder {
+        self.http_client.post(self.url.clone()).json(&request)
+    }
+
+    async fn send_request(
+        service: &str,
+        req: reqwest_middleware::RequestBuilder,
     ) -> Result<bytes::Bytes, graphql::FetchError> {
-        // Perform the actual request and start streaming.
-        // assume for now that there will be only one response
-        let response = self
-            .http_client
-            .post(self.url.clone())
-            .json(&request)
+        let response = req
             .send()
             .instrument(tracing::trace_span!("http-subgraph-request"))
             .await
@@ -52,7 +55,7 @@ impl HttpSubgraphFetcher {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
                 graphql::FetchError::SubrequestHttpError {
-                    service: self.service.to_owned(),
+                    service: service.to_owned(),
                     reason: err.to_string(),
                 }
             })?;
@@ -65,10 +68,18 @@ impl HttpSubgraphFetcher {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
                 graphql::FetchError::SubrequestHttpError {
-                    service: self.service.to_owned(),
+                    service: service.to_owned(),
                     reason: err.to_string(),
                 }
             })
+    }
+
+    async fn request_stream(
+        &self,
+        request: graphql::Request,
+    ) -> Result<bytes::Bytes, graphql::FetchError> {
+        let req = self.create_request(request);
+        Self::send_request(&self.service, req).await
     }
 
     fn map_to_graphql(
@@ -96,6 +107,37 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
         let service_name = self.service.to_string();
         let response = self.request_stream(request).await?;
         Self::map_to_graphql(service_name, response)
+    }
+}
+
+impl Service<graphql::Request> for HttpSubgraphFetcher {
+    type Response = graphql::Response;
+
+    type Error = graphql::FetchError;
+
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: graphql::Request) -> Self::Future {
+        let service_name = self.service.to_string();
+
+        // separate the request creation to avoid holding a reference to the fetcher
+        // in the future returned by the service
+        let req = self.create_request(request);
+
+        Box::pin(async move {
+            let response = Self::send_request(&service_name, req).await;
+            match response {
+                Err(e) => Err(e),
+                Ok(response) => Self::map_to_graphql(service_name, response),
+            }
+        })
     }
 }
 
