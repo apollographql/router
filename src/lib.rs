@@ -8,13 +8,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::layers::cache::CacheLayer;
-use crate::layers::header_propagation::PropagateHeaderLayer;
+use crate::layers::header_manipulation::{HeaderManipulationLayer, Operation};
 use crate::services::federation::{
     ExecutionService, QueryPlannerService, RouterService, SubgraphService,
 };
 use anyhow::Result;
 use http::header::{HeaderName, COOKIE};
-use http::{Request, Response};
+use http::{HeaderValue, Request, Response};
 use tower::layer::util::Stack;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
@@ -95,8 +95,23 @@ trait ServiceBuilderExt<L> {
     fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>>;
 
     //This will only compile for Endpoint services
-    fn propagate_header(self, header_name: &str) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
-    fn propagate_cookies(self) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>>;
+    fn propagate_all_headers(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn propagate_header(
+        self,
+        header_name: &str,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn propagate_or_default_header(
+        self,
+        header_name: &str,
+        value: HeaderValue,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn remove_header(self, header_name: &str) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn insert_header(
+        self,
+        header_name: &str,
+        value: HeaderValue,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
 }
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
@@ -105,17 +120,54 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.layer(CacheLayer {})
     }
 
+    fn propagate_all_headers(
+        self: ServiceBuilder<L>,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::PropagateAll))
+    }
+
     fn propagate_header(
         self: ServiceBuilder<L>,
         header_name: &str,
-    ) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
-        self.layer(PropagateHeaderLayer::new(
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::Propagate(
             HeaderName::from_str(header_name).unwrap(),
-        ))
+        )))
     }
 
-    fn propagate_cookies(self) -> ServiceBuilder<Stack<PropagateHeaderLayer, L>> {
-        self.layer(PropagateHeaderLayer::new(COOKIE))
+    fn propagate_or_default_header(
+        self: ServiceBuilder<L>,
+        header_name: &str,
+        default_header_value: HeaderValue,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::PropagateOrDefault(
+            HeaderName::from_str(header_name).unwrap(),
+            default_header_value,
+        )))
+    }
+
+    fn insert_header(
+        self: ServiceBuilder<L>,
+        header_name: &str,
+        header_value: HeaderValue,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::Insert(
+            HeaderName::from_str(header_name).unwrap(),
+            header_value,
+        )))
+    }
+
+    fn remove_header(
+        self: ServiceBuilder<L>,
+        header_name: &str,
+    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::Remove(
+            HeaderName::from_str(header_name).unwrap(),
+        )))
+    }
+
+    fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
+        self.layer(HeaderManipulationLayer::new(Operation::Propagate(COOKIE)))
     }
 }
 
