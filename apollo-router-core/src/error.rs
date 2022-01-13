@@ -129,44 +129,43 @@ pub struct Error {
     pub extensions: Object,
 }
 
-// temporary structure to help deserializing errors
-#[derive(Deserialize)]
-struct ErrorMeta {
-    message: String,
-    locations: Vec<Location>,
-    path: Option<Path>,
-}
-
 impl Error {
-    pub fn from_value(service_name: &str, mut value: Value) -> Result<Error, FetchError> {
-        // get the extensions object manually because from_value would end up reallocating all the strings
-        let extensions = if let Value::Object(object) = &mut value {
-            match object.remove("extensions") {
-                Some(Value::Object(o)) => o,
-                _ => {
-                    return Err(FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_string(),
-                        reason: "missing extensions field".to_string(),
-                    })
-                }
-            }
-        } else {
-            return Err(FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: "expected a JSON object".to_string(),
-            });
-        };
-
-        let ErrorMeta {
-            message,
-            locations,
-            path,
-        } = serde_json_bytes::from_value(value).map_err(|error| {
-            FetchError::SubrequestMalformedResponse {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
-            }
-        })?;
+            })?;
+
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let locations = extract_key_value_from_object!(object, "locations")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .unwrap_or_default();
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
 
         Ok(Error {
             message,
