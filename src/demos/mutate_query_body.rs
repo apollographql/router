@@ -1,7 +1,4 @@
-use crate::{
-    graphql, ApolloRouter, Extension, PlannedRequest, RouterRequest, RouterResponse,
-    SubgraphRequest,
-};
+use crate::{graphql, ApolloRouter, Extension, RouterResponse, SubgraphRequest};
 use http::Request;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};

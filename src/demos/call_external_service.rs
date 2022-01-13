@@ -1,9 +1,8 @@
 use http::{Request, Response};
 
-use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::{BoxError, ServiceBuilder};
 
-use crate::{graphql, ApolloRouter, Extension, RouterResponse, SubgraphRequest};
+use crate::{graphql, ApolloRouter, RouterResponse, SubgraphRequest};
 
 #[tokio::test]
 async fn call_external_service() -> Result<(), BoxError> {
