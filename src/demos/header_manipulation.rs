@@ -20,13 +20,8 @@ impl Extension for MyExtension {
             return ServiceBuilder::new()
                 .propagate_header("A") //Propagate using our helper
                 .propagate_or_default_header("B", HeaderValue::from(2))
-                //Some other operations that you can do on headers easily
-                // .propagate_all_headers()
-                // .remove_header("C")
-                // .insert_header("D", HeaderValue::from(5))
-                // .propagate_cookies() //Propagate using our helper
                 .map_request(|mut r: SubgraphRequest| {
-                    //Demonstrate some manual propagation that could contain fancy logic
+                    // Demonstrate some manual propagation that could contain fancy logic
                     if let Some(value) = r
                         .request
                         .headers()
@@ -38,8 +33,18 @@ impl Extension for MyExtension {
                 })
                 .service(service)
                 .boxed();
+        } else if name == "authors" {
+            return ServiceBuilder::new()
+                // Some other operations that you can do on headers easily
+                .propagate_all_headers()
+                .remove_header("C")
+                .insert_header("D", HeaderValue::from(5))
+                .propagate_cookies() //Propagate using our helper
+                .service(service)
+                .boxed();
         }
-        //If the service isn't books then just do the default.
+
+        // If it's any other service just go for the defaults
         service
     }
 }
