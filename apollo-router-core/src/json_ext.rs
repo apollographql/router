@@ -27,6 +27,18 @@ macro_rules! extract_key_value_from_object {
     }};
 }
 
+/// NOT PUBLIC API
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ensure_object {
+    ($value:expr) => {{
+        match $value {
+            Value::Object(o) => Ok(o),
+            _ => Err("invalid type, expected an object"),
+        }
+    }};
+}
+
 #[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
 pub trait ValueExt {

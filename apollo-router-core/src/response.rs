@@ -40,19 +40,6 @@ pub struct Response {
     pub extensions: Object,
 }
 
-// temporary structure to help deserializing errors
-#[derive(Deserialize)]
-struct ResponseMeta {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    label: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    path: Option<Path>,
-
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    has_next: Option<bool>,
-}
-
 fn skip_data_if(value: &Value) -> bool {
     match value {
         Value::Object(o) => o.is_empty(),
@@ -72,49 +59,52 @@ impl Response {
     }
 
     pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
-        let mut value =
+        let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
-
-        let (data, errors, extensions) = match &mut value {
-            Value::Object(object) => (
-                extract_key_value_from_object!(object, "data").unwrap_or_default(),
-                extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
-                    .map_err(|err| FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    })?
-                    .into_iter()
-                    .flatten()
-                    .map(|v| Error::from_value(service_name, v))
-                    .collect::<Result<Vec<Error>, FetchError>>()?,
-                extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                    .map_err(|err| FetchError::SubrequestMalformedResponse {
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    })?
-                    .unwrap_or_default(),
-            ),
-            _ => {
-                return Err(FetchError::SubrequestMalformedResponse {
-                    service: service_name.to_string(),
-                    reason: "expected a JSON object".to_string(),
-                })
-            }
-        };
-
-        let ResponseMeta {
-            label,
-            path,
-            has_next,
-        } = serde_json_bytes::from_value(value).map_err(|error| {
-            FetchError::SubrequestMalformedResponse {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: error.to_string(),
-            }
-        })?;
+            })?;
+
+        let data = extract_key_value_from_object!(object, "data").unwrap_or_default();
+        let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .into_iter()
+            .flatten()
+            .map(|v| Error::from_value(service_name, v))
+            .collect::<Result<Vec<Error>, FetchError>>()?;
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string());
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+        let has_next = extract_key_value_from_object!(object, "path", Value::Bool(b) => b)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
 
         Ok(Response {
             label,

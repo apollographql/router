@@ -45,34 +45,26 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
-#[derive(Deserialize)]
-struct RequestMeta {
-    query: String,
-    operation_name: Option<String>,
-}
-
 impl Request {
     pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {
-        let mut value = Value::from_bytes(b)?;
+        let value = Value::from_bytes(b)?;
+        let mut object = ensure_object!(value).map_err(serde::de::Error::custom)?;
 
-        let (variables, extensions) = match &mut value {
-            Value::Object(object) => (
-                extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
-                    .map_err(serde::de::Error::custom)?
-                    .unwrap_or_default(),
-                extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
-                    .map_err(serde::de::Error::custom)?
-                    .unwrap_or_default(),
-            ),
-            _ => {
-                return Err(serde::de::Error::custom("expected a JSON object"));
-            }
-        };
-
-        let RequestMeta {
-            query,
-            operation_name,
-        } = serde_json_bytes::from_value(value)?;
+        let variables = extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(serde::de::Error::custom)?
+                .unwrap_or_default();
+        let query = extract_key_value_from_object!(object, "query", Value::String(s) => s)
+            .map_err(serde::de::Error::custom)?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let operation_name =
+            extract_key_value_from_object!(object, "operation_name", Value::String(s) => s)
+                .map_err(serde::de::Error::custom)?
+                .map(|s| s.as_str().to_string());
 
         Ok(Request {
             query,
