@@ -216,11 +216,11 @@ fn get_graphql_request<Router>(
     router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<Arc<graphql::Request>, Response = graphql::Response, Error = ()>
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
         + Clone
         + Send
         + 'static,
-    <Router as Service<Arc<graphql::Request>>>::Future: Send + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -261,11 +261,11 @@ fn post_graphql_request<Router>(
     router: Router,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<Arc<graphql::Request>, Response = graphql::Response, Error = ()>
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
         + Clone
         + Send
         + 'static,
-    <Router as Service<Arc<graphql::Request>>>::Future: Send + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -274,7 +274,7 @@ where
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
             let router = router.clone();
             async move {
-                let reply = run_graphql_request(router, Arc::new(request), header_map).await;
+                let reply = run_graphql_request(router, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
         })
@@ -282,13 +282,12 @@ where
 
 fn run_graphql_request<Router>(
     router: Router,
-    request: Arc<graphql::Request>,
+    request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    Router:
-        Service<Arc<graphql::Request>, Response = graphql::Response, Error = ()> + Send + 'static,
-    <Router as Service<Arc<graphql::Request>>>::Future: Send + 'static,
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send + 'static,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -304,10 +303,10 @@ where
     }
 }
 
-async fn stream_request<Router>(mut router: Router, request: Arc<graphql::Request>) -> String
+async fn stream_request<Router>(mut router: Router, request: graphql::Request) -> String
 where
-    Router: Service<Arc<graphql::Request>, Response = graphql::Response, Error = ()> + Send,
-    <Router as Service<Arc<graphql::Request>>>::Future: Send + 'static,
+    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send,
+    <Router as Service<graphql::Request>>::Future: Send + 'static,
 {
     let response = router
         .call(request)

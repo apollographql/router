@@ -23,7 +23,7 @@ impl<R> RouterService<R> {
     }
 }
 
-impl<R> tower::Service<Arc<Request>> for RouterService<R>
+impl<R> tower::Service<Request> for RouterService<R>
 where
     R: Router + 'static,
 {
@@ -36,11 +36,11 @@ where
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Arc<Request>) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
         let router = self.router.clone();
         Box::pin(async move {
-            match router.prepare_query(req.clone()).await {
-                Ok(route) => Ok(route.execute(req).await),
+            match router.prepare_query(&request).await {
+                Ok(route) => Ok(route.execute(Arc::new(request)).await),
                 Err(response) => Ok(response),
             }
         })
@@ -54,7 +54,7 @@ where
 {
     type PreparedQuery = R::PreparedQuery;
 
-    async fn prepare_query(&self, request: Arc<Request>) -> Result<Self::PreparedQuery, Response> {
+    async fn prepare_query(&self, request: &Request) -> Result<Self::PreparedQuery, Response> {
         self.router.prepare_query(request).await
     }
 }

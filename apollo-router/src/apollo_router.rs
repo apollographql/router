@@ -75,7 +75,7 @@ impl Router for ApolloRouter {
     type PreparedQuery = ApolloPreparedQuery;
 
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn prepare_query(&self, request: Arc<Request>) -> Result<ApolloPreparedQuery, Response> {
+    async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response);
         }
