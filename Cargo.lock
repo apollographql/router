@@ -100,7 +100,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
- "pin-project",
  "reqwest",
  "reqwest-middleware",
  "reqwest-tracing",
