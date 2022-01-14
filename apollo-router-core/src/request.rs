@@ -79,7 +79,7 @@ impl Request {
 mod tests {
     use super::*;
     use serde_json::json;
-    use serde_json_bytes::bjson;
+    use serde_json_bytes::json as bjson;
     use test_log::test;
 
     #[test]

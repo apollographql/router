@@ -339,7 +339,7 @@ impl From<ast::OperationType> for OperationType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json_bytes::bjson;
+    use serde_json_bytes::json;
     use test_log::test;
 
     macro_rules! assert_eq_and_ordered {
@@ -378,7 +378,7 @@ mod tests {
                 alias_obj:baz_obj{bar}
                 alias_array:baz_array{bar}
             }",
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "stuff": {"bar": "2"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
@@ -389,7 +389,7 @@ mod tests {
                 "other": "13",
             }},
             None,
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "stuff": {
                     "bar": "2",
@@ -416,9 +416,9 @@ mod tests {
         assert_format_response!(
             "",
             "{... on Stuff { stuff{bar}}}",
-            bjson! {{"stuff": {"bar": "2"}}},
+            json! {{"stuff": {"bar": "2"}}},
             None,
-            bjson! {{
+            json! {{
                 "stuff": {
                     "bar": "2",
                 },
@@ -431,9 +431,9 @@ mod tests {
         assert_format_response!(
             "fragment baz on Baz {baz}",
             "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
-            bjson! {{"foo": "1", "bar": "2", "baz": "3"}},
+            json! {{"foo": "1", "bar": "2", "baz": "3"}},
             None,
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "bar": "2",
                 "baz": "3",
@@ -446,7 +446,7 @@ mod tests {
         assert_format_response!(
             "",
             "{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}",
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "stuff": {"baz": "2"},
                 "array": [
@@ -457,7 +457,7 @@ mod tests {
                 "other": "6",
             }},
             None,
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "stuff": {
                     "baz": "2",
@@ -476,7 +476,7 @@ mod tests {
     fn reformat_matching_operation() {
         let schema = "";
         let query = "query MyOperation { foo }";
-        let response = bjson! {{
+        let response = json! {{
             "foo": "1",
             "other": "2",
         }};
@@ -485,7 +485,7 @@ mod tests {
             query,
             response,
             Some("OtherOperation"),
-            bjson! {{
+            json! {{
                 "foo": "1",
                 "other": "2",
             }},
@@ -495,7 +495,7 @@ mod tests {
             query,
             response,
             Some("MyOperation"),
-            bjson! {{
+            json! {{
                 "foo": "1",
             }},
         );
@@ -533,85 +533,85 @@ mod tests {
 
     #[test]
     fn variable_validation() {
-        assert_validation!("", "query($foo:Boolean){x}", bjson!({}));
-        assert_validation_error!("", "query($foo:Boolean!){x}", bjson!({}));
-        assert_validation!("", "query($foo:Boolean!){x}", bjson!({"foo":true}));
-        assert_validation!("", "query($foo:Boolean!){x}", bjson!({"foo":"true"}));
-        assert_validation_error!("", "query($foo:Boolean!){x}", bjson!({"foo":"str"}));
-        assert_validation!("", "query($foo:Int){x}", bjson!({}));
-        assert_validation!("", "query($foo:Int){x}", bjson!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int){x}", bjson!({"foo":2.0}));
-        assert_validation_error!("", "query($foo:Int){x}", bjson!({"foo":"str"}));
-        assert_validation!("", "query($foo:Int){x}", bjson!({"foo":"2"}));
-        assert_validation_error!("", "query($foo:Int){x}", bjson!({"foo":true}));
-        assert_validation_error!("", "query($foo:Int){x}", bjson!({"foo":{}}));
+        assert_validation!("", "query($foo:Boolean){x}", json!({}));
+        assert_validation_error!("", "query($foo:Boolean!){x}", json!({}));
+        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":true}));
+        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":"true"}));
+        assert_validation_error!("", "query($foo:Boolean!){x}", json!({"foo":"str"}));
+        assert_validation!("", "query($foo:Int){x}", json!({}));
+        assert_validation!("", "query($foo:Int){x}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":2.0}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":"str"}));
+        assert_validation!("", "query($foo:Int){x}", json!({"foo":"2"}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":true}));
+        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":{}}));
         assert_validation_error!(
             "",
             "query($foo:Int){x}",
-            bjson!({ "foo": i32::MAX as i64 + 1 })
+            json!({ "foo": i32::MAX as i64 + 1 })
         );
         assert_validation_error!(
             "",
             "query($foo:Int){x}",
-            bjson!({ "foo": i32::MIN as i64 - 1 })
+            json!({ "foo": i32::MIN as i64 - 1 })
         );
-        assert_validation!("", "query($foo:Int){x}", bjson!({ "foo": i32::MAX }));
-        assert_validation!("", "query($foo:Int){x}", bjson!({ "foo": i32::MIN }));
-        assert_validation!("", "query($foo:ID){x}", bjson!({"foo": "1"}));
-        assert_validation!("", "query($foo:ID){x}", bjson!({"foo": 1}));
-        assert_validation_error!("", "query($foo:ID){x}", bjson!({"foo": true}));
-        assert_validation_error!("", "query($foo:ID){x}", bjson!({"foo": {}}));
-        assert_validation!("", "query($foo:String){x}", bjson!({"foo": "str"}));
-        assert_validation!("", "query($foo:Float){x}", bjson!({"foo":2.0}));
-        assert_validation!("", "query($foo:Float){x}", bjson!({"foo":"2.0"}));
-        assert_validation_error!("", "query($foo:Float){x}", bjson!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int!){x}", bjson!({}));
-        assert_validation!("", "query($foo:[Int]){x}", bjson!({}));
-        assert_validation_error!("", "query($foo:[Int]){x}", bjson!({"foo":1}));
-        assert_validation_error!("", "query($foo:[Int]){x}", bjson!({"foo":"str"}));
-        assert_validation_error!("", "query($foo:[Int]){x}", bjson!({"foo":{}}));
-        assert_validation_error!("", "query($foo:[Int]!){x}", bjson!({}));
-        assert_validation!("", "query($foo:[Int]!){x}", bjson!({"foo":[]}));
-        assert_validation!("", "query($foo:[Int]){x}", bjson!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int]){x}", bjson!({"foo":["f","o","o"]}));
-        assert_validation!("", "query($foo:[Int]){x}", bjson!({"foo":["1","2","3"]}));
-        assert_validation!("", "query($foo:[String]){x}", bjson!({"foo":["1","2","3"]}));
-        assert_validation_error!("", "query($foo:[String]){x}", bjson!({"foo":[1,2,3]}));
-        assert_validation!("", "query($foo:[Int!]){x}", bjson!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int!]){x}", bjson!({"foo":[1,null,3]}));
-        assert_validation!("", "query($foo:[Int]){x}", bjson!({"foo":[1,null,3]}));
-        assert_validation!("type Foo{}", "query($foo:Foo){x}", bjson!({}));
-        assert_validation!("type Foo{}", "query($foo:Foo){x}", bjson!({"foo":{}}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", bjson!({"foo":1}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", bjson!({"foo":"str"}));
-        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){x}", bjson!({"foo":{}}));
+        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MAX }));
+        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MIN }));
+        assert_validation!("", "query($foo:ID){x}", json!({"foo": "1"}));
+        assert_validation!("", "query($foo:ID){x}", json!({"foo": 1}));
+        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": true}));
+        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": {}}));
+        assert_validation!("", "query($foo:String){x}", json!({"foo": "str"}));
+        assert_validation!("", "query($foo:Float){x}", json!({"foo":2.0}));
+        assert_validation!("", "query($foo:Float){x}", json!({"foo":"2.0"}));
+        assert_validation_error!("", "query($foo:Float){x}", json!({"foo":2}));
+        assert_validation_error!("", "query($foo:Int!){x}", json!({}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":"str"}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":{}}));
+        assert_validation_error!("", "query($foo:[Int]!){x}", json!({}));
+        assert_validation!("", "query($foo:[Int]!){x}", json!({"foo":[]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
+        assert_validation!("", "query($foo:[String]){x}", json!({"foo":["1","2","3"]}));
+        assert_validation_error!("", "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
+        assert_validation!("", "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!("", "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({}));
+        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({"foo":{}}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":1}));
+        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":"str"}));
+        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){x}", json!({"foo":{}}));
         assert_validation!(
             "type Foo{x:Int!}",
             "query($foo:Foo){x}",
-            bjson!({"foo":{"x":1}})
+            json!({"foo":{"x":1}})
         );
         assert_validation!(
             "type Foo implements Bar interface Bar{x:Int!}",
             "query($foo:Foo){x}",
-            bjson!({"foo":{"x":1}}),
+            json!({"foo":{"x":1}}),
         );
         assert_validation_error!(
             "type Foo implements Bar interface Bar{x:Int!}",
             "query($foo:Foo){x}",
-            bjson!({"foo":{"x":"str"}}),
+            json!({"foo":{"x":"str"}}),
         );
         assert_validation_error!(
             "type Foo implements Bar interface Bar{x:Int!}",
             "query($foo:Foo){x}",
-            bjson!({"foo":{}}),
+            json!({"foo":{}}),
         );
-        assert_validation!("scalar Foo", "query($foo:Foo!){x}", bjson!({"foo":{}}));
-        assert_validation!("scalar Foo", "query($foo:Foo!){x}", bjson!({"foo":1}));
-        assert_validation_error!("scalar Foo", "query($foo:Foo!){x}", bjson!({}));
+        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":{}}));
+        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":1}));
+        assert_validation_error!("scalar Foo", "query($foo:Foo!){x}", json!({}));
         assert_validation!(
             "type Foo{bar:Bar!} type Bar{x:Int!}",
             "query($foo:Foo){x}",
-            bjson!({"foo":{"bar":{"x":1}}})
+            json!({"foo":{"bar":{"x":1}}})
         );
     }
 }

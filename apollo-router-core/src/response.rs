@@ -121,7 +121,7 @@ impl Response {
 mod tests {
     use super::*;
     use serde_json::json;
-    use serde_json_bytes::bjson;
+    use serde_json_bytes::json as bjson;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {

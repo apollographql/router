@@ -116,7 +116,7 @@ mod tests {
     use super::Selection;
     use super::*;
     use serde_json::json;
-    use serde_json_bytes::bjson;
+    use serde_json_bytes::json as bjson;
 
     fn select<'a>(
         response: &Response,

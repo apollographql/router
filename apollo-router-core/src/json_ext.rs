@@ -550,7 +550,7 @@ impl fmt::Display for Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json_bytes::bjson;
+    use serde_json_bytes::json;
 
     macro_rules! assert_is_subset {
         ($a:expr, $b:expr $(,)?) => {
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_get_at_path() {
-        let json = bjson!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
         let result = select_values(&path, &json).unwrap();
         assert_eq!(result, vec![&Value::Number(2.into())]);
@@ -580,15 +580,15 @@ mod tests {
 
     #[test]
     fn test_get_at_path_flatmap() {
-        let json = bjson!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
+        let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
         let result = select_values(&path, &json).unwrap();
-        assert_eq!(result, vec![&bjson!({"prop1":1}), &bjson!({"prop1":2})]);
+        assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
     }
 
     #[test]
     fn test_get_at_path_flatmap_nested() {
-        let json = bjson!({
+        let json = json!({
             "obj": {
                 "arr": [
                     {
@@ -611,92 +611,88 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                &bjson!({"prop3":1}),
-                &bjson!({"prop3":2}),
-                &bjson!({"prop3":3}),
-                &bjson!({"prop3":4}),
+                &json!({"prop3":1}),
+                &json!({"prop3":2}),
+                &json!({"prop3":3}),
+                &json!({"prop3":4}),
             ],
         );
     }
 
     #[test]
     fn test_deep_merge() {
-        let mut json = bjson!({"obj":{"arr":[{"prop1":1},{"prop2":2}]}});
-        json.deep_merge(bjson!({"obj":{"arr":[{"prop1":2,"prop3":3},{"prop4":4}]}}));
+        let mut json = json!({"obj":{"arr":[{"prop1":1},{"prop2":2}]}});
+        json.deep_merge(json!({"obj":{"arr":[{"prop1":2,"prop3":3},{"prop4":4}]}}));
         assert_eq!(
             json,
-            bjson!({"obj":{"arr":[{"prop1":2, "prop3":3},{"prop2":2, "prop4":4}]}})
+            json!({"obj":{"arr":[{"prop1":2, "prop3":3},{"prop2":2, "prop4":4}]}})
         );
     }
 
     #[test]
     fn test_is_subset_eq() {
         assert_is_subset!(
-            bjson!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
-            bjson!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
         );
     }
 
     #[test]
     fn test_is_subset_missing_pop() {
         assert_is_subset!(
-            bjson!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
-            bjson!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
         );
     }
 
     #[test]
     fn test_is_subset_array_lengths_differ() {
         assert_is_not_subset!(
-            bjson!({"obj":{"arr":[{"prop1":1}]}}),
-            bjson!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1}]}}),
+            json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
         );
     }
 
     #[test]
     fn test_is_subset_extra_prop() {
         assert_is_not_subset!(
-            bjson!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
-            bjson!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1,"prop3":3},{"prop4":4}]}}),
+            json!({"obj":{"arr":[{"prop1":1},{"prop4":4}]}}),
         );
     }
 
     #[test]
     fn eq_and_ordered() {
         // test not objects
-        assert!(bjson!([1, 2, 3]).eq_and_ordered(&bjson!([1, 2, 3])));
-        assert!(!bjson!([1, 3, 2]).eq_and_ordered(&bjson!([1, 2, 3])));
+        assert!(json!([1, 2, 3]).eq_and_ordered(&json!([1, 2, 3])));
+        assert!(!json!([1, 3, 2]).eq_and_ordered(&json!([1, 2, 3])));
 
         // test objects not nested
-        assert!(bjson!({"foo":1,"bar":2}).eq_and_ordered(&bjson!({"foo":1,"bar":2})));
-        assert!(!bjson!({"foo":1,"bar":2}).eq_and_ordered(&bjson!({"foo":1,"bar":3})));
-        assert!(!bjson!({"foo":1,"bar":2}).eq_and_ordered(&bjson!({"foo":1,"bar":2,"baz":3})));
-        assert!(!bjson!({"foo":1,"bar":2,"baz":3}).eq_and_ordered(&bjson!({"foo":1,"bar":2})));
-        assert!(!bjson!({"bar":2,"foo":1}).eq_and_ordered(&bjson!({"foo":1,"bar":2})));
+        assert!(json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":2})));
+        assert!(!json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":3})));
+        assert!(!json!({"foo":1,"bar":2}).eq_and_ordered(&json!({"foo":1,"bar":2,"baz":3})));
+        assert!(!json!({"foo":1,"bar":2,"baz":3}).eq_and_ordered(&json!({"foo":1,"bar":2})));
+        assert!(!json!({"bar":2,"foo":1}).eq_and_ordered(&json!({"foo":1,"bar":2})));
 
         // test objects nested
-        assert!(
-            bjson!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&bjson!({"baz":{"foo":1,"bar":2}}))
-        );
-        assert!(
-            !bjson!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&bjson!({"baz":{"foo":1,"bar":2}}))
-        );
-        assert!(!bjson!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&bjson!([1,{"foo":1,"bar":2},2])));
+        assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
 
     #[test]
     fn test_from_path() {
-        let json = bjson!([{"prop1":1},{"prop1":2}]);
+        let json = json!([{"prop1":1},{"prop1":2}]);
         let path = Path::from("obj/arr/@");
         let result = Value::from_path(&path, json);
-        assert_eq!(result, bjson!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
+        assert_eq!(result, json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
     }
 
     #[test]
     fn test_from_path_index() {
-        let json = bjson!({"prop1":1});
+        let json = json!({"prop1":1});
         let path = Path::from("obj/arr/1");
         let result = Value::from_path(&path, json);
-        assert_eq!(result, bjson!({"obj":{"arr":[null, {"prop1":1}]}}));
+        assert_eq!(result, json!({"obj":{"arr":[null, {"prop1":1}]}}));
     }
 }
