@@ -83,7 +83,7 @@ pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
 /// An object that can be executed to return a [`Response`].
 #[async_trait::async_trait]
 pub trait PreparedQuery: Send + Debug {
-    async fn execute(self, request: Arc<Request>) -> Response;
+    async fn execute(self, request: Request) -> Response;
 }
 
 #[cfg(test)]

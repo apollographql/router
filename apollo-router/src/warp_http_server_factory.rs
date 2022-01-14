@@ -308,7 +308,7 @@ where
     PreparedQuery: graphql::PreparedQuery,
 {
     let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+        Ok(route) => route.execute(request).await,
         Err(response) => response,
     };
 
