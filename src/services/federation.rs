@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 
-use http::{Request, Response, Uri};
+use http::{Request, Response};
 use tower::util::BoxCloneService;
 use tower::{BoxError, Service, ServiceExt};
 use typed_builder::TypedBuilder;

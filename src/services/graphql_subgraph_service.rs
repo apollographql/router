@@ -7,12 +7,12 @@ use tower::{BoxError, Service};
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
-pub struct HttpSubgraphService {
+pub struct GraphQlSubgraphService {
     #[builder(setter(into))]
     url: Uri,
 }
 
-impl Service<SubgraphRequest> for HttpSubgraphService {
+impl Service<SubgraphRequest> for GraphQlSubgraphService {
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;

@@ -1,7 +1,7 @@
 use http::{Request, Response, Uri};
 use tower::{BoxError, ServiceBuilder};
 
-use crate::services::http_subgraph_service::HttpSubgraphService;
+use crate::services::graphql_subgraph_service::GraphQlSubgraphService;
 use crate::services::rest_subgraph_service::RestSubgraphService;
 use crate::{graphql, ApolloRouter, RouterResponse, ServiceBuilderExt, SubgraphRequest};
 
@@ -29,7 +29,7 @@ async fn call_external_service() -> Result<(), BoxError> {
         .with_subgraph_service(
             "authors",
             ServiceBuilder::new().propagate_all_headers().service(
-                HttpSubgraphService::builder()
+                GraphQlSubgraphService::builder()
                     .url(Uri::from_static("http://custom"))
                     .build(),
             ),
