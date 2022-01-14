@@ -122,8 +122,10 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 /// a [`Response`] that can be returned immediately to the user. This is because GraphQL does
 /// not use the HTTP error codes, therefore it always return a response even if it fails.
 #[async_trait::async_trait]
-pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
-    async fn prepare_query(&self, request: Arc<Request>) -> Result<T, Response>;
+pub trait Router: Send + Sync + Debug {
+    type PreparedQuery: PreparedQuery;
+
+    async fn prepare_query(&self, request: Arc<Request>) -> Result<Self::PreparedQuery, Response>;
 }
 
 /// An object that can be executed to return a [`Response`].

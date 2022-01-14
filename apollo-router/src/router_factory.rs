@@ -1,4 +1,4 @@
-use crate::apollo_router::{ApolloPreparedQuery, ApolloRouter};
+use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
 use apollo_router_core::prelude::*;
@@ -9,10 +9,9 @@ use std::sync::Arc;
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
 #[async_trait::async_trait]
-pub(crate) trait RouterFactory<Router, PreparedQuery>
+pub(crate) trait RouterFactory<Router>
 where
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
+    Router: graphql::Router,
 {
     async fn create(
         &self,
@@ -26,7 +25,7 @@ where
 pub(crate) struct ApolloRouterFactory {}
 
 #[async_trait::async_trait]
-impl RouterFactory<ApolloRouter, ApolloPreparedQuery> for ApolloRouterFactory {
+impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
     async fn create(
         &self,
         configuration: &Configuration,

@@ -2,7 +2,6 @@ use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use futures::Future;
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -78,7 +77,9 @@ impl ApolloRouter {
 }
 
 #[async_trait::async_trait]
-impl Router<ApolloPreparedQuery> for ApolloRouter {
+impl Router for ApolloRouter {
+    type PreparedQuery = ApolloPreparedQuery;
+
     #[tracing::instrument(level = "debug", skip_all)]
     async fn prepare_query(&self, request: Arc<Request>) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
@@ -116,27 +117,6 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
     }
 }
 
-struct Planner {
-    router: Arc<ApolloRouter>,
-}
-impl Service<Arc<Request>> for Planner {
-    type Response = ApolloPreparedQuery;
-
-    type Error = Response;
-
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Arc<Request>) -> Self::Future {
-        let router = self.router.clone();
-        Box::pin(async move { router.prepare_query(req).await })
-    }
-}
-
 // The default route used with [`ApolloRouter`], suitable for most use cases.
 #[derive(Debug)]
 pub struct ApolloPreparedQuery {
@@ -170,18 +150,16 @@ impl PreparedQuery for ApolloPreparedQuery {
     }
 }
 
-pub struct ApolloRouterService<Router, PreparedQuery> {
+pub struct ApolloRouterService<Router> {
     inner: Arc<Router>,
-    _phantom: PhantomData<PreparedQuery>,
 }
 
 // we cannot derive Clone directly because that would require the Router and
 // PreparedQuery types to be Clone
-impl<Router, PreparedQuery> Clone for ApolloRouterService<Router, PreparedQuery> {
+impl<Router> Clone for ApolloRouterService<Router> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            _phantom: self._phantom.clone(),
         }
     }
 }
@@ -189,33 +167,27 @@ impl<Router, PreparedQuery> Clone for ApolloRouterService<Router, PreparedQuery>
 //Sync is not derived for ApolloRouterService due to the PhantomData of PreparedQuery
 // but that type does not actually affect the struct itself, it is only generated from
 // inside Service::call
-unsafe impl<Router, PreparedQuery> Sync for ApolloRouterService<Router, PreparedQuery> {}
+unsafe impl<Router> Sync for ApolloRouterService<Router> {}
 
-impl<R, P> ApolloRouterService<R, P>
+impl<R> ApolloRouterService<R>
 where
-    R: Router<P> + 'static,
-    P: PreparedQuery + Send + 'static,
+    R: Router + 'static,
 {
     pub fn new(inner: Arc<R>) -> Self {
-        ApolloRouterService {
-            inner,
-            _phantom: PhantomData,
-        }
+        ApolloRouterService { inner }
     }
 }
 
-impl<
-        Router: apollo_router_core::Router<PreparedQuery> + 'static,
-        PreparedQuery: apollo_router_core::PreparedQuery + Send + 'static,
-    > Service<Request> for ApolloRouterService<Router, PreparedQuery>
+impl<Router: apollo_router_core::Router + 'static> Service<Request>
+    for ApolloRouterService<Router>
 {
     type Response = Response;
 
     type Error = ();
 
     type Future = ApolloRouterServiceFuture<
-        Pin<Box<dyn Future<Output = Result<PreparedQuery, Response>> + Send>>,
-        PreparedQuery,
+        Pin<Box<dyn Future<Output = Result<Router::PreparedQuery, Response>> + Send>>,
+        Router::PreparedQuery,
     >;
 
     fn poll_ready(

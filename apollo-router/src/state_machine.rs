@@ -15,15 +15,14 @@ use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<Router, PreparedQuery>
+enum PrivateState<Router>
 where
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
+    Router: graphql::Router,
 {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<(Router, PreparedQuery)>,
+        phantom: PhantomData<Router>,
     },
     Running {
         configuration: Arc<Configuration>,
@@ -41,25 +40,23 @@ where
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, Router, PreparedQuery, FA>
+pub(crate) struct StateMachine<S, Router, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
-    FA: RouterFactory<Router, PreparedQuery>,
+    Router: graphql::Router,
+    FA: RouterFactory<Router>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<(Router, PreparedQuery)>,
+    phantom: PhantomData<Router>,
 }
 
-impl<Router, PreparedQuery> From<&PrivateState<Router, PreparedQuery>> for State
+impl<Router> From<&PrivateState<Router>> for State
 where
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
+    Router: graphql::Router,
 {
-    fn from(private_state: &PrivateState<Router, PreparedQuery>) -> Self {
+    fn from(private_state: &PrivateState<Router>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -76,12 +73,11 @@ where
     }
 }
 
-impl<S, Router, PreparedQuery, FA> StateMachine<S, Router, PreparedQuery, FA>
+impl<S, Router, FA> StateMachine<S, Router, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery + 'static,
-    FA: RouterFactory<Router, PreparedQuery>,
+    Router: graphql::Router + 'static,
+    FA: RouterFactory<Router>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -108,11 +104,8 @@ where
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
-            &mut state_listener,
-            initial_state,
-        )
-        .await;
+        <StateMachine<S, Router, FA>>::notify_state_listener(&mut state_listener, initial_state)
+            .await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -289,7 +282,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
+                <StateMachine<S, Router, FA>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -325,8 +318,8 @@ where
 
     async fn maybe_transition_to_running(
         &self,
-        state: PrivateState<Router, PreparedQuery>,
-    ) -> PrivateState<Router, PreparedQuery> {
+        state: PrivateState<Router>,
+    ) -> PrivateState<Router> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),

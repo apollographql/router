@@ -31,6 +31,7 @@ mod query_planner;
 mod request;
 mod response;
 mod spec;
+mod tower_compat;
 mod traits;
 
 pub use cache::*;
@@ -42,6 +43,7 @@ pub use query_planner::*;
 pub use request::*;
 pub use response::*;
 pub use spec::*;
+pub use tower_compat::*;
 pub use traits::*;
 
 pub mod prelude {
