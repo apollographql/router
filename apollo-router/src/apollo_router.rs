@@ -164,11 +164,6 @@ impl<Router> Clone for ApolloRouterService<Router> {
     }
 }
 
-//Sync is not derived for ApolloRouterService due to the PhantomData of PreparedQuery
-// but that type does not actually affect the struct itself, it is only generated from
-// inside Service::call
-unsafe impl<Router> Sync for ApolloRouterService<Router> {}
-
 impl<R> ApolloRouterService<R>
 where
     R: Router + 'static,
