@@ -57,7 +57,7 @@ thiserror = "1.0.30"
 tokio = { version = "1.15.0", features = ["full"] }
 # don't bump it to 0.6 until opentelemetry-otlp does
 tonic = { version = "0.5.2", optional = true }
-tower = "0.4.11"
+tower = { version="0.4.11", features = ["util"] }
 tower-http = { version = "0.2.0", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.29"

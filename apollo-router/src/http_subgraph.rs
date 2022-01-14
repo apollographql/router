@@ -11,7 +11,7 @@ use url::Url;
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
 #[derive(Derivative)]
-#[derivative(Debug)]
+#[derivative(Debug, Clone)]
 pub struct HttpSubgraphFetcher {
     service: String,
     url: Url,
@@ -115,12 +115,13 @@ impl Service<graphql::Request> for HttpSubgraphFetcher {
 
     type Error = graphql::FetchError;
 
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<graphql::Response, graphql::FetchError>> + Send>>;
 
     fn poll_ready(
         &mut self,
         _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+    ) -> std::task::Poll<Result<(), graphql::FetchError>> {
         std::task::Poll::Ready(Ok(()))
     }
 

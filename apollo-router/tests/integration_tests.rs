@@ -225,7 +225,7 @@ impl CountingServiceRegistry {
 }
 
 impl ServiceRegistry for CountingServiceRegistry {
-    fn get(&self, service: &str) -> Option<&dyn graphql::Fetcher> {
+    fn get(&self, service: &str) -> Option<Box<dyn SubgraphService>> {
         let mut counts = self.counts.lock().unwrap();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {

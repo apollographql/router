@@ -165,6 +165,8 @@ dependencies = [
  "test-log",
  "thiserror",
  "tokio",
+ "tower",
+ "tower-service",
  "tracing",
  "tracing-futures",
  "tracing-subscriber",

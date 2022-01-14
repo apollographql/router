@@ -216,6 +216,7 @@ mod fetch {
 
     use super::selection::{select_object, Selection};
     use serde::Deserialize;
+    use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
     use crate::prelude::graphql::*;
@@ -336,7 +337,7 @@ mod fetch {
                 .expect("we already checked that the service exists during planning; qed");
 
             let response = fetcher
-                .stream(
+                .oneshot(
                     Request::builder()
                         .query(operation)
                         .variables(Arc::new(variables))
