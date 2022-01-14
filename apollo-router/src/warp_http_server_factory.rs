@@ -37,14 +37,14 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<Router>(
+    fn create<R>(
         &self,
-        router: Arc<Router>,
+        router: Arc<R>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        Router: graphql::Router + 'static,
+        R: graphql::Router + 'static,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
