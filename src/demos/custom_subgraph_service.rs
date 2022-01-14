@@ -1,15 +1,16 @@
-use http::{Request, Response};
-
+use http::{Request, Response, Uri};
 use tower::{BoxError, ServiceBuilder};
 
-use crate::{graphql, ApolloRouter, RouterResponse, SubgraphRequest};
+use crate::services::http_subgraph_service::HttpSubgraphService;
+use crate::services::rest_subgraph_service::RestSubgraphService;
+use crate::{graphql, ApolloRouter, RouterResponse, ServiceBuilderExt, SubgraphRequest};
 
 #[tokio::test]
 async fn call_external_service() -> Result<(), BoxError> {
     let client = reqwest::Client::default();
 
     let router = ApolloRouter::builder()
-        .with_service(
+        .with_subgraph_service(
             "books",
             ServiceBuilder::new().service_fn(move |req: SubgraphRequest| {
                 let client = client.clone();
@@ -24,6 +25,22 @@ async fn call_external_service() -> Result<(), BoxError> {
                     })
                 }
             }),
+        )
+        .with_subgraph_service(
+            "authors",
+            ServiceBuilder::new().propagate_all_headers().service(
+                HttpSubgraphService::builder()
+                    .url(Uri::from_static("http://custom"))
+                    .build(),
+            ),
+        )
+        .with_subgraph_service(
+            "rest-service",
+            ServiceBuilder::new().propagate_header("A").service(
+                RestSubgraphService::builder()
+                    .url(Uri::from_static("http://custom"))
+                    .build(),
+            ),
         )
         .build();
 

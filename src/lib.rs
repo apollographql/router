@@ -9,9 +9,8 @@ use std::sync::Arc;
 
 use crate::layers::cache::CacheLayer;
 use crate::layers::header_manipulation::{HeaderManipulationLayer, Operation};
-use crate::services::federation::{
-    ExecutionService, QueryPlannerService, RouterService, SubgraphService,
-};
+use crate::services::federation::{ExecutionService, QueryPlannerService, RouterService};
+use crate::services::http_subgraph_service::HttpSubgraphService;
 use anyhow::Result;
 use http::header::{HeaderName, COOKIE};
 use http::{HeaderValue, Request, Response, Uri};
@@ -190,7 +189,7 @@ impl ApolloRouterBuilder {
         self
     }
 
-    pub fn with_service<
+    pub fn with_subgraph_service<
         S: Service<
                 SubgraphRequest,
                 Response = RouterResponse,
@@ -273,7 +272,7 @@ impl ApolloRouterBuilder {
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let book_service = ServiceBuilder::new()
             .service(
-                SubgraphService::builder()
+                HttpSubgraphService::builder()
                     .url(Uri::from_str("http://books").unwrap())
                     .build(),
             )
@@ -282,7 +281,7 @@ impl ApolloRouterBuilder {
         //SubgraphService takes a SubgraphRequest and outputs a graphql::Response
         let author_service = ServiceBuilder::new()
             .service(
-                SubgraphService::builder()
+                HttpSubgraphService::builder()
                     .url(Uri::from_str("http://authors").unwrap())
                     .build(),
             )

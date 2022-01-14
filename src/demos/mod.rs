@@ -1,6 +1,6 @@
-mod call_external_service;
 mod context_propagation;
 mod custom_logging;
+mod custom_subgraph_service;
 mod demo_template;
 mod header_manipulation;
 mod load_shedding;
