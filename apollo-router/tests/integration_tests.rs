@@ -18,8 +18,8 @@ macro_rules! assert_federated_response {
             .query($query)
             .variables(Arc::new(
                 vec![
-                    ("topProductsFirst".to_string(), 2.into()),
-                    ("reviewsForAuthorAuthorId".to_string(), 1.into()),
+                    ("topProductsFirst".into(), 2.into()),
+                    ("reviewsForAuthorAuthorId".into(), 1.into()),
                 ]
                 .into_iter()
                 .collect(),

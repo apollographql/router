@@ -105,6 +105,7 @@ dependencies = [
  "reqwest-tracing",
  "serde",
  "serde_json",
+ "serde_json_bytes",
  "serde_yaml",
  "structopt",
  "task-local-extensions",
@@ -147,6 +148,7 @@ dependencies = [
  "apollo-parser",
  "async-trait",
  "atty",
+ "bytes",
  "derivative",
  "displaydoc",
  "futures",
@@ -159,6 +161,7 @@ dependencies = [
  "router-bridge",
  "serde",
  "serde_json",
+ "serde_json_bytes",
  "static_assertions",
  "test-log",
  "thiserror",
@@ -3007,6 +3010,18 @@ dependencies = [
  "itoa 1.0.1",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_json_bytes"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d07cc85f924551185aa24952d5bf52c8433ffd040eeeff3908bb684c55035002"
+dependencies = [
+ "bytes",
+ "indexmap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

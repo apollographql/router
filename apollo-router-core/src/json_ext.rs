@@ -1,13 +1,43 @@
 use crate::prelude::graphql::*;
 use serde::{Deserialize, Serialize};
-use serde_json::map::Entry;
-use serde_json::Map;
-pub use serde_json::Value;
+pub use serde_json_bytes::Value;
+use serde_json_bytes::{ByteString, Entry, Map};
 use std::cmp::min;
 use std::fmt;
 
 /// A JSON object.
-pub type Object = Map<String, Value>;
+pub type Object = Map<ByteString, Value>;
+
+/// NOT PUBLIC API
+#[doc(hidden)]
+#[macro_export]
+macro_rules! extract_key_value_from_object {
+    ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
+        match $object.remove($key) {
+            Some($pattern) => Ok(Some($var)),
+            None | Some(Value::Null) => Ok(None),
+            _ => Err(concat!("invalid type for key: ", $key)),
+        }
+    }};
+    ($object:expr, $key:literal) => {{
+        match $object.remove($key) {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(value),
+        }
+    }};
+}
+
+/// NOT PUBLIC API
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ensure_object {
+    ($value:expr) => {{
+        match $value {
+            Value::Object(o) => Ok(o),
+            _ => Err("invalid type, expected an object"),
+        }
+    }};
+}
 
 #[doc(hidden)]
 /// Extension trait for [`serde_json::Value`].
@@ -188,13 +218,13 @@ impl ValueExt for Value {
                 },
                 PathElement::Key(k) => {
                     let mut m = Map::new();
-                    m.insert(k.to_string(), Value::default());
+                    m.insert(k.as_str(), Value::default());
 
                     *current_node = Value::Object(m);
                     current_node = current_node
                         .as_object_mut()
                         .expect("current_node was just set to a Value::Object")
-                        .get_mut(k)
+                        .get_mut(k.as_str())
                         .expect("the value at that key was just inserted");
                 }
             }
@@ -254,18 +284,18 @@ impl ValueExt for Value {
                 PathElement::Key(k) => match current_node {
                     Value::Object(o) => {
                         current_node = o
-                            .get_mut(k)
+                            .get_mut(k.as_str())
                             .expect("the value at that key was just inserted");
                     }
                     Value::Null => {
                         let mut m = Map::new();
-                        m.insert(k.to_string(), Value::default());
+                        m.insert(k.as_str(), Value::default());
 
                         *current_node = Value::Object(m);
                         current_node = current_node
                             .as_object_mut()
                             .expect("current_node was just set to a Value::Object")
-                            .get_mut(k)
+                            .get_mut(k.as_str())
                             .expect("the value at that key was just inserted");
                     }
                     _other => {
@@ -342,7 +372,7 @@ where
         }
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
-                if let Some(value) = o.get(k) {
+                if let Some(value) = o.get(k.as_str()) {
                     iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
                 } else {
                     Err(FetchError::ExecutionPathNotFound {
@@ -520,7 +550,7 @@ impl fmt::Display for Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json_bytes::json;
 
     macro_rules! assert_is_subset {
         ($a:expr, $b:expr $(,)?) => {

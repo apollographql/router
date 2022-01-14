@@ -1,6 +1,6 @@
 use crate::prelude::graphql::*;
 use serde::Deserialize;
-use serde_json::map::Entry;
+use serde_json_bytes::Entry;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -80,7 +80,7 @@ fn select_field(
     field: &Field,
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    match (content.get(&field.name), &field.selections) {
+    match (content.get(field.name.as_str()), &field.selections) {
         (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
         (Some(value), None) => Ok(Some(value.to_owned())),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
@@ -97,7 +97,7 @@ fn select_inline_fragment(
 ) -> Result<Option<Value>, FetchError> {
     match (&fragment.type_condition, &content.get("__typename")) {
         (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename || schema.is_subtype(condition, typename) {
+            if condition == typename || schema.is_subtype(condition, typename.as_str()) {
                 select_object(content, &fragment.selections, schema)
             } else {
                 Ok(None)
@@ -116,6 +116,7 @@ mod tests {
     use super::Selection;
     use super::*;
     use serde_json::json;
+    use serde_json_bytes::json as bjson;
 
     fn select<'a>(
         response: &Response,
@@ -190,10 +191,10 @@ mod tests {
         assert_eq!(
             select!(
                 "",
-                json!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
+                bjson!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
-            json!([{
+            bjson!([{
                 "__typename": "User",
                 "id": 2,
                 "job": {
@@ -208,10 +209,10 @@ mod tests {
         assert_eq!(
             select!(
                 "union User = Author | Reviewer",
-                json!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
+                bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
-            json!([{
+            bjson!([{
                 "__typename": "Author",
                 "id": 2,
                 "job": {
