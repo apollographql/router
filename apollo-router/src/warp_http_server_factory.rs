@@ -63,12 +63,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(tracing::Dispatch::new)
                 .unwrap_or_default();
 
-            let router = graphql::RouterService::new(router);
+            let service = graphql::RouterService::new(router);
 
             let routes = get_health_request()
                 .or(redirect_to_studio())
-                .or(get_graphql_request(router.clone()))
-                .or(post_graphql_request(router))
+                .or(get_graphql_request(service.clone()))
+                .or(post_graphql_request(service))
                 .with(cors);
 
             // generate a hyper service from warp routes
@@ -212,25 +212,21 @@ fn redirect_to_studio() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         })
 }
 
-fn get_graphql_request<Router>(
-    router: Router,
+fn get_graphql_request<R>(
+    service: graphql::RouterService<R>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
-        + Clone
-        + Send
-        + 'static,
-    <Router as Service<graphql::Request>>::Future: Send + 'static,
+    R: Router + 'static,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::bytes())
         .and(warp::header::headers_cloned())
         .and_then(move |body: Bytes, header_map: HeaderMap| {
-            let router = router.clone();
+            let service = service.clone();
             async move {
                 let reply: Box<dyn Reply> = if let Ok(request) = serde_json::from_slice(&body) {
-                    run_graphql_request(router, request, header_map).await
+                    run_graphql_request(service, request, header_map).await
                 } else {
                     Box::new(warp::reply::with_status(
                         "Invalid GraphQL request",
@@ -257,37 +253,32 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         })
 }
 
-fn post_graphql_request<Router>(
-    router: Router,
+fn post_graphql_request<R>(
+    service: graphql::RouterService<R>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    Router: Service<graphql::Request, Response = graphql::Response, Error = ()>
-        + Clone
-        + Send
-        + 'static,
-    <Router as Service<graphql::Request>>::Future: Send + 'static,
+    R: Router + 'static,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let router = router.clone();
+            let service = service.clone();
             async move {
-                let reply = run_graphql_request(router, request, header_map).await;
+                let reply = run_graphql_request(service, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
         })
 }
 
-fn run_graphql_request<Router>(
-    router: Router,
+fn run_graphql_request<R>(
+    service: graphql::RouterService<R>,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send + 'static,
-    <Router as Service<graphql::Request>>::Future: Send + 'static,
+    R: Router + 'static,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -295,7 +286,7 @@ where
     });
 
     async move {
-        let response = stream_request(router, request)
+        let response = stream_request(service, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -303,15 +294,17 @@ where
     }
 }
 
-async fn stream_request<Router>(mut router: Router, request: graphql::Request) -> String
+async fn stream_request<R>(
+    mut service: graphql::RouterService<R>,
+    request: graphql::Request,
+) -> String
 where
-    Router: Service<graphql::Request, Response = graphql::Response, Error = ()> + Send,
-    <Router as Service<graphql::Request>>::Future: Send + 'static,
+    R: Router + 'static,
 {
-    let response = router
+    let response = service
         .call(request)
         .await
-        .expect("the router always returns a Response");
+        .expect("the Router always returns a Response");
 
     let span = Span::current();
     tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
