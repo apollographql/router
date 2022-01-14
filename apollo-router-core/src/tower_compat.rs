@@ -40,7 +40,7 @@ where
         let router = self.router.clone();
         Box::pin(async move {
             match router.prepare_query(&request).await {
-                Ok(route) => Ok(route.execute(Arc::new(request)).await),
+                Ok(route) => Ok(route.execute(request).await),
                 Err(response) => Ok(response),
             }
         })
