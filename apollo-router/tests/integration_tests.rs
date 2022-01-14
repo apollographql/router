@@ -19,8 +19,8 @@ macro_rules! assert_federated_response {
             .query($query)
             .variables(Arc::new(
                 vec![
-                    (ByteString::from("topProductsFirst"), 2.into()),
-                    (ByteString::from("reviewsForAuthorAuthorId"), 1.into()),
+                    ("topProductsFirst".into(), 2.into()),
+                    ("reviewsForAuthorAuthorId".into(), 1.into()),
                 ]
                 .into_iter()
                 .collect(),
