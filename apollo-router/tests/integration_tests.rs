@@ -6,7 +6,6 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::ValueExt;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
-use serde_json_bytes::ByteString;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
