@@ -342,8 +342,6 @@ struct HeaderMapCarrier<'a>(&'a HeaderMap);
 
 impl<'a> Extractor for HeaderMapCarrier<'a> {
     fn get(&self, key: &str) -> Option<&str> {
-        eprintln!("LOOKING FOR: {}", key);
-        eprintln!("keys: {:?}", self.0.keys());
         if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
             tracing::trace!(
                 "found OpenTelemetry key in user's request: {}={}",
@@ -357,7 +355,6 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
     }
 
     fn keys(&self) -> Vec<&str> {
-        eprintln!("keys: {:?}", self.0.keys());
         self.0.keys().map(|x| x.as_str()).collect()
     }
 }

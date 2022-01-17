@@ -41,9 +41,8 @@ use opentelemetry::{
 };
 use std::borrow::Cow;
 use std::fmt::Debug;
-use tokio::{runtime::Runtime, task::JoinError};
+use tokio::task::JoinError;
 use usage_agent::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
-use usage_agent::server::ReportServer;
 use usage_agent::Reporter;
 
 use crate::configuration::StudioUsage;
@@ -103,6 +102,7 @@ impl PipelineBuilder {
     }
 
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
+    #[allow(dead_code)]
     pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
         let exporter = self.get_exporter()?;
 
@@ -119,92 +119,16 @@ impl PipelineBuilder {
         Ok(tracer)
     }
 
-    /// Do some stuff and get an exporter
+    /// Create a client to talk to our relay and return an exporter.
     pub fn get_exporter(&self) -> Result<Exporter, ApolloError> {
-        // XXX Trying to avoid overhead of spawning another runtime, however
-        // if I don't spawn a runtime this doesn't work. It just blocks when
-        // I call block_on() below. Also: cleaning up the spawned server might
-        // be complex if I don't spawn a runtime. I guess the way around that
-        // would be to preserve a handle and drop it...?
-        let (rt, hdl) = match tokio::runtime::Handle::try_current() {
-            Ok(_hdl) => {
-                tracing::debug!("has a runtime");
-                /*
-                (None, hdl)
-                */
-                let rt = Runtime::new()?;
-                let hdl = rt.handle().clone();
-                (Some(rt), hdl)
-            }
-            Err(_e) => {
-                let rt = Runtime::new()?;
-                let hdl = rt.handle().clone();
-                (Some(rt), hdl)
-            }
+        let collector = match self.studio_config.clone() {
+            Some(cfg) => cfg.collector,
+            None => "https://127.0.0.1:50051".to_string(),
         };
 
-        // Tie tokio::spawn to the executor we just found
-        let _guard = hdl.enter();
+        tracing::debug!("collector: {}", collector);
 
-        let (collector, external_agent) = match self.studio_config.clone() {
-            Some(cfg) => (cfg.collector, cfg.external_agent),
-            None => ("https://127.0.0.1:50051".to_string(), false),
-        };
-
-        tracing::info!("collector: {}", collector);
-        tracing::info!("external_agent: {}", external_agent);
-
-        let mut jh_s = None;
-        if !external_agent {
-            tracing::debug!("spawning server");
-            jh_s = Some(hdl.spawn(async {
-                tracing::info!("spawning an internal report server");
-                // Spawn a server to relay statistics
-                let addr = match "0.0.0.0:50051".parse() {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::error!("could not parse report server address: {}", e);
-                        return;
-                    }
-                };
-
-                let report_server = ReportServer::new(addr);
-
-                if let Err(e) = report_server.serve().await {
-                    tracing::error!("report server did not terminate normally: {}", e);
-                }
-            }));
-        }
-
-        tracing::debug!("spawning client");
-        let jh = async {
-            tracing::info!("TRYING...");
-            Reporter::try_new(collector)
-                .await
-                .map_err::<ApolloError, _>(Into::into)
-        };
-        tracing::debug!("about to block");
-        let reporter: Reporter = match futures::executor::block_on(jh) {
-            Ok(r) => r,
-            Err(e) => {
-                // If we have an internal server, abort before dropping runtime
-                if let Some(jh) = jh_s {
-                    jh.abort();
-                }
-                // Make sure our rt is dropped in a separate thread to avoid
-                // strange tokio errors.
-                std::thread::spawn(|| {
-                    drop(rt);
-                })
-                .join()
-                .expect("drop rt");
-                return Err(e);
-            }
-        };
-
-        tracing::debug!("after block");
-
-        Ok(Exporter::new(rt, reporter))
+        Ok(Exporter::new(collector))
     }
 }
 
@@ -214,15 +138,13 @@ impl PipelineBuilder {
 /// [`Reporter`]: usage_agent::Reporter
 #[derive(Debug)]
 pub struct Exporter {
-    // We may have to keep the runtime alive, but we don't use it directly
-    _rt: Option<Runtime>,
-    reporter: Reporter,
+    collector: String,
 }
 
 impl Exporter {
     /// Create a new apollo telemetry `Exporter`.
-    pub fn new(rt: Option<Runtime>, reporter: Reporter) -> Self {
-        Self { _rt: rt, reporter }
+    pub fn new(collector: String) -> Self {
+        Self { collector }
     }
 }
 
@@ -253,6 +175,9 @@ impl ExportError for ApolloError {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+        let mut reporter = Reporter::try_new(self.collector.clone())
+            .await
+            .map_err::<ApolloError, _>(Into::into)?;
         /*
          * Break down batch and send to studio
          */
@@ -310,8 +235,7 @@ impl SpanExporter for Exporter {
                     // XXX NEED TO NORMALISE THE QUERY
                     let key = normalize(operation_name, &q.as_str());
 
-                    let msg = self
-                        .reporter
+                    let msg = reporter
                         .submit_stats(key, stats)
                         .await
                         .map_err::<TraceError, _>(|e| e.to_string().into())?

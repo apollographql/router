@@ -80,8 +80,8 @@ pub(crate) fn try_initialize_subscriber(
             };
             let provider = builder
                 .with_span_processor(batch)
-                .with_simple_exporter(apollo_exporter)
-                // .with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
+                // .with_simple_exporter(apollo_exporter)
+                .with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
                 .build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
@@ -108,8 +108,8 @@ pub(crate) fn try_initialize_subscriber(
             // Add studio agent as an OT pipeline
             let tracer = match new_pipeline()
                 .with_studio_config(studio_config)
-                .install_simple()
-                // .install_batch()
+                // .install_simple()
+                .install_batch()
             {
                 Ok(t) => t,
                 Err(e) => {

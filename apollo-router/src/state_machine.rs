@@ -10,6 +10,9 @@ use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
+use usage_agent::server::ReportServer;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -40,7 +43,7 @@ where
 /// If config and schema are not supplied then the machine ends with an error.
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
-/// At any point a shutdown event will case the machine to try to get to stopped state.  
+/// At any point a shutdown event will cause the machine to try to get to stopped state.  
 pub(crate) struct StateMachine<S, Router, PreparedQuery, FA>
 where
     S: HttpServerFactory,
@@ -51,6 +54,7 @@ where
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
+    tx: UnboundedSender<bool>,
     phantom: PhantomData<(Router, PreparedQuery)>,
 }
 
@@ -88,10 +92,67 @@ where
         state_listener: Option<mpsc::Sender<State>>,
         router_factory: FA,
     ) -> Self {
+        // Studio Agent Relay listener
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let mut jh_s: Option<JoinHandle<()>> = None;
+
+            loop {
+                tracing::info!("waiting for a message");
+                let msg: bool = match rx.recv().await {
+                    Some(msg) => msg,
+                    None => break,
+                };
+                tracing::info!("got a message: {:?}", msg);
+                // Decide whether to start, shutdown or maintain a relay
+                let mut new_jh_s = None;
+                match jh_s {
+                    Some(ref jh) => {
+                        if msg {
+                            jh.abort();
+                        }
+                    }
+                    None => {
+                        if !msg {
+                            new_jh_s = Some(tokio::spawn(async {
+                                tracing::info!("spawning an internal report server");
+                                // Spawn a server to relay statistics
+                                let addr = match "0.0.0.0:50051".parse() {
+                                    Ok(a) => a,
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "could not parse report server address: {}",
+                                            e
+                                        );
+                                        return;
+                                    }
+                                };
+
+                                let report_server = ReportServer::new(addr);
+
+                                if let Err(e) = report_server.serve().await {
+                                    tracing::error!(
+                                        "report server did not terminate normally: {}",
+                                        e
+                                    );
+                                }
+                            }));
+                        }
+                    }
+                }
+                if new_jh_s.is_some() {
+                    jh_s = new_jh_s;
+                }
+            }
+            tracing::info!("terminating relay loop");
+        });
+
         Self {
             http_server_factory,
             state_listener,
             router_factory,
+            tx,
             phantom: Default::default(),
         }
     }
@@ -127,6 +188,11 @@ where
                 }
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
+                    if new_configuration.studio.is_some() {
+                        self.tx
+                            .send(new_configuration.studio.as_ref().unwrap().external_agent)
+                            .expect("XXX FIX LATER");
+                    }
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
                         schema,
@@ -249,6 +315,11 @@ where
                             }
                         }
                         Ok(()) => {
+                            if new_configuration.studio.is_some() {
+                                self.tx
+                                    .send(new_configuration.studio.as_ref().unwrap().external_agent)
+                                    .expect("XXX FIX LATER");
+                            }
                             let derived_configuration = Arc::new(derived_configuration);
                             let router = Arc::new(
                                 self.router_factory
