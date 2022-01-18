@@ -1,12 +1,16 @@
 use std::str::FromStr;
 
 use http::header::HeaderName;
-use http::{HeaderValue, Request};
+use http::HeaderValue;
+#[cfg(test)]
+use http::Request;
 
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
-use crate::{graphql, ApolloRouter, Plugin, RouterResponse, ServiceBuilderExt, SubgraphRequest};
+#[cfg(test)]
+use crate::{graphql, ApolloRouter};
+use crate::{Plugin, RouterResponse, ServiceBuilderExt, SubgraphRequest};
 
 #[derive(Default)]
 struct MyPlugin;
