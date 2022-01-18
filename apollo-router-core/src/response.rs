@@ -58,6 +58,15 @@ impl Response {
     }
 }
 
+pub struct RouterResponse {
+    // The original request
+    pub frontend_request: http::Request<Request>,
+
+    pub backend_response: http::Response<Response>,
+
+    pub context: Object,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

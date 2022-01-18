@@ -64,6 +64,11 @@ pub struct Configuration {
     #[builder(default)]
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
+
+    /// Mapping of name to subgraph that the router may contact.
+    #[serde(default)]
+    #[builder(default)]
+    pub extensions: graphql::Object,
 }
 
 fn default_listen() -> SocketAddr {

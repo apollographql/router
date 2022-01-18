@@ -65,7 +65,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        request: &'a Request,
+        request: &'a RouterRequest,
         service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -84,7 +84,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        request: &'a Request,
+        request: &'a RouterRequest,
         service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -252,13 +252,15 @@ mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &Request,
+            request: &RouterRequest,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
                 variables.extend(variable_usages.iter().filter_map(|key| {
                     request
+                        .frontend_request
+                        .body()
                         .variables
                         .get(key)
                         .map(|value| (key.clone(), value.clone()))
@@ -293,6 +295,8 @@ mod fetch {
                         .iter()
                         .filter_map(|key| {
                             request
+                                .frontend_request
+                                .body()
                                 .variables
                                 .get(key)
                                 .map(|value| (key.clone(), value.clone()))
@@ -309,7 +313,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            request: &'a Request,
+            request: &'a RouterRequest,
             service_registry: &'a dyn ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {

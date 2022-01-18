@@ -1,6 +1,5 @@
 use crate::prelude::graphql::*;
 use derivative::Derivative;
-use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -45,11 +44,36 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
-// carries a graphql request along with a list of HTTP headers
-// we might want to use a more generic "context" structure instead of hyper's HeaderMap
-pub struct HttpRequest {
-    pub headers: HeaderMap,
-    pub request: Request,
+/// the parsed graphql Request, HTTP headers and contextual data for extensions
+pub struct RouterRequest {
+    /// The original request
+    pub frontend_request: http::Request<Request>,
+
+    /// Context for extension
+    pub context: Object,
+}
+
+pub struct PlannedRequest {
+    ///riginal request
+    pub frontend_request: http::Request<Request>,
+
+    pub query_plan: QueryPlan,
+
+    // Cloned from RouterRequest
+    pub context: Object,
+}
+
+pub struct SubgraphRequest {
+    pub service_name: String,
+
+    // The request to make downstream
+    pub backend_request: http::Request<Request>,
+
+    // Downstream requests includes the original request
+    pub frontend_request: http::Request<Request>,
+
+    // Cloned from PlannedRequest
+    pub context: Object,
 }
 
 #[cfg(test)]

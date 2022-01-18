@@ -44,9 +44,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + Sync + 'static,
-        <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
-        <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
+        S: Clone
+            + Service<graphql::RouterRequest, Response = graphql::Response>
+            + Send
+            + Sync
+            + 'static,
+        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -183,9 +187,9 @@ fn get_graphql_request_or_redirect<S>(
     service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
-    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
+    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -203,7 +207,7 @@ where
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else if let Ok(request) = serde_json::from_slice(&body) {
-                        run_graphql_request(service, request, header_map).await
+                        run_graphql_request(service, http::Method::GET, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -260,9 +264,9 @@ fn post_graphql_request<S>(
     service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
-    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
+    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -271,7 +275,8 @@ where
         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
             let service = service.clone();
             async move {
-                let reply = run_graphql_request(service, request, header_map).await;
+                let reply =
+                    run_graphql_request(service, http::Method::POST, request, header_map).await;
                 Ok::<_, warp::reject::Rejection>(reply)
             }
         })
@@ -279,13 +284,14 @@ where
 
 fn run_graphql_request<S>(
     service: S,
+    method: http::Method,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
-    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
+    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -295,6 +301,17 @@ where
     async move {
         match service.ready_oneshot().await {
             Ok(service) => {
+                let mut frontend_request = http::Request::builder()
+                    .method(method)
+                    .body(request)
+                    .unwrap();
+                *frontend_request.headers_mut() = header_map;
+
+                let request = graphql::RouterRequest {
+                    context: graphql::Object::default(),
+                    frontend_request,
+                };
+
                 let response = stream_request(service, request)
                     .instrument(tracing::info_span!("graphql_request"))
                     .await;
@@ -309,10 +326,10 @@ where
     }
 }
 
-async fn stream_request<S>(mut service: S, request: graphql::Request) -> String
+async fn stream_request<S>(mut service: S, request: graphql::RouterRequest) -> String
 where
-    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
 {
     match service.call(request).await {
         Err(_) => String::new(),
@@ -442,7 +459,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: graphql::Request) -> graphql::Response;
+            async fn execute(self, request: graphql::RouterRequest) -> graphql::Response;
         }
     }
 

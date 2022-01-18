@@ -1,5 +1,4 @@
 use apollo_router_core::prelude::*;
-use hyper::HeaderMap;
 use std::{
     collections::HashSet,
     task::{Context, Poll},
@@ -38,9 +37,9 @@ pub struct HeaderFilter<S> {
     allowed_headers: HashSet<String>,
 }
 
-impl<S> Service<graphql::HttpRequest> for HeaderFilter<S>
+impl<S> Service<graphql::RouterRequest> for HeaderFilter<S>
 where
-    S: Service<graphql::HttpRequest, Error = ()>,
+    S: Service<graphql::RouterRequest, Error = ()>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -50,25 +49,19 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: graphql::HttpRequest) -> Self::Future {
-        let mut current_header = None;
-        let mut filtered_headers = HeaderMap::new();
+    fn call(&mut self, mut req: graphql::RouterRequest) -> Self::Future {
+        let removed_keys: Vec<_> = req
+            .frontend_request
+            .headers()
+            .keys()
+            .filter(|name| !self.allowed_headers.contains(name.as_str()))
+            .map(|name| name.clone())
+            .collect();
 
-        for (name, value) in req.headers.into_iter() {
-            if let Some(name) = name {
-                if self.allowed_headers.contains(name.as_str()) {
-                    current_header = Some(name.clone());
-                } else {
-                    current_header = None;
-                }
-            }
-
-            if let Some(ref name) = current_header {
-                filtered_headers.insert(name.clone(), value);
-            }
+        let headers_mut = req.frontend_request.headers_mut();
+        for name in removed_keys {
+            headers_mut.remove(name);
         }
-
-        req.headers = filtered_headers;
 
         self.service.call(req)
     }

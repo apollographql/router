@@ -25,9 +25,13 @@ pub(crate) trait HttpServerFactory {
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + Sync + 'static,
-        <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
-        <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send;
+        S: Clone
+            + Service<graphql::RouterRequest, Response = graphql::Response>
+            + Send
+            + Sync
+            + 'static,
+        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.

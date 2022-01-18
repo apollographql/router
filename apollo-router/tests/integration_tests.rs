@@ -25,10 +25,25 @@ macro_rules! assert_federated_response {
                 .collect(),
             ))
             .build();
-        let (actual, registry) = query_rust(request.clone()).await;
+
+
+
         let expected = query_node(request.clone()).await.unwrap();
 
-        tracing::debug!("query:\n{}\n", request.query.as_str());
+        let frontend_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap();
+
+        let request = graphql::RouterRequest {
+            context: graphql::Object::default(),
+            frontend_request,
+        };
+
+        let (actual, registry) = query_rust(request).await;
+
+
+        tracing::debug!("query:\n{}\n", $query);
 
         assert!(
             expected.data.is_object(),
@@ -157,7 +172,17 @@ async fn missing_variables() {
             "#,
         )
         .build();
-    let (response, _) = query_rust(request.clone()).await;
+
+    let frontend_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Object::default(),
+        frontend_request,
+    };
+    let (response, _) = query_rust(request).await;
     let expected = vec![
         graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -184,7 +209,7 @@ async fn query_node(request: graphql::Request) -> Result<graphql::Response, grap
 }
 
 async fn query_rust(
-    request: graphql::Request,
+    request: graphql::RouterRequest,
 ) -> (graphql::Response, Arc<CountingServiceRegistry>) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
@@ -196,7 +221,7 @@ async fn query_rust(
 
     let router = ApolloRouter::new(registry.clone(), schema, None).await;
 
-    let stream = match router.prepare_query(&request).await {
+    let stream = match router.prepare_query(request.frontend_request.body()).await {
         Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };

@@ -26,7 +26,7 @@ impl<R> RouterService<R> {
     }
 }
 
-impl<R> tower::Service<Request> for RouterService<R>
+impl<R> tower::Service<RouterRequest> for RouterService<R>
 where
     R: Router + 'static,
 {
@@ -38,10 +38,10 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
+    fn call(&mut self, request: RouterRequest) -> Self::Future {
         let router = self.router.clone();
         Box::pin(async move {
-            match router.prepare_query(&request).await {
+            match router.prepare_query(request.frontend_request.body()).await {
                 Ok(route) => Ok(route.execute(request).await),
                 Err(response) => Ok(response),
             }
