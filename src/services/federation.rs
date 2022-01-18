@@ -166,8 +166,8 @@ impl Service<PlannedRequest> for ExecutionService {
                 response: Response::new(graphql::Response {
                     body: format!(
                         "{{\"{}\", \"{}\"}}",
-                        f1.unwrap().response.body().body,
-                        f2.unwrap().response.body().body
+                        f1?.response.body().body,
+                        f2?.response.body().body
                     ),
                 }),
                 context: Default::default(),

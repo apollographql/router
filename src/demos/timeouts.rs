@@ -1,10 +1,13 @@
+#[cfg(test)]
 use http::Request;
 use std::time::Duration;
 
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
-use crate::{graphql, ApolloRouter, Plugin, RouterResponse, SubgraphRequest};
+#[cfg(test)]
+use crate::{graphql, ApolloRouter};
+use crate::{Plugin, RouterResponse, SubgraphRequest};
 
 #[derive(Default)]
 struct MyPlugin;

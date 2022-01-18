@@ -1,5 +1,9 @@
-use crate::{graphql, ApolloRouter, Plugin};
+use crate::Plugin;
+#[cfg(test)]
+use crate::{graphql, ApolloRouter};
+#[cfg(test)]
 use http::Request;
+#[cfg(test)]
 use tower::BoxError;
 
 #[derive(Default)]

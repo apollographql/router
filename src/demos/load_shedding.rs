@@ -1,10 +1,13 @@
-use http::Request;
 use std::time::Duration;
 
+#[cfg(test)]
+use http::Request;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
-use crate::{graphql, ApolloRouter, Plugin, RouterResponse, SubgraphRequest};
+#[cfg(test)]
+use crate::{graphql, ApolloRouter};
+use crate::{Plugin, RouterResponse, SubgraphRequest};
 
 #[derive(Default)]
 struct MyPlugin;
@@ -19,7 +22,7 @@ impl Plugin for MyPlugin {
             //If rate limit is exceeded then this service will response immediately rather than timing out.
             return ServiceBuilder::new()
                 .load_shed()
-                .rate_limit(1, Duration::from_secs(1))
+                .rate_limit(2, Duration::from_secs(1))
                 .service(service)
                 .boxed();
         }
@@ -33,7 +36,8 @@ async fn load_shedding() -> Result<(), BoxError> {
         .with_plugin(MyPlugin::default())
         .build();
 
-    let response = router
+    // first call should succeed
+    let res = router
         .call(
             Request::builder()
                 .header("A", "HEADER_A")
@@ -42,8 +46,31 @@ async fn load_shedding() -> Result<(), BoxError> {
                 })
                 .unwrap(),
         )
-        .await?;
-    println!("{:?}", response);
+        .await
+        .unwrap();
+
+    assert_eq!(
+        // body() means http response body, .body is the graphql response body
+        res.body().body,
+        r#"{"req1: Hello1 World from http://books/", "req2: Hello1 World from http://books/"}"#
+    );
+
+    println!("{:?}", res);
+
+    // second call will overload the subgraph
+    let err = router
+        .call(
+            Request::builder()
+                .header("A", "HEADER_A")
+                .body(graphql::Request {
+                    body: "Hello1".to_string(),
+                })
+                .unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!("service overloaded", format!("{}", err));
 
     Ok(())
 }

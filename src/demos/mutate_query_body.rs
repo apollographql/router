@@ -1,5 +1,10 @@
-use crate::{graphql, ApolloRouter, Plugin, RouterResponse, SubgraphRequest};
+#[cfg(test)]
+use crate::{graphql, ApolloRouter};
+use crate::{Plugin, RouterResponse, SubgraphRequest};
+
+#[cfg(test)]
 use http::Request;
+
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
