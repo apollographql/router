@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower::Service;
 
 /// Factory for creating the http server component.
 ///
@@ -17,14 +18,16 @@ use tokio::net::TcpListener;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<Router>(
+    fn create<S>(
         &self,
-        service: RouterService<Router>,
+        service: S,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        Router: graphql::Router + 'static;
+        S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + Sync + 'static,
+        <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+        <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.

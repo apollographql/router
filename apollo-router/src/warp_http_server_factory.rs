@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::{prelude::*, RouterService};
+use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
@@ -37,14 +37,16 @@ impl WarpHttpServerFactory {
 }
 
 impl HttpServerFactory for WarpHttpServerFactory {
-    fn create<R>(
+    fn create<S>(
         &self,
-        service: RouterService<R>,
+        service: S,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        R: graphql::Router + 'static,
+        S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + Sync + 'static,
+        <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+        <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -177,11 +179,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
-fn get_graphql_request_or_redirect<R>(
-    service: graphql::RouterService<R>,
+fn get_graphql_request_or_redirect<S>(
+    service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    R: Router + 'static,
+    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -252,11 +256,13 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         })
 }
 
-fn post_graphql_request<R>(
-    service: graphql::RouterService<R>,
+fn post_graphql_request<S>(
+    service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    R: Router + 'static,
+    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -271,13 +277,15 @@ where
         })
 }
 
-fn run_graphql_request<R>(
-    service: graphql::RouterService<R>,
+fn run_graphql_request<S>(
+    service: S,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    R: Router + 'static,
+    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
+    <S as tower::Service<apollo_router_core::Request>>::Error: std::marker::Send,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -301,22 +309,21 @@ where
     }
 }
 
-async fn stream_request<R>(
-    mut service: graphql::RouterService<R>,
-    request: graphql::Request,
-) -> String
+async fn stream_request<S>(mut service: S, request: graphql::Request) -> String
 where
-    R: Router + 'static,
+    S: Clone + Service<graphql::Request, Response = graphql::Response> + Send + 'static,
+    <S as tower::Service<apollo_router_core::Request>>::Future: std::marker::Send,
 {
-    let response = service
-        .call(request)
-        .await
-        .expect("the Router always returns a Response");
-
-    let span = Span::current();
-    tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-        serde_json::to_string(&response).expect("serde_json::Value serialization will not fail")
-    })
+    match service.call(request).await {
+        Err(_) => String::new(),
+        Ok(response) => {
+            let span = Span::current();
+            tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+                serde_json::to_string(&response)
+                    .expect("serde_json::Value serialization will not fail")
+            })
+        }
+    }
 }
 
 fn prefers_html(accept_header: String) -> bool {
@@ -351,6 +358,7 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
+    use apollo_router_core::RouterService;
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
