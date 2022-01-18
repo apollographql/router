@@ -325,8 +325,7 @@ fn prefers_html(accept_header: String) -> bool {
     accept_header
         .split(',')
         .map(|a| a.trim())
-        .find(|a| *a == "text/html")
-        .is_some()
+        .any(|a| a == "text/html")
 }
 
 struct HeaderMapCarrier<'a>(&'a HeaderMap);
