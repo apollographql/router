@@ -2,6 +2,7 @@
 extern crate maplit;
 
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -190,7 +191,10 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 #[derive(Default)]
 pub struct ApolloRouterBuilder {
     plugins: Vec<Box<dyn Plugin>>,
-    services: Vec<(
+    router_services: Vec<BoxService<RouterRequest, RouterResponse, BoxError>>,
+    query_planning_services: Vec<BoxService<RouterRequest, PlannedRequest, BoxError>>,
+    execution_services: Vec<BoxService<PlannedRequest, RouterResponse, BoxError>>,
+    subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, RouterResponse, BoxError>,
     )>,
@@ -200,6 +204,94 @@ impl ApolloRouterBuilder {
     pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> ApolloRouterBuilder {
         self.plugins.push(Box::new(plugin));
         self
+    }
+
+    pub fn with_router_service<
+        S: Service<
+                RouterRequest,
+                Response = RouterResponse,
+                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
+            > + Send
+            + 'static,
+    >(
+        mut self,
+        service: S,
+    ) -> ApolloRouterBuilder
+    where
+        <S as Service<RouterRequest>>::Future: Send,
+    {
+        self.router_services.push(service.boxed());
+        self
+    }
+
+    pub fn with_query_planning_service<
+        S: Service<
+                RouterRequest,
+                Response = PlannedRequest,
+                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
+            > + Send
+            + 'static,
+    >(
+        mut self,
+        service: S,
+    ) -> ApolloRouterBuilder
+    where
+        <S as Service<RouterRequest>>::Future: Send,
+    {
+        self.query_planning_services.push(service.boxed());
+        self
+    }
+
+    pub fn with_execution_service<
+        S: Service<
+                PlannedRequest,
+                Response = RouterResponse,
+                Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
+            > + Send
+            + 'static,
+    >(
+        mut self,
+        service: S,
+    ) -> ApolloRouterBuilder
+    where
+        <S as Service<PlannedRequest>>::Future: Send,
+    {
+        self.execution_services.push(service.boxed());
+        self
+    }
+
+    pub fn with_before_subgraph(
+        self,
+        subgraph_name: String,
+        callback: impl Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(
+            MaybeCallbackPlugin::default().with_before_subgraph(subgraph_name, callback),
+        )
+    }
+
+    pub fn with_before_any_subgraph(
+        self,
+        callback: impl Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_before_any_subgraph(callback))
+    }
+
+    pub fn with_after_subgraph(
+        self,
+        subgraph_name: String,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(
+            MaybeCallbackPlugin::default().with_after_subgraph(subgraph_name, callback),
+        )
+    }
+
+    pub fn with_after_any_subgraph(
+        self,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_after_any_subgraph(callback))
     }
 
     pub fn with_subgraph_service<
@@ -217,7 +309,8 @@ impl ApolloRouterBuilder {
     where
         <S as Service<SubgraphRequest>>::Future: Send,
     {
-        self.services.push((name.to_string(), service.boxed()));
+        self.subgraph_services
+            .push((name.to_string(), service.boxed()));
         self
     }
 
@@ -234,7 +327,7 @@ impl ApolloRouterBuilder {
         //SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = Self::default_services()
             .into_iter()
-            .chain(self.services.into_iter())
+            .chain(self.subgraph_services.into_iter())
             .map(|(name, s)| {
                 (
                     name.clone(),
@@ -368,116 +461,279 @@ pub trait Plugin {
     }
 }
 
-#[cfg(feature = "plugin_tests")]
-pub mod test_utils {
+pub trait ScatteredPlugin {
+    fn before_router(&self, router_request: RouterRequest) -> RouterRequest {
+        router_request
+    }
+    fn after_router(&self, router_response: RouterResponse) -> RouterResponse {
+        router_response
+    }
 
-    use super::*;
-    use std::borrow::Cow;
+    fn before_query_planning(&self, router_request: RouterRequest) -> RouterRequest {
+        router_request
+    }
 
-    pub trait TestablePlugin {
-        fn before_router(&self, router_request: RouterRequest) -> RouterRequest {
+    fn after_query_planning(&self, planned_request: PlannedRequest) -> PlannedRequest {
+        planned_request
+    }
+
+    fn before_execution(&self, planned_request: PlannedRequest) -> PlannedRequest {
+        planned_request
+    }
+
+    fn after_execution(&self, router_response: RouterResponse) -> RouterResponse {
+        router_response
+    }
+
+    fn before_subgraph(&self, _name: &str, subgraph_request: SubgraphRequest) -> SubgraphRequest {
+        subgraph_request
+    }
+    fn after_subgraph(&self, _name: &str, router_response: RouterResponse) -> RouterResponse {
+        router_response
+    }
+}
+
+impl<Scattered> Plugin for Scattered
+where
+    Scattered: ScatteredPlugin + Send + Sync + Clone + 'static,
+{
+    fn router_service(
+        &mut self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        let clone_for_before = self.clone();
+        let clone_for_after = self.clone();
+        ServiceBuilder::new()
+            .map_request(move |request| clone_for_before.before_router(request))
+            .map_response(move |response| clone_for_after.after_router(response))
+            .service(service)
+            .boxed()
+    }
+
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
+    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+        let clone_for_before = self.clone();
+        let clone_for_after = self.clone();
+        ServiceBuilder::new()
+            .map_request(move |request| clone_for_before.before_query_planning(request))
+            .map_response(move |planned_request| {
+                clone_for_after.after_query_planning(planned_request)
+            })
+            .service(service)
+            .boxed()
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
+    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
+        let clone_for_before = self.clone();
+        let clone_for_after = self.clone();
+        ServiceBuilder::new()
+            .map_request(move |planned_request| clone_for_before.before_execution(planned_request))
+            .map_response(move |router_response| clone_for_after.after_execution(router_response))
+            .service(service)
+            .boxed()
+    }
+
+    fn subgraph_service(
+        &mut self,
+        name: &str,
+        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
+        let name_for_before = Cow::from(name.to_string());
+        let name_for_after = name_for_before.clone();
+        let clone_for_before = self.clone();
+        let clone_for_after = self.clone();
+
+        ServiceBuilder::new()
+            .map_request(move |subgraph_request| {
+                clone_for_before.before_subgraph(&name_for_before, subgraph_request)
+            })
+            .map_response(move |router_response| {
+                clone_for_after.after_subgraph(&name_for_after, router_response)
+            })
+            .service(service)
+            .boxed()
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct MaybeCallbackPlugin {
+    before_router: Option<Arc<dyn Fn(RouterRequest) -> RouterRequest + Send + Sync + 'static>>,
+    after_router: Option<Arc<dyn Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static>>,
+
+    before_query_planning:
+        Option<Arc<dyn Fn(RouterRequest) -> RouterRequest + Send + Sync + 'static>>,
+    after_query_planning:
+        Option<Arc<dyn Fn(PlannedRequest) -> PlannedRequest + Send + Sync + 'static>>,
+
+    before_execution: Option<Arc<dyn Fn(PlannedRequest) -> PlannedRequest + Send + Sync + 'static>>,
+    after_execution: Option<Arc<dyn Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static>>,
+
+    before_any_subgraph:
+        Vec<Arc<dyn Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static>>,
+    after_any_subgraph: Vec<Arc<dyn Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static>>,
+
+    before_subgraph:
+        HashMap<String, Arc<dyn Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static>>,
+    after_subgraph:
+        HashMap<String, Arc<dyn Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static>>,
+}
+
+macro_rules! with {
+    ($name:ident, $fn_type:ty) => {
+        paste::item! {
+            pub fn [< with _ $name >](self, $name: impl $fn_type + Send + Sync + 'static) -> Self {
+                if self.$name.is_some() {
+                    panic!("[< with _ $name >] cannot be invoked twice, please build an other one");
+                }
+
+                Self {
+                    $name: Some(Arc::new($name)),
+                    ..self
+                }
+            }
+        }
+    };
+}
+
+impl MaybeCallbackPlugin {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    with!(before_router, Fn(RouterRequest) -> RouterRequest);
+    with!(after_router, Fn(RouterResponse) -> RouterResponse);
+
+    with!(before_query_planning, Fn(RouterRequest) -> RouterRequest);
+    with!(after_query_planning,Fn(PlannedRequest) -> PlannedRequest);
+
+    with!(before_execution,Fn(PlannedRequest) -> PlannedRequest);
+    with!(after_execution, Fn(RouterResponse) -> RouterResponse);
+
+    pub fn with_before_any_subgraph(
+        mut self,
+        callback: impl Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static,
+    ) -> Self {
+        self.before_any_subgraph.push(Arc::new(callback));
+
+        self
+    }
+
+    pub fn with_after_any_subgraph(
+        mut self,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> Self {
+        self.after_any_subgraph.push(Arc::new(callback));
+
+        self
+    }
+
+    pub fn with_before_subgraph(
+        mut self,
+        service_name: String,
+        callback: impl Fn(SubgraphRequest) -> SubgraphRequest + Send + Sync + 'static,
+    ) -> Self {
+        if self.before_subgraph.contains_key(service_name.as_str()) {
+            panic!("with_before_subgraph cannot be invoked twice on the same service_name, please build an other one");
+        }
+
+        self.before_subgraph
+            .insert(service_name, Arc::new(callback));
+
+        Self { ..self }
+    }
+
+    pub fn with_after_subgraph(
+        mut self,
+        service_name: String,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> Self {
+        if self.after_subgraph.contains_key(service_name.as_str()) {
+            panic!("with_before_subgraph cannot be invoked twice on the same service_name, please build an other one");
+        }
+
+        self.after_subgraph.insert(service_name, Arc::new(callback));
+
+        Self { ..self }
+    }
+}
+
+impl ScatteredPlugin for MaybeCallbackPlugin {
+    fn before_router(&self, router_request: RouterRequest) -> RouterRequest {
+        if let Some(before_router) = &self.before_router {
+            before_router(router_request)
+        } else {
             router_request
         }
-        fn after_router(&self, router_response: RouterResponse) -> RouterResponse {
-            router_response
-        }
-
-        fn before_query_planning(&self, router_request: RouterRequest) -> RouterRequest {
-            router_request
-        }
-
-        fn after_query_planning(&self, planned_request: PlannedRequest) -> PlannedRequest {
-            planned_request
-        }
-
-        fn before_execution(&self, planned_request: PlannedRequest) -> PlannedRequest {
-            planned_request
-        }
-
-        fn after_execution(&self, router_response: RouterResponse) -> RouterResponse {
-            router_response
-        }
-
-        fn before_subgraph(
-            &self,
-            _name: &str,
-            subgraph_request: SubgraphRequest,
-        ) -> SubgraphRequest {
-            subgraph_request
-        }
-        fn after_subgraph(&self, _name: &str, router_response: RouterResponse) -> RouterResponse {
+    }
+    fn after_router(&self, router_response: RouterResponse) -> RouterResponse {
+        if let Some(after_router) = &self.after_router {
+            after_router(router_response)
+        } else {
             router_response
         }
     }
 
-    impl<Test> Plugin for Test
-    where
-        Test: TestablePlugin + Send + Sync + Clone + 'static,
-    {
-        fn router_service(
-            &mut self,
-            service: BoxService<RouterRequest, RouterResponse, BoxError>,
-        ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-            let clone_for_before = self.clone();
-            let clone_for_after = self.clone();
-            ServiceBuilder::new()
-                .map_request(move |request| clone_for_before.before_router(request))
-                .map_response(move |response| clone_for_after.after_router(response))
-                .service(service)
-                .boxed()
+    fn before_query_planning(&self, router_request: RouterRequest) -> RouterRequest {
+        if let Some(before_query_planning) = &self.before_query_planning {
+            before_query_planning(router_request)
+        } else {
+            router_request
         }
+    }
 
-        fn query_planning_service(
-            &mut self,
-            service: BoxService<RouterRequest, PlannedRequest, BoxError>,
-        ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
-            let clone_for_before = self.clone();
-            let clone_for_after = self.clone();
-            ServiceBuilder::new()
-                .map_request(move |request| clone_for_before.before_query_planning(request))
-                .map_response(move |planned_request| {
-                    clone_for_after.after_query_planning(planned_request)
-                })
-                .service(service)
-                .boxed()
+    fn after_query_planning(&self, planned_request: PlannedRequest) -> PlannedRequest {
+        if let Some(after_query_planning) = &self.after_query_planning {
+            after_query_planning(planned_request)
+        } else {
+            planned_request
         }
+    }
 
-        fn execution_service(
-            &mut self,
-            service: BoxService<PlannedRequest, RouterResponse, BoxError>,
-        ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
-            let clone_for_before = self.clone();
-            let clone_for_after = self.clone();
-            ServiceBuilder::new()
-                .map_request(move |planned_request| {
-                    clone_for_before.before_execution(planned_request)
-                })
-                .map_response(move |router_response| {
-                    clone_for_after.after_execution(router_response)
-                })
-                .service(service)
-                .boxed()
+    fn before_execution(&self, planned_request: PlannedRequest) -> PlannedRequest {
+        if let Some(before_execution) = &self.before_execution {
+            before_execution(planned_request)
+        } else {
+            planned_request
         }
+    }
 
-        fn subgraph_service(
-            &mut self,
-            service_name: &str,
-            service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
-        ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
-            let before_name = Cow::from(service_name.to_string());
-            let after_name = before_name.clone();
-
-            let clone_for_before = self.clone();
-            let clone_for_after = self.clone();
-            ServiceBuilder::new()
-                .map_request(move |subgraph_request| {
-                    clone_for_before.before_subgraph(&before_name, subgraph_request)
-                })
-                .map_response(move |router_response| {
-                    clone_for_after.after_subgraph(&after_name, router_response)
-                })
-                .service(service)
-                .boxed()
+    fn after_execution(&self, router_response: RouterResponse) -> RouterResponse {
+        if let Some(after_execution) = &self.after_execution {
+            after_execution(router_response)
+        } else {
+            router_response
         }
+    }
+
+    fn before_subgraph(&self, name: &str, subgraph_request: SubgraphRequest) -> SubgraphRequest {
+        // run before any hooks
+        let subgraph_request = self
+            .before_any_subgraph
+            .iter()
+            .fold(subgraph_request, |request, callback| callback(request));
+        // run specific hook
+        if let Some(before_subgraph) = self.before_subgraph.get(name) {
+            before_subgraph(subgraph_request)
+        } else {
+            subgraph_request
+        }
+    }
+
+    fn after_subgraph(&self, name: &str, router_response: RouterResponse) -> RouterResponse {
+        // run specific hook
+        let router_response = if let Some(after_subgraph) = &self.after_subgraph.get(name) {
+            after_subgraph(router_response)
+        } else {
+            router_response
+        };
+        // run after any hooks
+        self.after_any_subgraph
+            .iter()
+            .fold(router_response, |response, callback| callback(response))
     }
 }

@@ -56,12 +56,11 @@ mod various_plugins_mod {
 // This would be cfg(test) gated, within the user's codebase
 #[cfg(test)]
 mod my_test_harness {
-    use apollo_router_rs::{ScatteredPlugin, SubgraphRequest};
+    use apollo_router_rs::SubgraphRequest;
     use http::HeaderValue;
 
     #[derive(Clone, Default, Debug)]
     pub struct PresenceRequirements {
-        pub service_name: Option<String>, // Defaults to all services
         pub must_be_present: bool,
         pub header_name: String,
         pub must_have_value: Option<HeaderValue>,
@@ -69,28 +68,20 @@ mod my_test_harness {
 
     impl PresenceRequirements {
         // assert_complies panics if the found headers doesn't match the requirement
-        pub fn assert_complies(&self, service_name: &str, request: &SubgraphRequest) {
-            if let Some(sn) = &self.service_name {
-                if sn.as_str() != service_name {
-                    // Requirement doesn't apply to this service.
-                    return;
-                }
-            }
+        pub fn assert_complies(&self, request: &SubgraphRequest) {
             let header = request.backend_request.headers().get(&self.header_name);
 
             if self.must_be_present {
                 assert!(
                     header.is_some(),
-                    "header {} must be present but hasn't been found in {}",
+                    "header {} must be present but hasn't been found",
                     self.header_name.as_str(),
-                    service_name
                 );
             } else {
                 assert!(
                     header.is_none(),
-                    "header {} must be absent but was been found in {}",
+                    "header {} must be absent but was been found",
                     self.header_name.as_str(),
-                    service_name
                 );
             }
 
@@ -99,87 +90,64 @@ mod my_test_harness {
                 assert_eq!(
                     actual,
                     expected_value,
-                    "header {} for service {} value missmatch: expected `{:?}` found `{:?}`",
+                    "header {} value missmatch: expected `{:?}` found `{:?}`",
                     self.header_name.as_str(),
-                    service_name,
                     expected_value,
                     actual
                 );
             }
         }
     }
-
-    #[derive(Clone)]
-    pub struct HeaderPresenceTestPlugin {
-        requirements: Vec<PresenceRequirements>,
-    }
-
-    impl HeaderPresenceTestPlugin {
-        pub fn from_presence_requirements(requirements: Vec<PresenceRequirements>) -> Self {
-            Self { requirements }
-        }
-    }
-
-    // The header propagation test plugin
-    // is only here to make sure subgraph requests to send the required headers.
-    //
-    // The ScatteredPlugin plugin trait allows us to only hook
-    // at the relevant spots to make asserts
-    impl ScatteredPlugin for HeaderPresenceTestPlugin {
-        fn before_subgraph(
-            &self,
-            service_name: &str,
-            subgraph_request: SubgraphRequest,
-        ) -> SubgraphRequest {
-            for requirement in self.requirements.iter() {
-                requirement.assert_complies(service_name, &subgraph_request);
-            }
-            subgraph_request
-        }
-    }
 }
 
 // ----------------------
 
-use crate::my_test_harness::{HeaderPresenceTestPlugin, PresenceRequirements};
+use crate::my_test_harness::PresenceRequirements;
 use crate::various_plugins_mod::MyPlugin;
 
 #[tokio::test]
 async fn header_propagation() {
-    let my_requirements = vec![
+    let books_requirements = vec![
         PresenceRequirements {
-            service_name: Some("books".to_string()),
             must_be_present: true,
             header_name: "A".to_string(),
             must_have_value: Some(HeaderValue::from_static("this is a test on header A")),
         },
         PresenceRequirements {
-            service_name: Some("books".to_string()),
             must_be_present: true,
             header_name: "B".to_string(),
             must_have_value: Some(HeaderValue::from_static("this is a test on header B")),
         },
+    ];
+
+    let all_requirements = vec![
         // C must be absent from any service
         PresenceRequirements {
-            service_name: None,
             must_be_present: false,
             header_name: "C".to_string(),
             must_have_value: None,
         },
         // Created / Overidden by our plugin
         PresenceRequirements {
-            service_name: None,
             must_be_present: true,
             header_name: "D".to_string(),
             must_have_value: Some(HeaderValue::from(5)),
         },
     ];
 
-    let test_plugin = HeaderPresenceTestPlugin::from_presence_requirements(my_requirements);
-
     let router = ApolloRouter::builder()
-        // beware! the order matters!
-        .with_plugin(test_plugin)
+        .with_before_any_subgraph(move |request| {
+            for requirement in all_requirements.iter() {
+                requirement.assert_complies(&request)
+            }
+            request
+        })
+        .with_before_subgraph("books".to_string(), move |request| {
+            for requirement in books_requirements.iter() {
+                requirement.assert_complies(&request)
+            }
+            request
+        })
         .with_plugin(MyPlugin::default())
         .build();
 
