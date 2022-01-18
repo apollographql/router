@@ -1,5 +1,6 @@
 use crate::prelude::graphql::*;
 use derivative::Derivative;
+use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -42,6 +43,13 @@ where
     D: serde::Deserializer<'de>,
 {
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
+}
+
+// carries a graphql request along with a list of HTTP headers
+// we might want to use a more generic "context" structure instead of hyper's HeaderMap
+pub struct HttpRequest {
+    pub headers: HeaderMap,
+    pub request: Request,
 }
 
 #[cfg(test)]

@@ -151,6 +151,7 @@ dependencies = [
  "derivative",
  "displaydoc",
  "futures",
+ "hyper",
  "include_dir",
  "insta",
  "lru",

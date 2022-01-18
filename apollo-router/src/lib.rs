@@ -2,6 +2,7 @@
 
 mod apollo_router;
 pub mod configuration;
+mod extensions;
 mod files;
 mod http_server_factory;
 pub mod http_service_registry;
