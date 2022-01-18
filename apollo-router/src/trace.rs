@@ -62,7 +62,16 @@ pub(crate) fn try_initialize_subscriber(
             let provider = builder.with_span_processor(batch).build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
-            let _ = opentelemetry::global::set_tracer_provider(provider);
+
+            // The call to set_tracer_provider() manipulate a sync RwLock.
+            // Even though this code is sync, it is called from within an
+            // async context. If we don't do this in a separate thread,
+            // it will cause issues with the async runtime that prevents
+            // the router from working correctly.
+            let _ = std::thread::spawn(|| {
+                opentelemetry::global::set_tracer_provider(provider);
+            })
+            .join();
 
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
