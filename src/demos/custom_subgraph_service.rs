@@ -10,9 +10,10 @@ mod test {
 
     #[tokio::test]
     async fn call_external_service() -> Result<(), BoxError> {
-        tracing_subscriber::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_max_level(Level::INFO)
             .try_init();
+
         let client = reqwest::Client::default();
 
         let router = ApolloRouter::builder()
@@ -23,8 +24,8 @@ mod test {
                     async move {
                         let response = client.get("http://apollographql.com").send().await;
                         Ok(RouterResponse {
-                            request: req.request,
-                            response: Response::new(graphql::Response {
+                            frontend_request: req.frontend_request,
+                            backend_response: Response::new(graphql::Response {
                                 body: response.unwrap().text().await.unwrap(),
                             }),
                             context: Default::default(),

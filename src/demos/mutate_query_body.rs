@@ -22,7 +22,7 @@ impl Plugin for MyPlugin {
         ServiceBuilder::new()
             .map_request(|mut r: SubgraphRequest| {
                 //Do something, e.g. censor data. In our case we UPPERCASE everything.
-                r.subgraph_request.body_mut().body = r.subgraph_request.body().body.to_uppercase();
+                r.backend_request.body_mut().body = r.backend_request.body().body.to_uppercase();
                 r
             })
             .service(service)
@@ -32,9 +32,10 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn mutate_query_body() -> Result<(), BoxError> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .try_init();
+
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();

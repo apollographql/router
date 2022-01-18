@@ -24,7 +24,8 @@ impl Plugin for MyPlugin {
         if name == "books" {
             return ServiceBuilder::new()
                 .map_request(|mut r: SubgraphRequest| {
-                    r.url_override = Some(Uri::from_static("http://overridden"));
+                    r.context
+                        .insert("books", Some(Uri::from_static("http://overridden")));
                     r
                 })
                 .service(service)
@@ -36,9 +37,10 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn demo() -> Result<(), BoxError> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .try_init();
+
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();

@@ -49,53 +49,52 @@ impl Context {
         self.content.insert(name.to_string(), Arc::new(value))
     }
 }
+
 pub struct RouterRequest {
     // The original request
-    pub request: Request<graphql::Request>,
+    pub frontend_request: Request<graphql::Request>,
 
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct RouterResponse {
     // The original request
-    pub request: Arc<Request<graphql::Request>>,
+    pub frontend_request: Arc<Request<graphql::Request>>,
 
-    pub response: Response<graphql::Response>,
+    pub backend_response: Response<graphql::Response>,
 
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct PlannedRequest {
     // Planned request includes the original request
-    pub request: Request<graphql::Request>,
+    pub frontend_request: Request<graphql::Request>,
 
     // And also the query plan
     pub query_plan: QueryPlan,
 
     // Cloned from RouterRequest
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct SubgraphRequest {
     pub service_name: String,
 
-    //Set this to override the URL of the service
-    pub url_override: Option<Uri>,
-
     // The request to make downstream
-    pub subgraph_request: Request<graphql::Request>,
-
-    // And also the query plan
-    pub query_plan: Arc<QueryPlan>,
+    pub backend_request: Request<graphql::Request>,
 
     // Downstream requests includes the original request
-    pub request: Arc<Request<graphql::Request>>,
+    pub frontend_request: Arc<Request<graphql::Request>>,
 
     // Cloned from PlannedRequest
     pub context: Context,
+    //Parsed_request
 }
 
-trait ServiceBuilderExt<L> {
+pub trait ServiceBuilderExt<L> {
     //Add extra stuff here to support our needs e.g. caching
     fn cache(self) -> ServiceBuilder<Stack<CacheLayer, L>>;
 
@@ -271,11 +270,11 @@ impl ApolloRouterBuilder {
                         .boxed(),
                     |acc, e| e.router_service(acc),
                 )
-                .map_request(|request| RouterRequest {
-                    request,
+                .map_request(|frontend_request| RouterRequest {
+                    frontend_request,
                     context: Context::default(),
                 })
-                .map_response(|response| response.response),
+                .map_response(|response| response.backend_response),
         );
 
         ApolloRouter { router_service }
@@ -366,5 +365,119 @@ pub trait Plugin {
         service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
         service
+    }
+}
+
+#[cfg(feature = "plugin_tests")]
+pub mod test_utils {
+
+    use super::*;
+    use std::borrow::Cow;
+
+    pub trait TestablePlugin {
+        fn before_router(&self, router_request: RouterRequest) -> RouterRequest {
+            router_request
+        }
+        fn after_router(&self, router_response: RouterResponse) -> RouterResponse {
+            router_response
+        }
+
+        fn before_query_planning(&self, router_request: RouterRequest) -> RouterRequest {
+            router_request
+        }
+
+        fn after_query_planning(&self, planned_request: PlannedRequest) -> PlannedRequest {
+            planned_request
+        }
+
+        fn before_execution(&self, planned_request: PlannedRequest) -> PlannedRequest {
+            planned_request
+        }
+
+        fn after_execution(&self, router_response: RouterResponse) -> RouterResponse {
+            router_response
+        }
+
+        fn before_subgraph(
+            &self,
+            _name: &str,
+            subgraph_request: SubgraphRequest,
+        ) -> SubgraphRequest {
+            subgraph_request
+        }
+        fn after_subgraph(&self, _name: &str, router_response: RouterResponse) -> RouterResponse {
+            router_response
+        }
+    }
+
+    impl<Test> Plugin for Test
+    where
+        Test: TestablePlugin + Send + Sync + Clone + 'static,
+    {
+        fn router_service(
+            &mut self,
+            service: BoxService<RouterRequest, RouterResponse, BoxError>,
+        ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+            let clone_for_before = self.clone();
+            let clone_for_after = self.clone();
+            ServiceBuilder::new()
+                .map_request(move |request| clone_for_before.before_router(request))
+                .map_response(move |response| clone_for_after.after_router(response))
+                .service(service)
+                .boxed()
+        }
+
+        fn query_planning_service(
+            &mut self,
+            service: BoxService<RouterRequest, PlannedRequest, BoxError>,
+        ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+            let clone_for_before = self.clone();
+            let clone_for_after = self.clone();
+            ServiceBuilder::new()
+                .map_request(move |request| clone_for_before.before_query_planning(request))
+                .map_response(move |planned_request| {
+                    clone_for_after.after_query_planning(planned_request)
+                })
+                .service(service)
+                .boxed()
+        }
+
+        fn execution_service(
+            &mut self,
+            service: BoxService<PlannedRequest, RouterResponse, BoxError>,
+        ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
+            let clone_for_before = self.clone();
+            let clone_for_after = self.clone();
+            ServiceBuilder::new()
+                .map_request(move |planned_request| {
+                    clone_for_before.before_execution(planned_request)
+                })
+                .map_response(move |router_response| {
+                    clone_for_after.after_execution(router_response)
+                })
+                .service(service)
+                .boxed()
+        }
+
+        fn subgraph_service(
+            &mut self,
+            service_name: &str,
+            service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
+        ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
+            let before_name = Cow::from(service_name.to_string());
+            let after_name = before_name.clone();
+
+            let clone_for_before = self.clone();
+            let clone_for_after = self.clone();
+            ServiceBuilder::new()
+                .map_request(move |subgraph_request| {
+                    clone_for_before.before_subgraph(&before_name, subgraph_request)
+                })
+                .map_response(move |router_response| {
+                    clone_for_after.after_subgraph(&after_name, router_response)
+                })
+                .service(service)
+                .boxed()
+        }
     }
 }

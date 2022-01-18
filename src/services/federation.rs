@@ -29,7 +29,7 @@ impl Service<RouterRequest> for QueryPlannerService {
         // create a response in a future.
         let fut = async {
             Ok(PlannedRequest {
-                request: request.request,
+                frontend_request: request.frontend_request,
                 query_plan: QueryPlan {
                     service_name: "books".to_string(), //Hard coded
                 },
@@ -100,18 +100,15 @@ impl ExecutionService {
     fn make_request(
         context: &Context,
         service_name: &str,
-        query_plan: &Arc<QueryPlan>,
         frontend_request: &Arc<Request<graphql::Request>>,
         body: &str,
     ) -> SubgraphRequest {
         SubgraphRequest {
             service_name: service_name.to_string(),
-            url_override: None,
-            subgraph_request: Request::new(graphql::Request {
+            backend_request: Request::new(graphql::Request {
                 body: body.to_string(),
             }),
-            query_plan: query_plan.clone(),
-            request: frontend_request.clone(),
+            frontend_request: frontend_request.clone(),
             context: context.clone(),
         }
     }
@@ -138,20 +135,17 @@ impl Service<PlannedRequest> for ExecutionService {
         let fut = async move {
             // Fan out, context becomes immutable at this point.
             let service_name = &req.query_plan.service_name.to_string();
-            let query_plan = Arc::new(req.query_plan);
-            let frontend_request = Arc::new(req.request);
+            let frontend_request = Arc::new(req.frontend_request);
             let context = Arc::new(req.context);
             let req1 = Self::make_request(
                 &context,
                 service_name,
-                &query_plan,
                 &frontend_request,
                 &format!("req1: {}", &frontend_request.body().body),
             );
             let req2 = Self::make_request(
                 &context,
                 service_name,
-                &query_plan,
                 &frontend_request,
                 &format!("req2: {}", &frontend_request.body().body),
             );
@@ -162,12 +156,12 @@ impl Service<PlannedRequest> for ExecutionService {
             let f2 = service2.ready().await.unwrap().call(req2).await;
 
             Ok(RouterResponse {
-                request: frontend_request.clone(),
-                response: Response::new(graphql::Response {
+                frontend_request: frontend_request.clone(),
+                backend_response: Response::new(graphql::Response {
                     body: format!(
                         "{{\"{}\", \"{}\"}}",
-                        f1?.response.body().body,
-                        f2?.response.body().body
+                        f1?.backend_response.body().body,
+                        f2?.backend_response.body().body
                     ),
                 }),
                 context: Default::default(),
