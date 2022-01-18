@@ -404,10 +404,12 @@ mod tests {
         MyRouter {}
 
         #[async_trait::async_trait]
-        impl graphql::Router<MockMyRoute> for MyRouter {
+        impl graphql::Router for MyRouter {
+            type PreparedQuery = MockMyRoute;
+
             async fn prepare_query(
                 &self,
-                request: Arc<graphql::Request>,
+                request: &graphql::Request,
             ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
@@ -418,7 +420,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::Response;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 

@@ -196,8 +196,7 @@ async fn query_rust(
 
     let router = ApolloRouter::new(registry.clone(), schema, None).await;
 
-    let request = Arc::new(request);
-    let stream = match router.prepare_query(request.clone()).await {
+    let stream = match router.prepare_query(&request).await {
         Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
