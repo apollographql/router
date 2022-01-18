@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
-use tower::{Service, ServiceBuilder};
+use tower::{Service, ServiceBuilder, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level, Span};
@@ -287,11 +287,19 @@ where
     });
 
     async move {
-        let response = stream_request(service, request)
-            .instrument(tracing::info_span!("graphql_request"))
-            .await;
+        match service.ready_oneshot().await {
+            Ok(service) => {
+                let response = stream_request(service, request)
+                    .instrument(tracing::info_span!("graphql_request"))
+                    .await;
 
-        Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
+                Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
+            }
+            Err(_) => Box::new(warp::reply::with_status(
+                "Invalid host to redirect to",
+                StatusCode::BAD_REQUEST,
+            )),
+        }
     }
 }
 
