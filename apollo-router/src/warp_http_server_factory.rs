@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, RouterService};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
@@ -39,7 +39,7 @@ impl WarpHttpServerFactory {
 impl HttpServerFactory for WarpHttpServerFactory {
     fn create<R>(
         &self,
-        router: Arc<R>,
+        service: RouterService<R>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
@@ -62,8 +62,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .clone()
                 .map(tracing::Dispatch::new)
                 .unwrap_or_default();
-
-            let service = graphql::RouterService::new(router);
 
             let routes = get_health_request()
                 .or(get_graphql_request_or_redirect(service.clone()))
@@ -446,10 +444,10 @@ mod tests {
             let mut $fetcher = MockMyRouter::new();
             $expect_prepare_query;
             let server_factory = WarpHttpServerFactory::new();
-            let fetcher = Arc::new($fetcher);
+            let fetcher = RouterService::new(Arc::new($fetcher));
             let server = server_factory
                 .create(
-                    fetcher.to_owned(),
+                    fetcher,
                     Arc::new(
                         Configuration::builder()
                             .server(

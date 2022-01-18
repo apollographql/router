@@ -1,7 +1,7 @@
 use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, RouterService};
 use std::sync::Arc;
 
 /// Factory for creating graphs.
@@ -17,8 +17,8 @@ where
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<Arc<Router>>,
-    ) -> Router;
+        previous_router: Option<RouterService<Router>>,
+    ) -> RouterService<Router>;
 }
 
 #[derive(Default)]
@@ -30,9 +30,16 @@ impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<Arc<ApolloRouter>>,
-    ) -> ApolloRouter {
+        previous_router: Option<RouterService<ApolloRouter>>,
+    ) -> RouterService<ApolloRouter> {
         let service_registry = HttpServiceRegistry::new(configuration);
-        ApolloRouter::new(Arc::new(service_registry), schema, previous_router).await
+        graphql::RouterService::new(Arc::new(
+            ApolloRouter::new(
+                Arc::new(service_registry),
+                schema,
+                previous_router.map(|r| r.into_inner()),
+            )
+            .await,
+        ))
     }
 }

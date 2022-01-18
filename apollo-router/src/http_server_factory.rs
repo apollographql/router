@@ -1,6 +1,6 @@
 use super::FederatedServerError;
 use crate::configuration::Configuration;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, RouterService};
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 pub(crate) trait HttpServerFactory {
     fn create<Router>(
         &self,
-        router: Arc<Router>,
+        service: RouterService<Router>,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
@@ -72,7 +72,7 @@ impl HttpServerHandle {
     pub(crate) async fn restart<Router, ServerFactory>(
         self,
         factory: &ServerFactory,
-        router: Arc<Router>,
+        router: RouterService<Router>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, FederatedServerError>
     where
@@ -105,7 +105,7 @@ impl HttpServerHandle {
         };
 
         let handle = factory
-            .create(Arc::clone(&router), Arc::clone(&configuration), listener)
+            .create(router, Arc::clone(&configuration), listener)
             .await?;
         tracing::debug!("Restarted on {}", handle.listen_address());
 

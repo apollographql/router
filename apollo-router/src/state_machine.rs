@@ -5,7 +5,7 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, RouterService};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
@@ -27,7 +27,7 @@ where
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        router: Arc<Router>,
+        router: RouterService<Router>,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -184,20 +184,15 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
 
                             let schema = Arc::new(*new_schema);
-                            let router = Arc::new(
-                                self.router_factory
-                                    .create(
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        Some(router),
-                                    )
-                                    .await,
-                            );
+                            let router = self
+                                .router_factory
+                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
+                                .await;
 
                             match server_handle
                                 .restart(
                                     &self.http_server_factory,
-                                    Arc::clone(&router),
+                                    router.clone(),
                                     derived_configuration,
                                 )
                                 .await
@@ -243,20 +238,15 @@ where
                         }
                         Ok(()) => {
                             let derived_configuration = Arc::new(derived_configuration);
-                            let router = Arc::new(
-                                self.router_factory
-                                    .create(
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        Some(router),
-                                    )
-                                    .await,
-                            );
+                            let router = self
+                                .router_factory
+                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
+                                .await;
 
                             match server_handle
                                 .restart(
                                     &self.http_server_factory,
-                                    Arc::clone(&router),
+                                    router.clone(),
                                     Arc::clone(&derived_configuration),
                                 )
                                 .await
@@ -344,15 +334,14 @@ where
                 }
                 Ok(()) => {
                     let schema = Arc::new(schema);
-                    let router = Arc::new(
-                        self.router_factory
-                            .create(&derived_configuration, Arc::clone(&schema), None)
-                            .await,
-                    );
+                    let router = self
+                        .router_factory
+                        .create(&derived_configuration, Arc::clone(&schema), None)
+                        .await;
 
                     match self
                         .http_server_factory
-                        .create(Arc::clone(&router), Arc::new(derived_configuration), None)
+                        .create(router.clone(), Arc::new(derived_configuration), None)
                         .await
                     {
                         Ok(server_handle) => {
@@ -643,7 +632,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
         // second call, configuration is empty, we should take the URL from the graph
         router_factory
             .expect_create()
@@ -657,7 +646,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -728,7 +717,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
         // second call, configuration is still empty, we should take the URL from the new supergraph
         router_factory
             .expect_create()
@@ -743,7 +732,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -801,8 +790,8 @@ mod tests {
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
-                previous_router: Option<Arc<MockMyRouter>>,
-            ) -> MockMyRouter;
+                previous_router: Option<RouterService<MockMyRouter>>,
+            ) -> RouterService<MockMyRouter>;
         }
     }
 
@@ -870,7 +859,7 @@ mod tests {
             .expect_create()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<MockMyRouter>,
+                move |_: RouterService<MockMyRouter>,
                       configuration: Arc<Configuration>,
                       listener: Option<TcpListener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
@@ -904,7 +893,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
         router_factory
     }
 }

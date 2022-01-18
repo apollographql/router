@@ -20,6 +20,10 @@ impl<R> RouterService<R> {
     pub fn new(router: Arc<R>) -> Self {
         Self { router }
     }
+
+    pub fn into_inner(self) -> Arc<R> {
+        self.router
+    }
 }
 
 impl<R> tower::Service<Request> for RouterService<R>
