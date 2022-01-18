@@ -74,6 +74,7 @@ async fn custom_instrumentation() -> Result<(), BoxError> {
     let _ = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .try_init();
+
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
