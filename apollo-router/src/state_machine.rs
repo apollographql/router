@@ -104,7 +104,7 @@ where
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
         // Studio Agent Relay listener
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
         tokio::spawn(async move {
             let mut jh_s: Option<JoinHandle<()>> = None;
@@ -187,10 +187,14 @@ where
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
                     match &new_configuration.studio {
                         Some(v) => {
-                            tx.send(v.external_agent).expect("XXX FIX LATER");
+                            tx.send(v.external_agent)
+                                .await
+                                .map_err(FederatedServerError::ServerRelayError)?;
                         }
                         None => {
-                            tx.send(false).expect("XXX FIX LATER");
+                            tx.send(false)
+                                .await
+                                .map_err(FederatedServerError::ServerRelayError)?;
                         }
                     }
                     self.maybe_transition_to_running(Startup {
@@ -317,10 +321,14 @@ where
                         Ok(()) => {
                             match &new_configuration.studio {
                                 Some(v) => {
-                                    tx.send(v.external_agent).expect("XXX FIX LATER");
+                                    tx.send(v.external_agent)
+                                        .await
+                                        .map_err(FederatedServerError::ServerRelayError)?;
                                 }
                                 None => {
-                                    tx.send(false).expect("XXX FIX LATER");
+                                    tx.send(false)
+                                        .await
+                                        .map_err(FederatedServerError::ServerRelayError)?;
                                 }
                             }
                             let derived_configuration = Arc::new(derived_configuration);

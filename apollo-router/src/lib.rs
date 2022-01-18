@@ -67,6 +67,9 @@ pub enum FederatedServerError {
 
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// Could not configure studio relay: {0}
+    ServerRelayError(tokio::sync::mpsc::error::SendError<bool>),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.

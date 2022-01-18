@@ -69,7 +69,6 @@ impl From<JoinError> for ReporterError {
     }
 }
 
-// Implement std::fmt::Display for ReporterError
 impl std::fmt::Display for ReporterError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(

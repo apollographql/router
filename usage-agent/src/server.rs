@@ -1,5 +1,7 @@
 use usage_agent::server::ReportServer;
 
+//TBD: Make the server address configurable
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::fmt().json().init();
