@@ -1,10 +1,9 @@
 use crate::configuration::Configuration;
 use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::prelude::*;
-use futures::Future;
+use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::fmt;
-use std::pin::Pin;
 use std::sync::Arc;
 use tower::Service;
 
@@ -65,7 +64,7 @@ impl Service<(String, graphql::Request)> for HttpServiceRegistry {
 
     type Error = graphql::FetchError;
 
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,

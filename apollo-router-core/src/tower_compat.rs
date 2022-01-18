@@ -1,6 +1,5 @@
 use crate::prelude::graphql::*;
-use futures::Future;
-use std::pin::Pin;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -29,8 +28,7 @@ where
 {
     type Response = Response;
     type Error = ();
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

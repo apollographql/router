@@ -87,7 +87,7 @@ impl Router for ApolloRouter {
             .await;
 
         if let Some(query) = query.as_ref() {
-            query.validate_variables(&request, &self.schema)?;
+            query.validate_variables(request, &self.schema)?;
         }
 
         let query_plan = self
