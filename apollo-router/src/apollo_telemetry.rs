@@ -96,11 +96,21 @@ impl PipelineBuilder {
         let provider = provider_builder.build();
 
         let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
-        let _prev_global_provider = global::set_tracer_provider(provider);
+        // The call to set_tracer_provider() manipulate a sync RwLock.
+        // Even though this code is sync, it is called from within an
+        // async context. If we don't do this in a separate thread,
+        // it will cause issues with the async runtime that prevents
+        // the router from working correctly.
+        let _prev_global_provider = std::thread::spawn(|| {
+            opentelemetry::global::set_tracer_provider(provider);
+        })
+        .join();
 
         Ok(tracer)
     }
 
+    // XXX CANNOT USE SIMPLE WITH OUR IMPLEMENTATION AS NO RUNTIME EXISTS
+    // WHEN TRYING TO EXPORT...
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     #[allow(dead_code)]
     pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {

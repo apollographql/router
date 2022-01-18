@@ -10,7 +10,6 @@ use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use usage_agent::server::ReportServer;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
@@ -54,7 +53,6 @@ where
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    tx: UnboundedSender<bool>,
     phantom: PhantomData<(Router, PreparedQuery)>,
 }
 
@@ -92,6 +90,19 @@ where
         state_listener: Option<mpsc::Sender<State>>,
         router_factory: FA,
     ) -> Self {
+        Self {
+            http_server_factory,
+            state_listener,
+            router_factory,
+            phantom: Default::default(),
+        }
+    }
+
+    pub(crate) async fn process_events(
+        mut self,
+        mut messages: impl Stream<Item = Event> + Unpin,
+    ) -> Result<(), FederatedServerError> {
+        tracing::debug!("Starting");
         // Studio Agent Relay listener
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -148,20 +159,6 @@ where
             tracing::info!("terminating relay loop");
         });
 
-        Self {
-            http_server_factory,
-            state_listener,
-            router_factory,
-            tx,
-            phantom: Default::default(),
-        }
-    }
-
-    pub(crate) async fn process_events(
-        mut self,
-        mut messages: impl Stream<Item = Event> + Unpin,
-    ) -> Result<(), FederatedServerError> {
-        tracing::debug!("Starting");
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -188,10 +185,13 @@ where
                 }
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
-                    if new_configuration.studio.is_some() {
-                        self.tx
-                            .send(new_configuration.studio.as_ref().unwrap().external_agent)
-                            .expect("XXX FIX LATER");
+                    match &new_configuration.studio {
+                        Some(v) => {
+                            tx.send(v.external_agent).expect("XXX FIX LATER");
+                        }
+                        None => {
+                            tx.send(false).expect("XXX FIX LATER");
+                        }
                     }
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
@@ -315,10 +315,13 @@ where
                             }
                         }
                         Ok(()) => {
-                            if new_configuration.studio.is_some() {
-                                self.tx
-                                    .send(new_configuration.studio.as_ref().unwrap().external_agent)
-                                    .expect("XXX FIX LATER");
+                            match &new_configuration.studio {
+                                Some(v) => {
+                                    tx.send(v.external_agent).expect("XXX FIX LATER");
+                                }
+                                None => {
+                                    tx.send(false).expect("XXX FIX LATER");
+                                }
                             }
                             let derived_configuration = Arc::new(derived_configuration);
                             let router = Arc::new(

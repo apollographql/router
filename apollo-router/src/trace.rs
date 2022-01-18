@@ -80,12 +80,19 @@ pub(crate) fn try_initialize_subscriber(
             };
             let provider = builder
                 .with_span_processor(batch)
-                // .with_simple_exporter(apollo_exporter)
                 .with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
                 .build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
-            let _ = opentelemetry::global::set_tracer_provider(provider);
+            // The call to set_tracer_provider() manipulate a sync RwLock.
+            // Even though this code is sync, it is called from within an
+            // async context. If we don't do this in a separate thread,
+            // it will cause issues with the async runtime that prevents
+            // the router from working correctly.
+            let _ = std::thread::spawn(|| {
+                opentelemetry::global::set_tracer_provider(provider);
+            })
+            .join();
 
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
@@ -108,7 +115,6 @@ pub(crate) fn try_initialize_subscriber(
             // Add studio agent as an OT pipeline
             let tracer = match new_pipeline()
                 .with_studio_config(studio_config)
-                // .install_simple()
                 .install_batch()
             {
                 Ok(t) => t,
