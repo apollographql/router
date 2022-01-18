@@ -28,6 +28,7 @@ name = "apollo_router_rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo_router_rs",
  "async-trait",
  "futures",
  "http",
