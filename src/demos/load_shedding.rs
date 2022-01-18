@@ -36,7 +36,10 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn load_shedding() -> Result<(), BoxError> {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .try_init();
+
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
