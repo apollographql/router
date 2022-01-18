@@ -1,10 +1,13 @@
 #[cfg(test)]
 use http::Request;
 use http::Uri;
-
 use tower::util::BoxService;
 use tower::ServiceExt;
 use tower::{BoxError, ServiceBuilder};
+#[cfg(test)]
+use tracing::info;
+#[cfg(test)]
+use tracing::Level;
 
 #[cfg(test)]
 use crate::{graphql, ApolloRouter};
@@ -33,6 +36,7 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn demo() -> Result<(), BoxError> {
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
@@ -47,7 +51,7 @@ async fn demo() -> Result<(), BoxError> {
                 .unwrap(),
         )
         .await?;
-    println!("{:?}", response);
+    info!("{:?}", response);
 
     Ok(())
 }

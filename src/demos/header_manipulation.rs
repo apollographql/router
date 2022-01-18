@@ -4,9 +4,12 @@ use http::header::HeaderName;
 use http::HeaderValue;
 #[cfg(test)]
 use http::Request;
-
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
+#[cfg(test)]
+use tracing::info;
+#[cfg(test)]
+use tracing::Level;
 
 #[cfg(test)]
 use crate::{graphql, ApolloRouter};
@@ -55,6 +58,7 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn header_propagation() -> Result<(), BoxError> {
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
@@ -69,7 +73,7 @@ async fn header_propagation() -> Result<(), BoxError> {
                 .unwrap(),
         )
         .await?;
-    println!("{:?}", response);
+    info!("{:?}", response);
 
     Ok(())
 }

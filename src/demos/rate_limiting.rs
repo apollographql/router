@@ -1,14 +1,17 @@
-#[cfg(test)]
-use http::Request;
 use std::time::Duration;
 
+#[cfg(test)]
+use http::Request;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
-
-use crate::{Plugin, RouterRequest, RouterResponse, SubgraphRequest};
+#[cfg(test)]
+use tracing::info;
+#[cfg(test)]
+use tracing::Level;
 
 #[cfg(test)]
 use crate::{graphql, ApolloRouter};
+use crate::{Plugin, RouterRequest, RouterResponse, SubgraphRequest};
 
 #[derive(Default)]
 struct MyPlugin;
@@ -42,6 +45,7 @@ impl Plugin for MyPlugin {
 
 #[tokio::test]
 async fn rate_limiting() -> Result<(), BoxError> {
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
@@ -56,7 +60,7 @@ async fn rate_limiting() -> Result<(), BoxError> {
                 .unwrap(),
         )
         .await?;
-    println!("{:?}", response);
+    info!("{:?}", response);
 
     Ok(())
 }

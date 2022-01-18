@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod test {
-
     use http::{Request, Response, Uri};
     use tower::{BoxError, ServiceBuilder};
+    use tracing::{info, Level};
 
     use crate::services::graphql_subgraph_service::GraphQlSubgraphService;
     use crate::services::rest_subgraph_service::RestSubgraphService;
@@ -10,6 +10,7 @@ mod test {
 
     #[tokio::test]
     async fn call_external_service() -> Result<(), BoxError> {
+        tracing_subscriber::fmt().with_max_level(Level::INFO).init();
         let client = reqwest::Client::default();
 
         let router = ApolloRouter::builder()
@@ -57,7 +58,7 @@ mod test {
                     .unwrap(),
             )
             .await?;
-        println!("{:?}", response);
+        info!("{:?}", response);
 
         Ok(())
     }

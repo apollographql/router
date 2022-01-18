@@ -3,20 +3,22 @@ extern crate maplit;
 
 use std::any::Any;
 use std::collections::HashMap;
-
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::layers::cache::CacheLayer;
-use crate::layers::header_manipulation::{HeaderManipulationLayer, Operation};
-use crate::services::federation::{ExecutionService, QueryPlannerService, RouterService};
-use crate::services::graphql_subgraph_service::GraphQlSubgraphService;
 use anyhow::Result;
 use http::header::{HeaderName, COOKIE};
 use http::{HeaderValue, Request, Response, Uri};
 use tower::layer::util::Stack;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Service, ServiceBuilder, ServiceExt};
+use tracing::Span;
+
+use crate::layers::cache::CacheLayer;
+use crate::layers::header_manipulation::{HeaderManipulationLayer, Operation};
+use crate::layers::instrument::InstrumentLayer;
+use crate::services::federation::{ExecutionService, QueryPlannerService, RouterService};
+use crate::services::graphql_subgraph_service::GraphQlSubgraphService;
 
 mod demos;
 pub mod graphql;
@@ -115,6 +117,11 @@ trait ServiceBuilderExt<L> {
         value: HeaderValue,
     ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
     fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+
+    fn instrument<Request, FnType: Fn(&Request) -> Span>(
+        self,
+        fn_span: FnType,
+    ) -> ServiceBuilder<Stack<InstrumentLayer<Request, FnType>, L>>;
 }
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
@@ -171,6 +178,13 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
     fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
         self.layer(HeaderManipulationLayer::new(Operation::Propagate(COOKIE)))
+    }
+
+    fn instrument<Request, FnType: Fn(&Request) -> Span>(
+        self,
+        fn_span: FnType,
+    ) -> ServiceBuilder<Stack<InstrumentLayer<Request, FnType>, L>> {
+        self.layer(InstrumentLayer::new(fn_span))
     }
 }
 

@@ -1,10 +1,13 @@
-use crate::{graphql, RouterResponse, SubgraphRequest};
-use http::{Response, Uri};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Poll;
+
+use http::{Response, Uri};
 use tower::{BoxError, Service};
+use tracing::info;
 use typed_builder::TypedBuilder;
+
+use crate::{graphql, RouterResponse, SubgraphRequest};
 
 #[derive(TypedBuilder)]
 pub struct RestSubgraphService {
@@ -25,7 +28,7 @@ impl Service<SubgraphRequest> for RestSubgraphService {
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let url = request.url_override.unwrap_or(self.url.clone());
         let fut = async move {
-            println!("Making request to {} {:?}", url, request.subgraph_request);
+            info!("Making request to {} {:?}", url, request.subgraph_request);
             Ok(RouterResponse {
                 request: request.request,
                 response: Response::new(graphql::Response {

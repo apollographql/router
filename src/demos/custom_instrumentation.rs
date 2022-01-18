@@ -1,33 +1,28 @@
+use http::HeaderValue;
 #[cfg(test)]
 use http::Request;
+use tower::util::BoxService;
+use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tracing::info_span;
+#[cfg(test)]
+use tracing::{info, Level};
 
 #[cfg(test)]
 use crate::{graphql, ApolloRouter};
-use tower::util::BoxService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
-
-use crate::{PlannedRequest, Plugin, RouterRequest, RouterResponse, SubgraphRequest};
+use crate::{
+    PlannedRequest, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest,
+};
 
 #[derive(Default)]
 struct MyPlugin;
 impl Plugin for MyPlugin {
     fn subgraph_service(
         &mut self,
-        name: &str,
+        _name: &str,
         service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
-        let name = name.to_string();
         ServiceBuilder::new()
-            .map_future(move |f| {
-                let name = name.clone();
-                async move {
-                    //Actually tracing-rs would be used.
-                    println!("Before subgraph service {}", name.clone());
-                    let r = f.await;
-                    println!("After subgraph service {}", name.clone());
-                    r
-                }
-            })
+            .instrument(|_| info_span!("subgraph_service"))
             .service(service)
             .boxed()
     }
@@ -37,14 +32,17 @@ impl Plugin for MyPlugin {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         ServiceBuilder::new()
-            .map_future(move |f| {
-                async move {
-                    //Actually tracing-rs would be used.
-                    println!("Before router planning service");
-                    let r = f.await;
-                    println!("After router planning service");
-                    r
-                }
+            .instrument(|r: &RouterRequest| {
+                info_span!(
+                    "router_service",
+                    correlation_id = r
+                        .request
+                        .headers()
+                        .get("A")
+                        .unwrap_or(&HeaderValue::from_static(""))
+                        .to_str()
+                        .unwrap()
+                )
             })
             .service(service)
             .boxed()
@@ -55,15 +53,7 @@ impl Plugin for MyPlugin {
         service: BoxService<RouterRequest, PlannedRequest, BoxError>,
     ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
         ServiceBuilder::new()
-            .map_future(move |f| {
-                async move {
-                    //Actually tracing-rs would be used.
-                    println!("Before query planning service");
-                    let r = f.await;
-                    println!("After query planning service");
-                    r
-                }
-            })
+            .instrument(|_| info_span!("query_planning_service"))
             .service(service)
             .boxed()
     }
@@ -73,22 +63,15 @@ impl Plugin for MyPlugin {
         service: BoxService<PlannedRequest, RouterResponse, BoxError>,
     ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
         ServiceBuilder::new()
-            .map_future(move |f| {
-                async move {
-                    //Actually tracing-rs would be used.
-                    println!("Before execution service");
-                    let r = f.await;
-                    println!("After execution service");
-                    r
-                }
-            })
+            .instrument(|_| info_span!("execution_service"))
             .service(service)
             .boxed()
     }
 }
 
 #[tokio::test]
-async fn custom_logging() -> Result<(), BoxError> {
+async fn custom_instrumentation() -> Result<(), BoxError> {
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
@@ -103,7 +86,7 @@ async fn custom_logging() -> Result<(), BoxError> {
                 .unwrap(),
         )
         .await?;
-    println!("{:?}", response);
+    info!("{:?}", response);
 
     Ok(())
 }
