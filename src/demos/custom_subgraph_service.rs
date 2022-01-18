@@ -21,8 +21,8 @@ mod test {
                     async move {
                         let response = client.get("http://apollographql.com").send().await;
                         Ok(RouterResponse {
-                            request: req.request,
-                            response: Response::new(graphql::Response {
+                            frontend_request: req.frontend_request,
+                            backend_response: Response::new(graphql::Response {
                                 body: response.unwrap().text().await.unwrap(),
                             }),
                             context: Default::default(),

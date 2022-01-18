@@ -36,7 +36,7 @@ impl Plugin for MyPlugin {
                 info_span!(
                     "router_service",
                     correlation_id = r
-                        .request
+                        .frontend_request
                         .headers()
                         .get("A")
                         .unwrap_or(&HeaderValue::from_static(""))

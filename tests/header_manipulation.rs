@@ -36,11 +36,11 @@ mod various_plugins_mod {
                     .map_request(|mut r: SubgraphRequest| {
                         // Demonstrate some manual propagation that could contain fancy logic
                         if let Some(value) = r
-                            .request
+                            .frontend_request
                             .headers()
                             .get(HeaderName::from_str("SomeHeader").unwrap())
                         {
-                            r.subgraph_request.headers_mut().insert("B", value.clone());
+                            r.backend_request.headers_mut().insert("B", value.clone());
                         }
                         r
                     })
@@ -76,7 +76,7 @@ mod my_test_harness {
                     return;
                 }
             }
-            let header = request.subgraph_request.headers().get(&self.header_name);
+            let header = request.backend_request.headers().get(&self.header_name);
 
             if self.must_be_present {
                 assert!(

@@ -49,50 +49,49 @@ impl Context {
         self.content.insert(name.to_string(), Arc::new(value))
     }
 }
+
 pub struct RouterRequest {
     // The original request
-    pub request: Request<graphql::Request>,
+    pub frontend_request: Request<graphql::Request>,
 
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct RouterResponse {
     // The original request
-    pub request: Arc<Request<graphql::Request>>,
+    pub frontend_request: Arc<Request<graphql::Request>>,
 
-    pub response: Response<graphql::Response>,
+    pub backend_response: Response<graphql::Response>,
 
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct PlannedRequest {
     // Planned request includes the original request
-    pub request: Request<graphql::Request>,
+    pub frontend_request: Request<graphql::Request>,
 
     // And also the query plan
     pub query_plan: QueryPlan,
 
     // Cloned from RouterRequest
     pub context: Context,
+    //Parsed_request
 }
 
 pub struct SubgraphRequest {
     pub service_name: String,
 
-    //Set this to override the URL of the service
-    pub url_override: Option<Uri>,
-
     // The request to make downstream
-    pub subgraph_request: Request<graphql::Request>,
-
-    // And also the query plan
-    pub query_plan: Arc<QueryPlan>,
+    pub backend_request: Request<graphql::Request>,
 
     // Downstream requests includes the original request
-    pub request: Arc<Request<graphql::Request>>,
+    pub frontend_request: Arc<Request<graphql::Request>>,
 
     // Cloned from PlannedRequest
     pub context: Context,
+    //Parsed_request
 }
 
 pub trait ServiceBuilderExt<L> {
@@ -271,11 +270,11 @@ impl ApolloRouterBuilder {
                         .boxed(),
                     |acc, e| e.router_service(acc),
                 )
-                .map_request(|request| RouterRequest {
-                    request,
+                .map_request(|frontend_request| RouterRequest {
+                    frontend_request,
                     context: Context::default(),
                 })
-                .map_response(|response| response.response),
+                .map_response(|response| response.backend_response),
         );
 
         ApolloRouter { router_service }

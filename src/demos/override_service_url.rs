@@ -24,7 +24,8 @@ impl Plugin for MyPlugin {
         if name == "books" {
             return ServiceBuilder::new()
                 .map_request(|mut r: SubgraphRequest| {
-                    r.url_override = Some(Uri::from_static("http://overridden"));
+                    r.context
+                        .insert("books", Some(Uri::from_static("http://overridden")));
                     r
                 })
                 .service(service)

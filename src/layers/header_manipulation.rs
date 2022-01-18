@@ -55,20 +55,20 @@ where
 
     fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         //Add the header to the request and pass it on to the service.
-        let subgraph_request_headers = request.subgraph_request.headers_mut();
+        let subgraph_request_headers = request.backend_request.headers_mut();
         match &self.operation {
             Operation::PropagateAll => {
-                for (header_name, header_value) in request.request.headers() {
+                for (header_name, header_value) in request.frontend_request.headers() {
                     subgraph_request_headers.insert(header_name, header_value.clone());
                 }
             }
             Operation::Propagate(header_name) => {
-                if let Some(header) = request.request.headers().get(header_name) {
+                if let Some(header) = request.frontend_request.headers().get(header_name) {
                     subgraph_request_headers.insert(header_name.to_owned(), header.clone());
                 }
             }
             Operation::PropagateOrDefault(header_name, default_value) => {
-                if let Some(header) = request.request.headers().get(header_name) {
+                if let Some(header) = request.frontend_request.headers().get(header_name) {
                     subgraph_request_headers.insert(header_name.to_owned(), header.clone());
                 } else {
                     subgraph_request_headers.insert(header_name.to_owned(), default_value.clone());

@@ -26,17 +26,18 @@ impl Service<SubgraphRequest> for RestSubgraphService {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let url = request.url_override.unwrap_or(self.url.clone());
+        let url = request
+            .context
+            .get(request.service_name.as_str())
+            .unwrap_or_else(|| &self.url)
+            .clone();
+
         let fut = async move {
-            info!("Making request to {} {:?}", url, request.subgraph_request);
+            info!("Making request to {} {:?}", url, request.backend_request);
             Ok(RouterResponse {
-                request: request.request,
-                response: Response::new(graphql::Response {
-                    body: format!(
-                        "{} World from {}",
-                        request.subgraph_request.body().body,
-                        url
-                    ),
+                frontend_request: request.frontend_request,
+                backend_response: Response::new(graphql::Response {
+                    body: format!("{} World from {}", request.backend_request.body().body, url),
                 }),
                 context: request.context,
             })

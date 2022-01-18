@@ -22,7 +22,7 @@ impl Plugin for MyPlugin {
         ServiceBuilder::new()
             .map_request(|mut r: SubgraphRequest| {
                 //Do something, e.g. censor data. In our case we UPPERCASE everything.
-                r.subgraph_request.body_mut().body = r.subgraph_request.body().body.to_uppercase();
+                r.backend_request.body_mut().body = r.backend_request.body().body.to_uppercase();
                 r
             })
             .service(service)
