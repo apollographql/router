@@ -10,7 +10,9 @@ mod test {
 
     #[tokio::test]
     async fn call_external_service() -> Result<(), BoxError> {
-        tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+        tracing_subscriber::fmt()
+            .with_max_level(Level::INFO)
+            .try_init();
         let client = reqwest::Client::default();
 
         let router = ApolloRouter::builder()

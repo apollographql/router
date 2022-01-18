@@ -15,7 +15,9 @@ impl Plugin for MyPlugin {}
 
 #[tokio::test]
 async fn demo() -> Result<(), BoxError> {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .try_init();
     let router = ApolloRouter::builder()
         .with_plugin(MyPlugin::default())
         .build();
