@@ -308,7 +308,7 @@ where
     PreparedQuery: graphql::PreparedQuery,
 {
     let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+        Ok(route) => route.execute(request).await,
         Err(response) => response,
     };
 
@@ -432,7 +432,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::Response;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 
