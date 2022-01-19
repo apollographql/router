@@ -4,7 +4,7 @@ use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, StudioUsage};
 use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -78,7 +78,7 @@ where
     }
 }
 
-async fn do_nothing() -> bool {
+async fn do_nothing(_addr_str: String) -> bool {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
     }
@@ -86,10 +86,10 @@ async fn do_nothing() -> bool {
     false
 }
 
-async fn do_something() -> bool {
+async fn do_something(addr_str: String) -> bool {
     tracing::info!("spawning an internal report server");
     // Spawn a server to relay statistics
-    let addr = match "0.0.0.0:50051".parse() {
+    let addr = match addr_str.parse() {
         Ok(a) => a,
         Err(e) => {
             tracing::error!("could not parse report server address: {}", e);
@@ -132,11 +132,12 @@ where
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
         // Studio Agent Relay listener
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<StudioUsage>(1);
 
         tokio::spawn(async move {
-            let mut current_thing: fn() -> Pin<Box<dyn Future<Output = bool> + Send>> =
-                || Box::pin(do_nothing());
+            let mut current_listener = "".to_string();
+            let mut current_thing: fn(msg: String) -> Pin<Box<dyn Future<Output = bool> + Send>> =
+                |msg| Box::pin(do_nothing(msg));
 
             loop {
                 tokio::select! {
@@ -144,23 +145,23 @@ where
                     mopt = rx.recv() => {
                         match mopt {
                             Some(msg) => {
-                                tracing::info!(%msg);
-                                // drop(current_thing);
-                                if msg {
-                                    current_thing = || Box::pin(do_nothing());
+                                tracing::info!(?msg);
+                                current_listener = msg.listener.clone();
+                                if msg.external_agent {
+                                    current_thing = |msg| Box::pin(do_nothing(msg));
                                 } else {
-                                    current_thing = || Box::pin(do_something());
+                                    current_thing = |msg| Box::pin(do_something(msg));
                                 }
                             },
                             None => break
                         }
                     },
-                    x = current_thing() => {
+                    x = current_thing(current_listener.clone()) => {
                         // The only time a current_thing will return is failure
-                        // from the server, so wait for a while then try again
+                        // from the server. If this happens, wait for a while
+                        // then try again.
                         tracing::info!(%x, "current_thing");
                         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        // current_thing = || Box::pin(do_something());
                     }
                 };
             }
@@ -195,12 +196,12 @@ where
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
                     match &new_configuration.studio {
                         Some(v) => {
-                            tx.send(v.external_agent)
+                            tx.send(v.clone())
                                 .await
                                 .map_err(FederatedServerError::ServerRelayError)?;
                         }
                         None => {
-                            tx.send(false)
+                            tx.send(Default::default())
                                 .await
                                 .map_err(FederatedServerError::ServerRelayError)?;
                         }
@@ -329,12 +330,12 @@ where
                         Ok(()) => {
                             match &new_configuration.studio {
                                 Some(v) => {
-                                    tx.send(v.external_agent)
+                                    tx.send(v.clone())
                                         .await
                                         .map_err(FederatedServerError::ServerRelayError)?;
                                 }
                                 None => {
-                                    tx.send(false)
+                                    tx.send(Default::default())
                                         .await
                                         .map_err(FederatedServerError::ServerRelayError)?;
                                 }

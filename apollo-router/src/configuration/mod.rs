@@ -3,6 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -218,15 +219,33 @@ impl Cors {
 }
 
 fn default_collector() -> String {
-    "https://127.0.0.1:50051".to_string()
+    DEFAULT_SERVER_URL.to_string()
+}
+
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioUsage {
     pub(crate) external_agent: bool,
+
     #[serde(default = "default_collector")]
     pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+impl Default for StudioUsage {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external_agent: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

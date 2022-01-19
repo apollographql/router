@@ -47,6 +47,9 @@ use usage_agent::Reporter;
 
 use crate::configuration::StudioUsage;
 
+pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
+pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
+
 /// Pipeline builder
 #[derive(Debug)]
 pub struct PipelineBuilder {
@@ -136,7 +139,7 @@ impl PipelineBuilder {
     pub fn get_exporter(&self) -> Result<Exporter, ApolloError> {
         let collector = match self.studio_config.clone() {
             Some(cfg) => cfg.collector,
-            None => "https://127.0.0.1:50051".to_string(),
+            None => DEFAULT_SERVER_URL.to_string(),
         };
 
         tracing::debug!("collector: {}", collector);

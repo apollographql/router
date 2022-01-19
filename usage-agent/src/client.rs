@@ -3,9 +3,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use usage_agent::report::trace::CachePolicy;
 use usage_agent::report::Trace;
 
+const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut reporter = usage_agent::Reporter::try_new("https://127.0.0.1:50051").await?;
+    let mut reporter = usage_agent::Reporter::try_new(DEFAULT_SERVER_URL).await?;
 
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
