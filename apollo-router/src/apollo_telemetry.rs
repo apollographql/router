@@ -98,13 +98,16 @@ impl PipelineBuilder {
         let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
         // The call to set_tracer_provider() manipulate a sync RwLock.
         // Even though this code is sync, it is called from within an
-        // async context. If we don't do this in a separate thread,
-        // it will cause issues with the async runtime that prevents
-        // the router from working correctly.
-        let _prev_global_provider = std::thread::spawn(|| {
+        // async context. If we don't call set_tracer_provider() from
+        // spawn_blocking() (or from a separate thread), it will cause
+        // issues with the async runtime which results in a router
+        // which no longer responds to input events.
+        // See https://github.com/apollographql/router/issues/331
+        // for more details and description.
+        let jh = tokio::task::spawn_blocking(|| {
             opentelemetry::global::set_tracer_provider(provider);
-        })
-        .join();
+        });
+        futures::executor::block_on(jh)?;
 
         Ok(tracer)
     }
