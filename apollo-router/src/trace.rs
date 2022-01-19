@@ -84,6 +84,7 @@ pub(crate) fn try_initialize_subscriber(
                 .build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
+
             // The call to set_tracer_provider() manipulate a sync RwLock.
             // Even though this code is sync, it is called from within an
             // async context. If we don't call set_tracer_provider() from
