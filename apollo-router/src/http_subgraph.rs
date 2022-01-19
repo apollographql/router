@@ -39,7 +39,14 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    fn create_request(&self, request: graphql::Request) -> reqwest_middleware::RequestBuilder {
+    fn create_request(
+        &self,
+        request: http::Request<graphql::Request>,
+    ) -> reqwest_middleware::RequestBuilder {
+        let (parts, request) = request.into_parts();
+        let mut header_map = reqwest::header::HeaderMap::new();
+        header_map.extend(parts.headers.into_iter());
+
         self.http_client.post(self.url.clone()).json(&request)
     }
 
@@ -78,7 +85,8 @@ impl HttpSubgraphFetcher {
         &self,
         request: graphql::Request,
     ) -> Result<bytes::Bytes, graphql::FetchError> {
-        let req = self.create_request(request);
+        //let req = self.create_request(request);
+        let req = self.http_client.post(self.url.clone()).json(&request);
         Self::send_request(&self.service, req).await
     }
 
@@ -110,7 +118,7 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     }
 }
 
-impl Service<graphql::Request> for HttpSubgraphFetcher {
+impl Service<graphql::SubgraphRequest> for HttpSubgraphFetcher {
     type Response = graphql::Response;
 
     type Error = graphql::FetchError;
@@ -125,12 +133,12 @@ impl Service<graphql::Request> for HttpSubgraphFetcher {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: graphql::Request) -> Self::Future {
+    fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
         let service_name = self.service.to_string();
 
         // separate the request creation to avoid holding a reference to the fetcher
         // in the future returned by the service
-        let req = self.create_request(request);
+        let req = self.create_request(request.backend_request);
 
         Box::pin(async move {
             let response = Self::send_request(&service_name, req).await;

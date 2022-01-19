@@ -59,7 +59,7 @@ impl graphql::ServiceRegistry for HttpServiceRegistry {
     }
 }
 
-impl Service<(String, graphql::Request)> for HttpServiceRegistry {
+impl Service<(String, graphql::SubgraphRequest)> for HttpServiceRegistry {
     type Response = graphql::Response;
 
     type Error = graphql::FetchError;
@@ -73,7 +73,10 @@ impl Service<(String, graphql::Request)> for HttpServiceRegistry {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, (service_name, request): (String, graphql::Request)) -> Self::Future {
+    fn call(
+        &mut self,
+        (service_name, request): (String, graphql::SubgraphRequest),
+    ) -> Self::Future {
         let mut service = self
             .services
             .get(&service_name)

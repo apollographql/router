@@ -55,9 +55,10 @@ pub struct RouterRequest {
 
 pub struct PlannedRequest {
     ///riginal request
-    pub frontend_request: http::Request<Request>,
+    pub frontend_request: Arc<http::Request<Request>>,
 
-    pub query_plan: QueryPlan,
+    // hiding this one for now
+    //pub query_plan: QueryPlan,
 
     // Cloned from RouterRequest
     pub context: Object,
@@ -66,11 +67,12 @@ pub struct PlannedRequest {
 pub struct SubgraphRequest {
     pub service_name: String,
 
-    // The request to make downstream
+    // The request to make to subgraphs
     pub backend_request: http::Request<Request>,
 
-    // Downstream requests includes the original request
-    pub frontend_request: http::Request<Request>,
+    // Subgraph extensions have access to the frontend request
+    // but cannot modify it
+    pub frontend_request: Arc<http::Request<Request>>,
 
     // Cloned from PlannedRequest
     pub context: Object,

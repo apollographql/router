@@ -65,7 +65,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        request: &'a RouterRequest,
+        request: &'a PlannedRequest,
         service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -84,7 +84,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        request: &'a RouterRequest,
+        request: &'a PlannedRequest,
         service_registry: &'a dyn ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -252,7 +252,7 @@ mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &RouterRequest,
+            request: &PlannedRequest,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
             if !requires.is_empty() {
@@ -313,7 +313,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            request: &'a RouterRequest,
+            request: &'a PlannedRequest,
             service_registry: &'a dyn ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
@@ -340,13 +340,24 @@ mod fetch {
                 .get(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
+            let backend_request_body = Request::builder()
+                .query(operation)
+                .variables(Arc::new(variables))
+                .build();
+            let backend_request = http::Request::builder()
+                .method(http::Method::POST)
+                .body(backend_request_body)
+                .unwrap();
+
+            let subgraph_request = SubgraphRequest {
+                service_name: service_name.to_string(),
+                backend_request,
+                frontend_request: request.frontend_request.clone(),
+                context: Object::default(),
+            };
+
             let response = fetcher
-                .oneshot(
-                    Request::builder()
-                        .query(operation)
-                        .variables(Arc::new(variables))
-                        .build(),
-                )
+                .oneshot(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
                 .await?;
 

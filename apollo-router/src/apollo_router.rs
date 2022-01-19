@@ -124,9 +124,18 @@ pub struct ApolloPreparedQuery {
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(level = "debug", skip_all)]
     async fn execute(self, request: RouterRequest) -> Response {
+        let planned_request = PlannedRequest {
+            frontend_request: Arc::new(request.frontend_request),
+            context: request.context,
+        };
+
         let mut response = self
             .query_plan
-            .execute(&request, self.service_registry.as_ref(), &self.schema)
+            .execute(
+                &planned_request,
+                self.service_registry.as_ref(),
+                &self.schema,
+            )
             .instrument(tracing::info_span!("execution"))
             .await;
 
@@ -134,7 +143,11 @@ impl PreparedQuery for ApolloPreparedQuery {
             tracing::debug_span!("format_response").in_scope(|| {
                 query.format_response(
                     &mut response,
-                    request.frontend_request.body().operation_name.as_deref(),
+                    planned_request
+                        .frontend_request
+                        .body()
+                        .operation_name
+                        .as_deref(),
                     &self.schema,
                 )
             });

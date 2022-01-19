@@ -63,7 +63,7 @@ pub trait SubgraphService:
     Send
     + Sync
     + Service<
-        Request,
+        SubgraphRequest,
         Response = crate::Response,
         Error = FetchError,
         Future = Pin<Box<dyn Future<Output = Result<crate::Response, FetchError>> + Send>>,
@@ -75,7 +75,7 @@ impl<
         T: Send
             + Sync
             + Service<
-                Request,
+                SubgraphRequest,
                 Response = crate::Response,
                 Error = FetchError,
                 Future = Pin<Box<dyn Future<Output = Result<crate::Response, FetchError>> + Send>>,
