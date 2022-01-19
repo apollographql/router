@@ -9,8 +9,8 @@ use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use usage_agent::server::ReportServer;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -78,6 +78,34 @@ where
     }
 }
 
+async fn do_nothing() -> bool {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+async fn do_something() -> bool {
+    tracing::info!("spawning an internal report server");
+    // Spawn a server to relay statistics
+    let addr = match "0.0.0.0:50051".parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("could not parse report server address: {}", e);
+            return false;
+        }
+    };
+
+    let report_server = ReportServer::new(addr);
+
+    if let Err(e) = report_server.serve().await {
+        tracing::error!("report server did not terminate normally: {}", e);
+        return false;
+    }
+    true
+}
+
 impl<S, Router, PreparedQuery, FA> StateMachine<S, Router, PreparedQuery, FA>
 where
     S: HttpServerFactory,
@@ -107,54 +135,34 @@ where
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
         tokio::spawn(async move {
-            let mut jh_s: Option<JoinHandle<()>> = None;
+            let mut current_thing: fn() -> Pin<Box<dyn Future<Output = bool> + Send>> =
+                || Box::pin(do_nothing());
 
             loop {
-                tracing::info!("waiting for a message");
-                let msg: bool = match rx.recv().await {
-                    Some(msg) => msg,
-                    None => break,
-                };
-                tracing::info!("got a message: {:?}", msg);
-                // Decide whether to start, shutdown or maintain a relay
-                let mut new_jh_s = None;
-                match jh_s {
-                    Some(ref jh) => {
-                        if msg {
-                            jh.abort();
-                        }
-                    }
-                    None => {
-                        if !msg {
-                            new_jh_s = Some(tokio::spawn(async {
-                                tracing::info!("spawning an internal report server");
-                                // Spawn a server to relay statistics
-                                let addr = match "0.0.0.0:50051".parse() {
-                                    Ok(a) => a,
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "could not parse report server address: {}",
-                                            e
-                                        );
-                                        return;
-                                    }
-                                };
-
-                                let report_server = ReportServer::new(addr);
-
-                                if let Err(e) = report_server.serve().await {
-                                    tracing::error!(
-                                        "report server did not terminate normally: {}",
-                                        e
-                                    );
+                tokio::select! {
+                    biased;
+                    mopt = rx.recv() => {
+                        match mopt {
+                            Some(msg) => {
+                                tracing::info!(%msg);
+                                // drop(current_thing);
+                                if msg {
+                                    current_thing = || Box::pin(do_nothing());
+                                } else {
+                                    current_thing = || Box::pin(do_something());
                                 }
-                            }));
+                            },
+                            None => break
                         }
+                    },
+                    x = current_thing() => {
+                        // The only time a current_thing will return is failure
+                        // from the server, so wait for a while then try again
+                        tracing::info!(%x, "current_thing");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        // current_thing = || Box::pin(do_something());
                     }
-                }
-                if new_jh_s.is_some() {
-                    jh_s = new_jh_s;
-                }
+                };
             }
             tracing::info!("terminating relay loop");
         });
