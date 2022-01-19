@@ -115,6 +115,7 @@ dependencies = [
  "reqwest-tracing",
  "serde",
  "serde_json",
+ "serde_json_bytes",
  "serde_yaml",
  "structopt",
  "task-local-extensions",
@@ -159,6 +160,7 @@ dependencies = [
  "apollo-parser 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
  "atty",
+ "bytes",
  "derivative",
  "displaydoc",
  "futures",
@@ -171,6 +173,7 @@ dependencies = [
  "router-bridge",
  "serde",
  "serde_json",
+ "serde_json_bytes",
  "static_assertions",
  "test-log",
  "thiserror",
@@ -1491,9 +1494,9 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
 name = "httpmock"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24a520a3193799852cc4baf0d8356d7578a8847dfc5603d087529f099661e42"
+checksum = "c159c4fc205e6c1a9b325cb7ec135d13b5f47188ce175dabb76ec847f331d9bd"
 dependencies = [
  "assert-json-diff",
  "async-object-pool",
@@ -1508,13 +1511,13 @@ dependencies = [
  "lazy_static",
  "levenshtein",
  "log",
- "qstring",
  "regex",
  "serde",
  "serde_json",
  "serde_regex",
  "similar",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -2646,15 +2649,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qstring"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d464fae65fff2680baf48019211ce37aaec0c78e9264c84a3e484717f965104e"
-dependencies = [
- "percent-encoding",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2784,15 +2778,16 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.8"
+version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c4e0a76dc12a116108933f6301b95e83634e0c47b0afbed6abbaa0601e99258"
+checksum = "87f242f1488a539a79bac6dbe7c8609ae43b7914b7736210f239a37cccb32525"
 dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "hyper",
@@ -3060,6 +3055,18 @@ dependencies = [
  "itoa 1.0.1",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_json_bytes"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d07cc85f924551185aa24952d5bf52c8433ffd040eeeff3908bb684c55035002"
+dependencies = [
+ "bytes",
+ "indexmap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3836,9 +3843,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d81bfa81424cc98cb034b837c985b7a290f592e5b4322f353f94a0ab0f9f594"
+checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
 dependencies = [
  "ansi_term",
  "lazy_static",

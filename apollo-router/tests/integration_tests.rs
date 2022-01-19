@@ -18,8 +18,8 @@ macro_rules! assert_federated_response {
             .query($query)
             .variables(Arc::new(
                 vec![
-                    ("topProductsFirst".to_string(), 2.into()),
-                    ("reviewsForAuthorAuthorId".to_string(), 1.into()),
+                    ("topProductsFirst".into(), 2.into()),
+                    ("reviewsForAuthorAuthorId".into(), 1.into()),
                 ]
                 .into_iter()
                 .collect(),
@@ -197,7 +197,7 @@ async fn query_rust(
     let router = ApolloRouter::new(registry.clone(), schema, None).await;
 
     let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+        Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
 

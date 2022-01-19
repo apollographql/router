@@ -924,7 +924,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::Response;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 

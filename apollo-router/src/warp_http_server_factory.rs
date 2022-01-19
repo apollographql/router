@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, Request};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
@@ -200,7 +200,7 @@ where
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
-                    } else if let Ok(request) = serde_json::from_slice(&body) {
+                    } else if let Ok(request) = Request::from_bytes(body) {
                         run_graphql_request(router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
@@ -320,7 +320,7 @@ where
     }
 
     let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+        Ok(route) => route.execute(request).await,
         Err(response) => response,
     };
 
@@ -444,7 +444,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::Response;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 

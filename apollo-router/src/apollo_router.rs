@@ -122,7 +122,7 @@ pub struct ApolloPreparedQuery {
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(skip_all, level = "debug")]
-    async fn execute(self, request: Arc<Request>) -> Response {
+    async fn execute(self, request: Request) -> Response {
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)
