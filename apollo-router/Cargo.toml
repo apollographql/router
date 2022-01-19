@@ -50,7 +50,7 @@ reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 serde = { version = "1.0.133", features = ["derive", "rc"] }
 serde_json = "1.0.74"
 serde_yaml = "0.8.23"
-structopt = "0.3.25"
+structopt = "0.3.26"
 task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.15.0", features = ["full"] }
