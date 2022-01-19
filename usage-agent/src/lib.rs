@@ -92,10 +92,15 @@ impl Report {
 
 #[cfg(target_os = "windows")]
 fn get_uname() -> Result<String, std::io::Error> {
-    // XXX Figure out at some point.
+    // Best we can do on windows right now
+    let sysname = sys_info::os_type().unwrap_or("Windows");
+    let nodename = sys_info::hostname().unwrap_or("unknown");
+    let release = sys_info::os_release().unwrap_or("unknown");
+    let version = "unknown";
+    let machine = "unknown";
     Ok(format!(
-        "{} {} {} {} {}",
-        "sysname", "nodename", "release", "version", "machine"
+        "{}, {}, {}, {}, {}",
+        sysname, nodename, release, version, machine
     ))
 }
 
@@ -103,7 +108,7 @@ fn get_uname() -> Result<String, std::io::Error> {
 fn get_uname() -> Result<String, std::io::Error> {
     let u = uname::uname()?;
     Ok(format!(
-        "{} {} {} {} {}",
+        "{}, {}, {}, {}, {},",
         u.sysname, u.nodename, u.release, u.version, u.machine
     ))
 }
