@@ -200,6 +200,7 @@ async fn missing_variables() {
     );
 }
 
+#[tracing::instrument(skip_all, level = "info")]
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     let nodejs_impl = HttpSubgraphFetcher::new(
         "federated",
@@ -208,6 +209,7 @@ async fn query_node(request: &graphql::Request) -> Result<graphql::Response, gra
     nodejs_impl.stream(request).await
 }
 
+#[tracing::instrument(skip_all, level = "info")]
 async fn query_rust(
     request: graphql::RouterRequest,
 ) -> (graphql::Response, Arc<CountingServiceRegistry>) {
