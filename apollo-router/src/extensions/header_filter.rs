@@ -11,6 +11,7 @@ pub struct HeaderFilterLayer {
 }
 
 impl HeaderFilterLayer {
+    #[allow(dead_code)]
     pub fn new<I>(allowed_headers: I) -> Self
     where
         I: Iterator<Item = String>,
@@ -55,7 +56,7 @@ where
             .headers()
             .keys()
             .filter(|name| !self.allowed_headers.contains(name.as_str()))
-            .map(|name| name.clone())
+            .cloned()
             .collect();
 
         let headers_mut = req.frontend_request.headers_mut();
