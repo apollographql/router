@@ -201,16 +201,19 @@ where
                 }
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
-                    match &new_configuration.studio {
-                        Some(v) => {
-                            tx.send(v.clone())
-                                .await
-                                .map_err(FederatedServerError::ServerRelayError)?;
-                        }
-                        None => {
-                            tx.send(Default::default())
-                                .await
-                                .map_err(FederatedServerError::ServerRelayError)?;
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.studio {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerRelayError)?;
+                            }
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerRelayError)?;
+                            }
                         }
                     }
                     self.maybe_transition_to_running(Startup {
@@ -335,16 +338,19 @@ where
                             }
                         }
                         Ok(()) => {
-                            match &new_configuration.studio {
-                                Some(v) => {
-                                    tx.send(v.clone())
-                                        .await
-                                        .map_err(FederatedServerError::ServerRelayError)?;
-                                }
-                                None => {
-                                    tx.send(Default::default())
-                                        .await
-                                        .map_err(FederatedServerError::ServerRelayError)?;
+                            // Only check for notify if we have graph configuration
+                            if new_configuration.graph.is_some() {
+                                match &new_configuration.studio {
+                                    Some(v) => {
+                                        tx.send(v.clone())
+                                            .await
+                                            .map_err(FederatedServerError::ServerRelayError)?;
+                                    }
+                                    None => {
+                                        tx.send(Default::default())
+                                            .await
+                                            .map_err(FederatedServerError::ServerRelayError)?;
+                                    }
                                 }
                             }
                             let derived_configuration = Arc::new(derived_configuration);
