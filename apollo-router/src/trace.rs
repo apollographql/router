@@ -100,6 +100,7 @@ pub(crate) fn try_initialize_subscriber(
             // See https://github.com/apollographql/router/issues/331
             // for more details and description.
             let jh = tokio::task::spawn_blocking(|| {
+                opentelemetry::global::force_flush_tracer_provider();
                 opentelemetry::global::set_tracer_provider(provider);
             });
             futures::executor::block_on(jh)?;

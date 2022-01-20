@@ -78,6 +78,8 @@ where
     }
 }
 
+// For use when we have an external collector. Makes selecting over
+// events simpler
 async fn do_nothing(_addr_str: String) -> bool {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
@@ -86,7 +88,8 @@ async fn do_nothing(_addr_str: String) -> bool {
     false
 }
 
-async fn do_something(addr_str: String) -> bool {
+// For use when we have an internal collector.
+async fn do_listen(addr_str: String) -> bool {
     tracing::info!("spawning an internal report server");
     // Spawn a server to relay statistics
     let addr = match addr_str.parse() {
@@ -136,8 +139,10 @@ where
 
         tokio::spawn(async move {
             let mut current_listener = "".to_string();
-            let mut current_thing: fn(msg: String) -> Pin<Box<dyn Future<Output = bool> + Send>> =
-                |msg| Box::pin(do_nothing(msg));
+            let mut current_operation: fn(
+                msg: String,
+            )
+                -> Pin<Box<dyn Future<Output = bool> + Send>> = |msg| Box::pin(do_nothing(msg));
 
             loop {
                 tokio::select! {
@@ -146,21 +151,23 @@ where
                         match mopt {
                             Some(msg) => {
                                 tracing::info!(?msg);
+                                // Save our target listener for later use
                                 current_listener = msg.listener.clone();
+                                // Configure which function to call
                                 if msg.external_agent {
-                                    current_thing = |msg| Box::pin(do_nothing(msg));
+                                    current_operation = |msg| Box::pin(do_nothing(msg));
                                 } else {
-                                    current_thing = |msg| Box::pin(do_something(msg));
+                                    current_operation = |msg| Box::pin(do_listen(msg));
                                 }
                             },
                             None => break
                         }
                     },
-                    x = current_thing(current_listener.clone()) => {
-                        // The only time a current_thing will return is failure
+                    x = current_operation(current_listener.clone()) => {
+                        // The only time a current_operation will return is failure
                         // from the server. If this happens, wait for a while
                         // then try again.
-                        tracing::info!(%x, "current_thing");
+                        tracing::info!(%x, "current_operation");
                         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                     }
                 };
