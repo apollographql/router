@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -45,7 +45,7 @@ opentelemetry-jaeger = { version = "0.15.0", features = [
 opentelemetry-otlp = { version = "0.9.0", default-features = false, features = [
     "serialize",
 ], optional = true }
-reqwest = { version = "0.11.8", features = ["json", "stream"] }
+reqwest = { version = "0.11.9", features = ["json", "stream"] }
 reqwest-middleware = "0.1.3"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 serde = { version = "1.0.133", features = ["derive", "rc"] }
@@ -72,11 +72,11 @@ warp = { version = "0.3.2", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-httpmock = "0.6.5"
+httpmock = "0.6.6"
 insta = "1.10.0"
 maplit = "1.0.2"
 mockall = "0.11.0"
-reqwest = { version = "0.11.8", features = ["json", "stream"] }
+reqwest = { version = "0.11.9", features = ["json", "stream"] }
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 test-span = "0.1.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
