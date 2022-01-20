@@ -1,8 +1,8 @@
 use apollo_router::configuration::Configuration;
-use apollo_router::http_service_registry::HttpServiceRegistry;
 use apollo_router::http_subgraph::HttpSubgraphFetcher;
 use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
+use apollo_router_core::SubgraphRequest;
 use apollo_router_core::ValueExt;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -10,7 +10,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use url::Url;
+use tower::util::BoxCloneService;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -202,56 +202,69 @@ async fn missing_variables() {
 
 #[tracing::instrument(skip_all, level = "info")]
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    let nodejs_impl = HttpSubgraphFetcher::new(
-        "federated",
-        Url::parse("http://localhost:4100/graphql").unwrap(),
-    );
-    nodejs_impl.stream(request).await
+    Ok(reqwest::Client::new()
+        .post("http://localhost:4100/graphql")
+        .json(request)
+        .send()
+        .await
+        .expect("couldn't send request")
+        .json()
+        .await
+        .expect("couldn't deserialize response"))
 }
 
 #[tracing::instrument(skip_all, level = "info")]
 async fn query_rust(
     request: graphql::RouterRequest,
-) -> (graphql::Response, Arc<CountingServiceRegistry>) {
+) -> (graphql::Response, CountingServiceRegistry) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
-    let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
-        &config,
-    )));
+    let counting_registry = CountingServiceRegistry::new();
 
-    let router = ApolloRouter::new(registry.clone(), schema, None).await;
+    use tower::ServiceExt;
+
+    let service_registry =
+        graphql::ServiceRegistry2::new(config.subgraphs.iter().map(|(name, subgraph)| {
+            let cloned_counter = counting_registry.clone();
+
+            let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
+                name.to_owned(),
+                subgraph.routing_url.to_owned(),
+            ))
+            .map_request(move |request: SubgraphRequest| {
+                let cloned_counter = cloned_counter.clone();
+                cloned_counter.increment(request.service_name.as_str());
+
+                request
+            });
+            (name.to_string(), BoxCloneService::new(fetcher))
+        }));
+
+    let router = ApolloRouter::new(Arc::new(service_registry), schema, None).await;
 
     let stream = match router.prepare_query(request.frontend_request.body()).await {
         Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
 
-    (stream, registry)
+    (stream, counting_registry)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CountingServiceRegistry {
     counts: Arc<Mutex<HashMap<String, usize>>>,
-    delegate: HttpServiceRegistry,
 }
 
 impl CountingServiceRegistry {
-    fn new(delegate: HttpServiceRegistry) -> CountingServiceRegistry {
+    fn new() -> CountingServiceRegistry {
         CountingServiceRegistry {
             counts: Arc::new(Mutex::new(HashMap::new())),
-            delegate,
         }
     }
 
-    fn totals(&self) -> HashMap<String, usize> {
-        self.counts.lock().unwrap().clone()
-    }
-}
-
-impl ServiceRegistry for CountingServiceRegistry {
-    fn get(&self, service: &str) -> Option<&dyn Fetcher> {
+    fn increment(&self, service: &str) {
         let mut counts = self.counts.lock().unwrap();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {
@@ -260,11 +273,10 @@ impl ServiceRegistry for CountingServiceRegistry {
             Entry::Vacant(e) => {
                 e.insert(1);
             }
-        }
-        self.delegate.get(service)
+        };
     }
 
-    fn has(&self, service: &str) -> bool {
-        self.delegate.has(service)
+    fn totals(&self) -> HashMap<String, usize> {
+        self.counts.lock().unwrap().clone()
     }
 }

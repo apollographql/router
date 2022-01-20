@@ -1,9 +1,9 @@
 use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
-use crate::http_service_registry::HttpServiceRegistry;
 use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::{prelude::*, RouterService};
 use std::sync::Arc;
+use tower::util::BoxCloneService;
 
 /// Factory for creating graphs.
 ///
@@ -39,7 +39,7 @@ impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
                     name.to_owned(),
                     subgraph.routing_url.to_owned(),
                 ));
-                (name.to_string(), fetcher)
+                (name.to_string(), BoxCloneService::new(fetcher))
             },
         ));
         graphql::RouterService::new(Arc::new(
