@@ -558,7 +558,7 @@ mod tests {
         socket: &SocketAddr,
         request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
-        reqwest::Client::new()
+        Ok(reqwest::Client::new()
             .post(format!("http://{}/graphql", socket))
             .json(request)
             .send()
@@ -566,7 +566,7 @@ mod tests {
             .expect("couldn't send request")
             .json()
             .await
-            .expect("couldn't deserialize into json")
+            .expect("couldn't deserialize into json"))
     }
 
     #[test(tokio::test)]

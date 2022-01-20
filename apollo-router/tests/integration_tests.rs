@@ -202,7 +202,7 @@ async fn missing_variables() {
 
 #[tracing::instrument(skip_all, level = "info")]
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    reqwest::Client::new()
+    Ok(reqwest::Client::new()
         .post("http://localhost:4100/graphql")
         .json(request)
         .send()
@@ -210,7 +210,7 @@ async fn query_node(request: &graphql::Request) -> Result<graphql::Response, gra
         .expect("couldn't send request")
         .json()
         .await
-        .expect("couldn't deserialize response")
+        .expect("couldn't deserialize response"))
 }
 
 #[tracing::instrument(skip_all, level = "info")]
