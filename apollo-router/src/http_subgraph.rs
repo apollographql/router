@@ -183,16 +183,20 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&expected_response);
         });
-        let fetcher =
-            HttpSubgraphFetcher::new("products", Url::parse(&server.url("/graphql")).unwrap());
-        let response = fetcher
-            .stream(
+
+        let response = reqwest::Client::new()
+            .post(server.url("/graphql"))
+            .json(
                 &graphql::Request::builder()
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )
+            .send()
             .await
-            .unwrap();
+            .expect("couldn't send request")
+            .json::<graphql::Response>()
+            .await
+            .expect("couldn't deserialize into json");
 
         assert_eq!(response, expected_response);
         mock.assert();

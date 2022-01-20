@@ -1,13 +1,11 @@
 use crate::prelude::graphql::*;
-use futures::future::BoxFuture;
+use futures::lock::Mutex;
 use std::collections::HashMap;
 use std::fmt;
-use std::task::{Context, Poll};
 use tower::util::BoxCloneService;
-use tower::ServiceExt;
 
 pub struct ServiceRegistry2 {
-    services: HashMap<String, BoxCloneService<SubgraphRequest, Response, FetchError>>,
+    services: HashMap<String, Mutex<BoxCloneService<SubgraphRequest, Response, FetchError>>>,
 }
 
 impl fmt::Debug for ServiceRegistry2 {
@@ -30,7 +28,10 @@ impl ServiceRegistry2 {
         >,
     ) -> Self {
         Self {
-            services: services.into_iter().collect(),
+            services: services
+                .into_iter()
+                .map(|(name, service)| (name, Mutex::new(service)))
+                .collect(),
         }
     }
 
@@ -39,7 +40,7 @@ impl ServiceRegistry2 {
         name: impl Into<String>,
         service: BoxCloneService<SubgraphRequest, Response, FetchError>,
     ) {
-        self.services.insert(name.into(), service);
+        self.services.insert(name.into(), Mutex::new(service));
     }
 
     pub fn len(&self) -> usize {
@@ -57,7 +58,7 @@ impl ServiceRegistry2 {
     pub fn get(
         &self,
         name: impl AsRef<str>,
-    ) -> Option<&BoxCloneService<SubgraphRequest, Response, FetchError>> {
+    ) -> Option<&Mutex<BoxCloneService<SubgraphRequest, Response, FetchError>>> {
         self.services.get(name.as_ref())
     }
 }

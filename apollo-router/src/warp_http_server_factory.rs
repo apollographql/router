@@ -375,7 +375,7 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use apollo_router_core::RouterService;
+    use apollo_router_core::{RouterService, SubgraphRequest};
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -436,7 +436,7 @@ mod tests {
         impl graphql::Fetcher for MyFetcher {
             async fn stream(
                 &self,
-                request: &graphql::Request,
+                request: &SubgraphRequest,
             ) -> Result<graphql::Response, graphql::FetchError>;
         }
     }

@@ -522,11 +522,9 @@ impl FederatedServer {
 mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
-    use crate::http_subgraph::HttpSubgraphFetcher;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
-    use url::Url;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =
@@ -558,14 +556,17 @@ mod tests {
 
     async fn query(
         socket: &SocketAddr,
-        request: &graphql::SubgraphRequest,
+        request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
-        HttpSubgraphFetcher::new(
-            "federated",
-            Url::parse(&format!("http://{}/graphql", socket)).unwrap(),
-        )
-        .stream(request)
-        .await
+        reqwest::Client::new()
+            .post(format!("http://{}/graphql", socket))
+            .json(request)
+            .send()
+            .await
+            .expect("couldn't send request")
+            .json()
+            .await
+            .expect("couldn't deserialize into json")
     }
 
     #[test(tokio::test)]

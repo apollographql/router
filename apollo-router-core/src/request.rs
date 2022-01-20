@@ -89,7 +89,7 @@ pub struct PlannedRequest {
     pub frontend_request: Arc<http::Request<Request>>,
 
     // hiding this one for now
-    //pub query_plan: QueryPlan,
+    // pub query_plan: QueryPlan,
 
     // Cloned from RouterRequest
     pub context: Object,

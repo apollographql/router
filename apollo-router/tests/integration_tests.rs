@@ -10,7 +10,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use url::Url;
+use tower::util::BoxCloneService;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -202,11 +202,15 @@ async fn missing_variables() {
 
 #[tracing::instrument(skip_all, level = "info")]
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    let nodejs_impl = HttpSubgraphFetcher::new(
-        "federated",
-        Url::parse("http://localhost:4100/graphql").unwrap(),
-    );
-    nodejs_impl.stream(request).await
+    reqwest::Client::new()
+        .post("http://localhost:4100/graphql")
+        .json(request)
+        .send()
+        .await
+        .expect("couldn't send request")
+        .json()
+        .await
+        .expect("couldn't deserialize response")
 }
 
 #[tracing::instrument(skip_all, level = "info")]
@@ -221,7 +225,16 @@ async fn query_rust(
         &config,
     )));
 
-    let router = ApolloRouter::new(registry.clone(), schema, None).await;
+    let service_registry =
+        graphql::ServiceRegistry2::new(config.subgraphs.iter().map(|(name, subgraph)| {
+            let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
+                name.to_owned(),
+                subgraph.routing_url.to_owned(),
+            ));
+            (name.to_string(), BoxCloneService::new(fetcher))
+        }));
+
+    let router = ApolloRouter::new(Arc::new(service_registry), schema, None).await;
 
     let stream = match router.prepare_query(request.frontend_request.body()).await {
         Ok(route) => route.execute(request).await,
