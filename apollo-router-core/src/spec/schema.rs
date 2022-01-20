@@ -296,7 +296,7 @@ macro_rules! implement_object_type_or_interface {
                     .fields
                     .iter()
                     .try_for_each(|(name, ty)| {
-                        let value = object.get(name).unwrap_or(&Value::Null);
+                        let value = object.get(name.as_str()).unwrap_or(&Value::Null);
                         ty.validate_value(value, schema)
                     })
                     .map_err(|_| InvalidObject)?;

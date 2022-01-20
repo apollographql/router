@@ -1,4 +1,5 @@
 use crate::prelude::graphql::*;
+use bytes::Bytes;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -44,6 +45,36 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
+impl Request {
+    pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {
+        let value = Value::from_bytes(b)?;
+        let mut object = ensure_object!(value).map_err(serde::de::Error::custom)?;
+
+        let variables = extract_key_value_from_object!(object, "variables", Value::Object(o) => o)
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(serde::de::Error::custom)?
+                .unwrap_or_default();
+        let query = extract_key_value_from_object!(object, "query", Value::String(s) => s)
+            .map_err(serde::de::Error::custom)?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let operation_name =
+            extract_key_value_from_object!(object, "operation_name", Value::String(s) => s)
+                .map_err(serde::de::Error::custom)?
+                .map(|s| s.as_str().to_string());
+
+        Ok(Request {
+            query,
+            operation_name,
+            variables: Arc::new(variables),
+            extensions,
+        })
+    }
+}
+
 /// the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
     /// The original request
@@ -82,30 +113,31 @@ pub struct SubgraphRequest {
 mod tests {
     use super::*;
     use serde_json::json;
+    use serde_json_bytes::json as bjson;
     use test_log::test;
 
     #[test]
     fn test_request() {
-        let result = serde_json::from_str::<Request>(
-            json!(
-            {
-              "query": "query aTest($arg1: String!) { test(who: $arg1) }",
-              "operationName": "aTest",
-              "variables": { "arg1": "me" },
-              "extensions": {"extension": 1}
-            })
-            .to_string()
-            .as_str(),
-        );
+        let data = json!(
+        {
+          "query": "query aTest($arg1: String!) { test(who: $arg1) }",
+          "operationName": "aTest",
+          "variables": { "arg1": "me" },
+          "extensions": {"extension": 1}
+        })
+        .to_string();
+        println!("data: {}", data);
+        let result = serde_json::from_str::<Request>(data.as_str());
+        println!("result: {:?}", result);
         assert_eq!(
             result.unwrap(),
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name(Some("aTest".to_owned()))
                 .variables(Arc::new(
-                    json!({ "arg1": "me" }).as_object().unwrap().clone()
+                    bjson!({ "arg1": "me" }).as_object().unwrap().clone()
                 ))
-                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
+                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
     }
@@ -127,7 +159,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name(Some("aTest".to_owned()))
-                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
+                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
     }
@@ -152,7 +184,7 @@ mod tests {
             Request::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name(Some("aTest".to_owned()))
-                .extensions(json!({"extension": 1}).as_object().cloned().unwrap())
+                .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
     }

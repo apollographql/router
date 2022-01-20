@@ -59,7 +59,7 @@ impl HttpSubgraphFetcher {
             .instrument(tracing::trace_span!("http-subgraph-request"))
             .await
             .map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+                tracing::error!(fetch_error = err.to_string().as_str());
 
                 graphql::FetchError::SubrequestHttpError {
                     service: service.to_owned(),
@@ -95,7 +95,7 @@ impl HttpSubgraphFetcher {
         response: bytes::Bytes,
     ) -> Result<graphql::Response, graphql::FetchError> {
         tracing::debug_span!("parse_subgraph_response").in_scope(|| {
-            serde_json::from_slice::<graphql::Response>(&response).map_err(|error| {
+            graphql::Response::from_bytes(&service_name, response).map_err(|error| {
                 graphql::FetchError::SubrequestMalformedResponse {
                     service: service_name.clone(),
                     reason: error.to_string(),
