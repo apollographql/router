@@ -116,11 +116,11 @@ where
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 
-/// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
+/// An object that accepts a [`Request`] and allows for creating [`PreparedQuery`]'s.
 ///
-/// The call to the function will either succeeds and return a [`PreparedQuery`] or it will fail and return
-/// a [`Response`] that can be returned immediately to the user. This is because GraphQL does
-/// not use the HTTP error codes, therefore it always return a response even if it fails.
+/// The call to the function will either succeed and return a [`PreparedQuery`] or it will fail
+/// and return a [`Response`] that can be returned immediately to the user. This is because GraphQL
+/// does not use the HTTP error codes, therefore it always return a response even if it fails.
 #[async_trait::async_trait]
 pub trait Router: Send + Sync + Debug {
     type PreparedQuery: PreparedQuery;
