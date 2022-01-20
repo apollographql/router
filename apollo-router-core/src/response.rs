@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::prelude::graphql::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -119,9 +121,9 @@ impl Response {
 
 pub struct RouterResponse {
     // The original request
-    pub frontend_request: http::Request<Request>,
+    pub frontend_request: Arc<http::Request<Request>>,
 
-    pub backend_response: http::Response<Response>,
+    pub backend_response: Response,
 
     pub context: Object,
 }

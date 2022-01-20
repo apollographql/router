@@ -5,7 +5,7 @@ use std::fmt;
 use tower::util::BoxCloneService;
 
 pub struct ServiceRegistry2 {
-    services: HashMap<String, Mutex<BoxCloneService<SubgraphRequest, Response, FetchError>>>,
+    services: HashMap<String, Mutex<BoxCloneService<SubgraphRequest, RouterResponse, FetchError>>>,
 }
 
 impl fmt::Debug for ServiceRegistry2 {
@@ -23,7 +23,7 @@ impl ServiceRegistry2 {
         services: impl IntoIterator<
             Item = (
                 String,
-                BoxCloneService<SubgraphRequest, Response, FetchError>,
+                BoxCloneService<SubgraphRequest, RouterResponse, FetchError>,
             ),
         >,
     ) -> Self {
@@ -38,7 +38,7 @@ impl ServiceRegistry2 {
     pub fn insert(
         &mut self,
         name: impl Into<String>,
-        service: BoxCloneService<SubgraphRequest, Response, FetchError>,
+        service: BoxCloneService<SubgraphRequest, RouterResponse, FetchError>,
     ) {
         self.services.insert(name.into(), Mutex::new(service));
     }
@@ -58,7 +58,7 @@ impl ServiceRegistry2 {
     pub fn get(
         &self,
         name: impl AsRef<str>,
-    ) -> Option<&Mutex<BoxCloneService<SubgraphRequest, Response, FetchError>>> {
+    ) -> Option<&Mutex<BoxCloneService<SubgraphRequest, RouterResponse, FetchError>>> {
         self.services.get(name.as_ref())
     }
 }

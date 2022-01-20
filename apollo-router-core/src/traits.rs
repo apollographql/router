@@ -35,7 +35,7 @@ pub trait ServiceRegistry: Send + Sync + Debug {
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    async fn stream(&self, request: &SubgraphRequest) -> Result<Response, FetchError>;
+    async fn stream(&self, request: &SubgraphRequest) -> Result<RouterResponse, FetchError>;
 }
 
 /// QueryPlanner can be used to plan queries.

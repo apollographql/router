@@ -437,7 +437,7 @@ mod tests {
             async fn stream(
                 &self,
                 request: &SubgraphRequest,
-            ) -> Result<graphql::Response, graphql::FetchError>;
+            ) -> Result<graphql::RouterResponse, graphql::FetchError>;
         }
     }
 
