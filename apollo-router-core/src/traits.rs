@@ -56,7 +56,7 @@ where
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    async fn stream(&self, request: Request) -> Result<Response, FetchError>;
+    async fn stream(&self, request: &Request) -> Result<Response, FetchError>;
 }
 
 pub trait SubgraphService:

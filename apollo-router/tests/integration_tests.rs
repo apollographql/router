@@ -28,7 +28,7 @@ macro_rules! assert_federated_response {
 
 
 
-        let expected = query_node(request.clone()).await.unwrap();
+        let expected = query_node(&request).await.unwrap();
 
         let frontend_request = http::Request::builder()
         .method("GET")
@@ -200,7 +200,7 @@ async fn missing_variables() {
     );
 }
 
-async fn query_node(request: graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
+async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     let nodejs_impl = HttpSubgraphFetcher::new(
         "federated",
         Url::parse("http://localhost:4100/graphql").unwrap(),

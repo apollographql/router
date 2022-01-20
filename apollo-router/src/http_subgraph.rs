@@ -1,10 +1,6 @@
-use std::pin::Pin;
-
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
-use futures::Future;
-use tower::Service;
 use tracing::Instrument;
 use url::Url;
 
@@ -39,6 +35,7 @@ impl HttpSubgraphFetcher {
         }
     }
 
+    #[allow(dead_code)]
     fn create_request(
         &self,
         request: http::Request<graphql::Request>,
@@ -83,7 +80,7 @@ impl HttpSubgraphFetcher {
 
     async fn request_stream(
         &self,
-        request: graphql::Request,
+        request: &graphql::Request,
     ) -> Result<bytes::Bytes, graphql::FetchError> {
         //let req = self.create_request(request);
         let req = self.http_client.post(self.url.clone()).json(&request);
@@ -110,43 +107,11 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest to fetch a graphql response
     async fn stream(
         &self,
-        request: graphql::Request,
+        request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
         let service_name = self.service.to_string();
         let response = self.request_stream(request).await?;
         Self::map_to_graphql(service_name, response)
-    }
-}
-
-impl Service<graphql::SubgraphRequest> for HttpSubgraphFetcher {
-    type Response = graphql::Response;
-
-    type Error = graphql::FetchError;
-
-    type Future =
-        Pin<Box<dyn Future<Output = Result<graphql::Response, graphql::FetchError>> + Send>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), graphql::FetchError>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
-        let service_name = self.service.to_string();
-
-        // separate the request creation to avoid holding a reference to the fetcher
-        // in the future returned by the service
-        let req = self.create_request(request.backend_request);
-
-        Box::pin(async move {
-            let response = Self::send_request(&service_name, req).await;
-            match response {
-                Err(e) => Err(e),
-                Ok(response) => Self::map_to_graphql(service_name, response),
-            }
-        })
     }
 }
 
@@ -219,7 +184,7 @@ mod tests {
             HttpSubgraphFetcher::new("products", Url::parse(&server.url("/graphql")).unwrap());
         let response = fetcher
             .stream(
-                graphql::Request::builder()
+                &graphql::Request::builder()
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )

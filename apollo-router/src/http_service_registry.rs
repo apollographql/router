@@ -32,7 +32,8 @@ impl HttpServiceRegistry {
                 .map(|(name, subgraph)| {
                     let fetcher =
                         HttpSubgraphFetcher::new(name.to_owned(), subgraph.routing_url.to_owned());
-                    let cloner: Arc<dyn NewSubgraphService> = Arc::new(move || fetcher.clone());
+                    let cloner: Arc<dyn NewSubgraphService> =
+                        Arc::new(move || graphql::FetcherService::new(Arc::new(fetcher.clone())));
                     (name.to_string(), cloner)
                 })
                 .collect(),

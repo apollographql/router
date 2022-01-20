@@ -60,3 +60,54 @@ where
         self.router.prepare_query(request).await
     }
 }
+
+#[derive(Debug)]
+pub struct FetcherService<F> {
+    fetcher: Arc<F>,
+}
+
+impl<F> Clone for FetcherService<F> {
+    fn clone(&self) -> Self {
+        Self {
+            fetcher: self.fetcher.clone(),
+        }
+    }
+}
+
+impl<F> FetcherService<F> {
+    pub fn new(fetcher: Arc<F>) -> Self {
+        Self { fetcher }
+    }
+
+    pub fn into_inner(self) -> Arc<F> {
+        self.fetcher
+    }
+}
+
+impl<F> tower::Service<SubgraphRequest> for FetcherService<F>
+where
+    F: Fetcher + 'static,
+{
+    type Response = Response;
+    type Error = FetchError;
+    type Future = BoxFuture<'static, Result<Response, FetchError>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), FetchError>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+        let fetcher = self.fetcher.clone();
+        Box::pin(async move { fetcher.stream(request.backend_request.body()).await })
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> Fetcher for FetcherService<F>
+where
+    F: Fetcher + 'static,
+{
+    async fn stream(&self, request: &Request) -> Result<Response, FetchError> {
+        self.fetcher.stream(request).await
+    }
+}

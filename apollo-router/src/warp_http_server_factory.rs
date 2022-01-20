@@ -434,7 +434,10 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
+            async fn stream(
+                &self,
+                request: &graphql::Request,
+            ) -> Result<graphql::Response, graphql::FetchError>;
         }
     }
 
