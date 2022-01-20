@@ -22,7 +22,60 @@ expression: get_spans()
     "integration_tests::query_node - 1": {
       "name": "integration_tests::query_node",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "message",
+            "starting new connection: http://localhost:4100/"
+          ],
+          [
+            "log.target",
+            "reqwest::connect"
+          ],
+          [
+            "log.module_path",
+            "reqwest::connect"
+          ],
+          [
+            "log.file",
+            "/Users/ignition/.cargo/registry/src/github.com-1ecc6299db9ec823/reqwest-0.11.9/src/connect.rs"
+          ],
+          [
+            "log.line",
+            560
+          ],
+          [
+            "message",
+            "response '200 OK' for http://localhost:4100/graphql"
+          ],
+          [
+            "log.target",
+            "reqwest::async_impl::client"
+          ],
+          [
+            "log.module_path",
+            "reqwest::async_impl::client"
+          ],
+          [
+            "log.file",
+            "/Users/ignition/.cargo/registry/src/github.com-1ecc6299db9ec823/reqwest-0.11.9/src/async_impl/client.rs"
+          ],
+          [
+            "log.line",
+            1898
+          ],
+          [
+            "message",
+            "connecting to [::1]:4100"
+          ],
+          [
+            "message",
+            "connected to [::1]:4100"
+          ],
+          [
+            "message",
+            "pooling idle connection for (\"http\", localhost:4100)"
+          ]
+        ],
         "metadata": {
           "name": "query_node",
           "target": "integration_tests",
@@ -33,42 +86,9 @@ expression: get_spans()
           }
         }
       },
-      "children": {
-        "apollo_router::http_subgraph::aggregate_response_data - 4": {
-          "name": "apollo_router::http_subgraph::aggregate_response_data",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "aggregate_response_data",
-              "target": "apollo_router::http_subgraph",
-              "level": "DEBUG",
-              "module_path": "apollo_router::http_subgraph",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
-        },
-        "apollo_router::http_subgraph::parse_subgraph_response - 5": {
-          "name": "apollo_router::http_subgraph::parse_subgraph_response",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "parse_subgraph_response",
-              "target": "apollo_router::http_subgraph",
-              "level": "DEBUG",
-              "module_path": "apollo_router::http_subgraph",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
-        }
-      }
+      "children": {}
     },
-    "integration_tests::query_rust - 6": {
+    "integration_tests::query_rust - 2": {
       "name": "integration_tests::query_rust",
       "record": {
         "entries": [],
@@ -83,7 +103,7 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::apollo_router::prepare_query - 7": {
+        "apollo_router::apollo_router::prepare_query - 3": {
           "name": "apollo_router::apollo_router::prepare_query",
           "record": {
             "entries": [
@@ -103,7 +123,7 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::apollo_router::query_parsing - 8": {
+            "apollo_router::apollo_router::query_parsing - 4": {
               "name": "apollo_router::apollo_router::query_parsing",
               "record": {
                 "entries": [],
@@ -119,7 +139,7 @@ expression: get_spans()
               },
               "children": {}
             },
-            "apollo_router_core::query_planner::router_bridge_query_planner::plan - 10": {
+            "apollo_router_core::query_planner::router_bridge_query_planner::plan - 6": {
               "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
               "record": {
                 "entries": [],
@@ -135,7 +155,7 @@ expression: get_spans()
               },
               "children": {}
             },
-            "apollo_router_core::query_planner::validate - 11": {
+            "apollo_router_core::query_planner::validate - 7": {
               "name": "apollo_router_core::query_planner::validate",
               "record": {
                 "entries": [],
@@ -153,7 +173,7 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::apollo_router::execute - 12": {
+        "apollo_router::apollo_router::execute - 8": {
           "name": "apollo_router::apollo_router::execute",
           "record": {
             "entries": [],
@@ -168,211 +188,22 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router_core::query_planner::step - 13": {
-              "name": "apollo_router_core::query_planner::step",
+            "apollo_router::apollo_router::execution - 9": {
+              "name": "apollo_router::apollo_router::execution",
               "record": {
                 "entries": [],
                 "metadata": {
-                  "name": "step",
-                  "target": "apollo_router_core::query_planner",
+                  "name": "execution",
+                  "target": "apollo_router::apollo_router",
                   "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
+                  "module_path": "apollo_router::apollo_router",
                   "fields": {
                     "names": []
                   }
                 }
               },
               "children": {
-                "apollo_router_core::query_planner::sequence - 14": {
-                  "name": "apollo_router_core::query_planner::sequence",
-                  "record": {
-                    "entries": [
-                      [
-                        "message",
-                        "flushed 159 bytes"
-                      ],
-                      [
-                        "message",
-                        "flushed 415 bytes"
-                      ],
-                      [
-                        "message",
-                        "parsed 7 headers"
-                      ],
-                      [
-                        "message",
-                        "parsed 7 headers"
-                      ],
-                      [
-                        "message",
-                        "incoming body is content-length (177 bytes)"
-                      ],
-                      [
-                        "message",
-                        "incoming body is content-length (451 bytes)"
-                      ],
-                      [
-                        "message",
-                        "incoming body completed"
-                      ],
-                      [
-                        "message",
-                        "incoming body completed"
-                      ]
-                    ],
-                    "metadata": {
-                      "name": "sequence",
-                      "target": "apollo_router_core::query_planner",
-                      "level": "INFO",
-                      "module_path": "apollo_router_core::query_planner",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {
-                    "apollo_router_core::query_planner::step - 15": {
-                      "name": "apollo_router_core::query_planner::step",
-                      "record": {
-                        "entries": [],
-                        "metadata": {
-                          "name": "step",
-                          "target": "apollo_router_core::query_planner",
-                          "level": "INFO",
-                          "module_path": "apollo_router_core::query_planner",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router_core::query_planner::fetch - 16": {
-                          "name": "apollo_router_core::query_planner::fetch",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "fetch",
-                              "target": "apollo_router_core::query_planner",
-                              "level": "INFO",
-                              "module_path": "apollo_router_core::query_planner",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {
-                            "apollo_router_core::query_planner::fetch::subfetch - 17": {
-                              "name": "apollo_router_core::query_planner::fetch::subfetch",
-                              "record": {
-                                "entries": [
-                                  [
-                                    "service",
-                                    "products"
-                                  ]
-                                ],
-                                "metadata": {
-                                  "name": "subfetch",
-                                  "target": "apollo_router_core::query_planner::fetch",
-                                  "level": "INFO",
-                                  "module_path": "apollo_router_core::query_planner::fetch",
-                                  "fields": {
-                                    "names": [
-                                      "service"
-                                    ]
-                                  }
-                                }
-                              },
-                              "children": {
-                                "apollo_router_core::query_planner::fetch::make_variables - 18": {
-                                  "name": "apollo_router_core::query_planner::fetch::make_variables",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "make_variables",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
-                                },
-                                "apollo_router_core::query_planner::fetch::subfetch_stream - 19": {
-                                  "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "subfetch_stream",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "INFO",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {
-                                    "apollo_router::http_subgraph::aggregate_response_data - 24": {
-                                      "name": "apollo_router::http_subgraph::aggregate_response_data",
-                                      "record": {
-                                        "entries": [],
-                                        "metadata": {
-                                          "name": "aggregate_response_data",
-                                          "target": "apollo_router::http_subgraph",
-                                          "level": "DEBUG",
-                                          "module_path": "apollo_router::http_subgraph",
-                                          "fields": {
-                                            "names": []
-                                          }
-                                        }
-                                      },
-                                      "children": {}
-                                    },
-                                    "apollo_router::http_subgraph::parse_subgraph_response - 25": {
-                                      "name": "apollo_router::http_subgraph::parse_subgraph_response",
-                                      "record": {
-                                        "entries": [],
-                                        "metadata": {
-                                          "name": "parse_subgraph_response",
-                                          "target": "apollo_router::http_subgraph",
-                                          "level": "DEBUG",
-                                          "module_path": "apollo_router::http_subgraph",
-                                          "fields": {
-                                            "names": []
-                                          }
-                                        }
-                                      },
-                                      "children": {}
-                                    }
-                                  }
-                                },
-                                "apollo_router_core::query_planner::fetch::response_insert - 26": {
-                                  "name": "apollo_router_core::query_planner::fetch::response_insert",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "response_insert",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "apollo_router_core::query_planner::step - 27": {
+                "apollo_router_core::query_planner::step - 10": {
                   "name": "apollo_router_core::query_planner::step",
                   "record": {
                     "entries": [],
@@ -387,177 +218,17 @@ expression: get_spans()
                     }
                   },
                   "children": {
-                    "apollo_router_core::query_planner::step - 28": {
-                      "name": "apollo_router_core::query_planner::step",
-                      "record": {
-                        "entries": [],
-                        "metadata": {
-                          "name": "step",
-                          "target": "apollo_router_core::query_planner",
-                          "level": "INFO",
-                          "module_path": "apollo_router_core::query_planner",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router_core::query_planner::fetch - 30": {
-                          "name": "apollo_router_core::query_planner::fetch",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "fetch",
-                              "target": "apollo_router_core::query_planner",
-                              "level": "INFO",
-                              "module_path": "apollo_router_core::query_planner",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {
-                            "apollo_router_core::query_planner::fetch::subfetch - 31": {
-                              "name": "apollo_router_core::query_planner::fetch::subfetch",
-                              "record": {
-                                "entries": [
-                                  [
-                                    "service",
-                                    "reviews"
-                                  ]
-                                ],
-                                "metadata": {
-                                  "name": "subfetch",
-                                  "target": "apollo_router_core::query_planner::fetch",
-                                  "level": "INFO",
-                                  "module_path": "apollo_router_core::query_planner::fetch",
-                                  "fields": {
-                                    "names": [
-                                      "service"
-                                    ]
-                                  }
-                                }
-                              },
-                              "children": {
-                                "apollo_router_core::query_planner::fetch::make_variables - 32": {
-                                  "name": "apollo_router_core::query_planner::fetch::make_variables",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "make_variables",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
-                                },
-                                "apollo_router_core::query_planner::fetch::subfetch_stream - 33": {
-                                  "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "subfetch_stream",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "INFO",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {
-                                    "apollo_router::http_subgraph::aggregate_response_data - 38": {
-                                      "name": "apollo_router::http_subgraph::aggregate_response_data",
-                                      "record": {
-                                        "entries": [],
-                                        "metadata": {
-                                          "name": "aggregate_response_data",
-                                          "target": "apollo_router::http_subgraph",
-                                          "level": "DEBUG",
-                                          "module_path": "apollo_router::http_subgraph",
-                                          "fields": {
-                                            "names": []
-                                          }
-                                        }
-                                      },
-                                      "children": {}
-                                    },
-                                    "apollo_router::http_subgraph::parse_subgraph_response - 39": {
-                                      "name": "apollo_router::http_subgraph::parse_subgraph_response",
-                                      "record": {
-                                        "entries": [],
-                                        "metadata": {
-                                          "name": "parse_subgraph_response",
-                                          "target": "apollo_router::http_subgraph",
-                                          "level": "DEBUG",
-                                          "module_path": "apollo_router::http_subgraph",
-                                          "fields": {
-                                            "names": []
-                                          }
-                                        }
-                                      },
-                                      "children": {}
-                                    }
-                                  }
-                                },
-                                "apollo_router_core::query_planner::fetch::response_insert - 40": {
-                                  "name": "apollo_router_core::query_planner::fetch::response_insert",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "response_insert",
-                                      "target": "apollo_router_core::query_planner::fetch",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router_core::query_planner::fetch",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "apollo_router_core::query_planner::step - 41": {
-                  "name": "apollo_router_core::query_planner::step",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "step",
-                      "target": "apollo_router_core::query_planner",
-                      "level": "INFO",
-                      "module_path": "apollo_router_core::query_planner",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {
-                    "apollo_router_core::query_planner::parallel - 42": {
-                      "name": "apollo_router_core::query_planner::parallel",
+                    "apollo_router_core::query_planner::sequence - 11": {
+                      "name": "apollo_router_core::query_planner::sequence",
                       "record": {
                         "entries": [
                           [
                             "message",
-                            "flushed 398 bytes"
+                            "flushed 159 bytes"
                           ],
                           [
                             "message",
-                            "flushed 379 bytes"
-                          ],
-                          [
-                            "message",
-                            "parsed 7 headers"
+                            "flushed 415 bytes"
                           ],
                           [
                             "message",
@@ -565,11 +236,15 @@ expression: get_spans()
                           ],
                           [
                             "message",
-                            "incoming body is content-length (93 bytes)"
+                            "parsed 7 headers"
                           ],
                           [
                             "message",
-                            "incoming body is content-length (119 bytes)"
+                            "incoming body is content-length (177 bytes)"
+                          ],
+                          [
+                            "message",
+                            "incoming body is content-length (451 bytes)"
                           ],
                           [
                             "message",
@@ -581,7 +256,7 @@ expression: get_spans()
                           ]
                         ],
                         "metadata": {
-                          "name": "parallel",
+                          "name": "sequence",
                           "target": "apollo_router_core::query_planner",
                           "level": "INFO",
                           "module_path": "apollo_router_core::query_planner",
@@ -591,7 +266,7 @@ expression: get_spans()
                         }
                       },
                       "children": {
-                        "apollo_router_core::query_planner::step - 43": {
+                        "apollo_router_core::query_planner::step - 12": {
                           "name": "apollo_router_core::query_planner::step",
                           "record": {
                             "entries": [],
@@ -606,12 +281,12 @@ expression: get_spans()
                             }
                           },
                           "children": {
-                            "apollo_router_core::query_planner::step - 45": {
-                              "name": "apollo_router_core::query_planner::step",
+                            "apollo_router_core::query_planner::fetch - 13": {
+                              "name": "apollo_router_core::query_planner::fetch",
                               "record": {
                                 "entries": [],
                                 "metadata": {
-                                  "name": "step",
+                                  "name": "fetch",
                                   "target": "apollo_router_core::query_planner",
                                   "level": "INFO",
                                   "module_path": "apollo_router_core::query_planner",
@@ -621,52 +296,68 @@ expression: get_spans()
                                 }
                               },
                               "children": {
-                                "apollo_router_core::query_planner::fetch - 47": {
-                                  "name": "apollo_router_core::query_planner::fetch",
+                                "apollo_router_core::query_planner::fetch::subfetch - 14": {
+                                  "name": "apollo_router_core::query_planner::fetch::subfetch",
                                   "record": {
-                                    "entries": [],
+                                    "entries": [
+                                      [
+                                        "service",
+                                        "products"
+                                      ]
+                                    ],
                                     "metadata": {
-                                      "name": "fetch",
-                                      "target": "apollo_router_core::query_planner",
+                                      "name": "subfetch",
+                                      "target": "apollo_router_core::query_planner::fetch",
                                       "level": "INFO",
-                                      "module_path": "apollo_router_core::query_planner",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
                                       "fields": {
-                                        "names": []
+                                        "names": [
+                                          "service"
+                                        ]
                                       }
                                     }
                                   },
                                   "children": {
-                                    "apollo_router_core::query_planner::fetch::subfetch - 48": {
-                                      "name": "apollo_router_core::query_planner::fetch::subfetch",
+                                    "apollo_router_core::query_planner::fetch::make_variables - 15": {
+                                      "name": "apollo_router_core::query_planner::fetch::make_variables",
                                       "record": {
-                                        "entries": [
-                                          [
-                                            "service",
-                                            "products"
-                                          ]
-                                        ],
+                                        "entries": [],
                                         "metadata": {
-                                          "name": "subfetch",
+                                          "name": "make_variables",
+                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router_core::query_planner::fetch::subfetch_stream - 16": {
+                                      "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "subfetch_stream",
                                           "target": "apollo_router_core::query_planner::fetch",
                                           "level": "INFO",
                                           "module_path": "apollo_router_core::query_planner::fetch",
                                           "fields": {
-                                            "names": [
-                                              "service"
-                                            ]
+                                            "names": []
                                           }
                                         }
                                       },
                                       "children": {
-                                        "apollo_router_core::query_planner::fetch::make_variables - 49": {
-                                          "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                        "apollo_router::http_subgraph::aggregate_response_data - 21": {
+                                          "name": "apollo_router::http_subgraph::aggregate_response_data",
                                           "record": {
                                             "entries": [],
                                             "metadata": {
-                                              "name": "make_variables",
-                                              "target": "apollo_router_core::query_planner::fetch",
+                                              "name": "aggregate_response_data",
+                                              "target": "apollo_router::http_subgraph",
                                               "level": "DEBUG",
-                                              "module_path": "apollo_router_core::query_planner::fetch",
+                                              "module_path": "apollo_router::http_subgraph",
                                               "fields": {
                                                 "names": []
                                               }
@@ -674,64 +365,15 @@ expression: get_spans()
                                           },
                                           "children": {}
                                         },
-                                        "apollo_router_core::query_planner::fetch::subfetch_stream - 50": {
-                                          "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                        "apollo_router::http_subgraph::parse_subgraph_response - 22": {
+                                          "name": "apollo_router::http_subgraph::parse_subgraph_response",
                                           "record": {
                                             "entries": [],
                                             "metadata": {
-                                              "name": "subfetch_stream",
-                                              "target": "apollo_router_core::query_planner::fetch",
-                                              "level": "INFO",
-                                              "module_path": "apollo_router_core::query_planner::fetch",
-                                              "fields": {
-                                                "names": []
-                                              }
-                                            }
-                                          },
-                                          "children": {
-                                            "apollo_router::http_subgraph::aggregate_response_data - 64": {
-                                              "name": "apollo_router::http_subgraph::aggregate_response_data",
-                                              "record": {
-                                                "entries": [],
-                                                "metadata": {
-                                                  "name": "aggregate_response_data",
-                                                  "target": "apollo_router::http_subgraph",
-                                                  "level": "DEBUG",
-                                                  "module_path": "apollo_router::http_subgraph",
-                                                  "fields": {
-                                                    "names": []
-                                                  }
-                                                }
-                                              },
-                                              "children": {}
-                                            },
-                                            "apollo_router::http_subgraph::parse_subgraph_response - 65": {
-                                              "name": "apollo_router::http_subgraph::parse_subgraph_response",
-                                              "record": {
-                                                "entries": [],
-                                                "metadata": {
-                                                  "name": "parse_subgraph_response",
-                                                  "target": "apollo_router::http_subgraph",
-                                                  "level": "DEBUG",
-                                                  "module_path": "apollo_router::http_subgraph",
-                                                  "fields": {
-                                                    "names": []
-                                                  }
-                                                }
-                                              },
-                                              "children": {}
-                                            }
-                                          }
-                                        },
-                                        "apollo_router_core::query_planner::fetch::response_insert - 66": {
-                                          "name": "apollo_router_core::query_planner::fetch::response_insert",
-                                          "record": {
-                                            "entries": [],
-                                            "metadata": {
-                                              "name": "response_insert",
-                                              "target": "apollo_router_core::query_planner::fetch",
+                                              "name": "parse_subgraph_response",
+                                              "target": "apollo_router::http_subgraph",
                                               "level": "DEBUG",
-                                              "module_path": "apollo_router_core::query_planner::fetch",
+                                              "module_path": "apollo_router::http_subgraph",
                                               "fields": {
                                                 "names": []
                                               }
@@ -740,14 +382,47 @@ expression: get_spans()
                                           "children": {}
                                         }
                                       }
+                                    },
+                                    "apollo_router_core::query_planner::fetch::response_insert - 23": {
+                                      "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "response_insert",
+                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
                                     }
                                   }
                                 }
                               }
                             }
                           }
-                        },
-                        "apollo_router_core::query_planner::step - 44": {
+                        }
+                      }
+                    },
+                    "apollo_router_core::query_planner::step - 24": {
+                      "name": "apollo_router_core::query_planner::step",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "step",
+                          "target": "apollo_router_core::query_planner",
+                          "level": "INFO",
+                          "module_path": "apollo_router_core::query_planner",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::step - 25": {
                           "name": "apollo_router_core::query_planner::step",
                           "record": {
                             "entries": [],
@@ -762,7 +437,196 @@ expression: get_spans()
                             }
                           },
                           "children": {
-                            "apollo_router_core::query_planner::step - 53": {
+                            "apollo_router_core::query_planner::fetch - 27": {
+                              "name": "apollo_router_core::query_planner::fetch",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "fetch",
+                                  "target": "apollo_router_core::query_planner",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router_core::query_planner",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router_core::query_planner::fetch::subfetch - 28": {
+                                  "name": "apollo_router_core::query_planner::fetch::subfetch",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "service",
+                                        "reviews"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "subfetch",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "INFO",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": [
+                                          "service"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router_core::query_planner::fetch::make_variables - 29": {
+                                      "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "make_variables",
+                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router_core::query_planner::fetch::subfetch_stream - 30": {
+                                      "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "subfetch_stream",
+                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router::http_subgraph::aggregate_response_data - 35": {
+                                          "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "aggregate_response_data",
+                                              "target": "apollo_router::http_subgraph",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::http_subgraph",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
+                                        "apollo_router::http_subgraph::parse_subgraph_response - 36": {
+                                          "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "parse_subgraph_response",
+                                              "target": "apollo_router::http_subgraph",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::http_subgraph",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
+                                      }
+                                    },
+                                    "apollo_router_core::query_planner::fetch::response_insert - 37": {
+                                      "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "response_insert",
+                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "apollo_router_core::query_planner::step - 38": {
+                      "name": "apollo_router_core::query_planner::step",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "step",
+                          "target": "apollo_router_core::query_planner",
+                          "level": "INFO",
+                          "module_path": "apollo_router_core::query_planner",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::parallel - 39": {
+                          "name": "apollo_router_core::query_planner::parallel",
+                          "record": {
+                            "entries": [
+                              [
+                                "message",
+                                "flushed 398 bytes"
+                              ],
+                              [
+                                "message",
+                                "flushed 379 bytes"
+                              ],
+                              [
+                                "message",
+                                "parsed 7 headers"
+                              ],
+                              [
+                                "message",
+                                "parsed 7 headers"
+                              ],
+                              [
+                                "message",
+                                "incoming body is content-length (93 bytes)"
+                              ],
+                              [
+                                "message",
+                                "incoming body is content-length (119 bytes)"
+                              ],
+                              [
+                                "message",
+                                "incoming body completed"
+                              ],
+                              [
+                                "message",
+                                "incoming body completed"
+                              ]
+                            ],
+                            "metadata": {
+                              "name": "parallel",
+                              "target": "apollo_router_core::query_planner",
+                              "level": "INFO",
+                              "module_path": "apollo_router_core::query_planner",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router_core::query_planner::step - 40": {
                               "name": "apollo_router_core::query_planner::step",
                               "record": {
                                 "entries": [],
@@ -777,12 +641,12 @@ expression: get_spans()
                                 }
                               },
                               "children": {
-                                "apollo_router_core::query_planner::fetch - 55": {
-                                  "name": "apollo_router_core::query_planner::fetch",
+                                "apollo_router_core::query_planner::step - 42": {
+                                  "name": "apollo_router_core::query_planner::step",
                                   "record": {
                                     "entries": [],
                                     "metadata": {
-                                      "name": "fetch",
+                                      "name": "step",
                                       "target": "apollo_router_core::query_planner",
                                       "level": "INFO",
                                       "module_path": "apollo_router_core::query_planner",
@@ -792,68 +656,52 @@ expression: get_spans()
                                     }
                                   },
                                   "children": {
-                                    "apollo_router_core::query_planner::fetch::subfetch - 56": {
-                                      "name": "apollo_router_core::query_planner::fetch::subfetch",
+                                    "apollo_router_core::query_planner::fetch - 44": {
+                                      "name": "apollo_router_core::query_planner::fetch",
                                       "record": {
-                                        "entries": [
-                                          [
-                                            "service",
-                                            "accounts"
-                                          ]
-                                        ],
+                                        "entries": [],
                                         "metadata": {
-                                          "name": "subfetch",
-                                          "target": "apollo_router_core::query_planner::fetch",
+                                          "name": "fetch",
+                                          "target": "apollo_router_core::query_planner",
                                           "level": "INFO",
-                                          "module_path": "apollo_router_core::query_planner::fetch",
+                                          "module_path": "apollo_router_core::query_planner",
                                           "fields": {
-                                            "names": [
-                                              "service"
-                                            ]
+                                            "names": []
                                           }
                                         }
                                       },
                                       "children": {
-                                        "apollo_router_core::query_planner::fetch::make_variables - 57": {
-                                          "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                        "apollo_router_core::query_planner::fetch::subfetch - 45": {
+                                          "name": "apollo_router_core::query_planner::fetch::subfetch",
                                           "record": {
-                                            "entries": [],
+                                            "entries": [
+                                              [
+                                                "service",
+                                                "products"
+                                              ]
+                                            ],
                                             "metadata": {
-                                              "name": "make_variables",
-                                              "target": "apollo_router_core::query_planner::fetch",
-                                              "level": "DEBUG",
-                                              "module_path": "apollo_router_core::query_planner::fetch",
-                                              "fields": {
-                                                "names": []
-                                              }
-                                            }
-                                          },
-                                          "children": {}
-                                        },
-                                        "apollo_router_core::query_planner::fetch::subfetch_stream - 58": {
-                                          "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                                          "record": {
-                                            "entries": [],
-                                            "metadata": {
-                                              "name": "subfetch_stream",
+                                              "name": "subfetch",
                                               "target": "apollo_router_core::query_planner::fetch",
                                               "level": "INFO",
                                               "module_path": "apollo_router_core::query_planner::fetch",
                                               "fields": {
-                                                "names": []
+                                                "names": [
+                                                  "service"
+                                                ]
                                               }
                                             }
                                           },
                                           "children": {
-                                            "apollo_router::http_subgraph::aggregate_response_data - 68": {
-                                              "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                            "apollo_router_core::query_planner::fetch::make_variables - 46": {
+                                              "name": "apollo_router_core::query_planner::fetch::make_variables",
                                               "record": {
                                                 "entries": [],
                                                 "metadata": {
-                                                  "name": "aggregate_response_data",
-                                                  "target": "apollo_router::http_subgraph",
+                                                  "name": "make_variables",
+                                                  "target": "apollo_router_core::query_planner::fetch",
                                                   "level": "DEBUG",
-                                                  "module_path": "apollo_router::http_subgraph",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
                                                   "fields": {
                                                     "names": []
                                                   }
@@ -861,15 +709,64 @@ expression: get_spans()
                                               },
                                               "children": {}
                                             },
-                                            "apollo_router::http_subgraph::parse_subgraph_response - 69": {
-                                              "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                            "apollo_router_core::query_planner::fetch::subfetch_stream - 47": {
+                                              "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
                                               "record": {
                                                 "entries": [],
                                                 "metadata": {
-                                                  "name": "parse_subgraph_response",
-                                                  "target": "apollo_router::http_subgraph",
+                                                  "name": "subfetch_stream",
+                                                  "target": "apollo_router_core::query_planner::fetch",
+                                                  "level": "INFO",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {
+                                                "apollo_router::http_subgraph::aggregate_response_data - 61": {
+                                                  "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                                  "record": {
+                                                    "entries": [],
+                                                    "metadata": {
+                                                      "name": "aggregate_response_data",
+                                                      "target": "apollo_router::http_subgraph",
+                                                      "level": "DEBUG",
+                                                      "module_path": "apollo_router::http_subgraph",
+                                                      "fields": {
+                                                        "names": []
+                                                      }
+                                                    }
+                                                  },
+                                                  "children": {}
+                                                },
+                                                "apollo_router::http_subgraph::parse_subgraph_response - 62": {
+                                                  "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                                  "record": {
+                                                    "entries": [],
+                                                    "metadata": {
+                                                      "name": "parse_subgraph_response",
+                                                      "target": "apollo_router::http_subgraph",
+                                                      "level": "DEBUG",
+                                                      "module_path": "apollo_router::http_subgraph",
+                                                      "fields": {
+                                                        "names": []
+                                                      }
+                                                    }
+                                                  },
+                                                  "children": {}
+                                                }
+                                              }
+                                            },
+                                            "apollo_router_core::query_planner::fetch::response_insert - 63": {
+                                              "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "response_insert",
+                                                  "target": "apollo_router_core::query_planner::fetch",
                                                   "level": "DEBUG",
-                                                  "module_path": "apollo_router::http_subgraph",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
                                                   "fields": {
                                                     "names": []
                                                   }
@@ -878,22 +775,162 @@ expression: get_spans()
                                               "children": {}
                                             }
                                           }
-                                        },
-                                        "apollo_router_core::query_planner::fetch::response_insert - 70": {
-                                          "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "apollo_router_core::query_planner::step - 41": {
+                              "name": "apollo_router_core::query_planner::step",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "step",
+                                  "target": "apollo_router_core::query_planner",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router_core::query_planner",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router_core::query_planner::step - 50": {
+                                  "name": "apollo_router_core::query_planner::step",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "step",
+                                      "target": "apollo_router_core::query_planner",
+                                      "level": "INFO",
+                                      "module_path": "apollo_router_core::query_planner",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router_core::query_planner::fetch - 52": {
+                                      "name": "apollo_router_core::query_planner::fetch",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "fetch",
+                                          "target": "apollo_router_core::query_planner",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router_core::query_planner",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router_core::query_planner::fetch::subfetch - 53": {
+                                          "name": "apollo_router_core::query_planner::fetch::subfetch",
                                           "record": {
-                                            "entries": [],
+                                            "entries": [
+                                              [
+                                                "service",
+                                                "accounts"
+                                              ]
+                                            ],
                                             "metadata": {
-                                              "name": "response_insert",
+                                              "name": "subfetch",
                                               "target": "apollo_router_core::query_planner::fetch",
-                                              "level": "DEBUG",
+                                              "level": "INFO",
                                               "module_path": "apollo_router_core::query_planner::fetch",
                                               "fields": {
-                                                "names": []
+                                                "names": [
+                                                  "service"
+                                                ]
                                               }
                                             }
                                           },
-                                          "children": {}
+                                          "children": {
+                                            "apollo_router_core::query_planner::fetch::make_variables - 54": {
+                                              "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "make_variables",
+                                                  "target": "apollo_router_core::query_planner::fetch",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
+                                            "apollo_router_core::query_planner::fetch::subfetch_stream - 55": {
+                                              "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "subfetch_stream",
+                                                  "target": "apollo_router_core::query_planner::fetch",
+                                                  "level": "INFO",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {
+                                                "apollo_router::http_subgraph::aggregate_response_data - 65": {
+                                                  "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                                  "record": {
+                                                    "entries": [],
+                                                    "metadata": {
+                                                      "name": "aggregate_response_data",
+                                                      "target": "apollo_router::http_subgraph",
+                                                      "level": "DEBUG",
+                                                      "module_path": "apollo_router::http_subgraph",
+                                                      "fields": {
+                                                        "names": []
+                                                      }
+                                                    }
+                                                  },
+                                                  "children": {}
+                                                },
+                                                "apollo_router::http_subgraph::parse_subgraph_response - 66": {
+                                                  "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                                  "record": {
+                                                    "entries": [],
+                                                    "metadata": {
+                                                      "name": "parse_subgraph_response",
+                                                      "target": "apollo_router::http_subgraph",
+                                                      "level": "DEBUG",
+                                                      "module_path": "apollo_router::http_subgraph",
+                                                      "fields": {
+                                                        "names": []
+                                                      }
+                                                    }
+                                                  },
+                                                  "children": {}
+                                                }
+                                              }
+                                            },
+                                            "apollo_router_core::query_planner::fetch::response_insert - 67": {
+                                              "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "response_insert",
+                                                  "target": "apollo_router_core::query_planner::fetch",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            }
+                                          }
                                         }
                                       }
                                     }
@@ -909,7 +946,7 @@ expression: get_spans()
                 }
               }
             },
-            "apollo_router::apollo_router::format_response - 71": {
+            "apollo_router::apollo_router::format_response - 68": {
               "name": "apollo_router::apollo_router::format_response",
               "record": {
                 "entries": [],
