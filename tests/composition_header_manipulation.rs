@@ -136,6 +136,10 @@ async fn header_propagation() {
     ];
 
     let router = ApolloRouter::builder()
+        .with_after_query_planning(|planned_request| {
+            dbg!("got query plan", &planned_request.query_plan);
+            planned_request
+        })
         .with_before_any_subgraph(move |request| {
             for requirement in all_requirements.iter() {
                 requirement.assert_complies(&request)

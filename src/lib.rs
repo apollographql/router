@@ -28,6 +28,7 @@ mod services;
 
 pub struct Schema;
 
+#[derive(Debug)]
 pub struct QueryPlan {
     service_name: String,
 }
@@ -224,6 +225,20 @@ impl ApolloRouterBuilder {
         self
     }
 
+    pub fn with_before_router(
+        self,
+        callback: impl Fn(RouterRequest) -> RouterRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_before_router(callback))
+    }
+
+    pub fn with_after_router(
+        self,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_after_router(callback))
+    }
+
     pub fn with_query_planning_service<
         S: Service<
                 RouterRequest,
@@ -242,6 +257,20 @@ impl ApolloRouterBuilder {
         self
     }
 
+    pub fn with_before_query_planning(
+        self,
+        callback: impl Fn(RouterRequest) -> RouterRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_before_query_planning(callback))
+    }
+
+    pub fn with_after_query_planning(
+        self,
+        callback: impl Fn(PlannedRequest) -> PlannedRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_after_query_planning(callback))
+    }
+
     pub fn with_execution_service<
         S: Service<
                 PlannedRequest,
@@ -258,6 +287,20 @@ impl ApolloRouterBuilder {
     {
         self.execution_services.push(service.boxed());
         self
+    }
+
+    pub fn with_before_execution(
+        self,
+        callback: impl Fn(PlannedRequest) -> PlannedRequest + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_before_execution(callback))
+    }
+
+    pub fn with_after_execution(
+        self,
+        callback: impl Fn(RouterResponse) -> RouterResponse + Send + Sync + 'static,
+    ) -> ApolloRouterBuilder {
+        self.with_plugin(MaybeCallbackPlugin::default().with_after_execution(callback))
     }
 
     pub fn with_before_subgraph(
