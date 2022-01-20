@@ -168,15 +168,15 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::apollo_router::execution - 13": {
-              "name": "apollo_router::apollo_router::execution",
+            "apollo_router_core::query_planner::step - 13": {
+              "name": "apollo_router_core::query_planner::step",
               "record": {
                 "entries": [],
                 "metadata": {
-                  "name": "execution",
-                  "target": "apollo_router::apollo_router",
+                  "name": "step",
+                  "target": "apollo_router_core::query_planner",
                   "level": "INFO",
-                  "module_path": "apollo_router::apollo_router",
+                  "module_path": "apollo_router_core::query_planner",
                   "fields": {
                     "names": []
                   }

@@ -136,7 +136,7 @@ impl PreparedQuery for ApolloPreparedQuery {
                 self.service_registry.as_ref(),
                 &self.schema,
             )
-            .instrument(tracing::info_span!("execution"))
+            .in_current_span()
             .await;
 
         if let Some(query) = self.query {
