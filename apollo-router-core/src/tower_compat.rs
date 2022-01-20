@@ -75,8 +75,10 @@ impl<F> Clone for FetcherService<F> {
 }
 
 impl<F> FetcherService<F> {
-    pub fn new(fetcher: Arc<F>) -> Self {
-        Self { fetcher }
+    pub fn new(fetcher: F) -> Self {
+        Self {
+            fetcher: Arc::new(fetcher),
+        }
     }
 
     pub fn into_inner(self) -> Arc<F> {
@@ -98,7 +100,7 @@ where
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let fetcher = self.fetcher.clone();
-        Box::pin(async move { fetcher.stream(request.backend_request.body()).await })
+        Box::pin(async move { fetcher.stream(&request).await })
     }
 }
 
@@ -107,7 +109,7 @@ impl<F> Fetcher for FetcherService<F>
 where
     F: Fetcher + 'static,
 {
-    async fn stream(&self, request: &Request) -> Result<Response, FetchError> {
+    async fn stream(&self, request: &SubgraphRequest) -> Result<Response, FetchError> {
         self.fetcher.stream(request).await
     }
 }

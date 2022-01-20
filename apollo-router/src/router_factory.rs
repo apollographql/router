@@ -1,6 +1,7 @@
 use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
 use crate::http_service_registry::HttpServiceRegistry;
+use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::{prelude::*, RouterService};
 use std::sync::Arc;
 
@@ -32,7 +33,15 @@ impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
         schema: Arc<graphql::Schema>,
         previous_router: Option<RouterService<ApolloRouter>>,
     ) -> RouterService<ApolloRouter> {
-        let service_registry = HttpServiceRegistry::new(configuration);
+        let service_registry = graphql::ServiceRegistry2::new(configuration.subgraphs.iter().map(
+            |(name, subgraph)| {
+                let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
+                    name.to_owned(),
+                    subgraph.routing_url.to_owned(),
+                ));
+                (name.to_string(), fetcher)
+            },
+        ));
         graphql::RouterService::new(Arc::new(
             ApolloRouter::new(
                 Arc::new(service_registry),

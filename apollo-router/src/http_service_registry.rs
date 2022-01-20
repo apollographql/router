@@ -1,15 +1,12 @@
 use crate::configuration::Configuration;
 use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::prelude::*;
-use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
-use tower::Service;
 
 /// Service registry that uses http to connect to subgraphs.
 pub struct HttpServiceRegistry {
-    services: HashMap<String, Arc<dyn NewSubgraphService>>,
+    services: HashMap<String, HttpSubgraphFetcher>,
 }
 
 impl fmt::Debug for HttpServiceRegistry {
@@ -32,27 +29,21 @@ impl HttpServiceRegistry {
                 .map(|(name, subgraph)| {
                     let fetcher =
                         HttpSubgraphFetcher::new(name.to_owned(), subgraph.routing_url.to_owned());
-                    let cloner: Arc<dyn NewSubgraphService> =
-                        Arc::new(move || graphql::FetcherService::new(Arc::new(fetcher.clone())));
-                    (name.to_string(), cloner)
+                    (name.to_string(), fetcher)
                 })
                 .collect(),
         }
     }
 
     // test dynamically adding a Service
-    pub fn add_service<S>(&mut self, name: String, service: S)
-    where
-        S: Clone + SubgraphService,
-    {
-        let cloner: Arc<dyn NewSubgraphService> = Arc::new(move || service.clone());
-        self.services.insert(name, cloner);
+    pub fn add_service<S>(&mut self, name: String, service: HttpSubgraphFetcher) {
+        self.services.insert(name, service);
     }
 }
 
 impl graphql::ServiceRegistry for HttpServiceRegistry {
-    fn get(&self, service: &str) -> Option<Box<dyn SubgraphService>> {
-        self.services.get(service).map(|a| a.new_service())
+    fn get(&self, service: &str) -> Option<&dyn Fetcher> {
+        self.services.get(service).map(|x| x as &dyn Fetcher)
     }
 
     fn has(&self, service: &str) -> bool {
@@ -60,32 +51,52 @@ impl graphql::ServiceRegistry for HttpServiceRegistry {
     }
 }
 
-impl Service<(String, graphql::SubgraphRequest)> for HttpServiceRegistry {
-    type Response = graphql::Response;
+// TODO POC: same service registry but using boxed fetcher
+pub struct HttpBoxedServiceRegistry {
+    services: HashMap<String, Box<dyn graphql::Fetcher>>,
+}
 
-    type Error = graphql::FetchError;
+impl fmt::Debug for HttpBoxedServiceRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut debug = f.debug_tuple("HttpServiceRegistry");
+        for name in self.services.keys() {
+            debug.field(name);
+        }
+        debug.finish()
+    }
+}
 
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
+impl HttpBoxedServiceRegistry {
+    /// Create a new http service registry from a configuration.
+    pub fn new(configuration: &Configuration) -> Self {
+        Self {
+            services: configuration
+                .subgraphs
+                .iter()
+                .map(|(name, subgraph)| {
+                    let fetcher = Box::new(HttpSubgraphFetcher::new(
+                        name.to_owned(),
+                        subgraph.routing_url.to_owned(),
+                    )) as Box<_>;
+                    (name.to_string(), fetcher)
+                })
+                .collect(),
+        }
     }
 
-    fn call(
-        &mut self,
-        (service_name, request): (String, graphql::SubgraphRequest),
-    ) -> Self::Future {
-        let mut service = self
-            .services
-            .get(&service_name)
-            .map(|a| &**a)
-            .unwrap()
-            .new_service();
+    // test dynamically adding a Service
+    pub fn add_service<S>(&mut self, name: String, service: Box<dyn graphql::Fetcher>) {
+        self.services.insert(name, service);
+    }
+}
 
-        service.call(request)
+impl graphql::ServiceRegistry for HttpBoxedServiceRegistry {
+    fn get(&self, service: &str) -> Option<&dyn graphql::Fetcher> {
+        self.services.get(service).map(|x| &**x)
+    }
+
+    fn has(&self, service: &str) -> bool {
+        self.services.get(service).is_some()
     }
 }
 

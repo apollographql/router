@@ -8,7 +8,6 @@ use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::Instrument;
 
 /// Query planning options.
@@ -46,12 +45,9 @@ pub(crate) enum PlanNode {
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, name = "validate", level = "debug")]
-    pub fn validate(&self, service_registry: Arc<dyn ServiceRegistry>) -> Result<(), Response> {
+    pub fn validate(&self, service_registry: &ServiceRegistry2) -> Result<(), Response> {
         let mut early_errors = Vec::new();
-        for err in self
-            .root
-            .validate_services_against_plan(Arc::clone(&service_registry))
-        {
+        for err in self.root.validate_services_against_plan(service_registry) {
             early_errors.push(err.to_graphql_error(None));
         }
 
@@ -66,7 +62,7 @@ impl QueryPlan {
     pub async fn execute<'a>(
         &'a self,
         request: &'a PlannedRequest,
-        service_registry: &'a dyn ServiceRegistry,
+        service_registry: &'a ServiceRegistry2,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
@@ -85,7 +81,7 @@ impl PlanNode {
         &'a self,
         current_dir: &'a Path,
         request: &'a PlannedRequest,
-        service_registry: &'a dyn ServiceRegistry,
+        service_registry: &'a ServiceRegistry2,
         schema: &'a Schema,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -208,10 +204,10 @@ impl PlanNode {
     ///  *   `plan`: The root query plan node to validate.
     fn validate_services_against_plan(
         &self,
-        service_registry: Arc<dyn ServiceRegistry>,
+        service_registry: &ServiceRegistry2,
     ) -> Vec<FetchError> {
         self.service_usage()
-            .filter(|service| !service_registry.has(service))
+            .filter(|service| !service_registry.contains(service))
             .collect::<HashSet<_>>()
             .into_iter()
             .map(|service| FetchError::ValidationUnknownServiceError {
@@ -222,14 +218,12 @@ impl PlanNode {
 }
 
 mod fetch {
-    use std::sync::Arc;
-
     use super::selection::{select_object, Selection};
-    use serde::Deserialize;
-    use tower::ServiceExt;
-    use tracing::{instrument, Instrument};
-
     use crate::prelude::graphql::*;
+    use serde::Deserialize;
+    use std::sync::Arc;
+    use tower::{Service, ServiceExt};
+    use tracing::{instrument, Instrument};
 
     /// A fetch node.
     #[derive(Debug, PartialEq, Deserialize)]
@@ -324,7 +318,7 @@ mod fetch {
             data: &'a Value,
             current_dir: &'a Path,
             request: &'a PlannedRequest,
-            service_registry: &'a dyn ServiceRegistry,
+            service_registry: &'a ServiceRegistry2,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
             let FetchNode {
@@ -346,9 +340,10 @@ mod fetch {
                 )
             })?;
 
-            let fetcher = service_registry
+            let mut service = service_registry
                 .get(service_name)
-                .expect("we already checked that the service exists during planning; qed");
+                .expect("we already checked that the service exists during planning; qed")
+                .clone();
 
             let backend_request_body = Request::builder()
                 .query(operation)
@@ -366,8 +361,10 @@ mod fetch {
                 context: Object::default(),
             };
 
-            let response = fetcher
-                .oneshot(subgraph_request)
+            let response = service
+                .ready()
+                .await?
+                .call(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
                 .await?;
 

@@ -80,10 +80,13 @@ impl HttpSubgraphFetcher {
 
     async fn request_stream(
         &self,
-        request: &graphql::Request,
+        request: &graphql::SubgraphRequest,
     ) -> Result<bytes::Bytes, graphql::FetchError> {
         //let req = self.create_request(request);
-        let req = self.http_client.post(self.url.clone()).json(&request);
+        let req = self
+            .http_client
+            .post(self.url.clone())
+            .json(request.backend_request.body());
         Self::send_request(&self.service, req).await
     }
 
@@ -107,7 +110,7 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest to fetch a graphql response
     async fn stream(
         &self,
-        request: &graphql::Request,
+        request: &graphql::SubgraphRequest,
     ) -> Result<graphql::Response, graphql::FetchError> {
         let service_name = self.service.to_string();
         let response = self.request_stream(request).await?;

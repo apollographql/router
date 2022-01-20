@@ -1,10 +1,7 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use futures::Future;
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::Arc;
-use tower_service::Service;
 
 /// A cache resolution trait.
 ///
@@ -24,28 +21,10 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 /// Maintains a map of services to fetchers.
 pub trait ServiceRegistry: Send + Sync + Debug {
     /// Get a fetcher for a service.
-    fn get(&self, service: &str) -> Option<Box<dyn SubgraphService>>;
+    fn get(&self, service: &str) -> Option<&dyn Fetcher>;
 
     /// Get a fetcher for a service.
     fn has(&self, service: &str) -> bool;
-}
-
-// we need that trait to create new instances of a Service (example: by cloning)
-// we cannot require Clone in the trait boudnds for SubgtraphService, because we
-// would not be able to make a trait object from it
-pub trait NewSubgraphService: Send + Sync {
-    fn new_service(&self) -> Box<dyn SubgraphService>;
-}
-
-impl<F, S> NewSubgraphService for F
-where
-    F: Fn() -> S,
-    F: Send + Sync,
-    S: SubgraphService,
-{
-    fn new_service(&self) -> Box<dyn SubgraphService> {
-        Box::new((self)())
-    }
 }
 
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
@@ -56,32 +35,7 @@ where
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    async fn stream(&self, request: &Request) -> Result<Response, FetchError>;
-}
-
-pub trait SubgraphService:
-    Send
-    + Sync
-    + Service<
-        SubgraphRequest,
-        Response = crate::Response,
-        Error = FetchError,
-        Future = Pin<Box<dyn Future<Output = Result<crate::Response, FetchError>> + Send>>,
-    > + 'static
-{
-}
-
-impl<
-        T: Send
-            + Sync
-            + Service<
-                SubgraphRequest,
-                Response = crate::Response,
-                Error = FetchError,
-                Future = Pin<Box<dyn Future<Output = Result<crate::Response, FetchError>> + Send>>,
-            > + 'static,
-    > SubgraphService for T
-{
+    async fn stream(&self, request: &SubgraphRequest) -> Result<Response, FetchError>;
 }
 
 /// QueryPlanner can be used to plan queries.

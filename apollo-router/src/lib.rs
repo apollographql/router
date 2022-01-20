@@ -558,7 +558,7 @@ mod tests {
 
     async fn query(
         socket: &SocketAddr,
-        request: &graphql::Request,
+        request: &graphql::SubgraphRequest,
     ) -> Result<graphql::Response, graphql::FetchError> {
         HttpSubgraphFetcher::new(
             "federated",
