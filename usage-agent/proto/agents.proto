@@ -13,12 +13,19 @@ message ReporterResponse {
     string message = 1;
 }
 
+message ReporterGraph {
+    string reference = 1;
+    string key = 2;
+}
+
 message ReporterStats {
-    string key = 1;
-    Report.ContextualizedStats stats = 2;
+    ReporterGraph graph = 1;
+    string key = 2;
+    Report.ContextualizedStats stats = 3;
 }
 
 message ReporterTrace {
-    string key = 1;
-    Report.Trace trace = 2;
+    ReporterGraph graph = 1;
+    string key = 2;
+    Report.Trace trace = 3;
 }

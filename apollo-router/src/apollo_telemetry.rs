@@ -43,9 +43,9 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use tokio::task::JoinError;
 use usage_agent::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
-use usage_agent::Reporter;
+use usage_agent::{Reporter, ReporterGraph};
 
-use crate::configuration::StudioUsage;
+use crate::configuration::{StudioGraph, StudioUsage};
 
 pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
 pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
@@ -53,6 +53,7 @@ pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
 /// Pipeline builder
 #[derive(Debug)]
 pub struct PipelineBuilder {
+    graph_config: Option<StudioGraph>,
     studio_config: Option<StudioUsage>,
     trace_config: Option<sdk::trace::Config>,
 }
@@ -66,6 +67,7 @@ impl Default for PipelineBuilder {
     /// Return the default pipeline builder.
     fn default() -> Self {
         Self {
+            graph_config: None,
             studio_config: None,
             trace_config: None,
         }
@@ -77,6 +79,12 @@ impl PipelineBuilder {
     #[allow(dead_code)]
     pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
         self.trace_config = Some(config);
+        self
+    }
+
+    /// Assign graph identification configuration
+    pub fn with_graph_config(mut self, config: &Option<StudioGraph>) -> Self {
+        self.graph_config = config.clone();
         self
     }
 
@@ -141,10 +149,12 @@ impl PipelineBuilder {
             Some(cfg) => cfg.collector,
             None => DEFAULT_SERVER_URL.to_string(),
         };
+        let graph = self.graph_config.clone();
 
         tracing::debug!("collector: {}", collector);
+        tracing::debug!("graph: {:?}", graph);
 
-        Ok(Exporter::new(collector))
+        Ok(Exporter::new(collector, graph))
     }
 }
 
@@ -155,12 +165,13 @@ impl PipelineBuilder {
 #[derive(Debug)]
 pub struct Exporter {
     collector: String,
+    graph: Option<StudioGraph>,
 }
 
 impl Exporter {
     /// Create a new apollo telemetry `Exporter`.
-    pub fn new(collector: String) -> Self {
-        Self { collector }
+    pub fn new(collector: String, graph: Option<StudioGraph>) -> Self {
+        Self { collector, graph }
     }
 }
 
@@ -187,10 +198,27 @@ impl ExportError for ApolloError {
     }
 }
 
+impl From<&StudioGraph> for ReporterGraph {
+    fn from(graph: &StudioGraph) -> Self {
+        ReporterGraph {
+            reference: graph.reference.clone(),
+            key: graph.key.clone(),
+        }
+    }
+}
+
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+        if self.graph.is_none() {
+            // It's an error to try and export statistics without
+            // graph details. We enforce that elsewhere in the code
+            // and panic here in case a logic bug creeps in elsewhere.
+            panic!("cannot export statistics without graph details")
+        }
+        // Convert the configuration data into a reportable form
+        let graph: ReporterGraph = self.graph.as_ref().unwrap().into();
         let mut reporter = Reporter::try_new(self.collector.clone())
             .await
             .map_err::<ApolloError, _>(Into::into)?;
@@ -252,7 +280,7 @@ impl SpanExporter for Exporter {
                     let key = normalize(operation_name, &q.as_str());
 
                     let msg = reporter
-                        .submit_stats(key, stats)
+                        .submit_stats(graph.clone(), key, stats)
                         .await
                         .map_err::<TraceError, _>(|e| e.to_string().into())?
                         .into_inner()

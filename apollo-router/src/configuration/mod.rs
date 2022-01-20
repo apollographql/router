@@ -70,6 +70,11 @@ pub struct Configuration {
     #[serde(default)]
     #[builder(default)]
     pub studio: Option<StudioUsage>,
+
+    /// Studio Graph configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub graph: Option<StudioGraph>,
 }
 
 fn default_listen() -> SocketAddr {
@@ -236,6 +241,14 @@ pub struct StudioUsage {
 
     #[serde(default = "default_listener")]
     pub(crate) listener: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct StudioGraph {
+    pub(crate) reference: String,
+
+    pub(crate) key: String,
 }
 
 impl Default for StudioUsage {

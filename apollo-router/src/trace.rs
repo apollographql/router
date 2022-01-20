@@ -29,8 +29,9 @@ pub(crate) fn try_initialize_subscriber(
         .json()
         .finish();
 
-    tracing::info!("config: {:?}", config.studio);
+    tracing::info!("studio: {:?}, graph: {:?}", config.studio, config.graph);
     let studio_config = &config.studio;
+    let graph_config = &config.graph;
 
     match config.opentelemetry.as_ref() {
         Some(OpenTelemetry::Jaeger(config)) => {
@@ -67,21 +68,26 @@ pub(crate) fn try_initialize_subscriber(
             if let Some(trace_config) = &config.trace_config {
                 builder = builder.with_config(trace_config.trace_config());
             }
-            // Add an apollo exporter into the mix
-            let apollo_exporter = match new_pipeline()
-                .with_studio_config(studio_config)
-                .get_exporter()
-            {
-                Ok(x) => x,
-                Err(e) => {
-                    tracing::error!("error installing studio telemetry: {}", e);
-                    return Err(Box::new(e));
-                }
-            };
-            let provider = builder
-                .with_span_processor(batch)
-                .with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
-                .build();
+            // If we have apollo studio graph configuration, then we can export statistics
+            // to the apollo ingress. If we don't, we can't and so no point configuring the
+            // exporter.
+            if graph_config.is_some() {
+                let apollo_exporter = match new_pipeline()
+                    .with_studio_config(studio_config)
+                    .with_graph_config(graph_config)
+                    .get_exporter()
+                {
+                    Ok(x) => x,
+                    Err(e) => {
+                        tracing::error!("error installing studio telemetry: {}", e);
+                        return Err(Box::new(e));
+                    }
+                };
+                builder =
+                    builder.with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
+            }
+
+            let provider = builder.with_span_processor(batch).build();
 
             let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
 
@@ -116,20 +122,25 @@ pub(crate) fn try_initialize_subscriber(
             Ok(Arc::new(subscriber.with(telemetry)))
         }
         None => {
-            // Add studio agent as an OT pipeline
-            let tracer = match new_pipeline()
-                .with_studio_config(studio_config)
-                .install_batch()
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("error installing studio telemetry: {}", e);
-                    return Err(Box::new(e));
-                }
-            };
-            let agent = tracing_opentelemetry::layer().with_tracer(tracer);
-            tracing::info!("Adding agent telemetry");
-            Ok(Arc::new(subscriber.with(agent)))
+            if graph_config.is_some() {
+                // Add studio agent as an OT pipeline
+                let tracer = match new_pipeline()
+                    .with_studio_config(studio_config)
+                    .with_graph_config(graph_config)
+                    .install_batch()
+                {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!("error installing studio telemetry: {}", e);
+                        return Err(Box::new(e));
+                    }
+                };
+                let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+                tracing::info!("Adding agent telemetry");
+                Ok(Arc::new(subscriber.with(agent)))
+            } else {
+                Ok(Arc::new(subscriber))
+            }
         }
     }
 }

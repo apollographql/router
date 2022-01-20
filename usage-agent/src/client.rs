@@ -2,6 +2,7 @@ use prost_types::Timestamp;
 use std::time::{SystemTime, UNIX_EPOCH};
 use usage_agent::report::trace::CachePolicy;
 use usage_agent::report::Trace;
+use usage_agent::ReporterGraph;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
 
@@ -38,7 +39,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
 }"
     .to_string();
-    let response = reporter.submit_trace(q_string, trace).await?;
+    let graph = ReporterGraph::default();
+    let response = reporter.submit_trace(graph, q_string, trace).await?;
     println!("response: {}", response.into_inner().message);
 
     Ok(())

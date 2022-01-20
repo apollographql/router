@@ -7,9 +7,11 @@ mod agent {
 }
 
 use agent::reporter_client::ReporterClient;
+pub use agent::ReporterGraph;
 use agent::{ReporterResponse, ReporterStats, ReporterTrace};
 pub use report::*;
 use std::error::Error;
+use std::hash::{Hash, Hasher};
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
@@ -20,6 +22,12 @@ use tonic::{Request, Response, Status};
 pub struct ReporterError {
     source: Box<dyn Error + Send + Sync + 'static>,
     msg: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StudioGraph {
+    pub reference: String,
+    pub key: String,
 }
 
 impl std::error::Error for ReporterError {}
@@ -76,6 +84,20 @@ impl std::fmt::Display for ReporterError {
             "ReporterError: source: {}, message: {}",
             self.source, self.msg
         )
+    }
+}
+
+impl Eq for ReporterGraph {}
+
+// PartialEq is derived in the generated code, but Hash isn't and we need
+// it to use this as key in a HashMap. We have to make sure this
+// implementation always matches the derived PartialEq in the generated
+// code.
+#[allow(clippy::derive_hash_xor_eq)]
+impl Hash for ReporterGraph {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.reference.hash(state);
+        self.key.hash(state);
     }
 }
 
@@ -157,11 +179,13 @@ impl Reporter {
     /// Relay stats onto the collector
     pub async fn submit_stats(
         &mut self,
+        graph: ReporterGraph,
         q: String,
         stats: ContextualizedStats,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_stats(Request::new(ReporterStats {
+                graph: Some(graph),
                 key: q,
                 stats: Some(stats),
             }))
@@ -171,11 +195,13 @@ impl Reporter {
     /// Relay trace onto the collector
     pub async fn submit_trace(
         &mut self,
+        graph: ReporterGraph,
         q: String,
         trace: Trace,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_trace(Request::new(ReporterTrace {
+                graph: Some(graph),
                 key: q,
                 trace: Some(trace),
             }))
@@ -204,7 +230,7 @@ pub mod server {
     use tonic::{Request, Response, Status};
 
     pub use crate::agent::reporter_server::{Reporter, ReporterServer};
-    use crate::agent::ReporterResponse;
+    use crate::agent::{ReporterGraph, ReporterResponse};
 
     #[derive(Debug, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -214,14 +240,16 @@ pub mod server {
 
     pub struct ReportServer {
         addr: SocketAddr,
-        tpq: Arc<Mutex<HashMap<String, report::TracesAndStats>>>,
+        // This HashMap will only have a single entry if used internally from a router.
+        tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
     }
 
     impl ReportServer {
         pub fn new(addr: SocketAddr) -> Self {
             // Spawn a task which will check if there are reports to
             // submit every interval.
-            let tpq = Arc::new(Mutex::new(HashMap::new()));
+            let tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>> =
+                Arc::new(Mutex::new(HashMap::new()));
             let task_tpq = tpq.clone();
             tokio::task::spawn(async move {
                 let client = Client::new();
@@ -229,33 +257,32 @@ pub mod server {
                 interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
                 interval.tick().await;
                 loop {
-                    let mut tpq = task_tpq.lock().await;
-                    let current_tpq = std::mem::take(&mut *tpq);
-                    drop(tpq);
-                    if !current_tpq.is_empty() {
-                        tracing::info!("submitting: {} records", current_tpq.len());
-                        tracing::debug!("containing: {:?}", current_tpq);
-                        let mut report =
-                            crate::Report::try_new("Usage-Agent-uc0sri@current").expect("XXX");
+                    // let mut tpq = task_tpq.lock().await;
+                    let mut all_entries = task_tpq.lock().await;
+                    for (graph, tpq) in all_entries.drain() {
+                        if !tpq.is_empty() {
+                            tracing::info!("submitting: {} records", tpq.len());
+                            tracing::debug!("containing: {:?}", tpq);
+                            let mut report = crate::Report::try_new(&graph.reference).expect("XXX");
+                            report.traces_per_query = tpq;
+                            let time = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards");
+                            let seconds = time.as_secs();
+                            let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
+                            let ts_end = Timestamp {
+                                seconds: seconds as i64,
+                                nanos: nanos as i32,
+                            };
+                            report.end_time = Some(ts_end);
 
-                        report.traces_per_query = current_tpq;
-                        let time = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards");
-                        let seconds = time.as_secs();
-                        let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-                        let ts_end = Timestamp {
-                            seconds: seconds as i64,
-                            nanos: nanos as i32,
-                        };
-                        report.end_time = Some(ts_end);
-
-                        match ReportServer::submit_report(&client, report).await {
-                            Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-                            Err(e) => tracing::error!("Report submission failed: {}", e),
+                            match ReportServer::submit_report(&client, graph.key, report).await {
+                                Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
+                                Err(e) => tracing::error!("Report submission failed: {}", e),
+                            }
                         }
+                        interval.tick().await;
                     }
-                    interval.tick().await;
                 }
             });
             Self { addr, tpq }
@@ -271,6 +298,7 @@ pub mod server {
 
         async fn submit_report(
             client: &Client,
+            key: String,
             report: report::Report,
         ) -> Result<Response<ReporterResponse>, Status> {
             tracing::debug!("submitting report: {:?}", report);
@@ -292,11 +320,7 @@ pub mod server {
             let res = client
                 .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
                 .body(compressed_content)
-                .header(
-                    "X-Api-Key",
-                    std::env::var("X_API_KEY")
-                        .map_err(|e| Status::unauthenticated(e.to_string()))?,
-                )
+                .header("X-Api-Key", key)
                 .header("Content-Encoding", "gzip")
                 .header("Content-Type", "application/protobuf")
                 .header("Accept", "application/json")
@@ -335,7 +359,8 @@ pub mod server {
                 message: "Report accepted".to_string(),
             };
             let mut tpq = self.tpq.lock().await;
-            let entry = tpq.entry(msg.key).or_insert(TracesAndStats {
+            let graph_map = tpq.entry(msg.graph.unwrap()).or_insert_with(HashMap::new);
+            let entry = graph_map.entry(msg.key).or_insert(TracesAndStats {
                 stats_with_context: vec![],
                 ..Default::default()
             });
@@ -354,7 +379,8 @@ pub mod server {
                 message: "Report accepted".to_string(),
             };
             let mut tpq = self.tpq.lock().await;
-            let entry = tpq.entry(msg.key).or_insert(TracesAndStats {
+            let graph_map = tpq.entry(msg.graph.unwrap()).or_insert_with(HashMap::new);
+            let entry = graph_map.entry(msg.key).or_insert(TracesAndStats {
                 trace: vec![],
                 stats_with_context: vec![],
                 ..Default::default()
