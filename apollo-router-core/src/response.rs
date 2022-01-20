@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use crate::prelude::graphql::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 /// A graphql primary response.

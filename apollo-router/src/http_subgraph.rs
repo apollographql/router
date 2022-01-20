@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
+use std::sync::Arc;
 use tracing::Instrument;
 use url::Url;
 
