@@ -224,6 +224,7 @@ pub mod server {
     use std::net::SocketAddr;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::mpsc::Sender;
     use tokio::sync::Mutex;
     use tokio::time::{interval, Duration, MissedTickBehavior};
     use tonic::transport::{Error, Server};
@@ -242,6 +243,7 @@ pub mod server {
         addr: SocketAddr,
         // This HashMap will only have a single entry if used internally from a router.
         tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
+        tx: Sender<()>,
     }
 
     impl ReportServer {
@@ -251,41 +253,30 @@ pub mod server {
             let tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>> =
                 Arc::new(Mutex::new(HashMap::new()));
             let task_tpq = tpq.clone();
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(100);
             tokio::task::spawn(async move {
                 let client = Client::new();
                 let mut interval = interval(Duration::from_secs(5));
                 interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
                 interval.tick().await;
                 loop {
-                    // let mut tpq = task_tpq.lock().await;
-                    let mut all_entries = task_tpq.lock().await;
-                    for (graph, tpq) in all_entries.drain() {
-                        if !tpq.is_empty() {
-                            tracing::info!("submitting: {} records", tpq.len());
-                            tracing::debug!("containing: {:?}", tpq);
-                            let mut report = crate::Report::try_new(&graph.reference).expect("XXX");
-                            report.traces_per_query = tpq;
-                            let time = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .expect("Time went backwards");
-                            let seconds = time.as_secs();
-                            let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-                            let ts_end = Timestamp {
-                                seconds: seconds as i64,
-                                nanos: nanos as i32,
-                            };
-                            report.end_time = Some(ts_end);
-
-                            match ReportServer::submit_report(&client, graph.key, report).await {
-                                Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-                                Err(e) => tracing::error!("Report submission failed: {}", e),
+                    tokio::select! {
+                        biased;
+                        mopt = rx.recv() => {
+                            match mopt {
+                                Some(_msg) => {
+                                    relay_tpq(&client, task_tpq.clone()).await;
+                                },
+                                None => break
                             }
+                        },
+                        _ = interval.tick() => {
+                            relay_tpq(&client, task_tpq.clone()).await;
                         }
-                        interval.tick().await;
-                    }
+                    };
                 }
             });
-            Self { addr, tpq }
+            Self { addr, tpq, tx }
         }
 
         pub async fn serve(self) -> Result<(), Error> {
@@ -317,6 +308,27 @@ pub mod server {
             let compressed_content = encoder
                 .finish()
                 .map_err(|e| Status::internal(e.to_string()))?;
+            let mut backoff = 0;
+            for i in 0..4 {
+                let res = client
+                    .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                    .body(compressed_content.clone())
+                    .header("X-Api-Key", key.clone())
+                    .header("Content-Encoding", "gzip")
+                    .header("Content-Type", "application/protobuf")
+                    .header("Accept", "application/json")
+                    .send()
+                    .await;
+                match res {
+                    Ok(_v) => break,
+                    Err(e) => {
+                        tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
+                        backoff += 500;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
+                    }
+                }
+            }
+            // Final attempt to transfer, if fails report error
             let res = client
                 .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
                 .body(compressed_content)
@@ -346,6 +358,41 @@ pub mod server {
             Ok(Response::new(response))
         }
     }
+    #[allow(clippy::large_enum_variant)]
+    enum StatsOrTrace {
+        Stats(ReporterStats),
+        Trace(ReporterTrace),
+    }
+
+    impl StatsOrTrace {
+        fn get_traces_and_stats(&self) -> TracesAndStats {
+            match self {
+                StatsOrTrace::Stats(_) => TracesAndStats {
+                    trace: vec![],
+                    stats_with_context: vec![],
+                    ..Default::default()
+                },
+                StatsOrTrace::Trace(_) => TracesAndStats {
+                    stats_with_context: vec![],
+                    ..Default::default()
+                },
+            }
+        }
+
+        fn graph(&self) -> Option<ReporterGraph> {
+            match self {
+                StatsOrTrace::Stats(s) => s.graph.clone(),
+                StatsOrTrace::Trace(t) => t.graph.clone(),
+            }
+        }
+
+        fn key(&self) -> String {
+            match self {
+                StatsOrTrace::Stats(s) => s.key.clone(),
+                StatsOrTrace::Trace(t) => t.key.clone(),
+            }
+        }
+    }
 
     #[tonic::async_trait]
     impl Reporter for ReportServer {
@@ -355,18 +402,7 @@ pub mod server {
         ) -> Result<Response<ReporterResponse>, Status> {
             tracing::debug!("received request: {:?}", request);
             let msg = request.into_inner();
-            let response = ReporterResponse {
-                message: "Report accepted".to_string(),
-            };
-            let mut tpq = self.tpq.lock().await;
-            let graph_map = tpq.entry(msg.graph.unwrap()).or_insert_with(HashMap::new);
-            let entry = graph_map.entry(msg.key).or_insert(TracesAndStats {
-                stats_with_context: vec![],
-                ..Default::default()
-            });
-            entry.stats_with_context.push(msg.stats.unwrap());
-
-            Ok(Response::new(response))
+            self.add_stats_or_trace(StatsOrTrace::Stats(msg)).await
         }
 
         async fn add_trace(
@@ -375,19 +411,88 @@ pub mod server {
         ) -> Result<Response<ReporterResponse>, Status> {
             tracing::debug!("received request: {:?}", request);
             let msg = request.into_inner();
+            self.add_stats_or_trace(StatsOrTrace::Trace(msg)).await
+        }
+    }
+
+    impl ReportServer {
+        async fn add_stats_or_trace(
+            &self,
+            record: StatsOrTrace,
+        ) -> Result<Response<ReporterResponse>, Status> {
             let response = ReporterResponse {
                 message: "Report accepted".to_string(),
             };
             let mut tpq = self.tpq.lock().await;
-            let graph_map = tpq.entry(msg.graph.unwrap()).or_insert_with(HashMap::new);
-            let entry = graph_map.entry(msg.key).or_insert(TracesAndStats {
-                trace: vec![],
-                stats_with_context: vec![],
-                ..Default::default()
-            });
-            entry.trace.push(msg.trace.unwrap());
+            let graph_map = tpq
+                .entry(record.graph().unwrap())
+                .or_insert_with(HashMap::new);
+            let entry = graph_map
+                .entry(record.key())
+                .or_insert_with(|| record.get_traces_and_stats());
+            match record {
+                StatsOrTrace::Stats(mut s) => {
+                    entry.stats_with_context.push(s.stats.take().unwrap())
+                }
+                StatsOrTrace::Trace(mut t) => entry.trace.push(t.trace.take().unwrap()),
+            }
+
+            // Trigger a dispatch if we have "too much" data
+            let mut total = 0;
+            for (_graph, entry) in tpq.iter() {
+                total += entry.len();
+            }
+
+            if total > 10 {
+                let mut backoff = 0;
+                for _i in 0..4 {
+                    match self.tx.send(()).await {
+                        Ok(_v) => break,
+                        Err(e) => {
+                            tracing::warn!("could not trigger transfer: {}", e);
+                            backoff += 500;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
+                        }
+                    }
+                }
+                // One last try and return error if fail
+                self.tx
+                    .send(())
+                    .await
+                    .map_err(|e| Status::internal(e.to_string()))?;
+            }
 
             Ok(Response::new(response))
+        }
+    }
+
+    async fn relay_tpq(
+        client: &Client,
+        task_tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
+    ) {
+        let mut all_entries = task_tpq.lock().await;
+        for (graph, tpq) in all_entries.drain() {
+            if !tpq.is_empty() {
+                tracing::info!("submitting: {} records", tpq.len());
+                tracing::debug!("containing: {:?}", tpq);
+                let mut report = crate::Report::try_new(&graph.reference).expect("XXX");
+                report.traces_per_query = tpq;
+                let time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards");
+                let seconds = time.as_secs();
+                let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
+                let ts_end = Timestamp {
+                    seconds: seconds as i64,
+                    nanos: nanos as i32,
+                };
+                report.end_time = Some(ts_end);
+
+                match ReportServer::submit_report(client, graph.key, report).await {
+                    Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
+                    Err(e) => tracing::error!("Report submission failed: {}", e),
+                }
+            }
         }
     }
 }
