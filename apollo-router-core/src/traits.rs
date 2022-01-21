@@ -18,15 +18,6 @@ pub trait CacheResolver<K, V> {
 /// [`QueryPlanOptions`].
 pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 
-/// Maintains a map of services to fetchers.
-pub trait ServiceRegistry: Send + Sync + Debug {
-    /// Get a fetcher for a service.
-    fn get(&self, service: &str) -> Option<&dyn Fetcher>;
-
-    /// Get a fetcher for a service.
-    fn has(&self, service: &str) -> bool;
-}
-
 /// A fetcher is responsible for turning a graphql request into a stream of responses.
 ///
 /// The goal of this trait is to hide the implementation details of fetching a stream of graphql responses.
@@ -93,7 +84,6 @@ mod tests {
     use super::*;
     use static_assertions::*;
 
-    assert_obj_safe!(ServiceRegistry);
     assert_obj_safe!(Fetcher);
     assert_obj_safe!(QueryPlanner);
 }
