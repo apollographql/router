@@ -10,7 +10,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tower::Service;
 
 /// Factory for creating the http server component.
 ///
@@ -26,12 +25,12 @@ pub(crate) trait HttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         S: Clone
-            + Service<graphql::RouterRequest, Response = graphql::Response>
+            + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
             + Send
             + Sync
             + 'static,
-        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send;
+        <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
+        <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.

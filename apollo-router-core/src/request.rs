@@ -75,40 +75,6 @@ impl Request {
     }
 }
 
-/// the parsed graphql Request, HTTP headers and contextual data for extensions
-pub struct RouterRequest {
-    /// The original request
-    pub frontend_request: http::Request<Request>,
-
-    /// Context for extension
-    pub context: Object,
-}
-
-pub struct PlannedRequest {
-    ///riginal request
-    pub frontend_request: Arc<http::Request<Request>>,
-
-    // hiding this one for now
-    // pub query_plan: QueryPlan,
-
-    // Cloned from RouterRequest
-    pub context: Object,
-}
-
-pub struct SubgraphRequest {
-    pub service_name: String,
-
-    // The request to make to subgraphs
-    pub backend_request: http::Request<Request>,
-
-    // Subgraph extensions have access to the frontend request
-    // but cannot modify it
-    pub frontend_request: Arc<http::Request<Request>>,
-
-    // Cloned from PlannedRequest
-    pub context: Object,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

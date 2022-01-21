@@ -38,9 +38,9 @@ pub struct HeaderFilter<S> {
     allowed_headers: HashSet<String>,
 }
 
-impl<S> Service<graphql::RouterRequest> for HeaderFilter<S>
+impl<S> Service<http::Request<graphql::Request>> for HeaderFilter<S>
 where
-    S: Service<graphql::RouterRequest, Error = ()>,
+    S: Service<http::Request<graphql::Request>, Error = ()>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -50,16 +50,15 @@ where
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: graphql::RouterRequest) -> Self::Future {
+    fn call(&mut self, mut req: http::Request<graphql::Request>) -> Self::Future {
         let removed_keys: Vec<_> = req
-            .frontend_request
             .headers()
             .keys()
             .filter(|name| !self.allowed_headers.contains(name.as_str()))
             .cloned()
             .collect();
 
-        let headers_mut = req.frontend_request.headers_mut();
+        let headers_mut = req.headers_mut();
         for name in removed_keys {
             headers_mut.remove(name);
         }

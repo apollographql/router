@@ -1,7 +1,6 @@
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
-use std::sync::Arc;
 use tracing::Instrument;
 use url::Url;
 
@@ -81,13 +80,13 @@ impl HttpSubgraphFetcher {
 
     async fn request_stream(
         &self,
-        request: &graphql::SubgraphRequest,
+        request: impl AsRef<graphql::Request>,
     ) -> Result<bytes::Bytes, graphql::FetchError> {
         //let req = self.create_request(request);
         let req = self
             .http_client
             .post(self.url.clone())
-            .json(request.backend_request.body());
+            .json(request.as_ref());
         Self::send_request(&self.service, req).await
     }
 
@@ -111,19 +110,18 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     /// Using reqwest to fetch a graphql response
     async fn stream(
         &self,
-        request: &graphql::SubgraphRequest,
+        request: http::Request<graphql::Request>,
+        context: graphql::Context,
     ) -> Result<graphql::RouterResponse, graphql::FetchError> {
         let service_name = self.service.to_string();
-        let backend_response = self
+        let response = self
             .request_stream(request)
             .await
             .and_then(|response| Self::map_to_graphql(service_name, response))?;
 
         Ok(graphql::RouterResponse {
-            frontend_request: Arc::clone(&request.frontend_request),
-            backend_response,
-            // TODO: what's with the context again ?
-            context: Default::default(),
+            response,
+            context: context.clone(),
         })
     }
 }

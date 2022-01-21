@@ -75,26 +75,26 @@ impl Router for ApolloRouter {
     type PreparedQuery = ApolloPreparedQuery;
 
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
-        if let Some(response) = self.naive_introspection.get(&request.query) {
+    async fn prepare_query(&self, context: Context) -> Result<ApolloPreparedQuery, Response> {
+        if let Some(response) = self.naive_introspection.get(&context.request.body().query) {
             return Err(response);
         }
 
         let query = self
             .query_cache
-            .get_query(&request.query)
+            .get_query(&context.request.body().query)
             .instrument(tracing::info_span!("query_parsing"))
             .await;
 
         if let Some(query) = query.as_ref() {
-            query.validate_variables(request, &self.schema)?;
+            query.validate_variables(&context.request, &self.schema)?;
         }
 
         let query_plan = self
             .query_planner
             .get(
-                request.query.as_str().to_owned(),
-                request.operation_name.to_owned(),
+                context.request.body().query.as_str().to_owned(),
+                context.request.body().operation_name.to_owned(),
                 Default::default(),
             )
             .await?;
@@ -123,19 +123,10 @@ pub struct ApolloPreparedQuery {
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
     #[tracing::instrument(level = "debug", skip_all)]
-    async fn execute(self, request: RouterRequest) -> Response {
-        let planned_request = PlannedRequest {
-            frontend_request: Arc::new(request.frontend_request),
-            context: request.context,
-        };
-
+    async fn execute(self, context: Context) -> Response {
         let mut response = self
             .query_plan
-            .execute(
-                &planned_request,
-                self.service_registry.as_ref(),
-                &self.schema,
-            )
+            .execute(&context, self.service_registry.as_ref(), &self.schema)
             .instrument(tracing::info_span!("execution"))
             .await;
 
@@ -143,11 +134,7 @@ impl PreparedQuery for ApolloPreparedQuery {
             tracing::debug_span!("format_response").in_scope(|| {
                 query.format_response(
                     &mut response,
-                    planned_request
-                        .frontend_request
-                        .body()
-                        .operation_name
-                        .as_deref(),
+                    context.request.body().operation_name.as_deref(),
                     &self.schema,
                 )
             });

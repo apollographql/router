@@ -61,7 +61,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        request: &'a PlannedRequest,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -69,7 +69,7 @@ impl QueryPlan {
 
         let (value, errors) = self
             .root
-            .execute_recursively(&root, request, service_registry, schema, &Value::default())
+            .execute_recursively(&root, context, service_registry, schema, &Value::default())
             .await;
 
         Response::builder().data(value).errors(errors).build()
@@ -80,7 +80,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        request: &'a PlannedRequest,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -101,7 +101,7 @@ impl PlanNode {
                             let (v, err) = node
                                 .execute_recursively(
                                     current_dir,
-                                    request,
+                                    context,
                                     service_registry,
                                     schema,
                                     &value,
@@ -122,7 +122,7 @@ impl PlanNode {
                             .map(|plan| {
                                 plan.execute_recursively(
                                     current_dir,
-                                    request,
+                                    context,
                                     service_registry,
                                     schema,
                                     parent_value,
@@ -141,7 +141,7 @@ impl PlanNode {
                             .execute_recursively(
                                 // this is the only command that actually changes the "current dir"
                                 &current_dir.join(path),
-                                request,
+                                context,
                                 service_registry,
                                 schema,
                                 parent_value,
@@ -157,7 +157,7 @@ impl PlanNode {
                             .fetch_node(
                                 parent_value,
                                 current_dir,
-                                request,
+                                context,
                                 service_registry,
                                 schema,
                             )
@@ -255,14 +255,14 @@ mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &PlannedRequest,
+            context: &Context,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
                 variables.extend(variable_usages.iter().filter_map(|key| {
-                    request
-                        .frontend_request
+                    context
+                        .request
                         .body()
                         .variables
                         .get_key_value(key.as_str())
@@ -297,8 +297,8 @@ mod fetch {
                     variables: variable_usages
                         .iter()
                         .filter_map(|key| {
-                            request
-                                .frontend_request
+                            context
+                                .request
                                 .body()
                                 .variables
                                 .get_key_value(key.as_str())
@@ -316,7 +316,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            request: &'a PlannedRequest,
+            context: &'a Context,
             service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
@@ -334,7 +334,7 @@ mod fetch {
                     self.variable_usages.as_ref(),
                     data,
                     current_dir,
-                    request,
+                    context,
                     schema,
                 )
             })?;
@@ -344,36 +344,34 @@ mod fetch {
                 .expect("we already checked that the service exists during planning; qed")
                 .clone_box();
 
-            let backend_request_body = Request::builder()
-                .query(operation)
-                .variables(Arc::new(variables))
-                .build();
-            let backend_request = http::Request::builder()
-                .method(http::Method::POST)
-                .body(backend_request_body)
-                .unwrap();
-
             let subgraph_request = SubgraphRequest {
-                service_name: service_name.to_string(),
-                backend_request,
-                frontend_request: request.frontend_request.clone(),
-                context: Object::default(),
+                request: http::Request::builder()
+                    .method(http::Method::POST)
+                    .body(
+                        Request::builder()
+                            .query(operation)
+                            .variables(Arc::new(variables))
+                            .build(),
+                    )
+                    .unwrap(),
+                context: context.clone(),
             };
 
             service.ready().await?;
             let response = service
                 .call(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
-                .await?;
+                .await?
+                .response;
 
             query_span.in_scope(|| {
-                if !response.backend_response.is_primary() {
+                if !response.is_primary() {
                     return Err(FetchError::SubrequestUnexpectedPatchResponse {
                         service: service_name.to_owned(),
                     });
                 }
 
-                self.response_at_path(current_dir, paths, response.backend_response)
+                self.response_at_path(current_dir, paths, response)
             })
         }
 

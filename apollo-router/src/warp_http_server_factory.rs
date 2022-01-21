@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
-use tower::{Service, ServiceBuilder, ServiceExt};
+use tower::{ServiceBuilder, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level, Span};
@@ -45,12 +45,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         S: Clone
-            + Service<graphql::RouterRequest, Response = graphql::Response>
+            + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
             + Send
             + Sync
             + 'static,
-        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
+        <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
+        <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -187,9 +187,12 @@ fn get_graphql_request_or_redirect<S>(
     service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
+    S: Clone
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + Send
+        + 'static,
+    <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
+    <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -264,9 +267,12 @@ fn post_graphql_request<S>(
     service: S,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
+    S: Clone
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + Send
+        + 'static,
+    <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
+    <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -289,9 +295,12 @@ fn run_graphql_request<S>(
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-    <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send,
+    S: Clone
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + Send
+        + 'static,
+    <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
+    <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send,
 {
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
@@ -301,16 +310,11 @@ where
     async move {
         match service.ready_oneshot().await {
             Ok(service) => {
-                let mut frontend_request = http::Request::builder()
+                let mut request = http::Request::builder()
                     .method(method)
                     .body(request)
                     .unwrap();
-                *frontend_request.headers_mut() = header_map;
-
-                let request = graphql::RouterRequest {
-                    context: graphql::Object::default(),
-                    frontend_request,
-                };
+                *request.headers_mut() = header_map;
 
                 let response = stream_request(service, request)
                     .instrument(tracing::info_span!("graphql_request"))
@@ -326,10 +330,13 @@ where
     }
 }
 
-async fn stream_request<S>(mut service: S, request: graphql::RouterRequest) -> String
+async fn stream_request<S>(mut service: S, request: http::Request<graphql::Request>) -> String
 where
-    S: Clone + Service<graphql::RouterRequest, Response = graphql::Response> + Send + 'static,
-    <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+    S: Clone
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + Send
+        + 'static,
+    <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
 {
     match service.call(request).await {
         Err(_) => String::new(),

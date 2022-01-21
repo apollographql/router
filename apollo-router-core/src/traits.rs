@@ -26,7 +26,11 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    async fn stream(&self, request: &SubgraphRequest) -> Result<RouterResponse, FetchError>;
+    async fn stream(
+        &self,
+        request: http::Request<Request>,
+        context: Context,
+    ) -> Result<RouterResponse, FetchError>;
 }
 
 /// QueryPlanner can be used to plan queries.
@@ -70,13 +74,13 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 pub trait Router: Send + Sync + Debug {
     type PreparedQuery: PreparedQuery;
 
-    async fn prepare_query(&self, request: &Request) -> Result<Self::PreparedQuery, Response>;
+    async fn prepare_query(&self, context: Context) -> Result<Self::PreparedQuery, Response>;
 }
 
 /// An object that can be executed to return a [`Response`].
 #[async_trait::async_trait]
 pub trait PreparedQuery: Send + Debug {
-    async fn execute(self, request: RouterRequest) -> Response;
+    async fn execute(self, context: Context) -> Response;
 }
 
 #[cfg(test)]

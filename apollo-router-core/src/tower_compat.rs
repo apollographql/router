@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task;
 
 #[derive(Debug)]
 pub struct RouterService<R> {
@@ -26,7 +26,7 @@ impl<R> RouterService<R> {
     }
 }
 
-impl<R> tower::Service<RouterRequest> for RouterService<R>
+impl<R> tower::Service<http::Request<Request>> for RouterService<R>
 where
     R: Router + 'static,
 {
@@ -34,15 +34,16 @@ where
     type Error = ();
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
+    fn call(&mut self, request: http::Request<Request>) -> Self::Future {
         let router = self.router.clone();
+        let context = Context::new(Arc::new(request));
         Box::pin(async move {
-            match router.prepare_query(request.frontend_request.body()).await {
-                Ok(route) => Ok(route.execute(request).await),
+            match router.prepare_query(context.clone()).await {
+                Ok(route) => Ok(route.execute(context).await),
                 Err(response) => Ok(response),
             }
         })
@@ -56,8 +57,8 @@ where
 {
     type PreparedQuery = R::PreparedQuery;
 
-    async fn prepare_query(&self, request: &Request) -> Result<Self::PreparedQuery, Response> {
-        self.router.prepare_query(request).await
+    async fn prepare_query(&self, context: Context) -> Result<Self::PreparedQuery, Response> {
+        self.router.prepare_query(context).await
     }
 }
 
@@ -94,13 +95,13 @@ where
     type Error = FetchError;
     type Future = BoxFuture<'static, Result<Self::Response, FetchError>>;
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), FetchError>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), FetchError>> {
+        task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, SubgraphRequest { request, context }: SubgraphRequest) -> Self::Future {
         let fetcher = self.fetcher.clone();
-        Box::pin(async move { fetcher.stream(&request).await })
+        Box::pin(async move { fetcher.stream(request, context).await })
     }
 }
 
@@ -109,8 +110,52 @@ impl<F> Fetcher for FetcherService<F>
 where
     F: Fetcher + 'static,
 {
-    async fn stream(&self, request: &SubgraphRequest) -> Result<RouterResponse, FetchError> {
-        self.fetcher.stream(request).await
+    async fn stream(
+        &self,
+        request: http::Request<Request>,
+        context: Context,
+    ) -> Result<RouterResponse, FetchError> {
+        self.fetcher.stream(request, context).await
+    }
+}
+
+// the parsed graphql Request, HTTP headers and contextual data for extensions
+#[derive(Clone)]
+pub struct RouterRequest {
+    // Context for extension
+    pub context: Context,
+}
+
+pub struct PlannedRequest {
+    // hiding this one for now
+    // pub query_plan: QueryPlan,
+
+    // Cloned from RouterRequest
+    pub context: Context,
+}
+
+pub struct SubgraphRequest {
+    pub request: http::Request<Request>,
+
+    // Cloned from PlannedRequest
+    pub context: Context,
+}
+
+pub struct RouterResponse {
+    pub response: Response,
+
+    pub context: Context,
+}
+
+impl AsRef<Request> for http::Request<Request> {
+    fn as_ref(&self) -> &Request {
+        self.body()
+    }
+}
+
+impl AsRef<Request> for Arc<http::Request<Request>> {
+    fn as_ref(&self) -> &Request {
+        self.body()
     }
 }
 
