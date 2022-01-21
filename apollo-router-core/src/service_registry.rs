@@ -3,16 +3,16 @@ use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::fmt;
 
-pub struct ServiceRegistry2 {
+pub struct ServiceRegistry {
     services: HashMap<
         String,
         Box<dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
     >,
 }
 
-impl fmt::Debug for ServiceRegistry2 {
+impl fmt::Debug for ServiceRegistry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut debug = f.debug_tuple("ServiceRegistry2");
+        let mut debug = f.debug_tuple("ServiceRegistry");
         for name in self.services.keys() {
             debug.field(name);
         }
@@ -20,7 +20,7 @@ impl fmt::Debug for ServiceRegistry2 {
     }
 }
 
-impl ServiceRegistry2 {
+impl ServiceRegistry {
     pub fn new() -> Self {
         Self {
             services: Default::default(),

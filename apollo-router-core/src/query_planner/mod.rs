@@ -45,7 +45,7 @@ pub(crate) enum PlanNode {
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, name = "validate", level = "debug")]
-    pub fn validate(&self, service_registry: &ServiceRegistry2) -> Result<(), Response> {
+    pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self.root.validate_services_against_plan(service_registry) {
             early_errors.push(err.to_graphql_error(None));
@@ -62,7 +62,7 @@ impl QueryPlan {
     pub async fn execute<'a>(
         &'a self,
         request: &'a PlannedRequest,
-        service_registry: &'a ServiceRegistry2,
+        service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
@@ -81,7 +81,7 @@ impl PlanNode {
         &'a self,
         current_dir: &'a Path,
         request: &'a PlannedRequest,
-        service_registry: &'a ServiceRegistry2,
+        service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -204,7 +204,7 @@ impl PlanNode {
     ///  *   `plan`: The root query plan node to validate.
     fn validate_services_against_plan(
         &self,
-        service_registry: &ServiceRegistry2,
+        service_registry: &ServiceRegistry,
     ) -> Vec<FetchError> {
         self.service_usage()
             .filter(|service| !service_registry.contains(service))
@@ -317,7 +317,7 @@ mod fetch {
             data: &'a Value,
             current_dir: &'a Path,
             request: &'a PlannedRequest,
-            service_registry: &'a ServiceRegistry2,
+            service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
             let FetchNode {

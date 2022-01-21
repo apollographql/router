@@ -10,7 +10,7 @@ pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
     query_planner: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
-    service_registry: Arc<ServiceRegistry2>,
+    service_registry: Arc<ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
 }
@@ -18,7 +18,7 @@ pub struct ApolloRouter {
 impl ApolloRouter {
     /// Create an [`ApolloRouter`] instance used to execute a GraphQL query.
     pub async fn new(
-        service_registry: Arc<ServiceRegistry2>,
+        service_registry: Arc<ServiceRegistry>,
         schema: Arc<Schema>,
         previous_router: Option<Arc<ApolloRouter>>,
     ) -> Self {
@@ -115,7 +115,7 @@ impl Router for ApolloRouter {
 #[derive(Debug)]
 pub struct ApolloPreparedQuery {
     query_plan: Arc<QueryPlan>,
-    service_registry: Arc<ServiceRegistry2>,
+    service_registry: Arc<ServiceRegistry>,
     schema: Arc<Schema>,
     query: Option<Arc<Query>>,
 }

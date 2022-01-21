@@ -223,7 +223,7 @@ async fn query_rust(
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
 
-    let mut service_registry = graphql::ServiceRegistry2::new();
+    let mut service_registry = graphql::ServiceRegistry::new();
     for (name, subgraph) in &config.subgraphs {
         let cloned_counter = counting_registry.clone();
 

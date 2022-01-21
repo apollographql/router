@@ -32,7 +32,7 @@ impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
         schema: Arc<graphql::Schema>,
         previous_router: Option<RouterService<ApolloRouter>>,
     ) -> RouterService<ApolloRouter> {
-        let mut service_registry = graphql::ServiceRegistry2::new();
+        let mut service_registry = graphql::ServiceRegistry::new();
         for (name, subgraph) in &configuration.subgraphs {
             let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
                 name.to_owned(),
