@@ -5,7 +5,6 @@ pub mod configuration;
 mod extensions;
 mod files;
 mod http_server_factory;
-pub mod http_service_registry;
 pub mod http_subgraph;
 mod router_factory;
 mod state_machine;
