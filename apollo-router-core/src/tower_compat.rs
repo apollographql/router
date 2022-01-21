@@ -30,7 +30,7 @@ impl<R> tower::Service<http::Request<Request>> for RouterService<R>
 where
     R: Router + 'static,
 {
-    type Response = Response;
+    type Response = RouterResponse;
     type Error = ();
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -42,10 +42,15 @@ where
         let router = self.router.clone();
         let context = Context::new(Arc::new(request));
         Box::pin(async move {
-            match router.prepare_query(context.clone()).await {
-                Ok(route) => Ok(route.execute(context).await),
-                Err(response) => Ok(response),
-            }
+            let response = match router.prepare_query(context.clone()).await {
+                Ok(route) => route.execute(context.clone()).await,
+                Err(response) => response,
+            };
+
+            Ok(RouterResponse {
+                response: http::Response::new(response),
+                context,
+            })
         })
     }
 }
@@ -142,7 +147,7 @@ pub struct SubgraphRequest {
 }
 
 pub struct RouterResponse {
-    pub response: Response,
+    pub response: http::Response<Response>,
 
     pub context: Context,
 }

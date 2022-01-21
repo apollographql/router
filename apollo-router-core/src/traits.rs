@@ -74,12 +74,14 @@ impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 pub trait Router: Send + Sync + Debug {
     type PreparedQuery: PreparedQuery;
 
+    // TODO not sure if this should be Response or RouterResponse
     async fn prepare_query(&self, context: Context) -> Result<Self::PreparedQuery, Response>;
 }
 
 /// An object that can be executed to return a [`Response`].
 #[async_trait::async_trait]
 pub trait PreparedQuery: Send + Debug {
+    // TODO not sure if this should be Response or RouterResponse
     async fn execute(self, context: Context) -> Response;
 }
 

@@ -45,7 +45,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         S: Clone
-            + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+            + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
             + Send
             + Sync
             + 'static,
@@ -188,7 +188,7 @@ fn get_graphql_request_or_redirect<S>(
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     S: Clone
-        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
         + Send
         + 'static,
     <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
@@ -268,7 +268,7 @@ fn post_graphql_request<S>(
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     S: Clone
-        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
         + Send
         + 'static,
     <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
@@ -296,7 +296,7 @@ fn run_graphql_request<S>(
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
     S: Clone
-        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
         + Send
         + 'static,
     <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
@@ -333,7 +333,7 @@ where
 async fn stream_request<S>(mut service: S, request: http::Request<graphql::Request>) -> String
 where
     S: Clone
-        + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+        + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
         + Send
         + 'static,
     <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
@@ -342,8 +342,9 @@ where
         Err(_) => String::new(),
         Ok(response) => {
             let span = Span::current();
+            // TODO headers
             tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-                serde_json::to_string(&response)
+                serde_json::to_string(response.response.body())
                     .expect("serde_json::Value serialization will not fail")
             })
         }

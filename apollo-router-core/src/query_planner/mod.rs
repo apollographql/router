@@ -358,11 +358,13 @@ mod fetch {
             };
 
             service.ready().await?;
-            let response = service
+            // TODO not sure if we need a RouterReponse here as we don't do anything with it
+            let (_parts, response) = service
                 .call(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
                 .await?
-                .response;
+                .response
+                .into_parts();
 
             query_span.in_scope(|| {
                 if !response.is_primary() {

@@ -119,8 +119,9 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
             .await
             .and_then(|response| Self::map_to_graphql(service_name, response))?;
 
+        // TODO missing headers and stuff
         Ok(graphql::RouterResponse {
-            response,
+            response: http::Response::new(response),
             context: context.clone(),
         })
     }

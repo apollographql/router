@@ -25,7 +25,7 @@ pub(crate) trait HttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         S: Clone
-            + tower::Service<http::Request<graphql::Request>, Response = graphql::Response>
+            + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
             + Send
             + Sync
             + 'static,
