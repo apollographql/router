@@ -223,22 +223,22 @@ async fn query_rust(
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
 
-    let service_registry =
-        graphql::ServiceRegistry2::new(config.subgraphs.iter().map(|(name, subgraph)| {
-            let cloned_counter = counting_registry.clone();
+    let mut service_registry = graphql::ServiceRegistry2::new();
+    for (name, subgraph) in &config.subgraphs {
+        let cloned_counter = counting_registry.clone();
 
-            let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
-                name.to_owned(),
-                subgraph.routing_url.to_owned(),
-            ))
-            .map_request(move |request: SubgraphRequest| {
-                let cloned_counter = cloned_counter.clone();
-                cloned_counter.increment(request.service_name.as_str());
+        let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
+            name.to_owned(),
+            subgraph.routing_url.to_owned(),
+        ))
+        .map_request(move |request: SubgraphRequest| {
+            let cloned_counter = cloned_counter.clone();
+            cloned_counter.increment(request.service_name.as_str());
 
-                request
-            });
-            (name.to_string(), Box::new(fetcher) as Box<_>)
-        }));
+            request
+        });
+        service_registry.insert(name, fetcher);
+    }
 
     let router = ApolloRouter::new(Arc::new(service_registry), schema, None).await;
 

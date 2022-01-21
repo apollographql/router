@@ -21,27 +21,29 @@ impl fmt::Debug for ServiceRegistry2 {
 }
 
 impl ServiceRegistry2 {
-    pub fn new(
-        services: impl IntoIterator<
-            Item = (
-                String,
-                Box<dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
-            ),
-        >,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            services: services.into_iter().collect(),
+            services: Default::default(),
         }
     }
 
-    pub fn insert(
-        &mut self,
-        name: impl Into<String>,
-        service: Box<
-            dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>,
-        >,
-    ) {
-        self.services.insert(name.into(), service);
+    pub fn with_capacity(size: usize) -> Self {
+        Self {
+            services: HashMap::with_capacity(size),
+        }
+    }
+
+    pub fn insert<S>(&mut self, name: impl Into<String>, service: S)
+    where
+        S: tower::Service<SubgraphRequest, Response = RouterResponse, Error = FetchError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        self.services
+            .insert(name.into(), Box::new(service) as Box<_>);
     }
 
     pub fn len(&self) -> usize {
@@ -56,7 +58,7 @@ impl ServiceRegistry2 {
         self.services.contains_key(name.as_ref())
     }
 
-    pub fn get(
+    pub(crate) fn get(
         &self,
         name: impl AsRef<str>,
     ) -> Option<Box<dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>>
@@ -65,7 +67,7 @@ impl ServiceRegistry2 {
     }
 }
 
-pub trait DynService<Request>: Send + Sync {
+pub(crate) trait DynService<Request>: Send + Sync {
     type Response;
     type Error;
 
@@ -78,8 +80,7 @@ pub trait DynService<Request>: Send + Sync {
 
 impl<T, R> DynService<R> for T
 where
-    T: tower::Service<R> + Clone + 'static,
-    T: Send + Sync,
+    T: tower::Service<R> + Clone + Send + Sync + 'static,
     T::Future: Send + 'static,
 {
     type Response = <T as tower::Service<R>>::Response;
