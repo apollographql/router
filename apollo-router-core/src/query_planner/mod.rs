@@ -369,13 +369,13 @@ mod fetch {
                 .await?;
 
             query_span.in_scope(|| {
-                if !response.is_primary() {
+                if !response.backend_response.is_primary() {
                     return Err(FetchError::SubrequestUnexpectedPatchResponse {
                         service: service_name.to_owned(),
                     });
                 }
 
-                self.response_at_path(current_dir, paths, response)
+                self.response_at_path(current_dir, paths, response.backend_response)
             })
         }
 

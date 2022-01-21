@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
+use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -222,8 +223,6 @@ async fn query_rust(
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
-
-    use tower::ServiceExt;
 
     let service_registry =
         graphql::ServiceRegistry2::new(config.subgraphs.iter().map(|(name, subgraph)| {

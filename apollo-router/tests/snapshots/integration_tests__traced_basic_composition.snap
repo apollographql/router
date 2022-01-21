@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 104
+assertion_line: 105
 expression: get_spans()
 
 ---
@@ -724,7 +724,7 @@ expression: get_spans()
                                                 }
                                               },
                                               "children": {
-                                                "apollo_router::http_subgraph::aggregate_response_data - 61": {
+                                                "apollo_router::http_subgraph::aggregate_response_data - 60": {
                                                   "name": "apollo_router::http_subgraph::aggregate_response_data",
                                                   "record": {
                                                     "entries": [],
@@ -740,7 +740,7 @@ expression: get_spans()
                                                   },
                                                   "children": {}
                                                 },
-                                                "apollo_router::http_subgraph::parse_subgraph_response - 62": {
+                                                "apollo_router::http_subgraph::parse_subgraph_response - 61": {
                                                   "name": "apollo_router::http_subgraph::parse_subgraph_response",
                                                   "record": {
                                                     "entries": [],
@@ -758,7 +758,7 @@ expression: get_spans()
                                                 }
                                               }
                                             },
-                                            "apollo_router_core::query_planner::fetch::response_insert - 63": {
+                                            "apollo_router_core::query_planner::fetch::response_insert - 62": {
                                               "name": "apollo_router_core::query_planner::fetch::response_insert",
                                               "record": {
                                                 "entries": [],

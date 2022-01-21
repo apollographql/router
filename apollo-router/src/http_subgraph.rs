@@ -1,6 +1,7 @@
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
+use std::sync::Arc;
 use tracing::Instrument;
 use url::Url;
 
@@ -111,10 +112,19 @@ impl graphql::Fetcher for HttpSubgraphFetcher {
     async fn stream(
         &self,
         request: &graphql::SubgraphRequest,
-    ) -> Result<graphql::Response, graphql::FetchError> {
+    ) -> Result<graphql::RouterResponse, graphql::FetchError> {
         let service_name = self.service.to_string();
-        let response = self.request_stream(request).await?;
-        Self::map_to_graphql(service_name, response)
+        let backend_response = self
+            .request_stream(request)
+            .await
+            .and_then(|response| Self::map_to_graphql(service_name, response))?;
+
+        Ok(graphql::RouterResponse {
+            frontend_request: Arc::clone(&request.frontend_request),
+            backend_response,
+            // TODO: what's with the context again ?
+            context: Default::default(),
+        })
     }
 }
 

@@ -90,9 +90,9 @@ impl<F> tower::Service<SubgraphRequest> for FetcherService<F>
 where
     F: Fetcher + 'static,
 {
-    type Response = Response;
+    type Response = RouterResponse;
     type Error = FetchError;
-    type Future = BoxFuture<'static, Result<Response, FetchError>>;
+    type Future = BoxFuture<'static, Result<Self::Response, FetchError>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), FetchError>> {
         Poll::Ready(Ok(()))
@@ -109,7 +109,7 @@ impl<F> Fetcher for FetcherService<F>
 where
     F: Fetcher + 'static,
 {
-    async fn stream(&self, request: &SubgraphRequest) -> Result<Response, FetchError> {
+    async fn stream(&self, request: &SubgraphRequest) -> Result<RouterResponse, FetchError> {
         self.fetcher.stream(request).await
     }
 }
