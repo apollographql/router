@@ -340,9 +340,10 @@ mod fetch {
                 )
             })?;
 
-            let service = service_registry
+            let mut service = service_registry
                 .get(service_name)
-                .expect("we already checked that the service exists during planning; qed");
+                .expect("we already checked that the service exists during planning; qed")
+                .clone_box();
 
             let backend_request_body = Request::builder()
                 .query(operation)
@@ -360,10 +361,8 @@ mod fetch {
                 context: Object::default(),
             };
 
-            let mut locked = service.lock().await;
-            let response = locked
-                .ready()
-                .await?
+            service.ready().await?;
+            let response = service
                 .call(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
                 .await?;

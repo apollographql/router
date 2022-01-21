@@ -238,7 +238,7 @@ async fn query_rust(
 
                 request
             });
-            (name.to_string(), BoxCloneService::new(fetcher))
+            (name.to_string(), Box::new(fetcher) as Box<_>)
         }));
 
     let router = ApolloRouter::new(Arc::new(service_registry), schema, None).await;

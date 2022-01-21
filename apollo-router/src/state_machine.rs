@@ -374,7 +374,6 @@ mod tests {
     use crate::configuration::Subgraph;
     use crate::http_server_factory::MockHttpServerFactory;
     use crate::router_factory::RouterFactory;
-    use apollo_router_core::SubgraphRequest;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
@@ -804,7 +803,7 @@ mod tests {
         impl graphql::Fetcher for MyFetcher {
             async fn stream(
                 &self,
-                request: &SubgraphRequest,
+                request: &graphql::SubgraphRequest,
             ) -> Result<graphql::RouterResponse, graphql::FetchError>;
         }
     }

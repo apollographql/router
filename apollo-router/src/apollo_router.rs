@@ -1,3 +1,5 @@
+use crate::http_service_registry::HttpServiceRegistry;
+use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use std::sync::Arc;
@@ -100,7 +102,7 @@ impl Router for ApolloRouter {
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);
-        query_plan.validate(&self.service_registry)?;
+        query_plan.validate(&*self.service_registry)?;
 
         Ok(ApolloPreparedQuery {
             query_plan,
