@@ -1,5 +1,5 @@
+use apollo_relay::server::ReportServer;
 use clap::Parser;
-use usage_agent::server::ReportServer;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
 

@@ -1,14 +1,14 @@
+use apollo_relay::report::trace::CachePolicy;
+use apollo_relay::report::Trace;
+use apollo_relay::ReporterGraph;
 use prost_types::Timestamp;
 use std::time::{SystemTime, UNIX_EPOCH};
-use usage_agent::report::trace::CachePolicy;
-use usage_agent::report::Trace;
-use usage_agent::ReporterGraph;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut reporter = usage_agent::Reporter::try_new(DEFAULT_SERVER_URL).await?;
+    let mut reporter = apollo_relay::Reporter::try_new(DEFAULT_SERVER_URL).await?;
 
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
