@@ -10,7 +10,6 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use tower::util::BoxCloneService;
 use tower::ServiceExt;
 
 macro_rules! assert_federated_response {

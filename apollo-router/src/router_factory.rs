@@ -1,6 +1,5 @@
 use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
-use crate::http_service_registry::HttpServiceRegistry;
 use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::{prelude::*, RouterService};
 use std::sync::Arc;

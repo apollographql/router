@@ -2,9 +2,6 @@ use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::fmt;
-use std::task::{Context, Poll};
-use tower::util::BoxCloneService;
-use tower::ServiceExt;
 
 pub struct ServiceRegistry2 {
     services: HashMap<

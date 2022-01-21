@@ -1,5 +1,3 @@
-use crate::http_service_registry::HttpServiceRegistry;
-use crate::http_subgraph::HttpSubgraphFetcher;
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use std::sync::Arc;

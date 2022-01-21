@@ -222,7 +222,6 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
-    use tower::{Service, ServiceExt};
     use tracing::{instrument, Instrument};
 
     /// A fetch node.
