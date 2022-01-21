@@ -27,6 +27,8 @@
 //! }
 //! ```
 use apollo_parser::{ast, Parser};
+use apollo_relay::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
+use apollo_relay::{Reporter, ReporterGraph};
 use async_trait::async_trait;
 use opentelemetry::{
     global,
@@ -42,8 +44,6 @@ use opentelemetry::{
 use std::borrow::Cow;
 use std::fmt::Debug;
 use tokio::task::JoinError;
-use apollo_relay::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
-use apollo_relay::{Reporter, ReporterGraph};
 
 use crate::configuration::{StudioGraph, StudioUsage};
 

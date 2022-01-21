@@ -5,13 +5,13 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::{Configuration, StudioUsage};
+use apollo_relay::server::ReportServer;
 use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-use apollo_relay::server::ReportServer;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
