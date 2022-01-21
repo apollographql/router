@@ -1,3 +1,4 @@
+//! Main entry point for CLI command to start relay.
 use apollo_relay::server::ReportServer;
 use clap::Parser;
 

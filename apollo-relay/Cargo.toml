@@ -34,10 +34,10 @@ tonic-build = "0.5"
 [lib]
 path = "src/lib.rs"
 
-# server binary
+# relay binary
 [[bin]]
-name = "server"
-path = "src/server.rs"
+name = "relay"
+path = "src/relay.rs"
 
 # client binary
 [[bin]]
