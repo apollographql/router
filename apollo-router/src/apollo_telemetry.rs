@@ -5,8 +5,8 @@
 //!
 //! [`SpanExporter`]: super::SpanExporter
 //! [`Span`]: crate::trace::Span
-//! [`Report`]: usage_agent::report::Report
-//! [`Reporter`]: usage_agent::Reporter
+//! [`Report`]: apollo_relay::report::Report
+//! [`Reporter`]: apollo_relay::Reporter
 //!
 //! # Examples
 //!
@@ -42,8 +42,8 @@ use opentelemetry::{
 use std::borrow::Cow;
 use std::fmt::Debug;
 use tokio::task::JoinError;
-use usage_agent::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
-use usage_agent::{Reporter, ReporterGraph};
+use apollo_relay::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
+use apollo_relay::{Reporter, ReporterGraph};
 
 use crate::configuration::{StudioGraph, StudioUsage};
 
@@ -162,7 +162,7 @@ impl PipelineBuilder {
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
-/// [`Reporter`]: usage_agent::Reporter
+/// [`Reporter`]: apollo_relay::Reporter
 #[derive(Debug)]
 pub struct Exporter {
     collector: String,
@@ -179,7 +179,7 @@ impl Exporter {
 /// Apollo Telemetry exporter's error
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct ApolloError(#[from] usage_agent::ReporterError);
+pub struct ApolloError(#[from] apollo_relay::ReporterError);
 
 impl From<std::io::Error> for ApolloError {
     fn from(error: std::io::Error) -> Self {

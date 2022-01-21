@@ -1,5 +1,5 @@
 [package]
-name = "usage-agent"
+name = "apollo-relay"
 version = "0.1.0-alpha.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"

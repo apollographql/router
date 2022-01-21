@@ -1,10 +1,10 @@
 [workspace]
 default-members = ["apollo-router", "apollo-router-core"]
 members = [
+    "apollo-relay",
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
-    "usage-agent",
     "xtask",
 ]
 

@@ -11,7 +11,7 @@ use futures::prelude::*;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
-use usage_agent::server::ReportServer;
+use apollo_relay::server::ReportServer;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
