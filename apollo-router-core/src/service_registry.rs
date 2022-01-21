@@ -1,12 +1,11 @@
 use crate::prelude::graphql::*;
-use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::fmt;
 
 pub struct ServiceRegistry {
     services: HashMap<
         String,
-        Box<dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
+        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
     >,
 }
 
@@ -61,39 +60,9 @@ impl ServiceRegistry {
     pub(crate) fn get(
         &self,
         name: impl AsRef<str>,
-    ) -> Option<Box<dyn DynService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>>
-    {
+    ) -> Option<
+        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
+    > {
         self.services.get(name.as_ref()).map(|x| x.clone_box())
-    }
-}
-
-pub(crate) trait DynService<Request>: Send + Sync {
-    type Response;
-    type Error;
-
-    fn ready<'a>(&'a mut self) -> BoxFuture<'a, Result<(), Self::Error>>;
-    fn call(&mut self, req: Request) -> BoxFuture<'static, Result<Self::Response, Self::Error>>;
-    fn clone_box(
-        &self,
-    ) -> Box<dyn DynService<Request, Response = Self::Response, Error = Self::Error>>;
-}
-
-impl<T, R> DynService<R> for T
-where
-    T: tower::Service<R> + Clone + Send + Sync + 'static,
-    T::Future: Send + 'static,
-{
-    type Response = <T as tower::Service<R>>::Response;
-    type Error = <T as tower::Service<R>>::Error;
-
-    fn ready<'a>(&'a mut self) -> BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(futures::future::poll_fn(move |cx| self.poll_ready(cx)))
-    }
-    fn call(&mut self, req: R) -> BoxFuture<'static, Result<Self::Response, Self::Error>> {
-        let fut = tower::Service::call(self, req);
-        Box::pin(fut)
-    }
-    fn clone_box(&self) -> Box<dyn DynService<R, Response = Self::Response, Error = Self::Error>> {
-        Box::new(self.clone())
     }
 }

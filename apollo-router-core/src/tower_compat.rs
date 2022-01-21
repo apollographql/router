@@ -113,3 +113,36 @@ where
         self.fetcher.stream(request).await
     }
 }
+
+pub(crate) trait DynCloneService<Request>: Send + Sync {
+    type Response;
+    type Error;
+
+    fn ready<'a>(&'a mut self) -> BoxFuture<'a, Result<(), Self::Error>>;
+    fn call(&mut self, req: Request) -> BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    fn clone_box(
+        &self,
+    ) -> Box<dyn DynCloneService<Request, Response = Self::Response, Error = Self::Error>>;
+}
+
+impl<T, R> DynCloneService<R> for T
+where
+    T: tower::Service<R> + Clone + Send + Sync + 'static,
+    T::Future: Send + 'static,
+{
+    type Response = <T as tower::Service<R>>::Response;
+    type Error = <T as tower::Service<R>>::Error;
+
+    fn ready<'a>(&'a mut self) -> BoxFuture<'a, Result<(), Self::Error>> {
+        Box::pin(futures::future::poll_fn(move |cx| self.poll_ready(cx)))
+    }
+    fn call(&mut self, req: R) -> BoxFuture<'static, Result<Self::Response, Self::Error>> {
+        let fut = tower::Service::call(self, req);
+        Box::pin(fut)
+    }
+    fn clone_box(
+        &self,
+    ) -> Box<dyn DynCloneService<R, Response = Self::Response, Error = Self::Error>> {
+        Box::new(self.clone())
+    }
+}
