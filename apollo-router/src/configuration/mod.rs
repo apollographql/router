@@ -234,7 +234,7 @@ fn default_listener() -> String {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioUsage {
-    pub(crate) external_agent: bool,
+    pub(crate) external_relay: bool,
 
     #[serde(default = "default_collector")]
     pub(crate) collector: String,
@@ -256,7 +256,7 @@ impl Default for StudioUsage {
         Self {
             collector: default_collector(),
             listener: default_listener(),
-            external_agent: false,
+            external_relay: false,
         }
     }
 }

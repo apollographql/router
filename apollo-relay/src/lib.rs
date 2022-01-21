@@ -18,16 +18,11 @@ use tonic::codegen::http::uri::InvalidUri;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Response, Status};
 
+/// Reporting Error type
 #[derive(Debug)]
 pub struct ReporterError {
     source: Box<dyn Error + Send + Sync + 'static>,
     msg: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct StudioGraph {
-    pub reference: String,
-    pub key: String,
 }
 
 impl std::error::Error for ReporterError {}
@@ -102,6 +97,9 @@ impl Hash for ReporterGraph {
 }
 
 impl Report {
+    /// Try to create a new Report.
+    ///
+    /// This can fail if the ReportHeader is not created.
     pub fn try_new(graph: &str) -> Result<Self, ReporterError> {
         let header = Some(ReportHeader::try_new(graph)?);
 
@@ -155,12 +153,19 @@ impl ReportHeader {
     }
 }
 
+/// The Reporter accepts requests from clients to transfer statistics
+/// and traces to the Apollo Ingress relay.
 #[derive(Debug)]
 pub struct Reporter {
     client: ReporterClient<Channel>,
 }
 
 impl Reporter {
+    /// Try to create a new reporter which will communicate with the supplied address.
+    ///
+    /// This can fail if:
+    ///  - the address cannot be parsed
+    ///  - the reporter can't connect to the address
     pub async fn try_new<T: AsRef<str>>(addr: T) -> Result<Self, ReporterError>
     where
         prost::bytes::Bytes: From<T>,
@@ -170,13 +175,20 @@ impl Reporter {
         Ok(Self { client })
     }
 
+    /// Try to create a new reporter which will communicate with the supplied address.
+    ///
+    /// This can fail if:
+    ///  - the address cannot be parsed
+    ///  - the reporter can't connect to the address
     pub async fn try_new_with_static(addr: &'static str) -> Result<Self, ReporterError> {
         let ep = Endpoint::from_static(addr);
         let client = ReporterClient::connect(ep).await?;
         Ok(Self { client })
     }
 
-    /// Relay stats onto the collector
+    /// Submit these stats onto the relayer for eventual processing.
+    ///
+    /// The relayer will buffer traces and stats, transferring them when convenient.
     pub async fn submit_stats(
         &mut self,
         graph: ReporterGraph,
@@ -192,7 +204,9 @@ impl Reporter {
             .await
     }
 
-    /// Relay trace onto the collector
+    /// Submit this trace onto the relayer for eventual processing.
+    ///
+    /// The relayer will buffer traces and stats, transferring them when convenient.
     pub async fn submit_trace(
         &mut self,
         graph: ReporterGraph,
@@ -209,7 +223,8 @@ impl Reporter {
     }
 }
 
-pub mod server {
+/// The relay module contains the relaying components
+pub mod relay {
     use super::report;
     use crate::{ReporterStats, ReporterTrace, TracesAndStats};
     use bytes::BytesMut;
@@ -233,20 +248,68 @@ pub mod server {
     pub use crate::agent::reporter_server::{Reporter, ReporterServer};
     use crate::agent::{ReporterGraph, ReporterResponse};
 
+    /// Allows common transfer code to be more easily represented
+    #[allow(clippy::large_enum_variant)]
+    enum StatsOrTrace {
+        Stats(ReporterStats),
+        Trace(ReporterTrace),
+    }
+
+    impl StatsOrTrace {
+        fn get_traces_and_stats(&self) -> TracesAndStats {
+            match self {
+                StatsOrTrace::Stats(_) => TracesAndStats {
+                    trace: vec![],
+                    stats_with_context: vec![],
+                    ..Default::default()
+                },
+                StatsOrTrace::Trace(_) => TracesAndStats {
+                    stats_with_context: vec![],
+                    ..Default::default()
+                },
+            }
+        }
+
+        fn graph(&self) -> Option<ReporterGraph> {
+            match self {
+                StatsOrTrace::Stats(s) => s.graph.clone(),
+                StatsOrTrace::Trace(t) => t.graph.clone(),
+            }
+        }
+
+        fn key(&self) -> String {
+            match self {
+                StatsOrTrace::Stats(s) => s.key.clone(),
+                StatsOrTrace::Trace(t) => t.key.clone(),
+            }
+        }
+    }
+
+    /// Response from Apollo Ingress
     #[derive(Debug, Deserialize, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct ApolloResponse {
         traces_ignored: bool,
     }
 
-    pub struct ReportServer {
+    /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
+    pub struct ReportRelay {
         addr: SocketAddr,
         // This HashMap will only have a single entry if used internally from a router.
         tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
         tx: Sender<()>,
     }
 
-    impl ReportServer {
+    impl ReportRelay {
+        /// Create a new ReportRelay which is configured to serve requests at the
+        /// supplied address
+        ///
+        /// The relay will buffer data and attempt to transfer it to the Apollo Ingress
+        /// every 5 seconds. This transfer will be triggered sooner if data is
+        /// accumulating more quickly than usual.
+        ///
+        /// The relay will attempt to make the transfer 5 times before failing. If
+        /// the relay fails, the data is discarded.
         pub fn new(addr: SocketAddr) -> Self {
             // Spawn a task which will check if there are reports to
             // submit every interval.
@@ -279,6 +342,7 @@ pub mod server {
             Self { addr, tpq, tx }
         }
 
+        /// Start serving requests.
         pub async fn serve(self) -> Result<(), Error> {
             let addr = self.addr;
             Server::builder()
@@ -358,44 +422,9 @@ pub mod server {
             Ok(Response::new(response))
         }
     }
-    #[allow(clippy::large_enum_variant)]
-    enum StatsOrTrace {
-        Stats(ReporterStats),
-        Trace(ReporterTrace),
-    }
-
-    impl StatsOrTrace {
-        fn get_traces_and_stats(&self) -> TracesAndStats {
-            match self {
-                StatsOrTrace::Stats(_) => TracesAndStats {
-                    trace: vec![],
-                    stats_with_context: vec![],
-                    ..Default::default()
-                },
-                StatsOrTrace::Trace(_) => TracesAndStats {
-                    stats_with_context: vec![],
-                    ..Default::default()
-                },
-            }
-        }
-
-        fn graph(&self) -> Option<ReporterGraph> {
-            match self {
-                StatsOrTrace::Stats(s) => s.graph.clone(),
-                StatsOrTrace::Trace(t) => t.graph.clone(),
-            }
-        }
-
-        fn key(&self) -> String {
-            match self {
-                StatsOrTrace::Stats(s) => s.key.clone(),
-                StatsOrTrace::Trace(t) => t.key.clone(),
-            }
-        }
-    }
 
     #[tonic::async_trait]
-    impl Reporter for ReportServer {
+    impl Reporter for ReportRelay {
         async fn add_stats(
             &self,
             request: Request<ReporterStats>,
@@ -415,7 +444,7 @@ pub mod server {
         }
     }
 
-    impl ReportServer {
+    impl ReportRelay {
         async fn add_stats_or_trace(
             &self,
             record: StatsOrTrace,
@@ -471,7 +500,12 @@ pub mod server {
         task_tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
     ) {
         let mut all_entries = task_tpq.lock().await;
-        for (graph, tpq) in all_entries.drain() {
+        let drained = all_entries
+            .drain()
+            .collect::<Vec<(ReporterGraph, HashMap<String, report::TracesAndStats>)>>();
+        // Release the lock ASAP so that clients can continue to add data
+        drop(all_entries);
+        for (graph, tpq) in drained {
             if !tpq.is_empty() {
                 tracing::info!("submitting: {} records", tpq.len());
                 tracing::debug!("containing: {:?}", tpq);
@@ -488,7 +522,7 @@ pub mod server {
                 };
                 report.end_time = Some(ts_end);
 
-                match ReportServer::submit_report(client, graph.key, report).await {
+                match ReportRelay::submit_report(client, graph.key, report).await {
                     Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                     Err(e) => tracing::error!("Report submission failed: {}", e),
                 }

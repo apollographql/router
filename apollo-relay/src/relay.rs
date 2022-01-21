@@ -1,5 +1,5 @@
 //! Main entry point for CLI command to start relay.
-use apollo_relay::server::ReportServer;
+use apollo_relay::relay::ReportRelay;
 use clap::Parser;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
@@ -17,8 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     tracing_subscriber::fmt::fmt().json().init();
-    let report_server = ReportServer::new(args.address.parse()?);
-    report_server.serve().await?;
+    let relay = ReportRelay::new(args.address.parse()?);
+    relay.serve().await?;
 
     Ok(())
 }

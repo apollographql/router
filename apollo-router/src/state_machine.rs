@@ -5,7 +5,7 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::{Configuration, StudioUsage};
-use apollo_relay::server::ReportServer;
+use apollo_relay::relay::ReportRelay;
 use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
@@ -90,20 +90,20 @@ async fn do_nothing(_addr_str: String) -> bool {
 
 // For use when we have an internal collector.
 async fn do_listen(addr_str: String) -> bool {
-    tracing::info!("spawning an internal report server");
+    tracing::info!("spawning an internal relay");
     // Spawn a server to relay statistics
     let addr = match addr_str.parse() {
         Ok(a) => a,
         Err(e) => {
-            tracing::error!("could not parse report server address: {}", e);
+            tracing::error!("could not parse relay address: {}", e);
             return false;
         }
     };
 
-    let report_server = ReportServer::new(addr);
+    let relay = ReportRelay::new(addr);
 
-    if let Err(e) = report_server.serve().await {
-        tracing::error!("report server did not terminate normally: {}", e);
+    if let Err(e) = relay.serve().await {
+        tracing::error!("relay did not terminate normally: {}", e);
         return false;
     }
     true
@@ -154,7 +154,7 @@ where
                                 // Save our target listener for later use
                                 current_listener = msg.listener.clone();
                                 // Configure which function to call
-                                if msg.external_agent {
+                                if msg.external_relay {
                                     current_operation = |msg| Box::pin(do_nothing(msg));
                                 } else {
                                     current_operation = |msg| Box::pin(do_listen(msg));
