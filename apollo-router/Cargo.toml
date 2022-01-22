@@ -23,7 +23,7 @@ otlp-grpc = [
 otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
-anyhow = "1.0.52"
+anyhow = "1.0.53"
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.52"
 atty = "0.2.14"
