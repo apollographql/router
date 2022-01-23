@@ -34,7 +34,7 @@ tracing-futures = "0.2.5"
 typed-builder = "0.9.1"
 
 [dev-dependencies]
-insta = "1.10.0"
+insta = "1.11.0"
 mockall = "0.11.0"
 static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
