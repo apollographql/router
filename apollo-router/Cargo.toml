@@ -77,7 +77,7 @@ mockall = "0.11.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
-test-span = "0.1.1"
+test-span = "0.2"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",

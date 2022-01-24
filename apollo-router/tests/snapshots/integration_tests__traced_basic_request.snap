@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 76
+assertion_line: 79
 expression: get_spans()
 
 ---
