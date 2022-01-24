@@ -139,17 +139,12 @@ impl ReportHeader {
             ..Default::default()
         };
 
-        header.add_hostname()?;
+        header.hostname = hostname()?;
         header.agent_version = std::env!("CARGO_PKG_VERSION").to_string();
-        header.runtime_version = "N/A".to_string();
+        header.runtime_version = std::env!("CARGO_PKG_NAME").to_string();
         header.uname = get_uname()?;
         header.graph_ref = graph.to_string();
         Ok(header)
-    }
-
-    fn add_hostname(&mut self) -> Result<(), ReporterError> {
-        self.hostname = hostname()?;
-        Ok(())
     }
 }
 
@@ -382,17 +377,21 @@ pub mod relay {
                 .finish()
                 .map_err(|e| Status::internal(e.to_string()))?;
             let mut backoff = 0;
+            let req = client
+                .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
+                .body(compressed_content)
+                .header("X-Api-Key", key.clone())
+                .header("Content-Encoding", "gzip")
+                .header("Content-Type", "application/protobuf")
+                .header("Accept", "application/json")
+                .build()
+                .map_err(|e| Status::failed_precondition(e.to_string()))?;
+
             for i in 0..4 {
-                let res = client
-                    .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
-                    // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
-                    .body(compressed_content.clone())
-                    .header("X-Api-Key", key.clone())
-                    .header("Content-Encoding", "gzip")
-                    .header("Content-Type", "application/protobuf")
-                    .header("Accept", "application/json")
-                    .send()
-                    .await;
+                // We know these requests can be cloned
+                let my_req = req.try_clone().expect("requests must be clone-able");
+                let res = client.execute(my_req).await;
                 match res {
                     Ok(_v) => break,
                     Err(e) => {
@@ -404,13 +403,7 @@ pub mod relay {
             }
             // Final attempt to transfer, if fails report error
             let res = client
-                .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
-                .body(compressed_content)
-                .header("X-Api-Key", key)
-                .header("Content-Encoding", "gzip")
-                .header("Content-Type", "application/protobuf")
-                .header("Accept", "application/json")
-                .send()
+                .execute(req)
                 .await
                 .map_err(|e| Status::failed_precondition(e.to_string()))?;
             tracing::debug!("result: {:?}", res);
