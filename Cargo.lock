@@ -2770,9 +2770,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest-middleware"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4eb4bd0c419665f9266097de27649a7723140acd100f2676245e0461278ca97a"
+checksum = "e08fe1a72661921ea08c6929537571b6c19295b4f279812073fbe074cd390f50"
 dependencies = [
  "anyhow",
  "async-trait",
