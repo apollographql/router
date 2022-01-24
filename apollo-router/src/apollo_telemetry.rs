@@ -286,7 +286,7 @@ impl SpanExporter for Exporter {
                         .map_err::<TraceError, _>(|e| e.to_string().into())?
                         .into_inner()
                         .message;
-                    tracing::info!("server response: {}", msg);
+                    tracing::trace!("server response: {}", msg);
                 }
             }
         }
@@ -302,6 +302,10 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
         Some(v) => v.as_str().into_owned(),
         None => return q.to_string(),
     };
+
+    if op_name.is_empty() {
+        return q.to_string();
+    }
     let parser = Parser::new(q);
     // compress *before* parsing to modify whitespaces/comments
     let ast = parser.compress().parse();

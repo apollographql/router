@@ -237,6 +237,7 @@ pub mod relay {
     use std::collections::HashMap;
     use std::io::Write;
     use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::mpsc::Sender;
@@ -298,6 +299,7 @@ pub mod relay {
         // This HashMap will only have a single entry if used internally from a router.
         tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
         tx: Sender<()>,
+        total: AtomicU32,
     }
 
     impl ReportRelay {
@@ -326,6 +328,7 @@ pub mod relay {
                     tokio::select! {
                         biased;
                         mopt = rx.recv() => {
+                            tracing::trace!("relay triggered");
                             match mopt {
                                 Some(_msg) => {
                                     relay_tpq(&client, task_tpq.clone()).await;
@@ -334,12 +337,18 @@ pub mod relay {
                             }
                         },
                         _ = interval.tick() => {
+                            tracing::trace!("relay ticked");
                             relay_tpq(&client, task_tpq.clone()).await;
                         }
                     };
                 }
             });
-            Self { addr, tpq, tx }
+            Self {
+                addr,
+                tpq,
+                tx,
+                total: AtomicU32::new(0u32),
+            }
         }
 
         /// Start serving requests.
@@ -376,6 +385,7 @@ pub mod relay {
             for i in 0..4 {
                 let res = client
                     .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                    // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
                     .body(compressed_content.clone())
                     .header("X-Api-Key", key.clone())
                     .header("Content-Encoding", "gzip")
@@ -386,8 +396,8 @@ pub mod relay {
                 match res {
                     Ok(_v) => break,
                     Err(e) => {
-                        tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
-                        backoff += 500;
+                        tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
+                        backoff += 50;
                         tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
                     }
                 }
@@ -465,30 +475,30 @@ pub mod relay {
                 }
                 StatsOrTrace::Trace(mut t) => entry.trace.push(t.trace.take().unwrap()),
             }
+            // Drop the tpq lock to maximise concurrency
+            drop(tpq);
 
-            // Trigger a dispatch if we have "too much" data
-            let mut total = 0;
-            for (_graph, entry) in tpq.iter() {
-                total += entry.len();
-            }
-
-            if total > 10 {
+            let total = self.total.fetch_add(1, Ordering::SeqCst);
+            if total > 5000 {
                 let mut backoff = 0;
-                for _i in 0..4 {
+                for i in 0..4 {
                     match self.tx.send(()).await {
-                        Ok(_v) => break,
+                        Ok(_v) => {
+                            self.total.store(0, Ordering::SeqCst);
+                            return Ok(Response::new(response));
+                        }
                         Err(e) => {
-                            tracing::warn!("could not trigger transfer: {}", e);
-                            backoff += 500;
-                            tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
+                            tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
+                            if i == 4 {
+                                return Err(Status::internal(e.to_string()));
+                            } else {
+                                backoff += 50;
+                                tokio::time::sleep(tokio::time::Duration::from_millis(backoff))
+                                    .await;
+                            }
                         }
                     }
                 }
-                // One last try and return error if fail
-                self.tx
-                    .send(())
-                    .await
-                    .map_err(|e| Status::internal(e.to_string()))?;
             }
 
             Ok(Response::new(response))
