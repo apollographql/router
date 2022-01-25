@@ -43,6 +43,7 @@ use opentelemetry::{
 };
 use std::borrow::Cow;
 use std::fmt::Debug;
+use std::time::Duration;
 use tokio::task::JoinError;
 
 use crate::configuration::{StudioGraph, StudioUsage};
@@ -235,23 +236,12 @@ impl SpanExporter for Exporter {
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
                 {
-                    let busy_v = span
-                        .end_time
-                        .duration_since(span.start_time)
-                        .unwrap()
-                        .as_micros() as i64;
-                    /*
-                    let busy = span
-                        .attributes
-                        .get(&opentelemetry::Key::from_static_str("busy_ns"))
-                        .unwrap();
-                    let busy_v = match busy {
-                        Value::I64(v) => v / 1_000_000,
-                        _ => panic!("value should be a signed integer"),
-                    };
-                    */
+                    let mut dh = DurationHistogram::new(None);
+                    dh.increment_duration(
+                        span.end_time.duration_since(span.start_time).unwrap(),
+                        1,
+                    );
                     tracing::debug!("query: {}", q);
-                    tracing::debug!("busy: {}", busy_v);
 
                     let not_found = Value::String(Cow::from("not found"));
                     let stats = ContextualizedStats {
@@ -268,7 +258,7 @@ impl SpanExporter for Exporter {
                                 .to_string(),
                         }),
                         query_latency_stats: Some(QueryLatencyStats {
-                            latency_count: vec![busy_v],
+                            latency_count: dh.buckets,
                             request_count: 1,
                             ..Default::default()
                         }),
@@ -303,9 +293,6 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
         None => return q.to_string(),
     };
 
-    if op_name.is_empty() {
-        return q.to_string();
-    }
     let parser = Parser::new(q);
     // compress *before* parsing to modify whitespaces/comments
     let ast = parser.compress().parse();
@@ -316,16 +303,20 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
         return q.to_string();
     }
     let doc = ast.document();
-    tracing::info!("{}", doc.format());
-    tracing::info!("looking for operation: {}", op_name);
+    tracing::debug!("{}", doc.format());
+    tracing::trace!("looking for operation: {}", op_name);
     let mut required_definitions: Vec<_> = doc
         .definitions()
         .into_iter()
         .filter(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
                 match op_def.name() {
-                    Some(v) => return v.text() == op_name,
-                    None => return false,
+                    Some(v) => {
+                        return v.text() == op_name;
+                    }
+                    None => {
+                        return op_name == "-";
+                    }
                 }
             }
             false
@@ -338,6 +329,43 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
     // XXX Somehow find fragments...
     let def = required_definition.format();
     format!("# {} \n{}", op_name, def)
+}
+
+struct DurationHistogram {
+    buckets: Vec<i64>,
+}
+
+impl DurationHistogram {
+    fn new(init_size: Option<usize>) -> Self {
+        Self {
+            buckets: vec![0; init_size.unwrap_or(74)],
+        }
+    }
+
+    fn duration_to_bucket(duration: Duration) -> usize {
+        let log_duration = f64::log2((duration.as_nanos() as f64) / 1000.0);
+        let unbounded_bucket = f64::ceil(log_duration / f64::log2(1.1));
+        if unbounded_bucket.is_nan() || unbounded_bucket <= 0f64 {
+            return 0;
+        } else if unbounded_bucket >= 384.0 {
+            return 383;
+        }
+        unbounded_bucket as usize
+    }
+
+    fn increment_duration(&mut self, duration: Duration, value: i64) {
+        self.increment_bucket(DurationHistogram::duration_to_bucket(duration), value)
+    }
+
+    fn increment_bucket(&mut self, bucket: usize, value: i64) {
+        if bucket >= 384 {
+            panic!("bucket is out of bounds of the bucket array");
+        }
+        if bucket >= self.buckets.len() {
+            self.buckets.resize(bucket + 1, 0);
+        }
+        self.buckets[bucket] += value;
+    }
 }
 
 #[cfg(test)]

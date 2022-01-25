@@ -297,7 +297,7 @@ where
     }
 }
 
-#[tracing::instrument(skip_all, name = "graphql_request", fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()), client_name, client_version), level = "info")]
+#[tracing::instrument(skip_all, name = "graphql_request", fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()), client_name, client_version), level = "info")]
 async fn stream_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
