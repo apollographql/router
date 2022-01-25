@@ -58,6 +58,37 @@ impl Response {
         self.errors.append(errors)
     }
 
+    pub fn to_value(self) -> Value {
+        let mut map = Object::default();
+        if let Some(label) = self.label {
+            map.insert("label", Value::String(label.into()));
+        }
+
+        map.insert("data", self.data);
+
+        if let Some(path) = self.path {
+            map.insert("path", Value::String(path.to_string().into()));
+        }
+
+        if let Some(has_next) = self.has_next {
+            map.insert("has_next", Value::Bool(has_next));
+        }
+
+        map.insert(
+            "errors",
+            Value::Array(
+                self.errors
+                    .into_iter()
+                    .map(|e| serde_json_bytes::to_value(e).unwrap())
+                    .collect(),
+            ),
+        );
+
+        map.insert("extensions", Value::Object(self.extensions));
+
+        Value::Object(map)
+    }
+
     pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
