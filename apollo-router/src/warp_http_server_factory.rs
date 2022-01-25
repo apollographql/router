@@ -291,7 +291,7 @@ where
     });
 
     async move {
-        let response = stream_request4(router, request)
+        let response = stream_request5(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -372,6 +372,22 @@ where
     };
 
     crate::json_serializer::make_body2(response.to_value())
+}
+
+async fn stream_request5<Router, PreparedQuery>(
+    router: Arc<Router>,
+    request: graphql::Request,
+) -> hyper::Body
+where
+    Router: graphql::Router<PreparedQuery> + 'static,
+    PreparedQuery: graphql::PreparedQuery,
+{
+    let response = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(request).await,
+        Err(stream) => stream,
+    };
+
+    crate::json_serializer::make_body3(response.to_value())
 }
 
 fn prefers_html(accept_header: String) -> bool {

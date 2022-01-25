@@ -433,6 +433,181 @@ async fn write_char_escape2(
     sender.send(Ok(s)).await
 }
 
+pub fn make_body3(value: Value) -> hyper::Body {
+    let mut v = Vec::new();
+    sync_serialize3(value, &mut v);
+
+    hyper::Body::wrap_stream(futures::stream::iter(v))
+}
+
+fn sync_serialize3(value: Value, queue: &mut Vec<Result<Bytes, io::Error>>) {
+    match value {
+        Value::Null => {
+            const null: Bytes = Bytes::from_static(b"null");
+            queue.push(Ok(null));
+        }
+        Value::Bool(b) => {
+            const true_bytes: Bytes = Bytes::from_static(b"true");
+            const false_bytes: Bytes = Bytes::from_static(b"false");
+
+            if b {
+                queue.push(Ok(true_bytes));
+            } else {
+                queue.push(Ok(false_bytes));
+            }
+        }
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                let mut buffer = itoa::Buffer::new();
+                let s = buffer.format(i);
+
+                queue.push(Ok(s.to_string().into()));
+            } else if let Some(u) = n.as_u64() {
+                let mut buffer = itoa::Buffer::new();
+                let s = buffer.format(u);
+
+                queue.push(Ok(s.to_string().into()));
+            } else if let Some(f) = n.as_f64() {
+                let mut buffer = ryu::Buffer::new();
+                let s = buffer.format_finite(f);
+
+                queue.push(Ok(s.to_string().into()));
+            } else {
+            }
+        }
+        Value::String(s) => sync_serialize_bytestring3(s, queue),
+        Value::Array(a) => {
+            const array_open: Bytes = Bytes::from_static(b"[");
+            const array_close: Bytes = Bytes::from_static(b"]");
+            const comma: Bytes = Bytes::from_static(b",");
+
+            queue.push(Ok(array_open));
+
+            let mut it = a.into_iter();
+
+            if let Some(v) = it.next() {
+                sync_serialize3(v, queue);
+
+                for v in it {
+                    queue.push(Ok(comma));
+                    sync_serialize3(v, queue);
+                }
+            }
+
+            queue.push(Ok(array_close));
+        }
+        Value::Object(o) => {
+            const object_open: Bytes = Bytes::from_static(b"{");
+            const object_close: Bytes = Bytes::from_static(b"}");
+            const comma: Bytes = Bytes::from_static(b",");
+            const colon: Bytes = Bytes::from_static(b":");
+
+            queue.push(Ok(object_open));
+
+            let mut it = o.into_iter();
+
+            if let Some((key, v)) = it.next() {
+                sync_serialize_bytestring3(key, queue);
+                queue.push(Ok(colon));
+                sync_serialize3(v, queue);
+
+                for (key, v) in it {
+                    queue.push(Ok(comma));
+
+                    sync_serialize_bytestring3(key, queue);
+                    queue.push(Ok(colon));
+                    sync_serialize3(v, queue);
+                }
+            }
+
+            queue.push(Ok(object_close));
+        }
+    }
+}
+
+fn sync_serialize_bytestring3(s: ByteString, queue: &mut Vec<Result<Bytes, io::Error>>) {
+    const quotes: Bytes = Bytes::from_static(b"\"");
+    queue.push(Ok(quotes));
+
+    let bytes = s.as_str().as_bytes();
+    let mut start = 0;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        let escape = ESCAPE[byte as usize];
+        if escape == 0 {
+            continue;
+        }
+
+        if start < i {
+            queue.push(Ok(s.inner().slice(start..i)));
+        }
+
+        let char_escape = from_escape_table(escape, byte);
+        write_char_escape3(queue, char_escape);
+
+        start = i + 1;
+    }
+
+    if start != bytes.len() {
+        queue.push(Ok(s.inner().slice(start..)));
+    }
+
+    queue.push(Ok(quotes));
+}
+
+fn write_char_escape3(queue: &mut Vec<Result<Bytes, io::Error>>, char_escape: CharEscape) {
+    use CharEscape::*;
+
+    let s = match char_escape {
+        Quote => {
+            const quotes: Bytes = Bytes::from_static(b"\\\"");
+            quotes
+        }
+        ReverseSolidus => {
+            const reverse: Bytes = Bytes::from_static(b"\\\\");
+            reverse
+        }
+        Solidus => {
+            const solidus: Bytes = Bytes::from_static(b"\\/");
+            solidus
+        }
+        Backspace => {
+            const backspace: Bytes = Bytes::from_static(b"\\b");
+            backspace
+        }
+        FormFeed => {
+            const formfeed: Bytes = Bytes::from_static(b"\\f");
+            formfeed
+        }
+        LineFeed => {
+            const linefeed: Bytes = Bytes::from_static(b"\\n");
+            linefeed
+        }
+        CarriageReturn => {
+            const cr: Bytes = Bytes::from_static(b"\\r");
+            cr
+        }
+        Tab => {
+            const tab: Bytes = Bytes::from_static(b"\\t");
+            tab
+        }
+        AsciiControl(byte) => {
+            static HEX_DIGITS: [u8; 16] = *b"0123456789abcdef";
+            let bytes = &[
+                b'\\',
+                b'u',
+                b'0',
+                b'0',
+                HEX_DIGITS[(byte >> 4) as usize],
+                HEX_DIGITS[(byte & 0xF) as usize],
+            ];
+            return queue.push(Ok(Bytes::from((&bytes[..]).to_owned())));
+        }
+    };
+
+    queue.push(Ok(s));
+}
+
 fn from_escape_table(escape: u8, byte: u8) -> CharEscape {
     match escape {
         self::BB => CharEscape::Backspace,
