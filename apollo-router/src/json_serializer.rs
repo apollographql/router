@@ -1,16 +1,14 @@
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{future::BoxFuture, Future};
+use futures::future::BoxFuture;
 use serde::Serialize;
 use serde_json::{ser::CharEscape, Serializer};
 use serde_json_bytes::{ByteString, Value};
 use std::{
     cmp::min,
     io::{self, Write},
-    pin::Pin,
-    task::Poll,
 };
 use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tokio_util::io::ReaderStream;
 
 pub enum Error {
@@ -246,6 +244,193 @@ where
     };
 
     writer.write(s).await
+}
+
+pub fn make_body2(value: Value) -> hyper::Body {
+    let (mut write, read) = mpsc::channel(1024);
+    tokio::task::spawn(async move { async_serialize2(value, &mut write).await });
+
+    hyper::Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(read))
+}
+
+fn async_serialize2(
+    value: Value,
+    sender: &mut Sender<Result<Bytes, io::Error>>,
+) -> BoxFuture<Result<(), SendError<Result<Bytes, io::Error>>>> {
+    Box::pin(async move {
+        match value {
+            Value::Null => {
+                const null: Bytes = Bytes::from_static(b"null");
+                sender.send(Ok(null)).await
+            }
+            Value::Bool(b) => {
+                const true_bytes: Bytes = Bytes::from_static(b"true");
+                const false_bytes: Bytes = Bytes::from_static(b"false");
+
+                if b {
+                    sender.send(Ok(true_bytes)).await
+                } else {
+                    sender.send(Ok(false_bytes)).await
+                }
+            }
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    let mut buffer = itoa::Buffer::new();
+                    let s = buffer.format(i);
+
+                    sender.send(Ok(s.to_string().into())).await
+                } else if let Some(u) = n.as_u64() {
+                    let mut buffer = itoa::Buffer::new();
+                    let s = buffer.format(u);
+
+                    sender.send(Ok(s.to_string().into())).await
+                } else if let Some(f) = n.as_f64() {
+                    let mut buffer = ryu::Buffer::new();
+                    let s = buffer.format_finite(f);
+
+                    sender.send(Ok(s.to_string().into())).await
+                } else {
+                    Ok(())
+                }
+            }
+            Value::String(s) => async_serialize_bytestring2(s, sender).await,
+            Value::Array(a) => {
+                const array_open: Bytes = Bytes::from_static(b"[");
+                const array_close: Bytes = Bytes::from_static(b"]");
+                const comma: Bytes = Bytes::from_static(b",");
+
+                sender.send(Ok(array_open)).await?;
+
+                let mut it = a.into_iter();
+
+                if let Some(v) = it.next() {
+                    async_serialize2(v, sender).await?;
+
+                    for v in it {
+                        sender.send(Ok(comma)).await?;
+                        async_serialize2(v, sender).await?;
+                    }
+                }
+
+                sender.send(Ok(array_close)).await
+            }
+            Value::Object(o) => {
+                const object_open: Bytes = Bytes::from_static(b"{");
+                const object_close: Bytes = Bytes::from_static(b"}");
+                const comma: Bytes = Bytes::from_static(b",");
+                const colon: Bytes = Bytes::from_static(b":");
+
+                sender.send(Ok(object_open)).await?;
+
+                let mut it = o.into_iter();
+
+                if let Some((key, v)) = it.next() {
+                    async_serialize_bytestring2(key, sender).await?;
+                    sender.send(Ok(colon)).await?;
+                    async_serialize2(v, sender).await?;
+
+                    for (key, v) in it {
+                        sender.send(Ok(comma)).await?;
+
+                        async_serialize_bytestring2(key, sender).await?;
+                        sender.send(Ok(colon)).await?;
+                        async_serialize2(v, sender).await?;
+                    }
+                }
+
+                sender.send(Ok(object_close)).await
+            }
+        }
+    })
+}
+
+async fn async_serialize_bytestring2(
+    s: ByteString,
+    sender: &mut Sender<Result<Bytes, io::Error>>,
+) -> Result<(), SendError<Result<Bytes, io::Error>>> {
+    const quotes: Bytes = Bytes::from_static(b"\"");
+    sender.send(Ok(quotes)).await?;
+
+    let bytes = s.as_str().as_bytes();
+    let mut start = 0;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        let escape = ESCAPE[byte as usize];
+        if escape == 0 {
+            continue;
+        }
+
+        if start < i {
+            sender.send(Ok(s.inner().slice(start..i))).await?;
+        }
+
+        let char_escape = from_escape_table(escape, byte);
+        write_char_escape2(sender, char_escape).await?;
+
+        start = i + 1;
+    }
+
+    if start != bytes.len() {
+        sender.send(Ok(s.inner().slice(start..))).await?;
+    }
+
+    sender.send(Ok(quotes)).await
+}
+
+async fn write_char_escape2(
+    sender: &mut Sender<Result<Bytes, io::Error>>,
+    char_escape: CharEscape,
+) -> Result<(), SendError<Result<Bytes, io::Error>>> {
+    use CharEscape::*;
+
+    let s = match char_escape {
+        Quote => {
+            const quotes: Bytes = Bytes::from_static(b"\\\"");
+            quotes
+        }
+        ReverseSolidus => {
+            const reverse: Bytes = Bytes::from_static(b"\\\\");
+            reverse
+        }
+        Solidus => {
+            const solidus: Bytes = Bytes::from_static(b"\\/");
+            solidus
+        }
+        Backspace => {
+            const backspace: Bytes = Bytes::from_static(b"\\b");
+            backspace
+        }
+        FormFeed => {
+            const formfeed: Bytes = Bytes::from_static(b"\\f");
+            formfeed
+        }
+        LineFeed => {
+            const linefeed: Bytes = Bytes::from_static(b"\\n");
+            linefeed
+        }
+        CarriageReturn => {
+            const cr: Bytes = Bytes::from_static(b"\\r");
+            cr
+        }
+        Tab => {
+            const tab: Bytes = Bytes::from_static(b"\\t");
+            tab
+        }
+        AsciiControl(byte) => {
+            static HEX_DIGITS: [u8; 16] = *b"0123456789abcdef";
+            let bytes = &[
+                b'\\',
+                b'u',
+                b'0',
+                b'0',
+                HEX_DIGITS[(byte >> 4) as usize],
+                HEX_DIGITS[(byte & 0xF) as usize],
+            ];
+            return sender.send(Ok(Bytes::from((&bytes[..]).to_owned()))).await;
+        }
+    };
+
+    sender.send(Ok(s)).await
 }
 
 fn from_escape_table(escape: u8, byte: u8) -> CharEscape {
