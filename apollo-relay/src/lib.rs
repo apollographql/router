@@ -389,7 +389,7 @@ pub mod relay {
             let compressed_content = encoder
                 .finish()
                 .map_err(|e| Status::internal(e.to_string()))?;
-            let mut backoff = 0;
+            let mut backoff = Duration::from_millis(0);
             let ingress = match std::env::var("APOLLO_INGRESS") {
                 Ok(v) => v,
                 Err(_e) => DEFAULT_INGRESS.to_string(),
@@ -413,8 +413,8 @@ pub mod relay {
                     Ok(_v) => break,
                     Err(e) => {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
-                        backoff += 50;
-                        tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
+                        backoff += Duration::from_millis(50);
+                        tokio::time::sleep(backoff).await;
                     }
                 }
             }
@@ -490,7 +490,7 @@ pub mod relay {
 
             let total = self.total.fetch_add(1, Ordering::SeqCst);
             if total > 5000 {
-                let mut backoff = 0;
+                let mut backoff = Duration::from_millis(0);
                 for i in 0..4 {
                     match self.tx.send(()).await {
                         Ok(_v) => {
@@ -502,9 +502,8 @@ pub mod relay {
                             if i == 4 {
                                 return Err(Status::unavailable(e.to_string()));
                             } else {
-                                backoff += 50;
-                                tokio::time::sleep(tokio::time::Duration::from_millis(backoff))
-                                    .await;
+                                backoff += Duration::from_millis(50);
+                                tokio::time::sleep(backoff).await;
                             }
                         }
                     }
