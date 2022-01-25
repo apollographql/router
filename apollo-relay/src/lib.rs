@@ -244,6 +244,9 @@ pub mod relay {
     pub use crate::agent::reporter_server::{Reporter, ReporterServer};
     use crate::agent::{ReporterGraph, ReporterResponse};
 
+    static DEFAULT_INGRESS: &str =
+        "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+
     /// Allows common transfer code to be more easily represented
     #[allow(clippy::large_enum_variant)]
     enum StatsOrTrace {
@@ -326,14 +329,24 @@ pub mod relay {
                             tracing::trace!("relay triggered");
                             match mopt {
                                 Some(_msg) => {
-                                    relay_tpq(&client, task_tpq.clone()).await;
+                                    for result in relay_tpq(&client, task_tpq.clone()).await {
+                                        match result {
+                                            Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
+                                            Err(e) => tracing::error!("Report submission failed: {}", e),
+                                        }
+                                    }
                                 },
                                 None => break
                             }
                         },
                         _ = interval.tick() => {
                             tracing::trace!("relay ticked");
-                            relay_tpq(&client, task_tpq.clone()).await;
+                            for result in relay_tpq(&client, task_tpq.clone()).await {
+                                match result {
+                                    Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
+                                    Err(e) => tracing::error!("Report submission failed: {}", e),
+                                }
+                            }
                         }
                     };
                 }
@@ -377,16 +390,20 @@ pub mod relay {
                 .finish()
                 .map_err(|e| Status::internal(e.to_string()))?;
             let mut backoff = 0;
+            let ingress = match std::env::var("APOLLO_INGRESS") {
+                Ok(v) => v,
+                Err(_e) => DEFAULT_INGRESS.to_string(),
+            };
             let req = client
-                .post("https://usage-reporting.api.apollographql.com/api/ingress/traces")
                 // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
+                .post(ingress)
                 .body(compressed_content)
                 .header("X-Api-Key", key.clone())
                 .header("Content-Encoding", "gzip")
                 .header("Content-Type", "application/protobuf")
                 .header("Accept", "application/json")
                 .build()
-                .map_err(|e| Status::failed_precondition(e.to_string()))?;
+                .map_err(|e| Status::unavailable(e.to_string()))?;
 
             for i in 0..4 {
                 // We know these requests can be cloned
@@ -405,7 +422,7 @@ pub mod relay {
             let res = client
                 .execute(req)
                 .await
-                .map_err(|e| Status::failed_precondition(e.to_string()))?;
+                .map_err(|e| Status::unavailable(e.to_string()))?;
             tracing::debug!("result: {:?}", res);
             let data = res
                 .text()
@@ -483,7 +500,7 @@ pub mod relay {
                         Err(e) => {
                             tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
                             if i == 4 {
-                                return Err(Status::internal(e.to_string()));
+                                return Err(Status::unavailable(e.to_string()));
                             } else {
                                 backoff += 50;
                                 tokio::time::sleep(tokio::time::Duration::from_millis(backoff))
@@ -501,35 +518,45 @@ pub mod relay {
     async fn relay_tpq(
         client: &Client,
         task_tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
-    ) {
+    ) -> Vec<Result<Response<ReporterResponse>, Status>> {
         let mut all_entries = task_tpq.lock().await;
         let drained = all_entries
             .drain()
             .collect::<Vec<(ReporterGraph, HashMap<String, report::TracesAndStats>)>>();
         // Release the lock ASAP so that clients can continue to add data
         drop(all_entries);
+        let mut results = vec![];
         for (graph, tpq) in drained {
             if !tpq.is_empty() {
                 tracing::info!("submitting: {} records", tpq.len());
                 tracing::debug!("containing: {:?}", tpq);
-                let mut report = crate::Report::try_new(&graph.reference).expect("XXX");
-                report.traces_per_query = tpq;
-                let time = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-                let seconds = time.as_secs();
-                let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-                let ts_end = Timestamp {
-                    seconds: seconds as i64,
-                    nanos: nanos as i32,
-                };
-                report.end_time = Some(ts_end);
+                match crate::Report::try_new(&graph.reference) {
+                    Ok(mut report) => {
+                        report.traces_per_query = tpq;
+                        let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                results.push(Err(Status::internal(e.to_string())));
+                                continue;
+                            }
+                        };
+                        let seconds = time.as_secs();
+                        let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
+                        let ts_end = Timestamp {
+                            seconds: seconds as i64,
+                            nanos: nanos as i32,
+                        };
+                        report.end_time = Some(ts_end);
 
-                match ReportRelay::submit_report(client, graph.key, report).await {
-                    Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-                    Err(e) => tracing::error!("Report submission failed: {}", e),
+                        results.push(ReportRelay::submit_report(client, graph.key, report).await)
+                    }
+                    Err(e) => {
+                        results.push(Err(Status::internal(e.to_string())));
+                        continue;
+                    }
                 }
             }
         }
+        results
     }
 }
