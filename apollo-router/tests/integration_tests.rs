@@ -66,9 +66,8 @@ async fn basic_composition() {
 }
 
 #[test_span(tokio::test)]
-#[target(reqwest=tracing::Level::INFO)]
-#[target(reqwest_tracing=tracing::Level::INFO)]
-#[target(hyper::client=tracing::Level::INFO)]
+#[target(apollo_router=tracing::Level::DEBUG)]
+#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -80,9 +79,8 @@ async fn traced_basic_request() {
 }
 
 #[test_span(tokio::test)]
-#[target(reqwest=tracing::Level::INFO)]
-#[target(reqwest_tracing=tracing::Level::INFO)]
-#[target(hyper::client=tracing::Level::INFO)]
+#[target(apollo_router=tracing::Level::DEBUG)]
+#[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
