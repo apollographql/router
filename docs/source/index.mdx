@@ -4,9 +4,7 @@ sidebar_title: Introduction
 description: High-performance graph routing for federated graphs
 ---
 
-import { Button } from '@apollo/space-kit/Button';
 import { Link } from 'gatsby';
-import { colors } from 'gatsby-theme-apollo-core';
 
 The **Apollo Router** is a configurable, high-performance **graph router** for a federated graph. It slots into any existing [Apollo Federation](https://www.apollographql.com/docs/federation/) architecture (v1 or v2), replacing your Node.js gateway that uses the `@apollo/gateway` library:
 
@@ -28,9 +26,9 @@ flowchart BT;
 
 <p>
   <Button
-    size="default"
-    color={colors.primary}
-    as={<Link to="/quickstart/" />}
+    color="indigo"
+    to="/quickstart/"
+    as={Link}
   >
     Try it out!
   </Button>
