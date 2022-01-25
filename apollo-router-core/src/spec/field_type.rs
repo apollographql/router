@@ -26,7 +26,7 @@ impl FieldType {
         match (self, value) {
             // Type coercion from string to Int, Float or Boolean
             (FieldType::Int | FieldType::Float | FieldType::Boolean, Value::String(s)) => {
-                if let Ok(value) = serde_json::from_str::<Value>(s) {
+                if let Ok(value) = Value::from_bytes(s.inner().clone()) {
                     self.validate_value(&value, schema)
                 } else {
                     Err(InvalidValue)

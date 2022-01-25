@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, Request};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
@@ -200,7 +200,7 @@ where
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
-                    } else if let Ok(request) = serde_json::from_slice(&body) {
+                    } else if let Ok(request) = Request::from_bytes(body) {
                         run_graphql_request(router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
@@ -291,72 +291,55 @@ where
     });
 
     async move {
-        let response_stream = stream_request2(router, request)
+        let response = stream_request2(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
-        Box::new(Response::new(Body::wrap_stream(response_stream))) as Box<dyn Reply>
+        Box::new(Response::new(response)) as Box<dyn Reply>
     }
 }
 
 async fn stream_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
-) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+) -> hyper::Body
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
-    let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
-        Err(stream) => stream,
+    let response = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(request).await,
+        Err(response) => response,
     };
 
     let span = Span::current();
-    stream.enumerate().map(move |(index, res)| {
-        tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-            match serde_json::to_string(&res) {
-                Ok(bytes) => Ok(Bytes::from(bytes)),
-                Err(err) => {
-                    // We didn't manage to serialise the response!
-                    // Do our best to send some sort of error back.
-                    serde_json::to_string(
-                        &graphql::FetchError::MalformedResponse {
-                            reason: err.to_string(),
-                        }
-                        .to_response(index == 0),
-                    )
-                    .map(Bytes::from)
-                }
-            }
-        })
+    tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+        Body::from(
+            serde_json::to_string(&response)
+                .expect("serde_json::Value serialization will not fail"),
+        )
     })
 }
 
 async fn stream_request2<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
-) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+) -> hyper::Body
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
-    let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+    let response = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
 
-    stream
-        .enumerate()
-        .map(|(index, res)| {
-            let (writer, rx) = crate::json_serializer::BytesWriter::new(2048, 10);
-            let _jh = tokio::task::spawn_blocking(move || writer.serialize(res));
+    let (writer, rx) = crate::json_serializer::BytesWriter::new(2048, 10);
+    let _jh = tokio::task::spawn_blocking(move || writer.serialize(response));
 
-            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-            let s = stream.map(|bytes| Ok(bytes));
-            s
-        })
-        .flatten()
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let s = stream.map(|bytes| Ok::<Bytes, serde_json::Error>(bytes));
+    Body::wrap_stream(s)
 }
 
 fn prefers_html(accept_header: String) -> bool {
@@ -450,7 +433,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
         }
     }
 
@@ -463,7 +446,7 @@ mod tests {
             async fn prepare_query(
                 &self,
                 request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+            ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
 
@@ -473,7 +456,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 
@@ -592,7 +575,7 @@ mod tests {
                     route.expect_execute()
                         .times(1)
                         .return_once(move |_| {
-                            example_response.into()
+                            example_response
                         });
                     Ok(route)
                 })
@@ -646,7 +629,7 @@ mod tests {
                                 service: "Mock service".to_string(),
                                 reason: "Mock error".to_string(),
                             }
-                            .to_response(true).into()
+                            .to_response(true)
                         });
                     Ok(route)
                 })

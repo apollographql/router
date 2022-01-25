@@ -819,7 +819,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream;
+            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
         }
     }
 
@@ -832,7 +832,7 @@ mod tests {
             async fn prepare_query(
                 &self,
                 request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+            ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
 
@@ -842,7 +842,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 

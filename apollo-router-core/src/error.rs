@@ -1,6 +1,5 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
-use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
@@ -89,15 +88,12 @@ pub enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        let value: Value = serde_json::to_value(self).unwrap().into();
         Error {
             message: self.to_string(),
             locations: Default::default(),
             path,
-            extensions: serde_json::to_value(self)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .to_owned(),
+            extensions: value.as_object().unwrap().to_owned(),
         }
     }
 
@@ -131,6 +127,53 @@ pub struct Error {
     /// The optional graphql extensions.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+}
+
+impl Error {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let locations = extract_key_value_from_object!(object, "locations")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .unwrap_or_default();
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        Ok(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
 }
 
 /// A location in the request that triggered a graphql error.
@@ -214,9 +257,9 @@ impl From<CacheResolverError> for QueryPlannerError {
     }
 }
 
-impl From<QueryPlannerError> for ResponseStream {
+impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
-        stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
+        FetchError::from(err).to_response(true)
     }
 }
 

@@ -29,7 +29,8 @@ ignore = ["RUSTSEC-2020-0159"]
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
 # The lint level for crates which do not have a detectable license
-unlicensed = "deny"
+# TODO[igni]: remove this once the span / macro are fleshed out
+unlicensed = "warn"
 # List of explictly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
@@ -62,13 +63,13 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]

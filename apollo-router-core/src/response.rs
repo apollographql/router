@@ -1,11 +1,7 @@
 use crate::prelude::graphql::*;
-use futures::prelude::*;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use typed_builder::TypedBuilder;
-
-/// A graph response stream consists of one primary response and any number of patch responses.
-pub type ResponseStream = Pin<Box<dyn futures::Stream<Item = Response> + Send>>;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
@@ -61,11 +57,63 @@ impl Response {
     pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
         self.errors.append(errors)
     }
-}
 
-impl From<Response> for ResponseStream {
-    fn from(response: Response) -> Self {
-        stream::once(future::ready(response)).boxed()
+    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+        let value =
+            Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        let data = extract_key_value_from_object!(object, "data").unwrap_or_default();
+        let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .into_iter()
+            .flatten()
+            .map(|v| Error::from_value(service_name, v))
+            .collect::<Result<Vec<Error>, FetchError>>()?;
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string());
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+        let has_next = extract_key_value_from_object!(object, "has_next", Value::Bool(b) => b)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        Ok(Response {
+            label,
+            data,
+            path,
+            has_next,
+            errors,
+            extensions,
+        })
     }
 }
 
@@ -73,6 +121,7 @@ impl From<Response> for ResponseStream {
 mod tests {
     use super::*;
     use serde_json::json;
+    use serde_json_bytes::json as bjson;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
@@ -172,7 +221,7 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: json!({
+                    extensions: bjson!({
                         "error-extension": 5,
                     })
                     .as_object()
@@ -180,7 +229,7 @@ mod tests {
                     .unwrap()
                 }])
                 .extensions(
-                    json!({
+                    bjson!({
                         "response-extension": 3,
                     })
                     .as_object()
@@ -264,7 +313,7 @@ mod tests {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),
                     path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: json!({
+                    extensions: bjson!({
                         "error-extension": 5,
                     })
                     .as_object()
@@ -272,7 +321,7 @@ mod tests {
                     .unwrap()
                 }])
                 .extensions(
-                    json!({
+                    bjson!({
                         "response-extension": 3,
                     })
                     .as_object()

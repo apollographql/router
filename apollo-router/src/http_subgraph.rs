@@ -1,7 +1,6 @@
 use apollo_router_core::prelude::*;
 use async_trait::async_trait;
 use derivative::Derivative;
-use futures::prelude::*;
 use tracing::Instrument;
 use url::Url;
 
@@ -50,7 +49,7 @@ impl HttpSubgraphFetcher {
             .instrument(tracing::trace_span!("http-subgraph-request"))
             .await
             .map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+                tracing::error!(fetch_error = err.to_string().as_str());
 
                 graphql::FetchError::SubrequestHttpError {
                     service: self.service.to_owned(),
@@ -74,37 +73,28 @@ impl HttpSubgraphFetcher {
 
     fn map_to_graphql(
         service_name: String,
-        response: Result<bytes::Bytes, graphql::FetchError>,
-    ) -> graphql::ResponseStream {
-        Box::pin(
-            async move {
-                let is_primary = true;
-                match response {
-                    Err(e) => e.to_response(is_primary),
-                    Ok(bytes) => tracing::debug_span!("parse_subgraph_response").in_scope(|| {
-                        serde_json::from_slice::<graphql::Response>(&bytes).unwrap_or_else(
-                            |error| {
-                                graphql::FetchError::SubrequestMalformedResponse {
-                                    service: service_name.clone(),
-                                    reason: error.to_string(),
-                                }
-                                .to_response(is_primary)
-                            },
-                        )
-                    }),
+        response: bytes::Bytes,
+    ) -> Result<graphql::Response, graphql::FetchError> {
+        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+            graphql::Response::from_bytes(&service_name, response).map_err(|error| {
+                graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.clone(),
+                    reason: error.to_string(),
                 }
-            }
-            .into_stream(),
-        )
+            })
+        })
     }
 }
 
 #[async_trait]
 impl graphql::Fetcher for HttpSubgraphFetcher {
-    /// Using reqwest fetch a stream of graphql results.
-    async fn stream(&self, request: graphql::Request) -> graphql::ResponseStream {
+    /// Using reqwest to fetch a graphql response
+    async fn stream(
+        &self,
+        request: graphql::Request,
+    ) -> Result<graphql::Response, graphql::FetchError> {
         let service_name = self.service.to_string();
-        let response = self.request_stream(request).await;
+        let response = self.request_stream(request).await?;
         Self::map_to_graphql(service_name, response)
     }
 }
@@ -146,7 +136,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
-        let response = graphql::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({
               "allProducts": [
                 {
@@ -172,21 +162,20 @@ mod tests {
                 .body_matches(Regex::new(".*").unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&response);
+                .json_body_obj(&expected_response);
         });
         let fetcher =
             HttpSubgraphFetcher::new("products", Url::parse(&server.url("/graphql")).unwrap());
-        let collect = fetcher
+        let response = fetcher
             .stream(
                 graphql::Request::builder()
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )
             .await
-            .collect::<Vec<_>>()
-            .await;
+            .unwrap();
 
-        assert_eq!(collect[0], response);
+        assert_eq!(response, expected_response);
         mock.assert();
         Ok(())
     }
