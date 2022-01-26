@@ -1,13 +1,8 @@
 ---
 source: apollo-router/src/apollo_telemetry.rs
-assertion_line: 293
+assertion_line: 423
 expression: normalized
 
 ---
-
-query {
-    user {
-        name
-    }
-}
+## GraphQLUnknownOperationName
 

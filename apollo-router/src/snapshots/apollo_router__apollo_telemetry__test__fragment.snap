@@ -1,20 +1,8 @@
 ---
 source: apollo-router/src/apollo_telemetry.rs
-assertion_line: 329
+assertion_line: 459
 expression: normalized
 
 ---
-
-{
-  user {
-    name
-    ...Bar
-  }
-}
-fragment Bar on User {
-  asd
-}
-fragment Baz on User {
-  jkl
-}
+## GraphQLUnknownOperationName
 

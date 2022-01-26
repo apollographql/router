@@ -232,7 +232,7 @@ impl SpanExporter for Exporter {
             tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
             if span.name == "graphql_request" {
                 tracing::debug!("span: {:?}", span);
-                if let Some(q) = span
+                if let Some(query) = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query"))
                 {
@@ -241,7 +241,7 @@ impl SpanExporter for Exporter {
                         span.end_time.duration_since(span.start_time).unwrap(),
                         1,
                     );
-                    tracing::debug!("query: {}", q);
+                    tracing::debug!("query: {}", query);
 
                     let not_found = Value::String(Cow::from("not found"));
                     let stats = ContextualizedStats {
@@ -268,7 +268,7 @@ impl SpanExporter for Exporter {
                         .attributes
                         .get(&opentelemetry::Key::from_static_str("operation_name"));
                     // XXX NEED TO NORMALISE THE QUERY
-                    let key = normalize(operation_name, &q.as_str());
+                    let key = normalize(operation_name, &query.as_str());
 
                     let msg = reporter
                         .submit_stats(graph.clone(), key, stats)
@@ -285,22 +285,31 @@ impl SpanExporter for Exporter {
     }
 }
 
-fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
-    // If we don't have an operation name, no point normalizing
-    // it. Just return the unprocessed input.
+// Taken from TS implementation
+static GRAPHQL_PARSE_FAILURE: &str = "## GraphQLParseFailure\n";
+static GRAPHQL_VALIDATION_FAILURE: &str = "## GraphQLValidationFailure\n";
+static GRAPHQL_UNKNOWN_OPERATION_NAME: &str = "## GraphQLUnknownOperationName\n";
+
+fn normalize(op: Option<&opentelemetry::Value>, query: &str) -> String {
+    // If we don't have an operation name, we can't do anything useful
+    // with this query. Just return the appropriate error.
     let op_name: String = match op {
         Some(v) => v.as_str().into_owned(),
-        None => return q.to_string(),
+        None => {
+            tracing::warn!("Could not identify operation name: {}", query);
+            return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
+        }
     };
 
-    let parser = Parser::new(q);
+    let parser = Parser::new(query);
     // compress *before* parsing to modify whitespaces/comments
     let ast = parser.compress().parse();
     tracing::debug!("ast:\n {:?}", ast);
     // If we can't parse the query, we definitely can't normalize it, so
-    // just return the un-processed input
+    // just return the appropriate error.
     if ast.errors().len() > 0 {
-        return q.to_string();
+        tracing::warn!("Could not parse query: {}", query);
+        return GRAPHQL_PARSE_FAILURE.to_string();
     }
     let doc = ast.document();
     tracing::debug!("{}", doc.format());
@@ -310,25 +319,24 @@ fn normalize(op: Option<&opentelemetry::Value>, q: &str) -> String {
         .into_iter()
         .filter(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
-                match op_def.name() {
-                    Some(v) => {
-                        return v.text() == op_name;
-                    }
-                    None => {
-                        return op_name == "-";
-                    }
-                }
+                return match op_def.name() {
+                    Some(v) => v.text() == op_name,
+                    None => op_name == "-",
+                };
             }
             false
         })
         .collect();
     tracing::debug!("required definitions: {:?}", required_definitions);
-    assert_eq!(required_definitions.len(), 1);
+    if required_definitions.len() != 1 {
+        tracing::warn!("Could not find required single definition: {}", query);
+        return GRAPHQL_VALIDATION_FAILURE.to_string();
+    }
     let required_definition = required_definitions.pop().unwrap();
     tracing::debug!("required_definition: {:?}", required_definition);
     // XXX Somehow find fragments...
     let def = required_definition.format();
-    format!("# {} \n{}", op_name, def)
+    format!("# {}\n{}", op_name, def)
 }
 
 struct DurationHistogram {
@@ -360,7 +368,6 @@ impl DurationHistogram {
             return DurationHistogram::MAXIMUM_SIZE;
         }
 
-        println!("unbounded_bucket: {}", unbounded_bucket);
         unbounded_bucket as usize
     }
 
