@@ -110,9 +110,15 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, SubgraphRequest { request, context }: SubgraphRequest) -> Self::Future {
+    fn call(
+        &mut self,
+        SubgraphRequest {
+            http_request,
+            context,
+        }: SubgraphRequest,
+    ) -> Self::Future {
         let fetcher = self.fetcher.clone();
-        Box::pin(async move { fetcher.stream(request, context).await })
+        Box::pin(async move { fetcher.stream(http_request, context).await })
     }
 }
 
@@ -156,7 +162,7 @@ pub struct PlannedRequest {
 }
 
 pub struct SubgraphRequest {
-    pub request: http::Request<Request>,
+    pub http_request: http::Request<Request>,
 
     // Cloned from PlannedRequest
     pub context: Context,

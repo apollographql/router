@@ -345,7 +345,7 @@ mod fetch {
                 .clone_box();
 
             let subgraph_request = SubgraphRequest {
-                request: http::Request::builder()
+                http_request: http::Request::builder()
                     .method(http::Method::POST)
                     .body(
                         Request::builder()
