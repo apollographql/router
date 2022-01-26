@@ -187,13 +187,13 @@ impl Reporter {
     pub async fn submit_stats(
         &mut self,
         graph: ReporterGraph,
-        q: String,
+        key: String,
         stats: ContextualizedStats,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_stats(Request::new(ReporterStats {
                 graph: Some(graph),
-                key: q,
+                key,
                 stats: Some(stats),
             }))
             .await
@@ -205,13 +205,13 @@ impl Reporter {
     pub async fn submit_trace(
         &mut self,
         graph: ReporterGraph,
-        q: String,
+        key: String,
         trace: Trace,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_trace(Request::new(ReporterTrace {
                 graph: Some(graph),
-                key: q,
+                key,
                 trace: Some(trace),
             }))
             .await
@@ -398,7 +398,7 @@ pub mod spaceport {
                 // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
                 .post(ingress)
                 .body(compressed_content)
-                .header("X-Api-Key", key.clone())
+                .header("X-Api-Key", key)
                 .header("Content-Encoding", "gzip")
                 .header("Content-Type", "application/protobuf")
                 .header("Accept", "application/json")
@@ -504,6 +504,10 @@ pub mod spaceport {
             // Drop the tpq lock to maximise concurrency
             drop(tpq);
 
+            // This is inherently both imprecise and racy, but it doesn't matter
+            // because we are just hinting to the spaceport that it's probably a
+            // good idea to try to transfer data up to the ingress. Multiple
+            // notifications just trigger more transfers.
             let total = self.total.fetch_add(1, Ordering::SeqCst);
             if total > 5000 {
                 let mut backoff = Duration::from_millis(0);

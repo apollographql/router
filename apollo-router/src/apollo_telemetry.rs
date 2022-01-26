@@ -220,64 +220,64 @@ impl SpanExporter for Exporter {
             // and panic here in case a logic bug creeps in elsewhere.
             panic!("cannot export statistics without graph details")
         }
-        // Convert the configuration data into a reportable form
-        let graph: ReporterGraph = self.graph.as_ref().unwrap().into();
         let mut reporter = Reporter::try_new(self.collector.clone())
             .await
             .map_err::<ApolloError, _>(Into::into)?;
         /*
          * Break down batch and send to spaceport
          */
-        for (index, span) in batch.into_iter().enumerate() {
+        for (index, span) in batch
+            .into_iter()
+            .filter(|span| span.name == "graphql_request")
+            .enumerate()
+        {
             tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
-            if span.name == "graphql_request" {
-                tracing::debug!("span: {:?}", span);
-                if let Some(query) = span
-                    .attributes
-                    .get(&opentelemetry::Key::from_static_str("query"))
-                {
-                    let mut dh = DurationHistogram::new(None);
-                    dh.increment_duration(
-                        span.end_time.duration_since(span.start_time).unwrap(),
-                        1,
-                    );
-                    tracing::debug!("query: {}", query);
+            tracing::debug!("span: {:?}", span);
+            if let Some(query) = span
+                .attributes
+                .get(&opentelemetry::Key::from_static_str("query"))
+            {
+                // Convert the configuration data into a reportable form
+                let graph: ReporterGraph = self.graph.as_ref().unwrap().into();
+                let mut dh = DurationHistogram::new(None);
+                dh.increment_duration(span.end_time.duration_since(span.start_time).unwrap(), 1);
+                tracing::debug!("query: {}", query);
 
-                    let not_found = Value::String(Cow::from("not found"));
-                    let stats = ContextualizedStats {
-                        context: Some(StatsContext {
-                            client_name: span
-                                .attributes
-                                .get(&opentelemetry::Key::from_static_str("client_name"))
-                                .unwrap_or(&not_found)
-                                .to_string(),
-                            client_version: span
-                                .attributes
-                                .get(&opentelemetry::Key::from_static_str("client_version"))
-                                .unwrap_or(&not_found)
-                                .to_string(),
-                        }),
-                        query_latency_stats: Some(QueryLatencyStats {
-                            latency_count: dh.buckets,
-                            request_count: 1,
-                            ..Default::default()
-                        }),
+                let not_found = Value::String(Cow::from("not found"));
+                let stats = ContextualizedStats {
+                    context: Some(StatsContext {
+                        client_name: span
+                            .attributes
+                            .get(&opentelemetry::Key::from_static_str("client_name"))
+                            .unwrap_or(&not_found)
+                            .to_string(),
+                        client_version: span
+                            .attributes
+                            .get(&opentelemetry::Key::from_static_str("client_version"))
+                            .unwrap_or(&not_found)
+                            .to_string(),
+                    }),
+                    query_latency_stats: Some(QueryLatencyStats {
+                        latency_count: dh.buckets,
+                        request_count: 1,
                         ..Default::default()
-                    };
-                    let operation_name = span
-                        .attributes
-                        .get(&opentelemetry::Key::from_static_str("operation_name"));
-                    // XXX NEED TO NORMALISE THE QUERY
-                    let key = normalize(operation_name, &query.as_str());
+                    }),
+                    ..Default::default()
+                };
+                let operation_name = span
+                    .attributes
+                    .get(&opentelemetry::Key::from_static_str("operation_name"));
+                // XXX The normalize function isn't complete yet, but does the
+                // minimum amount of normalization.
+                let key = normalize(operation_name, &query.as_str());
 
-                    let msg = reporter
-                        .submit_stats(graph.clone(), key, stats)
-                        .await
-                        .map_err::<TraceError, _>(|e| e.to_string().into())?
-                        .into_inner()
-                        .message;
-                    tracing::trace!("server response: {}", msg);
-                }
+                let msg = reporter
+                    .submit_stats(graph, key, stats)
+                    .await
+                    .map_err::<TraceError, _>(|e| e.to_string().into())?
+                    .into_inner()
+                    .message;
+                tracing::trace!("server response: {}", msg);
             }
         }
 
