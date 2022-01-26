@@ -3073,9 +3073,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.135"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cf9235533494ea2ddcdb794665461814781c53f19d87b76e571a1c35acbad2b"
+checksum = "ce31e24b01e1e524df96f1c2fdd054405f8d7376249a5110886fb4b658484789"
 dependencies = [
  "serde_derive",
 ]
@@ -3101,9 +3101,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.135"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dcde03d87d4c973c04be249e7d8f0b35db1c848c487bd43032808e59dd8328d"
+checksum = "08597e7152fcd306f41838ed3e37be9eaeed2b61c42e2117266a554fab4662f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3490,9 +3490,9 @@ dependencies = [
 
 [[package]]
 name = "test-span"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e9f85d34f1792565eb25be5231f457f21efe11166ea1c9f3aad0e60f1cedf59"
+checksum = "0253fc94d43dcc581fc5a1150683b722d469013ed0b8e79ede0046333f18d243"
 dependencies = [
  "daggy",
  "derivative",
@@ -3511,9 +3511,9 @@ dependencies = [
 
 [[package]]
 name = "test-span-macro"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1fd5d6b8ac468c44017cf9caf1b96b56c37c8a68bc87d21f53d9e3a47eb6e41"
+checksum = "7563c12f5cd1424ed95688dc89b638f96947111d6aacc84610857d1ee2a7a328"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3923,9 +3923,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77be66445c4eeebb934a7340f227bfe7b338173d3f8c00a60a5a58005c9faecf"
+checksum = "5312f325fe3588e277415f5a6cca1f4ccad0f248c4cd5a4bd33032d7286abc22"
 dependencies = [
  "ansi_term",
  "lazy_static",
