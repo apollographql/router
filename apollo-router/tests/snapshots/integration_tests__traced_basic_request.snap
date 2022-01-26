@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 76
+assertion_line: 78
 expression: get_spans()
 
 ---
@@ -11,7 +11,7 @@ expression: get_spans()
     "metadata": {
       "name": "root",
       "target": "integration_tests",
-      "level": "DEBUG",
+      "level": "INFO",
       "module_path": "integration_tests",
       "fields": {
         "names": []
@@ -19,7 +19,7 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::apollo_router::prepare_query - 1": {
+    "apollo_router::apollo_router::prepare_query": {
       "name": "apollo_router::apollo_router::prepare_query",
       "record": {
         "entries": [
@@ -39,7 +39,7 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::apollo_router::query_parsing - 2": {
+        "apollo_router::apollo_router::query_parsing": {
           "name": "apollo_router::apollo_router::query_parsing",
           "record": {
             "entries": [],
@@ -55,7 +55,7 @@ expression: get_spans()
           },
           "children": {}
         },
-        "apollo_router_core::query_planner::router_bridge_query_planner::plan - 4": {
+        "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
           "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
           "record": {
             "entries": [],
@@ -71,7 +71,7 @@ expression: get_spans()
           },
           "children": {}
         },
-        "apollo_router_core::query_planner::validate - 5": {
+        "apollo_router_core::query_planner::validate": {
           "name": "apollo_router_core::query_planner::validate",
           "record": {
             "entries": [],
@@ -89,7 +89,7 @@ expression: get_spans()
         }
       }
     },
-    "apollo_router::apollo_router::execute - 6": {
+    "apollo_router::apollo_router::execute": {
       "name": "apollo_router::apollo_router::execute",
       "record": {
         "entries": [],
@@ -104,7 +104,7 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::apollo_router::execution - 7": {
+        "apollo_router::apollo_router::execution": {
           "name": "apollo_router::apollo_router::execution",
           "record": {
             "entries": [],
@@ -119,7 +119,7 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router_core::query_planner::fetch - 8": {
+            "apollo_router_core::query_planner::fetch": {
               "name": "apollo_router_core::query_planner::fetch",
               "record": {
                 "entries": [],
@@ -134,7 +134,7 @@ expression: get_spans()
                 }
               },
               "children": {
-                "apollo_router_core::query_planner::fetch::subfetch - 9": {
+                "apollo_router_core::query_planner::fetch::subfetch": {
                   "name": "apollo_router_core::query_planner::fetch::subfetch",
                   "record": {
                     "entries": [
@@ -156,7 +156,7 @@ expression: get_spans()
                     }
                   },
                   "children": {
-                    "apollo_router_core::query_planner::fetch::make_variables - 10": {
+                    "apollo_router_core::query_planner::fetch::make_variables": {
                       "name": "apollo_router_core::query_planner::fetch::make_variables",
                       "record": {
                         "entries": [],
@@ -172,7 +172,7 @@ expression: get_spans()
                       },
                       "children": {}
                     },
-                    "apollo_router_core::query_planner::fetch::subfetch_stream - 11": {
+                    "apollo_router_core::query_planner::fetch::subfetch_stream": {
                       "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
                       "record": {
                         "entries": [],
@@ -187,7 +187,7 @@ expression: get_spans()
                         }
                       },
                       "children": {
-                        "apollo_router::http_subgraph::aggregate_response_data - 14": {
+                        "apollo_router::http_subgraph::aggregate_response_data": {
                           "name": "apollo_router::http_subgraph::aggregate_response_data",
                           "record": {
                             "entries": [],
@@ -203,7 +203,7 @@ expression: get_spans()
                           },
                           "children": {}
                         },
-                        "apollo_router::http_subgraph::parse_subgraph_response - 15": {
+                        "apollo_router::http_subgraph::parse_subgraph_response": {
                           "name": "apollo_router::http_subgraph::parse_subgraph_response",
                           "record": {
                             "entries": [],
@@ -221,7 +221,7 @@ expression: get_spans()
                         }
                       }
                     },
-                    "apollo_router_core::query_planner::fetch::response_insert - 16": {
+                    "apollo_router_core::query_planner::fetch::response_insert": {
                       "name": "apollo_router_core::query_planner::fetch::response_insert",
                       "record": {
                         "entries": [],
@@ -243,7 +243,7 @@ expression: get_spans()
             }
           }
         },
-        "apollo_router::apollo_router::format_response - 17": {
+        "apollo_router::apollo_router::format_response": {
           "name": "apollo_router::apollo_router::format_response",
           "record": {
             "entries": [],
@@ -261,7 +261,7 @@ expression: get_spans()
         }
       }
     },
-    "apollo_router::http_subgraph::aggregate_response_data - 21": {
+    "apollo_router::http_subgraph::aggregate_response_data": {
       "name": "apollo_router::http_subgraph::aggregate_response_data",
       "record": {
         "entries": [],
@@ -277,7 +277,7 @@ expression: get_spans()
       },
       "children": {}
     },
-    "apollo_router::http_subgraph::parse_subgraph_response - 22": {
+    "apollo_router::http_subgraph::parse_subgraph_response": {
       "name": "apollo_router::http_subgraph::parse_subgraph_response",
       "record": {
         "entries": [],
