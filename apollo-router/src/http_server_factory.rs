@@ -25,12 +25,12 @@ pub(crate) trait HttpServerFactory {
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         S: Clone
-            + tower::Service<http::Request<graphql::Request>, Response = graphql::RouterResponse>
+            + tower::Service<graphql::RouterRequest, Response = graphql::RouterResponse>
             + Send
             + Sync
             + 'static,
-        <S as tower::Service<http::Request<graphql::Request>>>::Future: std::marker::Send,
-        <S as tower::Service<http::Request<graphql::Request>>>::Error: std::marker::Send;
+        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
+        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.

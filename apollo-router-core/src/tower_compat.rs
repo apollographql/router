@@ -26,7 +26,7 @@ impl<R> RouterService<R> {
     }
 }
 
-impl<R> tower::Service<http::Request<Request>> for RouterService<R>
+impl<R> tower::Service<RouterRequest> for RouterService<R>
 where
     R: Router + 'static,
 {
@@ -38,9 +38,15 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: http::Request<Request>) -> Self::Future {
+    fn call(
+        &mut self,
+        RouterRequest {
+            http_request,
+            context,
+        }: RouterRequest,
+    ) -> Self::Future {
         let router = self.router.clone();
-        let context = Context::new(Arc::new(request));
+        let context = context.with_request(Arc::new(http_request));
         Box::pin(async move {
             let response = match router.prepare_query(context.clone()).await {
                 Ok(route) => route.execute(context.clone()).await,
@@ -125,10 +131,20 @@ where
 }
 
 // the parsed graphql Request, HTTP headers and contextual data for extensions
-#[derive(Clone)]
 pub struct RouterRequest {
+    pub http_request: http::Request<Request>,
+
     // Context for extension
-    pub context: Context,
+    pub context: Context<()>,
+}
+
+impl From<http::Request<Request>> for RouterRequest {
+    fn from(http_request: http::Request<Request>) -> Self {
+        Self {
+            http_request,
+            context: Context::new(),
+        }
+    }
 }
 
 pub struct PlannedRequest {
