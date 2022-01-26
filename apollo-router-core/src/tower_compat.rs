@@ -186,6 +186,11 @@ impl AsRef<Request> for Arc<http::Request<Request>> {
     }
 }
 
+// This code is inspired from:
+// https://users.rust-lang.org/t/stalemated-between-impl-and-dyn-vicious-cycle/65546/3
+//
+// I only added `clone_box()` which is itself inspired from:
+// https://docs.rs/tower/latest/src/tower/util/boxed_clone.rs.html#111-130
 pub(crate) trait DynCloneService<Request>: Send + Sync {
     type Response;
     type Error;
