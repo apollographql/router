@@ -1,6 +1,7 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use std::sync::Arc;
+use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -9,7 +10,7 @@ use tracing::Instrument;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
+    query_planner_service: QueryPlannerService<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
     service_registry: Arc<ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
@@ -53,7 +54,12 @@ impl ApolloRouter {
         // background, the next queries might be blocked until the cache is primed, so there'll be
         // a perf hit.
         if let Some(previous_router) = previous_router {
-            for (query, operation, options) in previous_router.query_planner.get_hot_keys().await {
+            for (query, operation, options) in previous_router
+                .query_planner_service
+                .get_ref()
+                .get_hot_keys()
+                .await
+            {
                 // We can ignore errors because some of the queries that were previously in the
                 // cache might not work with the new schema
                 let _ = query_planner.get(query, operation, options).await;
@@ -62,7 +68,7 @@ impl ApolloRouter {
 
         Self {
             naive_introspection,
-            query_planner,
+            query_planner_service: QueryPlannerService::new(query_planner),
             service_registry,
             query_cache: Arc::new(QueryCache::new(query_cache_limit)),
             schema,
@@ -90,13 +96,18 @@ impl Router for ApolloRouter {
             query.validate_variables(&context.request, &self.schema)?;
         }
 
-        let query_plan = self
-            .query_planner
-            .get(
-                context.request.body().query.as_str().to_owned(),
-                context.request.body().operation_name.to_owned(),
-                Default::default(),
-            )
+        let mut query_planner_service = self.query_planner_service.clone();
+        query_planner_service.ready().await?;
+        // TODO resulting context doesn't seem to be useful
+        // TODO remove QueryPlanner trait too?
+        let PlannedRequest {
+            query_plan,
+            context: _,
+        } = query_planner_service
+            .call(QueryPlannerRequest {
+                options: Default::default(),
+                context: context.clone(),
+            })
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);

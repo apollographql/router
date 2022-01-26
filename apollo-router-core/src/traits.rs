@@ -22,6 +22,7 @@ pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 ///
 /// The goal of this trait is to hide the implementation details of fetching a stream of graphql responses.
 /// We can then create multiple implementations that can be plugged into federation.
+// TODO trait should be remove if not value added
 #[async_trait]
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.

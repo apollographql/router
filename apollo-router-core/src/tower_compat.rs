@@ -136,6 +136,83 @@ where
     }
 }
 
+#[derive(Debug)]
+pub struct QueryPlannerService<Q> {
+    query_planner: Arc<Q>,
+}
+
+impl<Q> Clone for QueryPlannerService<Q> {
+    fn clone(&self) -> Self {
+        Self {
+            query_planner: self.query_planner.clone(),
+        }
+    }
+}
+
+impl<Q> QueryPlannerService<Q> {
+    pub fn new(query_planner: Arc<Q>) -> Self {
+        Self { query_planner }
+    }
+
+    pub fn into_inner(self) -> Arc<Q> {
+        self.query_planner
+    }
+
+    // TODO this should normally be called get() but it's conflicting with the trait's
+    // implementation
+    pub fn get_ref(&self) -> &Q {
+        &self.query_planner
+    }
+}
+
+impl<Q> tower::Service<QueryPlannerRequest> for QueryPlannerService<Q>
+where
+    Q: QueryPlanner + 'static,
+{
+    type Response = PlannedRequest;
+    type Error = QueryPlannerError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        task::Poll::Ready(Ok(()))
+    }
+
+    fn call(
+        &mut self,
+        QueryPlannerRequest { options, context }: QueryPlannerRequest,
+    ) -> Self::Future {
+        let query_planner = self.query_planner.clone();
+        Box::pin(async move {
+            let query_plan = query_planner
+                .get(
+                    context.request.body().query.as_str().to_owned(),
+                    context.request.body().operation_name.to_owned(),
+                    options,
+                )
+                .await?;
+            Ok(PlannedRequest {
+                query_plan,
+                context,
+            })
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl<Q> QueryPlanner for QueryPlannerService<Q>
+where
+    Q: QueryPlanner + 'static,
+{
+    async fn get(
+        &self,
+        query: String,
+        operation: Option<String>,
+        options: QueryPlanOptions,
+    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
+        self.query_planner.get(query, operation, options).await
+    }
+}
+
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
     pub http_request: http::Request<Request>,
@@ -153,18 +230,22 @@ impl From<http::Request<Request>> for RouterRequest {
     }
 }
 
+/// TODO confusing name since this is a Response
 pub struct PlannedRequest {
-    // hiding this one for now
-    // pub query_plan: QueryPlan,
+    pub query_plan: Arc<QueryPlan>,
 
-    // Cloned from RouterRequest
     pub context: Context,
 }
 
 pub struct SubgraphRequest {
     pub http_request: http::Request<Request>,
 
-    // Cloned from PlannedRequest
+    pub context: Context,
+}
+
+pub struct QueryPlannerRequest {
+    pub options: QueryPlanOptions,
+
     pub context: Context,
 }
 
