@@ -16,6 +16,6 @@ opentelemetry:
       exporter:
         http: ~
       trace_config: ~
-studio: ~
+spaceport: ~
 graph: ~
 

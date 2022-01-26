@@ -1,5 +1,5 @@
 [package]
-name = "apollo-relay"
+name = "apollo-spaceport"
 version = "0.1.0-alpha.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
@@ -34,10 +34,10 @@ tonic-build = "0.5"
 [lib]
 path = "src/lib.rs"
 
-# relay binary
+# spaceport binary
 [[bin]]
-name = "relay"
-path = "src/relay.rs"
+name = "spaceport"
+path = "src/spaceport.rs"
 
 # client binary
 [[bin]]

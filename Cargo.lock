@@ -85,34 +85,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-relay"
-version = "0.1.0-alpha.3"
-dependencies = [
- "bytes",
- "clap 3.0.10",
- "flate2",
- "prost 0.9.0",
- "prost-types 0.9.0",
- "reqwest",
- "serde",
- "serde_json",
- "sys-info",
- "tokio",
- "tonic 0.6.2",
- "tonic-build",
- "tracing",
- "tracing-subscriber",
- "uname",
-]
-
-[[package]]
 name = "apollo-router"
 version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.0 (git+https://github.com/apollographql/apollo-rs.git?rev=ff317c7e85165bb6c380284b63c55d8af877fb7b)",
- "apollo-relay",
  "apollo-router-core",
+ "apollo-spaceport",
  "async-trait",
  "atty",
  "bytes",
@@ -203,6 +182,27 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "typed-builder",
+]
+
+[[package]]
+name = "apollo-spaceport"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "bytes",
+ "clap 3.0.10",
+ "flate2",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sys-info",
+ "tokio",
+ "tonic 0.6.2",
+ "tonic-build",
+ "tracing",
+ "tracing-subscriber",
+ "uname",
 ]
 
 [[package]]

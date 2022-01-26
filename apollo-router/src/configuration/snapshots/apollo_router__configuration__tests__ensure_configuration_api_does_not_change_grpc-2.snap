@@ -47,6 +47,6 @@ opentelemetry:
                 String:
                   - value1
                   - value2
-studio: ~
+spaceport: ~
 graph: ~
 

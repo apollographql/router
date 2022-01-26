@@ -1,5 +1,5 @@
-//! Main entry point for CLI command to start relay.
-use apollo_relay::relay::ReportRelay;
+//! Main entry point for CLI command to start spaceport.
+use apollo_spaceport::spaceport::ReportSpaceport;
 use clap::Parser;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
@@ -17,8 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     tracing_subscriber::fmt::fmt().json().init();
-    let relay = ReportRelay::new(args.address.parse()?);
-    relay.serve().await?;
+    let spaceport = ReportSpaceport::new(args.address.parse()?);
+    spaceport.serve().await?;
 
     Ok(())
 }

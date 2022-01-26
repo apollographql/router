@@ -149,7 +149,7 @@ impl ReportHeader {
 }
 
 /// The Reporter accepts requests from clients to transfer statistics
-/// and traces to the Apollo Ingress relay.
+/// and traces to the Apollo Ingress spaceport.
 #[derive(Debug)]
 pub struct Reporter {
     client: ReporterClient<Channel>,
@@ -181,9 +181,9 @@ impl Reporter {
         Ok(Self { client })
     }
 
-    /// Submit these stats onto the relayer for eventual processing.
+    /// Submit these stats onto the spaceport for eventual processing.
     ///
-    /// The relayer will buffer traces and stats, transferring them when convenient.
+    /// The spaceport will buffer traces and stats, transferring them when convenient.
     pub async fn submit_stats(
         &mut self,
         graph: ReporterGraph,
@@ -199,9 +199,9 @@ impl Reporter {
             .await
     }
 
-    /// Submit this trace onto the relayer for eventual processing.
+    /// Submit this trace onto the spaceport for eventual processing.
     ///
-    /// The relayer will buffer traces and stats, transferring them when convenient.
+    /// The spaceport will buffer traces and stats, transferring them when convenient.
     pub async fn submit_trace(
         &mut self,
         graph: ReporterGraph,
@@ -218,8 +218,8 @@ impl Reporter {
     }
 }
 
-/// The relay module contains the relaying components
-pub mod relay {
+/// The spaceport module contains the spaceport components
+pub mod spaceport {
     use super::report;
     use crate::{ReporterStats, ReporterTrace, TracesAndStats};
     use bytes::BytesMut;
@@ -292,7 +292,7 @@ pub mod relay {
     }
 
     /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
-    pub struct ReportRelay {
+    pub struct ReportSpaceport {
         addr: SocketAddr,
         // This HashMap will only have a single entry if used internally from a router.
         tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
@@ -300,16 +300,16 @@ pub mod relay {
         total: AtomicU32,
     }
 
-    impl ReportRelay {
-        /// Create a new ReportRelay which is configured to serve requests at the
+    impl ReportSpaceport {
+        /// Create a new ReportSpaceport which is configured to serve requests at the
         /// supplied address
         ///
-        /// The relay will buffer data and attempt to transfer it to the Apollo Ingress
+        /// The spaceport will buffer data and attempt to transfer it to the Apollo Ingress
         /// every 5 seconds. This transfer will be triggered sooner if data is
         /// accumulating more quickly than usual.
         ///
-        /// The relay will attempt to make the transfer 5 times before failing. If
-        /// the relay fails, the data is discarded.
+        /// The spaceport will attempt to make the transfer 5 times before failing. If
+        /// the spaceport fails, the data is discarded.
         pub fn new(addr: SocketAddr) -> Self {
             // Spawn a task which will check if there are reports to
             // submit every interval.
@@ -326,10 +326,10 @@ pub mod relay {
                     tokio::select! {
                         biased;
                         mopt = rx.recv() => {
-                            tracing::trace!("relay triggered");
+                            tracing::trace!("spaceport triggered");
                             match mopt {
                                 Some(_msg) => {
-                                    for result in relay_tpq(&client, task_tpq.clone()).await {
+                                    for result in spaceport_tpq(&client, task_tpq.clone()).await {
                                         match result {
                                             Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                             Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -340,8 +340,8 @@ pub mod relay {
                             }
                         },
                         _ = interval.tick() => {
-                            tracing::trace!("relay ticked");
-                            for result in relay_tpq(&client, task_tpq.clone()).await {
+                            tracing::trace!("spaceport ticked");
+                            for result in spaceport_tpq(&client, task_tpq.clone()).await {
                                 match result {
                                     Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                     Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -460,7 +460,7 @@ pub mod relay {
     }
 
     #[tonic::async_trait]
-    impl Reporter for ReportRelay {
+    impl Reporter for ReportSpaceport {
         async fn add_stats(
             &self,
             request: Request<ReporterStats>,
@@ -480,7 +480,7 @@ pub mod relay {
         }
     }
 
-    impl ReportRelay {
+    impl ReportSpaceport {
         async fn add_stats_or_trace(
             &self,
             record: StatsOrTrace,
@@ -530,7 +530,7 @@ pub mod relay {
         }
     }
 
-    async fn relay_tpq(
+    async fn spaceport_tpq(
         client: &Client,
         task_tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
     ) -> Vec<Result<Response<ReporterResponse>, Status>> {
@@ -563,7 +563,8 @@ pub mod relay {
                         };
                         report.end_time = Some(ts_end);
 
-                        results.push(ReportRelay::submit_report(client, graph.key, report).await)
+                        results
+                            .push(ReportSpaceport::submit_report(client, graph.key, report).await)
                     }
                     Err(e) => {
                         results.push(Err(Status::internal(e.to_string())));

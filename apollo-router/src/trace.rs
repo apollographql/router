@@ -29,8 +29,12 @@ pub(crate) fn try_initialize_subscriber(
         .json()
         .finish();
 
-    tracing::info!("studio: {:?}, graph: {:?}", config.studio, config.graph);
-    let studio_config = &config.studio;
+    tracing::info!(
+        "spaceport: {:?}, graph: {:?}",
+        config.spaceport,
+        config.graph
+    );
+    let spaceport_config = &config.spaceport;
     let graph_config = &config.graph;
 
     match config.opentelemetry.as_ref() {
@@ -68,18 +72,18 @@ pub(crate) fn try_initialize_subscriber(
             if let Some(trace_config) = &config.trace_config {
                 builder = builder.with_config(trace_config.trace_config());
             }
-            // If we have apollo studio graph configuration, then we can export statistics
+            // If we have apollo graph configuration, then we can export statistics
             // to the apollo ingress. If we don't, we can't and so no point configuring the
             // exporter.
             if graph_config.is_some() {
                 let apollo_exporter = match new_pipeline()
-                    .with_studio_config(studio_config)
+                    .with_spaceport_config(spaceport_config)
                     .with_graph_config(graph_config)
                     .get_exporter()
                 {
                     Ok(x) => x,
                     Err(e) => {
-                        tracing::error!("error installing studio telemetry: {}", e);
+                        tracing::error!("error installing spaceport telemetry: {}", e);
                         return Err(Box::new(e));
                     }
                 };
@@ -124,15 +128,15 @@ pub(crate) fn try_initialize_subscriber(
         }
         None => {
             if graph_config.is_some() {
-                // Add studio agent as an OT pipeline
+                // Add spaceport agent as an OT pipeline
                 let tracer = match new_pipeline()
-                    .with_studio_config(studio_config)
+                    .with_spaceport_config(spaceport_config)
                     .with_graph_config(graph_config)
                     .install_batch()
                 {
                     Ok(t) => t,
                     Err(e) => {
-                        tracing::error!("error installing studio telemetry: {}", e);
+                        tracing::error!("error installing spaceport telemetry: {}", e);
                         return Err(Box::new(e));
                     }
                 };

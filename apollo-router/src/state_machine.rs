@@ -4,9 +4,9 @@ use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::{Configuration, StudioUsage};
-use apollo_relay::relay::ReportRelay;
+use crate::configuration::{Configuration, SpaceportConfig};
 use apollo_router_core::prelude::*;
+use apollo_spaceport::spaceport::ReportSpaceport;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
@@ -90,20 +90,20 @@ async fn do_nothing(_addr_str: String) -> bool {
 
 // For use when we have an internal collector.
 async fn do_listen(addr_str: String) -> bool {
-    tracing::info!("spawning an internal relay");
-    // Spawn a server to relay statistics
+    tracing::info!("spawning an internal spaceport");
+    // Spawn a spaceport server to handle statistics
     let addr = match addr_str.parse() {
         Ok(a) => a,
         Err(e) => {
-            tracing::error!("could not parse relay address: {}", e);
+            tracing::error!("could not parse spaceport address: {}", e);
             return false;
         }
     };
 
-    let relay = ReportRelay::new(addr);
+    let spaceport = ReportSpaceport::new(addr);
 
-    if let Err(e) = relay.serve().await {
-        tracing::error!("relay did not terminate normally: {}", e);
+    if let Err(e) = spaceport.serve().await {
+        tracing::error!("spaceport did not terminate normally: {}", e);
         return false;
     }
     true
@@ -134,8 +134,8 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
-        // Studio Agent Relay listener
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<StudioUsage>(1);
+        // Studio Agent Spaceport listener
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
 
         tokio::spawn(async move {
             let mut current_listener = "".to_string();
@@ -154,7 +154,7 @@ where
                                 // Save our target listener for later use
                                 current_listener = msg.listener.clone();
                                 // Configure which function to call
-                                if msg.external_relay {
+                                if msg.external {
                                     current_operation = |msg| Box::pin(do_nothing(msg));
                                 } else {
                                     current_operation = |msg| Box::pin(do_listen(msg));
@@ -172,7 +172,7 @@ where
                     }
                 };
             }
-            tracing::info!("terminating relay loop");
+            tracing::info!("terminating spaceport loop");
         });
 
         let mut state = Startup {
@@ -203,16 +203,16 @@ where
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
                     // Only check for notify if we have graph configuration
                     if new_configuration.graph.is_some() {
-                        match &new_configuration.studio {
+                        match &new_configuration.spaceport {
                             Some(v) => {
                                 tx.send(v.clone())
                                     .await
-                                    .map_err(FederatedServerError::ServerRelayError)?;
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
                             }
                             None => {
                                 tx.send(Default::default())
                                     .await
-                                    .map_err(FederatedServerError::ServerRelayError)?;
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
                             }
                         }
                     }
@@ -340,16 +340,16 @@ where
                         Ok(()) => {
                             // Only check for notify if we have graph configuration
                             if new_configuration.graph.is_some() {
-                                match &new_configuration.studio {
+                                match &new_configuration.spaceport {
                                     Some(v) => {
                                         tx.send(v.clone())
                                             .await
-                                            .map_err(FederatedServerError::ServerRelayError)?;
+                                            .map_err(FederatedServerError::ServerSpaceportError)?;
                                     }
                                     None => {
                                         tx.send(Default::default())
                                             .await
-                                            .map_err(FederatedServerError::ServerRelayError)?;
+                                            .map_err(FederatedServerError::ServerSpaceportError)?;
                                     }
                                 }
                             }

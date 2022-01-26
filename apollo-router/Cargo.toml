@@ -69,7 +69,7 @@ tracing-subscriber = { version = "0.3.7", features = ["json"] }
 
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
-apollo-relay = { path = "../apollo-relay" }
+apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }

@@ -28,6 +28,6 @@ opentelemetry:
             key:
               file: /bar
       trace_config: ~
-studio: ~
+spaceport: ~
 graph: ~
 

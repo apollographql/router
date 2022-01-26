@@ -69,7 +69,7 @@ pub struct Configuration {
     /// Studio Usage configuration.
     #[serde(default)]
     #[builder(default)]
-    pub studio: Option<StudioUsage>,
+    pub spaceport: Option<SpaceportConfig>,
 
     /// Studio Graph configuration.
     #[serde(default)]
@@ -233,8 +233,8 @@ fn default_listener() -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct StudioUsage {
-    pub(crate) external_relay: bool,
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
 
     #[serde(default = "default_collector")]
     pub(crate) collector: String,
@@ -251,12 +251,12 @@ pub struct StudioGraph {
     pub(crate) key: String,
 }
 
-impl Default for StudioUsage {
+impl Default for SpaceportConfig {
     fn default() -> Self {
         Self {
             collector: default_collector(),
             listener: default_listener(),
-            external_relay: false,
+            external: false,
         }
     }
 }

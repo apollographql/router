@@ -5,8 +5,8 @@
 //!
 //! [`SpanExporter`]: super::SpanExporter
 //! [`Span`]: crate::trace::Span
-//! [`Report`]: apollo_relay::report::Report
-//! [`Reporter`]: apollo_relay::Reporter
+//! [`Report`]: apollo_spaceport::report::Report
+//! [`Reporter`]: apollo_spaceport::Reporter
 //!
 //! # Examples
 //!
@@ -27,8 +27,8 @@
 //! }
 //! ```
 use apollo_parser::{ast, Parser};
-use apollo_relay::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
-use apollo_relay::{Reporter, ReporterGraph};
+use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
+use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
 use once_cell::sync::OnceCell;
 use opentelemetry::{
@@ -47,7 +47,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 use tokio::task::JoinError;
 
-use crate::configuration::{StudioGraph, StudioUsage};
+use crate::configuration::{SpaceportConfig, StudioGraph};
 
 pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.0:50051";
 pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
@@ -56,7 +56,7 @@ pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
 #[derive(Debug)]
 pub struct PipelineBuilder {
     graph_config: Option<StudioGraph>,
-    studio_config: Option<StudioUsage>,
+    spaceport_config: Option<SpaceportConfig>,
     trace_config: Option<sdk::trace::Config>,
 }
 
@@ -70,7 +70,7 @@ impl Default for PipelineBuilder {
     fn default() -> Self {
         Self {
             graph_config: None,
-            studio_config: None,
+            spaceport_config: None,
             trace_config: None,
         }
     }
@@ -90,9 +90,9 @@ impl PipelineBuilder {
         self
     }
 
-    /// Assign studio reporting configuration
-    pub fn with_studio_config(mut self, config: &Option<StudioUsage>) -> Self {
-        self.studio_config = config.clone();
+    /// Assign spaceport reporting configuration
+    pub fn with_spaceport_config(mut self, config: &Option<SpaceportConfig>) -> Self {
+        self.spaceport_config = config.clone();
         self
     }
 
@@ -146,9 +146,9 @@ impl PipelineBuilder {
         Ok(tracer)
     }
 
-    /// Create a client to talk to our relay and return an exporter.
+    /// Create a client to talk to our spaceport and return an exporter.
     pub fn get_exporter(&self) -> Result<Exporter, ApolloError> {
-        let collector = match self.studio_config.clone() {
+        let collector = match self.spaceport_config.clone() {
             Some(cfg) => cfg.collector,
             None => DEFAULT_SERVER_URL.to_string(),
         };
@@ -164,7 +164,7 @@ impl PipelineBuilder {
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
-/// [`Reporter`]: apollo_relay::Reporter
+/// [`Reporter`]: apollo_spaceport::Reporter
 #[derive(Debug)]
 pub struct Exporter {
     collector: String,
@@ -181,7 +181,7 @@ impl Exporter {
 /// Apollo Telemetry exporter's error
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct ApolloError(#[from] apollo_relay::ReporterError);
+pub struct ApolloError(#[from] apollo_spaceport::ReporterError);
 
 impl From<std::io::Error> for ApolloError {
     fn from(error: std::io::Error) -> Self {
@@ -226,7 +226,7 @@ impl SpanExporter for Exporter {
             .await
             .map_err::<ApolloError, _>(Into::into)?;
         /*
-         * Break down batch and send to studio
+         * Break down batch and send to spaceport
          */
         for (index, span) in batch.into_iter().enumerate() {
             tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
