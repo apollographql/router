@@ -408,9 +408,25 @@ pub mod relay {
             for i in 0..4 {
                 // We know these requests can be cloned
                 let my_req = req.try_clone().expect("requests must be clone-able");
-                let res = client.execute(my_req).await;
-                match res {
-                    Ok(_v) => break,
+                match client.execute(my_req).await {
+                    Ok(v) => {
+                        let data = v
+                            .text()
+                            .await
+                            .map_err(|e| Status::internal(e.to_string()))?;
+                        tracing::debug!("text: {:?}", data);
+                        /*
+                        let ar: ApolloResponse = v
+                            .json()
+                            .await
+                            .map_err(|e| Status::internal(e.to_string()))?;
+                        tracing::debug!("json: {:?}", ar);
+                        */
+                        let response = ReporterResponse {
+                            message: "Report accepted".to_string(),
+                        };
+                        return Ok(Response::new(response));
+                    }
                     Err(e) => {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
                         backoff += Duration::from_millis(50);
@@ -418,28 +434,28 @@ pub mod relay {
                     }
                 }
             }
-            // Final attempt to transfer, if fails report error
-            let res = client
-                .execute(req)
-                .await
-                .map_err(|e| Status::unavailable(e.to_string()))?;
-            tracing::debug!("result: {:?}", res);
-            let data = res
-                .text()
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            tracing::debug!("text: {:?}", data);
-            /*
-            let ar: ApolloResponse = res
-                .json()
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            tracing::debug!("json: {:?}", ar);
-            */
-            let response = ReporterResponse {
-                message: "Report accepted".to_string(),
-            };
-            Ok(Response::new(response))
+            // One last try to transfer, if fail, report unavailable
+            match client.execute(req).await {
+                Ok(v) => {
+                    let data = v
+                        .text()
+                        .await
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                    tracing::debug!("text: {:?}", data);
+                    /*
+                    let ar: ApolloResponse = v
+                        .json()
+                        .await
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                    tracing::debug!("json: {:?}", ar);
+                    */
+                    let response = ReporterResponse {
+                        message: "Report accepted".to_string(),
+                    };
+                    Ok(Response::new(response))
+                }
+                Err(e) => Err(Status::unavailable(e.to_string())),
+            }
         }
     }
 
