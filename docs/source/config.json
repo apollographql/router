@@ -1,12 +1,9 @@
 {
   "title": "Apollo Router",
   "sidebar": {
-    "Introduction": "/",
-    "Get started": "/get-started",
-    "Why Apollo Client?": "/why-apollo",
-    "Caching": {
-      "Advanced topics": "/caching/advanced-topics",
-      "Overview": "/caching/overview"
-    }
+    "🔭 Introduction": "/",
+    "🚀 Quickstart": "/quickstart",
+    "⚙️ Usage and config": "/configuration",
+    "🛠 Build from source": "/build-from-source"
   }
 }
