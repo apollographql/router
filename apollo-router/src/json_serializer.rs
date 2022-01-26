@@ -907,6 +907,301 @@ async fn write_char_escape4(w: &mut BytesAcc, char_escape: CharEscape) {
     w.write_buf(&s[..]).await;
 }
 
+pub fn make_body5(value: Value) -> hyper::Body {
+    let (mut acc, receiver) = BytesAcc2::new(2048, 10);
+    //let (mut write, read) = mpsc::channel(1024);
+    tokio::task::spawn_blocking(move || {
+        sync_serialize5(value, &mut acc);
+        acc.flush();
+    });
+
+    hyper::Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(receiver))
+}
+
+struct BytesAcc2 {
+    sender: Sender<Result<Bytes, io::Error>>,
+    buffer: Option<BytesMut>,
+    buffer_capacity: usize,
+}
+
+impl BytesAcc2 {
+    pub fn new(
+        buffer_capacity: usize,
+        channel_capacity: usize,
+    ) -> (Self, mpsc::Receiver<Result<Bytes, io::Error>>) {
+        let (sender, receiver) = mpsc::channel(channel_capacity);
+
+        (
+            BytesAcc2 {
+                sender,
+                buffer: None,
+                buffer_capacity,
+            },
+            receiver,
+        )
+    }
+
+    fn capacity(&self) -> usize {
+        self.buffer_capacity
+    }
+}
+
+impl BytesAcc2 {
+    fn write(&mut self, s: &str) {
+        self.write_buf(s.as_bytes());
+    }
+
+    fn write_buf(&mut self, mut buf: &[u8]) {
+        let mut buffer = match self.buffer.take() {
+            Some(buf) => buf,
+            None => BytesMut::with_capacity(self.buffer_capacity),
+        };
+
+        let mut size = 0;
+        loop {
+            let to_write = min(buf.len(), buffer.capacity() - buffer.len());
+            let mut writer = buffer.writer();
+
+            let sz = writer.write(&buf[..to_write]).unwrap();
+            size += sz;
+
+            buffer = writer.into_inner();
+
+            if buffer.capacity() - buffer.len() > 0 {
+                self.buffer = Some(buffer);
+                //println!("wrote {} bytes", size);
+                //return Ok(size);
+                return;
+            } else {
+                /*println!(
+                    "=======> will send {}",
+                    std::str::from_utf8(&buffer).unwrap()
+                );*/
+                self.sender.blocking_send(Ok(buffer.freeze())).unwrap();
+
+                if sz == buf.len() {
+                    //println!("wrote {} bytes", size);
+                    //return Ok(size);
+                    return;
+                } else {
+                    buf = &buf[sz..];
+                    buffer = BytesMut::with_capacity(self.buffer_capacity);
+                }
+            }
+        }
+    }
+
+    fn write_bytes(&mut self, bytes: Bytes) {
+        let mut buffer = match self.buffer.take() {
+            Some(buf) => buf,
+            None => BytesMut::with_capacity(self.buffer_capacity),
+        };
+
+        // large strings: send them directly
+        if bytes.len() > self.buffer_capacity {
+            if !buffer.is_empty() {
+                /*println!(
+                    "=======> will send {}",
+                    std::str::from_utf8(&buffer).unwrap()
+                );*/
+                self.sender.blocking_send(Ok(buffer.freeze())).unwrap();
+                buffer = BytesMut::with_capacity(self.buffer_capacity);
+            }
+
+            /*println!(
+                "=======> will send {}",
+                std::str::from_utf8(&bytes).unwrap()
+            );*/
+            self.sender.blocking_send(Ok(bytes)).unwrap();
+        } else {
+            let mut buf = &bytes[..];
+
+            let mut size = 0;
+            loop {
+                let to_write = min(buf.len(), buffer.capacity() - buffer.len());
+                let mut writer = buffer.writer();
+
+                let sz = writer.write(&buf[..to_write]).unwrap();
+                size += sz;
+
+                buffer = writer.into_inner();
+
+                if buffer.capacity() - buffer.len() > 0 {
+                    self.buffer = Some(buffer);
+                    //println!("wrote {} bytes", size);
+                    //return Ok(size);
+                    return;
+                } else {
+                    /*println!(
+                        "=======> will send {}",
+                        std::str::from_utf8(&bytes).unwrap()
+                    );*/
+                    self.sender.blocking_send(Ok(buffer.freeze())).unwrap();
+
+                    if sz == buf.len() {
+                        //println!("wrote {} bytes", size);
+                        //return Ok(size);
+                        return;
+                    } else {
+                        buf = &buf[sz..];
+                        buffer = BytesMut::with_capacity(self.buffer_capacity);
+                    }
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if let Some(buffer) = self.buffer.take() {
+            /*println!(
+                "=======> will send {}",
+                std::str::from_utf8(&buffer).unwrap()
+            );*/
+            self.sender.blocking_send(Ok(buffer.freeze())).unwrap();
+        }
+    }
+}
+
+fn sync_serialize5(value: Value, w: &mut BytesAcc2) {
+    match value {
+        Value::Null => {
+            w.write("null");
+        }
+        Value::Bool(b) => {
+            if b {
+                w.write("true");
+            } else {
+                w.write("false");
+            }
+        }
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                let mut buffer = itoa::Buffer::new();
+                let s = buffer.format(i);
+
+                w.write(s);
+            } else if let Some(u) = n.as_u64() {
+                let mut buffer = itoa::Buffer::new();
+                let s = buffer.format(u);
+
+                w.write(s);
+            } else if let Some(f) = n.as_f64() {
+                let mut buffer = ryu::Buffer::new();
+                let s = buffer.format_finite(f);
+
+                w.write(s);
+            } else {
+            }
+        }
+        Value::String(s) => sync_serialize_bytestring5(s, w),
+        Value::Array(a) => {
+            w.write("[");
+
+            let mut it = a.into_iter();
+
+            if let Some(v) = it.next() {
+                sync_serialize5(v, w);
+
+                for v in it {
+                    w.write(",");
+                    sync_serialize5(v, w);
+                }
+            }
+
+            w.write("]");
+        }
+        Value::Object(o) => {
+            w.write("{");
+
+            let mut it = o.into_iter();
+
+            if let Some((key, v)) = it.next() {
+                sync_serialize_bytestring5(key, w);
+
+                w.write(":");
+                sync_serialize5(v, w);
+
+                for (key, v) in it {
+                    w.write(",");
+
+                    sync_serialize_bytestring5(key, w);
+                    w.write(":");
+                    sync_serialize5(v, w);
+                }
+            }
+
+            w.write("}");
+        }
+    }
+}
+
+fn sync_serialize_bytestring5(s: ByteString, w: &mut BytesAcc2) {
+    w.write("\"");
+
+    let bytes = s.as_str().as_bytes();
+    let mut start = 0;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        let escape = ESCAPE[byte as usize];
+        if escape == 0 {
+            continue;
+        }
+
+        if start < i {
+            if i - start > w.capacity() {
+                w.write_bytes(s.inner().slice(start..i));
+            } else {
+                w.write_buf(&bytes[start..i]);
+            }
+        }
+
+        let char_escape = from_escape_table(escape, byte);
+        write_char_escape5(w, char_escape);
+
+        start = i + 1;
+    }
+
+    if start != bytes.len() {
+        if bytes.len() - start > w.capacity() {
+            w.write_bytes(s.inner().slice(start..));
+        } else {
+            w.write_buf(&bytes[start..]);
+        }
+    }
+
+    w.write("\"");
+}
+
+fn write_char_escape5(w: &mut BytesAcc2, char_escape: CharEscape) {
+    use CharEscape::*;
+
+    let s = match char_escape {
+        Quote => b"\\\"",
+        ReverseSolidus => b"\\\\",
+        Solidus => b"\\/",
+        Backspace => b"\\b",
+        FormFeed => b"\\f",
+        LineFeed => b"\\n",
+        CarriageReturn => b"\\r",
+        Tab => b"\\t",
+        AsciiControl(byte) => {
+            static HEX_DIGITS: [u8; 16] = *b"0123456789abcdef";
+            let bytes = &[
+                b'\\',
+                b'u',
+                b'0',
+                b'0',
+                HEX_DIGITS[(byte >> 4) as usize],
+                HEX_DIGITS[(byte & 0xF) as usize],
+            ];
+
+            return w.write_buf(&bytes[..]);
+        }
+    };
+
+    w.write_buf(&s[..]);
+}
+
 fn from_escape_table(escape: u8, byte: u8) -> CharEscape {
     match escape {
         self::BB => CharEscape::Backspace,
