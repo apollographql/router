@@ -30,6 +30,7 @@ use apollo_parser::{ast, Parser};
 use apollo_relay::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_relay::{Reporter, ReporterGraph};
 use async_trait::async_trait;
+use once_cell::sync::OnceCell;
 use opentelemetry::{
     global,
     runtime::Tokio,
@@ -228,7 +229,6 @@ impl SpanExporter for Exporter {
          * Break down batch and send to studio
          */
         for (index, span) in batch.into_iter().enumerate() {
-            // tracing::debug!("index: {}, span: {:?}", index, span);
             tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
             if span.name == "graphql_request" {
                 tracing::debug!("span: {:?}", span);
@@ -335,21 +335,32 @@ struct DurationHistogram {
     buckets: Vec<i64>,
 }
 
+static EXPONENT_LOG: OnceCell<f64> = OnceCell::new();
+
 impl DurationHistogram {
+    const DEFAULT_SIZE: usize = 74; // Taken from TS implementation
+    const MAXIMUM_SIZE: usize = 383; // Taken from TS implementation
+
     fn new(init_size: Option<usize>) -> Self {
         Self {
-            buckets: vec![0; init_size.unwrap_or(74)],
+            buckets: vec![0; init_size.unwrap_or(DurationHistogram::DEFAULT_SIZE)],
         }
     }
 
     fn duration_to_bucket(duration: Duration) -> usize {
-        let log_duration = f64::log2((duration.as_nanos() as f64) / 1000.0);
-        let unbounded_bucket = f64::ceil(log_duration / f64::log2(1.1));
+        // If you use as_micros() here to avoid the divide, tests will fail
+        // Because, internally, as_micros() is losing remainders
+        let log_duration = f64::log2(duration.as_nanos() as f64 / 1000.0);
+        let unbounded_bucket =
+            f64::ceil(log_duration / EXPONENT_LOG.get_or_init(|| f64::log2(1.1)));
+
         if unbounded_bucket.is_nan() || unbounded_bucket <= 0f64 {
             return 0;
-        } else if unbounded_bucket >= 384.0 {
-            return 383;
+        } else if unbounded_bucket > DurationHistogram::MAXIMUM_SIZE as f64 {
+            return DurationHistogram::MAXIMUM_SIZE;
         }
+
+        println!("unbounded_bucket: {}", unbounded_bucket);
         unbounded_bucket as usize
     }
 
@@ -358,7 +369,7 @@ impl DurationHistogram {
     }
 
     fn increment_bucket(&mut self, bucket: usize, value: i64) {
-        if bucket >= 384 {
+        if bucket > DurationHistogram::MAXIMUM_SIZE {
             panic!("bucket is out of bounds of the bucket array");
         }
         if bucket >= self.buckets.len() {
@@ -374,6 +385,8 @@ mod test {
     use std::borrow::Cow;
 
     // Tests ported from TypeScript implementation in Apollo Server
+
+    // Normalization tests
 
     #[test]
     // #[tracing_test::traced_test]
@@ -437,5 +450,123 @@ fragment Baz on User {
 "#;
         let normalized = normalize(None, q);
         insta::assert_snapshot!(normalized);
+    }
+
+    // DurationHistogram Tests
+
+    impl DurationHistogram {
+        fn to_array(&self) -> Vec<i64> {
+            let mut result = vec![];
+            let mut buffered_zeroes = 0;
+
+            for value in &self.buckets {
+                if *value == 0 {
+                    buffered_zeroes += 1;
+                } else {
+                    if buffered_zeroes == 1 {
+                        result.push(0);
+                    } else if buffered_zeroes != 0 {
+                        result.push(0 - buffered_zeroes);
+                    }
+                    result.push(*value);
+                    buffered_zeroes = 0;
+                }
+            }
+            result
+        }
+    }
+
+    #[test]
+    fn it_generates_empty_histogram() {
+        let histogram = DurationHistogram::new(None);
+        let expected: Vec<i64> = vec![];
+        assert_eq!(histogram.to_array(), expected);
+    }
+
+    #[test]
+    fn it_generates_populated_histogram() {
+        let mut histogram = DurationHistogram::new(None);
+        histogram.increment_bucket(100, 1);
+        assert_eq!(histogram.to_array(), vec![-100, 1]);
+        histogram.increment_bucket(102, 1);
+        assert_eq!(histogram.to_array(), vec![-100, 1, 0, 1]);
+        histogram.increment_bucket(382, 1);
+        assert_eq!(histogram.to_array(), vec![-100, 1, 0, 1, -279, 1]);
+    }
+
+    #[test]
+    fn it_buckets_to_zero_and_one() {
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(0)),
+            0
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1)),
+            0
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(999)),
+            0
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1000)),
+            0
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1001)),
+            1
+        );
+    }
+
+    #[test]
+    fn it_buckets_to_one_and_two() {
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1100)),
+            1
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1101)),
+            2
+        );
+    }
+
+    #[test]
+    fn it_buckets_to_threshold() {
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(10000)),
+            25
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(10834)),
+            25
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(10835)),
+            26
+        );
+    }
+
+    #[test]
+    fn it_buckets_common_times() {
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1e5 as u64)),
+            49
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1e6 as u64)),
+            73
+        );
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1e9 as u64)),
+            145
+        );
+    }
+
+    #[test]
+    fn it_limits_to_last_bucket() {
+        assert_eq!(
+            DurationHistogram::duration_to_bucket(Duration::from_nanos(1e64 as u64)),
+            DurationHistogram::MAXIMUM_SIZE
+        );
     }
 }
