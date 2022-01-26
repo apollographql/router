@@ -1,11 +1,11 @@
 use apollo_router::ApolloRouter;
 use apollo_router_core::{
-    ByteString, FetchError, Fetcher, PreparedQuery, Request, Response, Router, ServiceRegistry,
-    Value,
+    FetchError, Fetcher, PreparedQuery, Request, Response, Router, ServiceRegistry, Value,
 };
 use async_trait::async_trait;
 use criterion::{criterion_group, criterion_main, Criterion};
 use once_cell::sync::OnceCell;
+use serde_json_bytes::ByteString;
 use std::sync::Arc;
 
 macro_rules! generate_registry {
