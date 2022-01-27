@@ -97,6 +97,10 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
 
+### Troubleshoot
+
++ If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.
+
 ## Project maintainers
 
 Apollo Graph, Inc.
