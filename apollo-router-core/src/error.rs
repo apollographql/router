@@ -103,7 +103,7 @@ impl FetchError {
             label: Default::default(),
             data: Default::default(),
             path: Default::default(),
-            has_next: primary.then(|| false),
+            has_next: (!primary).then(|| true),
             errors: vec![self.to_graphql_error(None)],
             extensions: Default::default(),
         }
