@@ -11,11 +11,13 @@ mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
+use crate::future::BoxFuture;
 use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
+use apollo_router_core::{RouterRequest, RouterResponse, SubgraphRequest};
 use configuration::Configuration;
 use derivative::Derivative;
 use derive_more::Display;
@@ -32,6 +34,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
+use tower::util::BoxService;
+use tower::BoxError;
 use typed_builder::TypedBuilder;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
@@ -302,14 +306,14 @@ impl ShutdownKind {
 ///
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::FederatedServer;
+/// use apollo_router::ApolloRouter;
 /// use apollo_router::ShutdownKind;
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = FederatedServer::builder()
+///     let server = ApolloRouter::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
@@ -321,14 +325,14 @@ impl ShutdownKind {
 /// Shutdown via handle.
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::FederatedServer;
+/// use apollo_router::ApolloRouter;
 /// use apollo_router::ShutdownKind;
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = FederatedServer::builder()
+///     let server = ApolloRouter::builder()
 ///             .configuration(configuration)
 ///             .schema(schema)
 ///             .shutdown(ShutdownKind::CtrlC)
@@ -340,7 +344,7 @@ impl ShutdownKind {
 ///
 #[derive(TypedBuilder, Debug)]
 #[builder(field_defaults(setter(into)))]
-pub struct FederatedServer {
+pub struct ApolloRouter {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
 
@@ -458,7 +462,7 @@ impl Future for FederatedServerHandle {
     }
 }
 
-impl FederatedServer {
+impl ApolloRouter {
     /// Start the federated server on a separate thread.
     ///
     /// The returned handle allows the user to await until the server is ready and shutdown.
@@ -529,7 +533,7 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
-        FederatedServer::builder()
+        ApolloRouter::builder()
             .configuration(configuration)
             .schema(Box::new(schema))
             .build()
