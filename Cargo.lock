@@ -149,6 +149,7 @@ dependencies = [
  "futures",
  "once_cell",
  "serde_json",
+ "serde_json_bytes",
  "tokio",
  "tracing-subscriber",
 ]
@@ -251,9 +252,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.3.8"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5443ccbb270374a2b1055fc72da40e1f237809cd6bb0e97e66d264cd138473a6"
+checksum = "795814bc6dce6c2e6af7e6aa5a96d99543c88808596300dbfb56372b4456f689"
 dependencies = [
  "brotli",
  "flate2",
@@ -407,9 +408,9 @@ dependencies = [
 
 [[package]]
 name = "async-task"
-version = "4.0.3"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91831deabf0d6d7ec49552e489aed63b7456a7a3c46cff62adad428110b0af0"
+checksum = "677d306121baf53310a3fd342d88dc0824f6bbeace68347593658525565abee8"
 
 [[package]]
 name = "async-trait"
@@ -1882,9 +1883,9 @@ checksum = "db13adb97ab515a3691f56e4dbab09283d0b86cb45abd991d8634a9d6f501760"
 
 [[package]]
 name = "libc"
-version = "0.2.113"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
+checksum = "b0005d08a8f7b65fb8073cb697aa0b12b631ed251ce73d862ce50eeb52ce3b50"
 
 [[package]]
 name = "libnghttp2-sys"
@@ -3152,9 +3153,9 @@ dependencies = [
 
 [[package]]
 name = "serde_test"
-version = "1.0.135"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f822485db18894f1c1d904cae2e9769c178b3129a90d85c518ce47546c68daf"
+checksum = "21675ba6f9d97711cc00eee79d8dd7d0a31e571c350fb4d8a7c78f70c0e7b0e9"
 dependencies = [
  "serde",
 ]
