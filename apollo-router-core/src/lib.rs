@@ -33,8 +33,8 @@ mod query_planner;
 mod request;
 mod response;
 mod service_registry;
+mod services;
 mod spec;
-mod tower_compat;
 mod traits;
 
 pub use cache::*;
@@ -48,8 +48,8 @@ pub use query_planner::*;
 pub use request::*;
 pub use response::*;
 pub use service_registry::*;
+pub use services::*;
 pub use spec::*;
-pub use tower_compat::*;
 pub use traits::*;
 
 pub mod prelude {
