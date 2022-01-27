@@ -19,7 +19,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
     http::{header::HeaderMap, StatusCode, Uri},
-    hyper::{Body, Response},
+    hyper::Response,
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -291,7 +291,7 @@ where
     });
 
     async move {
-        let response = stream_request7(router, request)
+        let response = stream_request(router, request)
             .instrument(tracing::info_span!("graphql_request"))
             .await;
 
@@ -309,117 +309,10 @@ where
 {
     let response = match router.prepare_query(&request).await {
         Ok(route) => route.execute(request).await,
-        Err(response) => response,
-    };
-
-    let span = Span::current();
-    tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-        Body::from(
-            serde_json::to_string(&response)
-                .expect("serde_json::Value serialization will not fail"),
-        )
-    })
-}
-
-async fn stream_request2<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
 
-    let (writer, rx) = crate::json_serializer::BytesWriter::new(2048, 10);
-    let _jh = tokio::task::spawn_blocking(move || writer.serialize(response));
-
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-    let s = stream.map(|bytes| Ok::<Bytes, serde_json::Error>(bytes));
-    Body::wrap_stream(s)
-}
-
-async fn stream_request3<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
-
-    crate::json_serializer::make_body(response.to_value())
-}
-
-async fn stream_request4<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
-
-    crate::json_serializer::make_body2(response.to_value())
-}
-
-async fn stream_request5<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
-
-    crate::json_serializer::make_body3(response.to_value())
-}
-
-async fn stream_request6<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
-
-    crate::json_serializer::make_body4(response.to_value())
-}
-
-async fn stream_request7<Router, PreparedQuery>(
-    router: Arc<Router>,
-    request: graphql::Request,
-) -> hyper::Body
-where
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    let response = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
-
-    crate::json_serializer::make_body5(response.to_value())
+    crate::json_serializer::make_body(response.to_value()).await
 }
 
 fn prefers_html(accept_header: String) -> bool {
