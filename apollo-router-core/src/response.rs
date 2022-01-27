@@ -64,7 +64,9 @@ impl Response {
             map.insert("label", Value::String(label.into()));
         }
 
-        map.insert("data", self.data);
+        if !self.data.is_null() {
+            map.insert("data", self.data);
+        }
 
         if let Some(path) = self.path {
             map.insert("path", Value::String(path.to_string().into()));
@@ -74,17 +76,21 @@ impl Response {
             map.insert("has_next", Value::Bool(has_next));
         }
 
-        map.insert(
-            "errors",
-            Value::Array(
-                self.errors
-                    .into_iter()
-                    .map(|e| serde_json_bytes::to_value(e).unwrap())
-                    .collect(),
-            ),
-        );
+        if !self.errors.is_empty() {
+            map.insert(
+                "errors",
+                Value::Array(
+                    self.errors
+                        .into_iter()
+                        .map(|e| serde_json_bytes::to_value(e).unwrap())
+                        .collect(),
+                ),
+            );
+        }
 
-        map.insert("extensions", Value::Object(self.extensions));
+        if !self.extensions.is_empty() {
+            map.insert("extensions", Value::Object(self.extensions));
+        }
 
         Value::Object(map)
     }
