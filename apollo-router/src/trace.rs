@@ -16,9 +16,6 @@ use crate::{
 pub(crate) fn try_initialize_subscriber(
     config: &Configuration,
 ) -> Result<Arc<dyn tracing::Subscriber + Send + Sync + 'static>, Box<dyn std::error::Error>> {
-    // XXX Seems bogus that we have set a subscriber in src/main.rs and yet
-    // create another one here that may/will have a different configuration.
-    // We should check if there is one and if not, make this the default...
     let subscriber = tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::new(
             GLOBAL_ENV_FILTER
@@ -26,7 +23,6 @@ pub(crate) fn try_initialize_subscriber(
                 .map(|x| x.as_str())
                 .unwrap_or("info"),
         ))
-        .json()
         .finish();
 
     tracing::info!(
