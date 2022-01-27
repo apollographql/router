@@ -1,217 +1,11 @@
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
+use static_assertions::assert_impl_all;
 use std::sync::Arc;
-use std::task;
-
-#[derive(Debug)]
-pub struct RouterService<R> {
-    router: Arc<R>,
-}
-
-impl<R> Clone for RouterService<R> {
-    fn clone(&self) -> Self {
-        Self {
-            router: self.router.clone(),
-        }
-    }
-}
-
-impl<R> RouterService<R> {
-    pub fn new(router: Arc<R>) -> Self {
-        Self { router }
-    }
-
-    pub fn into_inner(self) -> Arc<R> {
-        self.router
-    }
-}
-
-impl<R> tower::Service<RouterRequest> for RouterService<R>
-where
-    R: Router + 'static,
-{
-    type Response = RouterResponse;
-    type Error = ();
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
-        task::Poll::Ready(Ok(()))
-    }
-
-    fn call(
-        &mut self,
-        RouterRequest {
-            http_request,
-            context,
-        }: RouterRequest,
-    ) -> Self::Future {
-        let router = self.router.clone();
-        let context = context.with_request(Arc::new(http_request));
-        Box::pin(async move {
-            let response = match router.prepare_query(context.clone()).await {
-                Ok(route) => route.execute(context.clone()).await,
-                Err(response) => response,
-            };
-
-            Ok(RouterResponse {
-                response: http::Response::new(response),
-                context,
-            })
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl<R> Router for RouterService<R>
-where
-    R: Router + 'static,
-{
-    type PreparedQuery = R::PreparedQuery;
-
-    async fn prepare_query(&self, context: Context) -> Result<Self::PreparedQuery, Response> {
-        self.router.prepare_query(context).await
-    }
-}
-
-#[derive(Debug)]
-pub struct FetcherService<F> {
-    fetcher: Arc<F>,
-}
-
-impl<F> Clone for FetcherService<F> {
-    fn clone(&self) -> Self {
-        Self {
-            fetcher: self.fetcher.clone(),
-        }
-    }
-}
-
-impl<F> FetcherService<F> {
-    pub fn new(fetcher: F) -> Self {
-        Self {
-            fetcher: Arc::new(fetcher),
-        }
-    }
-
-    pub fn into_inner(self) -> Arc<F> {
-        self.fetcher
-    }
-}
-
-impl<F> tower::Service<SubgraphRequest> for FetcherService<F>
-where
-    F: Fetcher + 'static,
-{
-    type Response = RouterResponse;
-    type Error = FetchError;
-    type Future = BoxFuture<'static, Result<Self::Response, FetchError>>;
-
-    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), FetchError>> {
-        task::Poll::Ready(Ok(()))
-    }
-
-    fn call(
-        &mut self,
-        SubgraphRequest {
-            http_request,
-            context,
-        }: SubgraphRequest,
-    ) -> Self::Future {
-        let fetcher = self.fetcher.clone();
-        Box::pin(async move { fetcher.stream(http_request, context).await })
-    }
-}
-
-#[async_trait::async_trait]
-impl<F> Fetcher for FetcherService<F>
-where
-    F: Fetcher + 'static,
-{
-    async fn stream(
-        &self,
-        request: http::Request<Request>,
-        context: Context,
-    ) -> Result<RouterResponse, FetchError> {
-        self.fetcher.stream(request, context).await
-    }
-}
-
-#[derive(Debug)]
-pub struct QueryPlannerService<Q> {
-    query_planner: Arc<Q>,
-}
-
-impl<Q> Clone for QueryPlannerService<Q> {
-    fn clone(&self) -> Self {
-        Self {
-            query_planner: self.query_planner.clone(),
-        }
-    }
-}
-
-impl<Q> QueryPlannerService<Q> {
-    pub fn new(query_planner: Arc<Q>) -> Self {
-        Self { query_planner }
-    }
-
-    pub fn into_inner(self) -> Arc<Q> {
-        self.query_planner
-    }
-
-    // TODO this should normally be called get() but it's conflicting with the trait's
-    // implementation
-    pub fn get_ref(&self) -> &Q {
-        &self.query_planner
-    }
-}
-
-impl<Q> tower::Service<QueryPlannerRequest> for QueryPlannerService<Q>
-where
-    Q: QueryPlanner + 'static,
-{
-    type Response = PlannedRequest;
-    type Error = QueryPlannerError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
-        task::Poll::Ready(Ok(()))
-    }
-
-    fn call(
-        &mut self,
-        QueryPlannerRequest { options, context }: QueryPlannerRequest,
-    ) -> Self::Future {
-        let query_planner = self.query_planner.clone();
-        Box::pin(async move {
-            let query_plan = query_planner
-                .get(
-                    context.request.body().query.as_str().to_owned(),
-                    context.request.body().operation_name.to_owned(),
-                    options,
-                )
-                .await?;
-            Ok(PlannedRequest {
-                query_plan,
-                context,
-            })
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl<Q> QueryPlanner for QueryPlannerService<Q>
-where
-    Q: QueryPlanner + 'static,
-{
-    async fn get(
-        &self,
-        query: String,
-        operation: Option<String>,
-        options: QueryPlanOptions,
-    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
-        self.query_planner.get(query, operation, options).await
-    }
-}
+pub mod execution_service;
+pub mod graphql_subgraph_service;
+pub mod query_planner_service;
+pub mod router_service;
 
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
@@ -230,6 +24,7 @@ impl From<http::Request<Request>> for RouterRequest {
     }
 }
 
+assert_impl_all!(PlannedRequest: Send);
 /// TODO confusing name since this is a Response
 pub struct PlannedRequest {
     pub query_plan: Arc<QueryPlan>,
@@ -237,18 +32,21 @@ pub struct PlannedRequest {
     pub context: Context,
 }
 
+assert_impl_all!(SubgraphRequest: Send);
 pub struct SubgraphRequest {
     pub http_request: http::Request<Request>,
 
     pub context: Context,
 }
 
+assert_impl_all!(QueryPlannerRequest: Send);
 pub struct QueryPlannerRequest {
     pub options: QueryPlanOptions,
 
     pub context: Context,
 }
 
+assert_impl_all!(RouterResponse: Send);
 pub struct RouterResponse {
     pub response: http::Response<Response>,
 

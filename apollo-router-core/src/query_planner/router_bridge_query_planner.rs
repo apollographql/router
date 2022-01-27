@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RouterBridgeQueryPlanner {
     schema: Arc<Schema>,
 }
