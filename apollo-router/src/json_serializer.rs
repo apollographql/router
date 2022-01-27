@@ -6,23 +6,18 @@ use std::{
     io::{self, Write},
 };
 use tokio::sync::mpsc::{self, error::SendError, Sender};
-use tracing::Span;
-use tracing_futures::{Instrument, WithSubscriber};
+use tracing_futures::Instrument;
 
 pub async fn make_body(value: Value) -> hyper::Body {
     let (mut acc, receiver) = BytesChunkWriter::new(2048, 10);
 
-    let span = Span::current();
+    let span = tracing::info_span!("serialize_response").or_current();
     tokio::task::spawn_blocking(move || {
-        tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-            if serialize_all(value, &mut acc).is_err() {
-                tracing::error!("failed serializing response");
-            }
-        })
+        if serialize_all(value, &mut acc).is_err() {
+            tracing::error!("failed serializing response");
+        }
     })
-    .with_current_subscriber()
-    .in_current_span();
-
+    .instrument(span);
     hyper::Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(receiver))
 }
 
