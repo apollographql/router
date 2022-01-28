@@ -31,12 +31,14 @@ in lieu of an official changelog.
 1.  Make sure you have `cargo` installed on your machine and in your `PATH`.
 2.  Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
-3.  Update the version in `crates/*/Cargo.toml`.
+3.  Update the version in `*/Cargo.toml`.
+3.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core` and `apollo-router`.
 4.  Run `cargo check` so the lock file gets updated.
-5.  Push up a commit with the `crates/*/Cargo.toml`, `Cargo.lock` and
+5.  Run `cargo xtask check-compliance` so the lock file gets updated.
+6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock` and
     `CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
-6.  Request review from the Apollo GraphQL tooling team.
+7.  Request review from the Router team.
 
 ### Review
 

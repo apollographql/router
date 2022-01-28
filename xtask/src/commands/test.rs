@@ -1,14 +1,12 @@
+use std::process::Stdio;
+
 use anyhow::{ensure, Result};
 use structopt::StructOpt;
 use xtask::*;
 
-const FEATURE_SETS: &[&[&str]] = &[
-    &[],
-    &["otlp-http"],
-    &["otlp-tonic"],
-    &["otlp-tonic", "tls"],
-    &["otlp-grpcio"],
-];
+const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked", "--no-default-features"];
+
+const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[]];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
@@ -17,8 +15,17 @@ pub struct Test {
     no_demo: bool,
 
     /// Do start the federation demo (without docker).
+    ///
+    /// To speed up the process, the project will be compiled in background
+    /// while federation-demo is booting up. If you want to disable this,
+    /// use the --no-pre-compile flag.
     #[structopt(long, conflicts_with = "no-demo")]
     with_demo: bool,
+
+    /// Do not start the project's compilation in background while federation
+    /// demo is booting up (requires --with-demo).
+    #[structopt(long, conflicts_with = "no-demo")]
+    no_pre_compile: bool,
 }
 
 impl Test {
@@ -44,21 +51,37 @@ impl Test {
             eprintln!("Not running federation-demo.");
             Box::new(())
         } else {
+            let mut maybe_pre_compile = if !self.no_pre_compile {
+                eprintln!("Starting background process to pre-compile the tests while federation-demo prepares...");
+                Some(
+                    std::process::Command::new(which::which("cargo")?)
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .args(TEST_DEFAULT_ARGS)
+                        .args(FEATURE_SETS[0])
+                        .arg("--no-run")
+                        .spawn()?,
+                )
+            } else {
+                None
+            };
+
             let demo = FederationDemoRunner::new()?;
             let guard = demo.start_background()?;
+
+            if let Some(sub_process) = maybe_pre_compile.as_mut() {
+                eprintln!("Waiting for background process that pre-compiles the test to finish...");
+                sub_process.wait()?;
+            }
+
             Box::new((demo, guard))
         };
 
         for features in FEATURE_SETS {
-            if cfg!(windows) && features.contains(&"otlp-grpcio") {
-                // TODO: I couldn't make it build on Windows but it is supposed to build.
-                continue;
-            }
-
-            eprintln!("Running tests with features: {}", features.join(", "));
+            eprintln!("Running tests with features: {}", features.join(","));
             cargo!(
-                ["test", "--workspace", "--locked", "--no-default-features"],
-                features.iter().flat_map(|feature| ["--features", feature]),
+                TEST_DEFAULT_ARGS,
+                features.iter().flat_map(|feature| ["--features", feature])
             );
         }
 

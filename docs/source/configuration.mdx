@@ -57,6 +57,21 @@ You can also provide this value via the `CONFIGURATION_PATH` environment variabl
 </td>
 </tr>
 
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+</td>
+<td>
+
+Log level which may be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+Default: `info`
+
+</td>
+</tr>
+
 </tbody>
 </table>
 
@@ -77,6 +92,10 @@ server:
       - https://studio.apollographql.com
       - http://localhost
 ```
+
+## Logging
+
+Apollo Router detects if the stdout is a TTY and enables JSON logging only if it is not.
 
 ## Configuration file
 
@@ -121,9 +140,24 @@ subgraphs:
   products:
     routing_url: http://localhost:4003/graphql
 
-# OpenTelemetry configuration. Choose either jaeger or otlp
+# OpenTelemetry configuration, see next section
+# opentelemetry:
+```
+
+## Tracing
+
+The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), it has exporters for [Jaeger](https://www.jaegertracing.io/) and for the [OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter) over HTTP or gRPC.
+It will generate a trace of the various phases of the GraphQL query and their dependencies.
+
+It will send a `TraceParent` header to subgraphs so they can create and send their own spans under the same trace.
+If the request to the Router already contains a `TraceParent` header, it will use its value as trace id instead of generating a random one.
+
+### Using Jaeger
+
+```yaml:title=configuration.yaml
+server:
+  listen: 127.0.0.1:4000
 opentelemetry:
-  # Configuration to send traces and metrics to a Jaeger service
   jaeger:
     # optional url of the jaeger collector
     collector_endpoint: "http://example.org"
@@ -132,24 +166,61 @@ opentelemetry:
     service_name: "router"
     # the username and password are obtained from the environment variables
     # JAEGER_USERNAME and JAEGER_PASSWORD
+    trace_config:
+      # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
+      # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
+      # be recorded or not
+      sampler:
+        TraceIdRatioBased: 0.42
+      max_events_per_span: 1
+      max_attributes_per_span: 2
+      max_links_per_span: 3
+      max_attributes_per_event: 4
+      max_attributes_per_link: 5
+      resource:
+        attrs:
+          key1:
+            String: value
+          key2:
+            Bool: true
+          key3:
+            I64: 42
+          key4:
+            F64: 42.0
+          key5:
+            Array:
+              String:
+                - value1
+                - value2
+```
+
+### Using OTLP
+
+
+```yaml:title=configuration.yaml
+server:
+  listen: 127.0.0.1:4000
+opentelemetry:
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   otlp:
     tracing:
       exporter:
-        # URL of the exporter
-        endpoint:
-        # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-        protocol: Grpc
-        # timmeout in seconds
-        timeout: 60
-        metadata:
-          - foo: bar
-          - foo: baz
-          - bar: baz
+        # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
+        http:
+          # URL of the exporter
+          endpoint:
+          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+          protocol: Grpc
+          # timmeout in seconds
+          timeout: 60
+          metadata:
+            - foo: bar
       trace_config:
+        # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
+        # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
+        # be recorded or not
         sampler:
-          ParentBased:
-            TraceIdRatioBased: 0.42
+          TraceIdRatioBased: 0.42
         max_events_per_span: 1
         max_attributes_per_span: 2
         max_links_per_span: 3

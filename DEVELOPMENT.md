@@ -74,19 +74,32 @@ requires that the `federation-demo` project is running:
 Once the subgraphs are up and running, run Apollo Router with this command:
 
 ```shell
-cargo run -- -s ./examples/local.graphql
+cargo run --release -- -s ./examples/local.graphql -c examples/config-jaeger.yml
 ```
 
 Go to https://studio.apollographql.com/sandbox/explorer to make queries and
 http://localhost:16686/ to reach Jaeger.
 
-### Strict linting
+### Strict linting and license compliance
 
 While developing locally doc warnings and other lint checks are disabled.
 This limits the noise generated while exploration is taking place.
 
-When you are ready to create a PR, run a build with strict checking enabled.
-Use `scripts/ci-build.sh` to perform such a build.
+When you are ready to create a PR, run a build with strict checking enabled,
+and check for license compliance.
+
+Use `cargo xtask all` to run all of the checks the CI will run.
+
+The CI checks require `cargo-deny` and `cargo-about` which can both be installed by running:
+- `cargo install cargo-deny`
+- `cargo install cargo-about`
+
+They also need you to have the federation-demo project up and running,
+as explained in the Getting started section above.
+
+### Troubleshoot
+
++ If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.
 
 ## Project maintainers
 

@@ -11,6 +11,8 @@ module.exports = {
         subtitle: "Router (alpha)",
         description: "Documentation for the Apollo Router",
         githubRepo: "apollographql/router",
+        algoliaIndexName: 'router',
+        algoliaFilters: ['docset:router'],
         sidebarCategories: {
           null: ["index", "quickstart", "configuration", "build-from-source"],
         },
