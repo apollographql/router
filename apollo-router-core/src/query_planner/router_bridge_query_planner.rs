@@ -2,9 +2,11 @@
 
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use router_bridge::plan;
 use serde::Deserialize;
 use std::sync::Arc;
+use std::task;
 
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -72,6 +74,41 @@ enum PlannerResult {
     },
     #[serde(other)]
     Other,
+}
+
+impl tower::Service<RouterRequest> for RouterBridgeQueryPlanner {
+    type Response = PlannedRequest;
+    // TODO I don't think we can serialize this error back to the router response's payload
+    type Error = tower::BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: RouterRequest) -> Self::Future {
+        let this = self.clone();
+        let fut = async move {
+            let body = request.http_request.body();
+            match this
+                .get(
+                    body.query.to_owned(),
+                    body.operation_name.to_owned(),
+                    QueryPlanOptions::default(),
+                )
+                .await
+            {
+                Ok(query_plan) => Ok(PlannedRequest {
+                    query_plan,
+                    context: request.context.with_request(Arc::new(request.http_request)),
+                }),
+                Err(e) => Err(tower::BoxError::from(e)),
+            }
+        };
+
+        // Return the response as an immediate future
+        Box::pin(fut)
+    }
 }
 
 #[cfg(test)]

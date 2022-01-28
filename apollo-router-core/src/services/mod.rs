@@ -1,11 +1,9 @@
 mod execution_service;
 mod graphql_subgraph_service;
-mod query_planner_service;
 mod router_service;
 
 pub use self::execution_service::*;
 pub use self::graphql_subgraph_service::*;
-pub use self::query_planner_service::*;
 pub use self::router_service::*;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
