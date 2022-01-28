@@ -14,7 +14,7 @@ use typed_builder::TypedBuilder;
 pub struct ExecutionService {
     schema: Arc<Schema>,
 
-    #[builder(setter(transform = |services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>| Arc::new(services.into())))]
+    #[builder(setter(transform = |services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>| Arc::new(ServiceRegistry::new(services))))]
     subgraph_services: Arc<ServiceRegistry>,
 }
 

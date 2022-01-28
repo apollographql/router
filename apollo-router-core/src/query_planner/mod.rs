@@ -1,13 +1,14 @@
 mod caching_query_planner;
 mod router_bridge_query_planner;
 mod selection;
-
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
 use std::collections::HashSet;
+use tower::Service;
+use tower::ServiceExt;
 use tracing::Instrument;
 
 /// Query planning options.
@@ -222,6 +223,7 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
+    use tower_service::Service;
     use tracing::{instrument, Instrument};
 
     /// A fetch node.
@@ -339,11 +341,6 @@ mod fetch {
                 )
             })?;
 
-            let mut service = service_registry
-                .get(service_name)
-                .expect("we already checked that the service exists during planning; qed")
-                .clone_box();
-
             let subgraph_request = SubgraphRequest {
                 http_request: http::Request::builder()
                     .method(http::Method::POST)
@@ -357,13 +354,11 @@ mod fetch {
                 context: context.clone(),
             };
 
-            service
-                .ready()
+            let mut service = service_registry
+                .get(service_name)
                 .await
-                .map_err(|e| FetchError::SubrequestHttpError {
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                })?;
+                .expect("we already checked that the service exists during planning; qed");
+
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service
                 .call(subgraph_request)
