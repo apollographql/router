@@ -1,3 +1,8 @@
+//! streaming JSON serialization
+//!
+//! to reduce memory usage and send responses faster to the client,
+//! we write the SJON response to smaller chunks that are sent as soon
+//! as they are full
 use bytes::{BufMut, Bytes, BytesMut};
 use serde_json::ser::CharEscape;
 use serde_json_bytes::{ByteString, Value};
@@ -8,7 +13,7 @@ use std::{
 use tokio::sync::mpsc::{self, error::SendError, Sender};
 use tracing_futures::Instrument;
 
-pub async fn make_body(value: Value) -> hyper::Body {
+pub(crate) async fn make_body(value: Value) -> hyper::Body {
     let (mut acc, receiver) = BytesChunkWriter::new(2048, 10);
 
     let span = tracing::info_span!("serialize_response").or_current();
@@ -21,6 +26,8 @@ pub async fn make_body(value: Value) -> hyper::Body {
     hyper::Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(receiver))
 }
 
+/// writes data to a serie of Bytes buffer, that are sent over a channel
+/// once they are full
 struct BytesChunkWriter {
     sender: Sender<Result<Bytes, io::Error>>,
     buffer: Option<BytesMut>,
@@ -83,6 +90,11 @@ impl BytesChunkWriter {
         }
     }
 
+    /// sends a Bytes buffer
+    ///
+    /// those are handled differently than byte slices, because they can
+    /// be sent direftly to the channel instead of being copied into the
+    /// current buffer
     fn write_bytes(&mut self, bytes: Bytes) -> Result<(), Error> {
         let mut buffer = match self.buffer.take() {
             Some(buf) => buf,
@@ -125,6 +137,9 @@ impl BytesChunkWriter {
         Ok(())
     }
 
+    /// sends the current buffer
+    ///
+    /// must be called after serializing
     fn flush(&mut self) -> Result<(), Error> {
         if let Some(buffer) = self.buffer.take() {
             self.sender.blocking_send(Ok(buffer.freeze()))?;
@@ -211,6 +226,13 @@ fn serialize(value: Value, w: &mut BytesChunkWriter) -> Result<(), Error> {
     }
 }
 
+/// escapes and serializes a ByteString
+///
+/// instead of allocating a large buffer to write the escaped string into, we can give
+/// to the writer long chunks of the string that do not need to be escaped, avoiding
+/// copies
+///
+/// escaping code taken from serde_json
 fn serialize_bytestring(s: ByteString, w: &mut BytesChunkWriter) -> Result<(), Error> {
     w.write("\"")?;
 
