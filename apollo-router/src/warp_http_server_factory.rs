@@ -749,6 +749,7 @@ mod tests {
         insta::assert_debug_snapshot!(res);
     }
 
+    #[test(tokio::test)]
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
         let expected_response = graphql::Response::builder()
@@ -758,12 +759,10 @@ mod tests {
 
         #[allow(unused_mut)]
         let mut fetcher = MockMyRouter::new();
-        /*
-        fetcher.expect_stream().times(2).returning(move |_| {
+        fetcher.expect_prepare_query().times(2).returning(move |_| {
             let actual_response = example_response.clone();
-            Ok(actual_response)
+            Err(actual_response)
         });
-        */
 
         let server_factory = WarpHttpServerFactory::new();
         let fetcher = Arc::new(fetcher);
@@ -775,6 +774,7 @@ mod tests {
                         .server(
                             crate::configuration::Server::builder()
                                 .listen(ListenAddr::UnixSocket(
+                                    // TODO create socket using tempfile
                                     "/tmp/listening_to_unix_socket.sock".into(),
                                 ))
                                 .cors(Some(
@@ -814,14 +814,14 @@ mod tests {
 
     #[cfg(unix)]
     async fn send_to_unix_socket(addr: &ListenAddr, method: &str, body: &str) -> Vec<u8> {
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Interest};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest};
         use tokio::net::UnixStream;
 
         let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
         stream.ready(Interest::WRITABLE).await.unwrap();
         stream
             .write_all(
-                &format!(
+                format!(
                     "{} / HTTP/1.1\r
 Host: localhost:4100\r
 Content-Length: {}\r
@@ -845,23 +845,14 @@ Content-Length: {}\r
             .expect("no header received");
         // skip the rest of the headers
         let mut headers = String::new();
-        loop {
-            if lines.get_mut().read_line(&mut headers).await.unwrap() == 2 {
-                break;
-            }
-        }
-        // read body
         let mut stream = lines.into_inner();
-        let mut body = Vec::new();
-        let mut size = String::new();
         loop {
-            size.clear();
-            if stream.read_line(&mut size).await.unwrap() == 2 {
+            if stream.read_line(&mut headers).await.unwrap() == 2 {
                 break;
             }
-            let size = u64::from_str_radix(size.trim_end(), 16).unwrap();
-            (&mut stream).take(size).read_buf(&mut body).await.unwrap();
         }
+        // get rest of the buffer as body
+        let body = stream.buffer().to_vec();
         assert!(header_first_line.contains(" 200 "), "");
         body
     }
