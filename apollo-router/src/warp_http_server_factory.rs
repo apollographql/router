@@ -485,7 +485,7 @@ mod tests {
         ($fetcher:ident => $expect_stream:block) => {{
             #[allow(unused_mut)]
             let mut $fetcher = MockMyRouter::new();
-            $expect_prepare_query;
+            $expect_stream;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = Arc::new($fetcher);
             let server = server_factory
@@ -757,11 +757,13 @@ mod tests {
         let example_response = expected_response.clone();
 
         #[allow(unused_mut)]
-        let mut fetcher = MockMyFetcher::new();
+        let mut fetcher = MockMyRouter::new();
+        /*
         fetcher.expect_stream().times(2).returning(move |_| {
             let actual_response = example_response.clone();
-            future::ready(futures::stream::iter(vec![actual_response]).boxed()).boxed()
+            Ok(actual_response)
         });
+        */
 
         let server_factory = WarpHttpServerFactory::new();
         let fetcher = Arc::new(fetcher);
@@ -834,9 +836,9 @@ Content-Length: {}\r
             .await
             .unwrap();
         stream.flush().await.unwrap();
-        let mut stream = BufReader::new(stream);
+        let stream = BufReader::new(stream);
         let mut lines = stream.lines();
-        let mut header_first_line = lines
+        let header_first_line = lines
             .next_line()
             .await
             .unwrap()

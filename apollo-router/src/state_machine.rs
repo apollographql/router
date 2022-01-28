@@ -703,7 +703,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -775,14 +775,14 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
                         }"#.to_string()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -876,7 +876,7 @@ mod tests {
             .returning(
                 move |_: Arc<MockMyRouter>,
                       configuration: Arc<Configuration>,
-                      listener: Option<Box<dyn Listener>>| {
+                      listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -887,8 +887,16 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            Box::new(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap())
-                                as Box<_>
+                            #[cfg(unix)]
+                            {
+                                tokio_util::either::Either::Left(
+                                    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                                )
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            }
                         })
                     };
 

@@ -138,7 +138,12 @@ mod tests {
     #[test(tokio::test)]
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listener = Box::new(TcpListener::bind("127.0.0.1:0").await.unwrap()) as Box<_>;
+        #[cfg(unix)]
+        let listener: Listener = tokio_util::either::Either::Left(
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        );
+        #[cfg(not(unix))]
+        let listener: Listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
 
         HttpServerHandle::new(
             shutdown_sender,
@@ -159,7 +164,9 @@ mod tests {
     async fn sanity_unix() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         // TODO get path from tempfile
-        let listener = Box::new(UnixListener::bind("/tmp/sanity_unix.sock").unwrap()) as Box<_>;
+        let listener: Listener = tokio_util::either::Either::Right(
+            tokio::net::UnixListener::bind("/tmp/sanity_unix.sock").unwrap(),
+        );
 
         HttpServerHandle::new(
             shutdown_sender,

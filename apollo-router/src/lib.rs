@@ -548,7 +548,7 @@ mod tests {
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = graphql::Request::builder().query(request).build();
-        let mut expected = query(listen_addr, request.clone()).await.unwrap();
+        let expected = query(listen_addr, request.clone()).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
@@ -560,7 +560,7 @@ mod tests {
     ) -> Result<graphql::Response, graphql::FetchError> {
         HttpSubgraphFetcher::new(
             "federated",
-            Url::parse(&format!("http://{}/graphql", listen_addr)).unwrap(),
+            Url::parse(&format!("{}/graphql", listen_addr)).unwrap(),
         )
         .stream(request)
         .await
