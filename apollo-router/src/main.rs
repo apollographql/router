@@ -1,11 +1,12 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use apollo_router::configuration::Configuration;
 use apollo_router::GLOBAL_ENV_FILTER;
 use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
+use reqwest::Url;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
@@ -31,6 +32,10 @@ struct Opt {
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
+
+    /// URL where the schema is located.
+    #[structopt(short = "u", long = "supergraph-url", env)]
+    supergraph_url: Option<Url>,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -118,42 +123,65 @@ async fn rt_main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
-    ensure!(
-        opt.supergraph_path.is_some(),
-        r#"
-💫 Apollo Router requires a supergraph to be set using '--supergraph':
+    let schema = match (opt.supergraph_path, opt.supergraph_url) {
+        (Some(supergraph_path), None) => {
+            let path = if supergraph_path.is_relative() {
+                current_directory.join(supergraph_path)
+            } else {
+                supergraph_path
+            };
 
-    $ ./router --supergraph <file>`
-  
-🪐 The supergraph can be built or downloaded from the Apollo Registry
-   using the Rover CLI. To find out how, see:
-    
-    https://www.apollographql.com/docs/rover/supergraphs/.
+            SchemaKind::File {
+                path,
+                watch: opt.watch,
+                delay: None,
+            }
+        }
+        (None, Some(supergraph_url)) => {
+            let schema = reqwest::Client::new()
+                .get(supergraph_url.clone())
+                .send()
+                .await
+                .map_err(|e| anyhow!("couldn't get supergraph from url {}: {}", supergraph_url, e))?
+                .text()
+                .await
+                .map_err(|e| {
+                    anyhow!(
+                        "couldn't get supergraph schema from url {}: {}",
+                        supergraph_url,
+                        e
+                    )
+                })?
+                .parse()
+                .map_err(|e| {
+                    anyhow!(
+                        "supergraph url {} yielded an invalid schema: {}",
+                        supergraph_url,
+                        e
+                    )
+                })?;
 
-🧪 If you're just experimenting, you can download and use an example
-   supergraph with pre-deployed subgraphs:
+            SchemaKind::Instance(Box::new(schema))
+        }
+        _ => {
+            bail!(
+                r#"
+        💫 Apollo Router requires a supergraph to be set using '--supergraph':
 
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+            $ ./router --supergraph <file>`
 
-   Then run the Apollo Router with that supergraph:
+        🪐 The supergraph can be built or downloaded from the Apollo Registry
+           using the Rover CLI. To find out how, see:
 
-    $ ./router --supergraph starstuff.graphql
+            https://www.apollographql.com/docs/rover/supergraphs/.
 
-"#
-    );
+        🧪 Then run the Apollo Router with an example
+           supergraph with pre-deployed subgraphs:
 
-    let supergraph_path = opt.supergraph_path.unwrap();
-
-    let supergraph_path = if supergraph_path.is_relative() {
-        current_directory.join(supergraph_path)
-    } else {
-        supergraph_path
-    };
-
-    let schema = SchemaKind::File {
-        path: supergraph_path,
-        watch: opt.watch,
-        delay: None,
+            $ ./router -u https://supergraph.demo.starstuff.dev/
+        "#
+            );
+        }
     };
 
     // Create your text map propagator & assign it as the global propagator.
