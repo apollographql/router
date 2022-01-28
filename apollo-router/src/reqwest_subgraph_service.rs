@@ -1,25 +1,21 @@
-use crate::{RouterResponse, SubgraphRequest};
 use apollo_router_core::prelude::*;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
-use tower::{BoxError, Service};
 use typed_builder::TypedBuilder;
-use url::Url;
 
 #[derive(TypedBuilder, Clone)]
 pub struct ReqwestSubgraphService {
     http_client: reqwest_middleware::ClientWithMiddleware,
-    // TODO not used because provided by SubgraphRequest
     service: Arc<String>,
     // TODO not used because provided by SubgraphRequest
-    url: Arc<Url>,
+    url: Arc<reqwest::Url>,
 }
 
 impl ReqwestSubgraphService {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: impl Into<String>, url: Url) -> Self {
+    pub fn new(service: impl Into<String>, url: reqwest::Url) -> Self {
         let service = service.into();
 
         Self {
@@ -38,9 +34,9 @@ impl ReqwestSubgraphService {
     }
 }
 
-impl Service<SubgraphRequest> for ReqwestSubgraphService {
-    type Response = RouterResponse;
-    type Error = BoxError;
+impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
+    type Response = graphql::RouterResponse;
+    type Error = graphql::FetchError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -48,33 +44,59 @@ impl Service<SubgraphRequest> for ReqwestSubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(
+        &mut self,
+        graphql::SubgraphRequest {
+            http_request,
+            context,
+        }: graphql::SubgraphRequest,
+    ) -> Self::Future {
         let http_client = self.http_client.clone();
         Box::pin(async move {
             tracing::debug!(
                 "Making request to {} {:?}",
-                request.http_request.uri(),
-                request.http_request
+                http_request.uri(),
+                http_request,
             );
-            let response = http_client
-                .post(request.http_request.uri().to_string())
-                .body(reqwest::Body::from(serde_json::to_vec(
-                    request.http_request.body(),
-                )?))
-                .headers(request.http_request.headers().to_owned())
-                .send()
-                .await;
-
-            match response {
-                Ok(resp) => {
-                    let graphql: graphql::Response = serde_json::from_slice(&resp.bytes().await?)?;
-                    Ok(RouterResponse {
-                        response: http::Response::builder().body(graphql)?,
-                        context: request.context,
-                    })
+            let (
+                http::request::Parts {
+                    method,
+                    uri,
+                    version,
+                    headers,
+                    extensions: _,
+                    ..
+                },
+                body,
+            ) = http_request.into_parts();
+            let mut request =
+                reqwest::Request::new(method, reqwest::Url::parse(&uri.to_string()).expect("todo"));
+            *request.headers_mut() = headers;
+            *request.version_mut() = version;
+            let response = http_client.execute(request).await.map_err(|err| {
+                graphql::FetchError::SubrequestHttpError {
+                    service: self.service.to_string(),
+                    reason: err.to_string(),
                 }
-                Err(e) => Err(BoxError::from(e)),
-            }
+            })?;
+
+            let graphql: graphql::Response =
+                serde_json::from_slice(&response.bytes().await.map_err(|err| {
+                    graphql::FetchError::SubrequestMalformedResponse {
+                        service: self.service.to_string(),
+                        reason: err.to_string(),
+                    }
+                })?)
+                .map_err(|err| {
+                    graphql::FetchError::SubrequestMalformedResponse {
+                        service: self.service.to_string(),
+                        reason: err.to_string(),
+                    }
+                })?;
+            Ok(graphql::RouterResponse {
+                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
+                context,
+            })
         })
     }
 }

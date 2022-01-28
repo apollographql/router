@@ -9,6 +9,7 @@ use displaydoc::Display;
 use opentelemetry::sdk::trace::Sampler;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -17,7 +18,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use typed_builder::TypedBuilder;
-use url::Url;
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
