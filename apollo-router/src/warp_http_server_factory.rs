@@ -276,6 +276,7 @@ where
         })
 }
 
+#[tracing::instrument(skip_all, name = "graphql_request", fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()), client_name, client_version), level = "info")]
 fn run_graphql_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
@@ -285,40 +286,38 @@ where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery + 'static,
 {
+    if let Some(client_name) = header_map.get("apollographql-client-name") {
+        // Record the client name as part of the current span
+        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
+    }
+    if let Some(client_version) = header_map.get("apollographql-client-version") {
+        // Record the client version as part of the current span
+        Span::current().record(
+            "client_version",
+            &client_version.to_str().unwrap_or_default(),
+        );
+    }
+
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
         injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
     });
 
     async move {
-        let response = stream_request(router, request, header_map).await;
+        let response = stream_request(router, request).await;
 
         Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
     }
 }
 
-#[tracing::instrument(skip_all, name = "graphql_request", fields(query = %request.query, operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()), client_name, client_version), level = "info")]
 async fn stream_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
-    header_map: HeaderMap,
 ) -> String
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
-    if let Some(client_name) = header_map.get("apollographql-client-name") {
-        // Record the client name as part of the current span
-        tracing::Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
-    }
-    if let Some(client_version) = header_map.get("apollographql-client-version") {
-        // Record the client version as part of the current span
-        tracing::Span::current().record(
-            "client_version",
-            &client_version.to_str().unwrap_or_default(),
-        );
-    }
-
     let response = match router.prepare_query(&request).await {
         Ok(route) => route.execute(request).await,
         Err(response) => response,
