@@ -1,35 +1,38 @@
 use crate::{RouterResponse, SubgraphRequest};
-use futures::lock::Mutex;
-use std::collections::{HashMap, HashSet};
-use tower::util::BoxCloneService;
-use tower::BoxError;
+use std::collections::HashMap;
+use tower::buffer::Buffer;
+use tower::util::{BoxCloneService, BoxService};
+use tower::ServiceExt;
+use tower::{BoxError, ServiceBuilder};
 
 pub struct ServiceRegistry {
-    service_names: HashSet<String>,
-    services: Mutex<HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>>,
+    services: HashMap<
+        String,
+        Buffer<BoxService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
+    >,
 }
 
 impl ServiceRegistry {
     pub(crate) fn new(
-        services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>,
+        concurrency: usize,
+        services: HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>,
     ) -> Self {
         Self {
-            service_names: services
-                .keys()
-                .map(|k| k.to_string())
-                .collect::<HashSet<String>>(),
-            services: Mutex::new(services),
+            services: services
+                .into_iter()
+                .map(|(name, s)| (name, ServiceBuilder::new().buffer(concurrency).service(s)))
+                .collect(),
         }
     }
 
-    pub async fn get(
+    pub fn get(
         &self,
         name: &str,
     ) -> Option<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>> {
-        self.services.lock().await.get(name).cloned()
+        self.services.get(name).map(|s| s.clone().boxed_clone())
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.service_names.contains(name)
+        self.services.contains_key(name)
     }
 }

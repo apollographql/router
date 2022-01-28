@@ -84,9 +84,9 @@ pub struct PluggableRouterServiceBuilder {
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Schema, concurrency: usize) -> Self {
+    pub fn new(schema: Arc<Schema>, concurrency: usize) -> Self {
         Self {
-            schema: Arc::new(schema),
+            schema,
             concurrency,
             plugins: Default::default(),
             services: Default::default(),
@@ -137,14 +137,11 @@ impl PluggableRouterServiceBuilder {
             .map(|(name, s)| {
                 (
                     name.clone(),
-                    ServiceBuilder::new()
-                        .boxed_clone()
-                        .buffer(self.concurrency)
-                        .service(
-                            self.plugins
-                                .iter_mut()
-                                .fold(s, |acc, e| e.subgraph_service(&name, acc)),
-                        ),
+                    ServiceBuilder::new().service(
+                        self.plugins
+                            .iter_mut()
+                            .fold(s, |acc, e| e.subgraph_service(&name, acc)),
+                    ),
                 )
             })
             .collect();
@@ -157,7 +154,7 @@ impl PluggableRouterServiceBuilder {
                 self.plugins.iter_mut().fold(
                     ExecutionService::builder()
                         .schema(self.schema.clone())
-                        .subgraph_services(subgraphs)
+                        .subgraph_services(self.concurrency, subgraphs)
                         .build()
                         .boxed(),
                     |acc, e| e.execution_service(acc),
