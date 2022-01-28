@@ -258,12 +258,11 @@ pub mod spaceport {
         fn get_traces_and_stats(&self) -> TracesAndStats {
             match self {
                 StatsOrTrace::Stats(_) => TracesAndStats {
-                    trace: vec![],
                     stats_with_context: vec![],
                     ..Default::default()
                 },
                 StatsOrTrace::Trace(_) => TracesAndStats {
-                    stats_with_context: vec![],
+                    trace: vec![],
                     ..Default::default()
                 },
             }
@@ -329,7 +328,7 @@ pub mod spaceport {
                             tracing::trace!("spaceport triggered");
                             match mopt {
                                 Some(_msg) => {
-                                    for result in spaceport_tpq(&client, task_tpq.clone()).await {
+                                    for result in extract_tpq(&client, task_tpq.clone()).await {
                                         match result {
                                             Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                             Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -341,7 +340,7 @@ pub mod spaceport {
                         },
                         _ = interval.tick() => {
                             tracing::trace!("spaceport ticked");
-                            for result in spaceport_tpq(&client, task_tpq.clone()).await {
+                            for result in extract_tpq(&client, task_tpq.clone()).await {
                                 match result {
                                     Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                     Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -395,7 +394,6 @@ pub mod spaceport {
                 Err(_e) => DEFAULT_INGRESS.to_string(),
             };
             let req = client
-                // .post("http://localhost:8080/api/ingress/traces") // XXX FOR TESTING
                 .post(ingress)
                 .body(compressed_content)
                 .header("X-Api-Key", key)
@@ -534,7 +532,7 @@ pub mod spaceport {
         }
     }
 
-    async fn spaceport_tpq(
+    async fn extract_tpq(
         client: &Client,
         task_tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
     ) -> Vec<Result<Response<ReporterResponse>, Status>> {

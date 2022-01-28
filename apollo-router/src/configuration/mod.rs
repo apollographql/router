@@ -243,11 +243,13 @@ pub struct SpaceportConfig {
     pub(crate) listener: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Derivative, Deserialize, Serialize)]
+#[derivative(Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioGraph {
     pub(crate) reference: String,
 
+    #[derivative(Debug = "ignore")]
     pub(crate) key: String,
 }
 

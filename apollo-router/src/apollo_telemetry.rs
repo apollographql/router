@@ -285,9 +285,6 @@ impl SpanExporter for Exporter {
             }
         }
 
-        // Drop the batch to free memory quickly
-        drop(batch);
-
         // Guarantee that the reporter is initialised
         self.reporter
             .get_or_try_init(|| async {
