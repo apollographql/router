@@ -122,7 +122,10 @@ impl HttpServerHandle {
     }
 }
 
+#[cfg(unix)]
 pub type Listener = tokio_util::either::Either<tokio::net::TcpListener, tokio::net::UnixListener>;
+#[cfg(not(unix))]
+pub type Listener = tokio::net::TcpListener;
 
 #[cfg(test)]
 mod tests {

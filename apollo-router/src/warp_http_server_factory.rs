@@ -13,7 +13,6 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
-use tokio_util::either::Either;
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
@@ -84,16 +83,23 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .service(svc);
 
             // if we received a TCP listener, reuse it, otherwise create a new one
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut listener = if let Some(listener) = listener {
                 listener
             } else {
                 match listen_address {
-                    ListenAddr::SocketAddr(addr) => Either::Left(
+                    #[cfg(unix)]
+                    ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    ListenAddr::UnixSocket(path) => Either::Right(
+                    #[cfg(not(unix))]
+                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
+                        .await
+                        .map_err(FederatedServerError::ServerCreationError)?,
+                    #[cfg(unix)]
+                    ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
@@ -167,7 +173,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // with varying behaviours
                                 #[cfg(unix)]
                                 match res.unwrap() {
-                                    Either::Left((stream, _addr)) => {
+                                    tokio_util::either::Either::Left((stream, _addr)) => {
                                         stream
                                             .set_nodelay(true)
                                             .expect(
@@ -175,13 +181,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                             );
                                         serve_connection!(stream);
                                     }
-                                    Either::Right((stream, _addr)) => {
+                                    tokio_util::either::Either::Right((stream, _addr)) => {
                                         serve_connection!(stream);
                                     }
                                 };
                                 #[cfg(not(unix))]
                                 {
-                                    let stream = res.unwrap();
+                                    let (stream, _addr) = res.unwrap();
                                     stream
                                         .set_nodelay(true)
                                         .expect(
