@@ -752,6 +752,7 @@ mod tests {
     #[test(tokio::test)]
     #[cfg(unix)]
     async fn listening_to_unix_socket() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
@@ -773,10 +774,7 @@ mod tests {
                     Configuration::builder()
                         .server(
                             crate::configuration::Server::builder()
-                                .listen(ListenAddr::UnixSocket(
-                                    // TODO create socket using tempfile
-                                    "/tmp/listening_to_unix_socket.sock".into(),
-                                ))
+                                .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
                                 .cors(Some(
                                     Cors::builder()
                                         .origins(vec!["http://studio".to_string()])

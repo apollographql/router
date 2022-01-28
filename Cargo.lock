@@ -109,6 +109,7 @@ dependencies = [
  "serde_yaml",
  "structopt",
  "task-local-extensions",
+ "tempfile",
  "test-log",
  "test-span",
  "thiserror",

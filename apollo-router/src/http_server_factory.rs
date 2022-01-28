@@ -162,16 +162,16 @@ mod tests {
     #[test(tokio::test)]
     #[cfg(unix)]
     async fn sanity_unix() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sock = temp_dir.as_ref().join("sock");
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        // TODO get path from tempfile
-        let listener: Listener = tokio_util::either::Either::Right(
-            tokio::net::UnixListener::bind("/tmp/sanity_unix.sock").unwrap(),
-        );
+        let listener: Listener =
+            tokio_util::either::Either::Right(tokio::net::UnixListener::bind(&sock).unwrap());
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(listener)).boxed(),
-            ListenAddr::UnixSocket("/tmp/sanity_unix.sock".into()),
+            ListenAddr::UnixSocket(sock),
         )
         .shutdown()
         .await
