@@ -1,7 +1,6 @@
 use apollo_router_core::prelude::graphql::*;
 use derivative::Derivative;
 use std::sync::Arc;
-use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 /// The default router of Apollo, suitable for most use cases.
@@ -10,7 +9,7 @@ use tracing::Instrument;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner_service: CachingQueryPlanner<RouterBridgeQueryPlanner>,
+    query_planner_service: Arc<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
     service_registry: Arc<ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,

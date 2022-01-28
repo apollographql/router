@@ -11,13 +11,11 @@ mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
-use crate::future::BoxFuture;
 use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use apollo_router_core::{RouterRequest, RouterResponse, SubgraphRequest};
 use configuration::Configuration;
 use derivative::Derivative;
 use derive_more::Display;
@@ -34,8 +32,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tower::util::BoxService;
-use tower::BoxError;
 use typed_builder::TypedBuilder;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 

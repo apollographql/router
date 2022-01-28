@@ -13,12 +13,10 @@ use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(Debug)]
+#[derive(derivative::Derivative)]
+#[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<Router>
-where
-    Router: graphql::Router,
-{
+enum PrivateState<Router, ExecutionService> {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
@@ -27,7 +25,8 @@ where
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        router: RouterService<Router>,
+        #[derivative(Debug = "ignore")]
+        router: RouterService<Router, ExecutionService>,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -40,23 +39,19 @@ where
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, Router, FA>
+pub(crate) struct StateMachine<S, Router, FA, ExecutionService>
 where
     S: HttpServerFactory,
-    Router: graphql::Router,
-    FA: RouterFactory<Router>,
+    FA: RouterFactory<Router, ExecutionService>,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<Router>,
+    phantom: PhantomData<(Router, ExecutionService)>,
 }
 
-impl<Router> From<&PrivateState<Router>> for State
-where
-    Router: graphql::Router,
-{
-    fn from(private_state: &PrivateState<Router>) -> Self {
+impl<Router, ExecutionService> From<&PrivateState<Router, ExecutionService>> for State {
+    fn from(private_state: &PrivateState<Router, ExecutionService>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -73,11 +68,10 @@ where
     }
 }
 
-impl<S, Router, FA> StateMachine<S, Router, FA>
+impl<S, Router, FA, ExecutionService> StateMachine<S, Router, FA, ExecutionService>
 where
     S: HttpServerFactory,
-    Router: graphql::Router + 'static,
-    FA: RouterFactory<Router>,
+    FA: RouterFactory<Router, ExecutionService>,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -272,7 +266,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, Router, FA>>::notify_state_listener(
+                <StateMachine<S, Router, FA, ExecutionService>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -308,8 +302,8 @@ where
 
     async fn maybe_transition_to_running(
         &self,
-        state: PrivateState<Router>,
-    ) -> PrivateState<Router> {
+        state: PrivateState<Router, ExecutionService>,
+    ) -> PrivateState<Router, ExecutionService> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),

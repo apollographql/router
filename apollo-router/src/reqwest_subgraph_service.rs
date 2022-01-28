@@ -36,7 +36,7 @@ impl ReqwestSubgraphService {
 
 impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
     type Response = graphql::RouterResponse;
-    type Error = graphql::FetchError;
+    type Error = tower::BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -73,26 +73,9 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                 reqwest::Request::new(method, reqwest::Url::parse(&uri.to_string()).expect("todo"));
             *request.headers_mut() = headers;
             *request.version_mut() = version;
-            let response = http_client.execute(request).await.map_err(|err| {
-                graphql::FetchError::SubrequestHttpError {
-                    service: self.service.to_string(),
-                    reason: err.to_string(),
-                }
-            })?;
+            let response = http_client.execute(request).await?;
 
-            let graphql: graphql::Response =
-                serde_json::from_slice(&response.bytes().await.map_err(|err| {
-                    graphql::FetchError::SubrequestMalformedResponse {
-                        service: self.service.to_string(),
-                        reason: err.to_string(),
-                    }
-                })?)
-                .map_err(|err| {
-                    graphql::FetchError::SubrequestMalformedResponse {
-                        service: self.service.to_string(),
-                        reason: err.to_string(),
-                    }
-                })?;
+            let graphql: graphql::Response = serde_json::from_slice(&response.bytes().await?)?;
             Ok(graphql::RouterResponse {
                 response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
                 context,

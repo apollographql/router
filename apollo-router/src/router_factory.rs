@@ -9,29 +9,26 @@ use std::sync::Arc;
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
 #[async_trait::async_trait]
-pub(crate) trait RouterFactory<Router>
-where
-    Router: graphql::Router,
-{
+pub(crate) trait RouterFactory<Router, ExecutionService> {
     async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<graphql::RouterService<Router>>,
-    ) -> graphql::RouterService<Router>;
+        previous_router: Option<graphql::RouterService<Router, ExecutionService>>,
+    ) -> graphql::RouterService<Router, ExecutionService>;
 }
 
 #[derive(Default)]
 pub(crate) struct ApolloRouterFactory {}
 
 #[async_trait::async_trait]
-impl RouterFactory<ApolloRouter> for ApolloRouterFactory {
+impl RouterFactory<ApolloRouter, graphql::ExecutionService> for ApolloRouterFactory {
     async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<graphql::RouterService<ApolloRouter>>,
-    ) -> graphql::RouterService<ApolloRouter> {
+        previous_router: Option<graphql::RouterService<ApolloRouter, graphql::ExecutionService>>,
+    ) -> graphql::RouterService<ApolloRouter, graphql::ExecutionService> {
         let mut service_registry = graphql::ServiceRegistry::new();
         for (name, subgraph) in &configuration.subgraphs {
             let fetcher =

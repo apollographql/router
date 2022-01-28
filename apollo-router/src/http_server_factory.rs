@@ -75,14 +75,13 @@ impl HttpServerHandle {
         self.server_future.await.map(|_| ())
     }
 
-    pub(crate) async fn restart<Router, ServerFactory>(
+    pub(crate) async fn restart<Router, ServerFactory, ExecutionService>(
         self,
         factory: &ServerFactory,
-        router: RouterService<Router>,
+        router: RouterService<Router, ExecutionService>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, FederatedServerError>
     where
-        Router: graphql::Router + 'static,
         ServerFactory: HttpServerFactory,
     {
         // we tell the currently running server to stop

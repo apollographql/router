@@ -13,17 +13,7 @@ use tower_service::Service;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
-pub struct RouterService<QueryPlannerService, ExecutionService>
-where
-    QueryPlannerService: Service<RouterRequest, Response = PlannedRequest, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
-    ExecutionService: Service<PlannedRequest, Response = RouterResponse, Error = BoxError>
-        + Clone
-        + Send
-        + 'static,
-{
+pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
     query_execution_service: ExecutionService,
     #[builder(default)]
