@@ -1,8 +1,11 @@
+use crate::SubgraphRequest;
 use crate::{PlannedRequest, RouterResponse, Schema, ServiceRegistry};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use tower::util::BoxCloneService;
 use tower::BoxError;
 use tower_service::Service;
 use typed_builder::TypedBuilder;
@@ -10,6 +13,8 @@ use typed_builder::TypedBuilder;
 #[derive(TypedBuilder, Clone)]
 pub struct ExecutionService {
     schema: Arc<Schema>,
+
+    #[builder(setter(transform = |services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>| Arc::new(services.into())))]
     subgraph_services: Arc<ServiceRegistry>,
 }
 

@@ -1,4 +1,4 @@
-use crate::{RouterRequest, RouterResponse, SubgraphRequest};
+use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use tower::util::BoxService;
@@ -22,6 +22,20 @@ pub trait Plugin {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        service
+    }
+
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
+    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+        service
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
+    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
         service
     }
 

@@ -1,11 +1,13 @@
 use crate::prelude::graphql::*;
 use std::collections::HashMap;
 use std::fmt;
+use tower::util::BoxCloneService;
+use tower::BoxError;
 
 pub struct ServiceRegistry {
     services: HashMap<
         String,
-        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
+        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = BoxError>>,
     >,
 }
 
@@ -34,7 +36,7 @@ impl ServiceRegistry {
 
     pub fn insert<S>(&mut self, name: impl Into<String>, service: S)
     where
-        S: tower::Service<SubgraphRequest, Response = RouterResponse, Error = FetchError>
+        S: tower::Service<SubgraphRequest, Response = RouterResponse, Error = BoxError>
             + Clone
             + Send
             + Sync
@@ -61,8 +63,27 @@ impl ServiceRegistry {
         &self,
         name: impl AsRef<str>,
     ) -> Option<
-        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = FetchError>>,
+        Box<dyn DynCloneService<SubgraphRequest, Response = RouterResponse, Error = BoxError>>,
     > {
         self.services.get(name.as_ref()).map(|x| x.clone_box())
+    }
+}
+
+impl From<HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>>
+    for ServiceRegistry
+{
+    fn from(
+        services: HashMap<String, BoxCloneService<SubgraphRequest, RouterResponse, BoxError>>,
+    ) -> Self {
+        todo!("What's the solution here?");
+
+        //The issue is that we have shifted the requirement for Sync.
+        //There is no guarantee that this will be the case for subgraph services.
+
+        // let mut service_registry = ServiceRegistry::new();
+        // for (name, service) in services {
+        //     service_registry.insert(name, service);
+        // }
+        //        service_registry
     }
 }

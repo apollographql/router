@@ -357,12 +357,22 @@ mod fetch {
                 context: context.clone(),
             };
 
-            service.ready().await?;
+            service
+                .ready()
+                .await
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                })?;
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service
                 .call(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
-                .await?
+                .await
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                })?
                 .response
                 .into_parts();
 
