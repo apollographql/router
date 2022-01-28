@@ -4,7 +4,7 @@ mod apollo_router;
 pub mod configuration;
 mod files;
 mod http_server_factory;
-pub mod http_subgraph;
+mod reqwest_subgraph_service;
 mod router_factory;
 mod state_machine;
 mod trace;
