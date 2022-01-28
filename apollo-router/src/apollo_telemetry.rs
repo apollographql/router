@@ -98,13 +98,12 @@ impl PipelineBuilder {
     }
 
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
-    #[allow(dead_code)]
     pub fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
         let exporter = self.get_exporter()?;
 
         let batch = sdk::trace::BatchSpanProcessor::builder(exporter, Tokio)
-            .with_max_queue_size(131_072)
-            .with_max_export_batch_size(131_072)
+            .with_max_queue_size(65_536)
+            .with_max_export_batch_size(65_536)
             .build();
 
         let mut provider_builder = sdk::trace::TracerProvider::builder().with_span_processor(batch);
@@ -175,7 +174,7 @@ pub struct Exporter {
     collector: String,
     graph: Option<StudioGraph>,
     reporter: tokio::sync::OnceCell<Reporter>,
-    normalized_keys: HashMap<(String, String), String>,
+    normalized_queries: HashMap<(String, String), String>,
 }
 
 impl Exporter {
@@ -185,7 +184,7 @@ impl Exporter {
             collector,
             graph,
             reporter: tokio::sync::OnceCell::new(),
-            normalized_keys: HashMap::new(),
+            normalized_queries: HashMap::new(),
         }
     }
 }
@@ -226,7 +225,7 @@ impl From<&StudioGraph> for ReporterGraph {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
-        tracing::debug!("batch size: {}", batch.len());
+        tracing::info!("batch size: {}", batch.len());
         if self.graph.is_none() {
             // It's an error to try and export statistics without
             // graph details. We enforce that elsewhere in the code
@@ -243,12 +242,8 @@ impl SpanExporter for Exporter {
         /*
          * Process the batch
          */
-        for (index, span) in batch
-            .into_iter()
-            .filter(|span| span.name == "graphql_request")
-            .enumerate()
-        {
-            tracing::debug!(index, %span.name, ?span.start_time, ?span.end_time);
+        for span in batch.iter().filter(|span| span.name == "graphql_request") {
+            tracing::debug!(%span.name, ?span.start_time, ?span.end_time);
             tracing::debug!("span: {:?}", span);
             if let Some(query) = span
                 .attributes
@@ -278,7 +273,7 @@ impl SpanExporter for Exporter {
                 // Cache the normalized keys since this is a fairly slow
                 // operation...
                 let key = self
-                    .normalized_keys
+                    .normalized_queries
                     .entry((op_name, query.as_str().to_string()))
                     .or_insert_with(|| normalize(operation_name, &query.as_str()));
 
@@ -289,6 +284,9 @@ impl SpanExporter for Exporter {
                 dh.increment_duration(span.end_time.duration_since(span.start_time).unwrap(), 1);
             }
         }
+
+        // Drop the batch to free memory quickly
+        drop(batch);
 
         // Guarantee that the reporter is initialised
         self.reporter

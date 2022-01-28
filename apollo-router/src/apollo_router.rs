@@ -95,7 +95,7 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
                 request.operation_name.to_owned(),
                 Default::default(),
             )
-            .instrument(tracing::info_span!("query_get"))
+            .instrument(tracing::trace_span!("query_get"))
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);
@@ -126,7 +126,7 @@ impl PreparedQuery for ApolloPreparedQuery {
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)
-            .instrument(tracing::info_span!("execution"))
+            .instrument(tracing::trace_span!("execution"))
             .await;
 
         if let Some(query) = self.query {

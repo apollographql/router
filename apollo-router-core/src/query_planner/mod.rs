@@ -157,7 +157,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
                         .fetch_node(parent_value, current_dir, request, service_registry, schema)
-                        .instrument(tracing::info_span!("fetch"))
+                        .instrument(tracing::trace_span!("fetch"))
                         .await
                     {
                         Ok(v) => value = v,
@@ -318,7 +318,7 @@ mod fetch {
                 ..
             } = self;
 
-            let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
+            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
 
             let Variables { variables, paths } = query_span.in_scope(|| {
                 Variables::new(
@@ -342,7 +342,7 @@ mod fetch {
                         .variables(Arc::new(variables))
                         .build(),
                 )
-                .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
+                .instrument(tracing::trace_span!(parent: &query_span, "subfetch_stream"))
                 .await?;
 
             query_span.in_scope(|| {
