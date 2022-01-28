@@ -10,7 +10,7 @@ use tracing::Instrument;
 pub struct ApolloRouter {
     #[derivative(Debug = "ignore")]
     naive_introspection: NaiveIntrospection,
-    query_planner_service: QueryPlannerService<CachingQueryPlanner<RouterBridgeQueryPlanner>>,
+    query_planner_service: CachingQueryPlanner<RouterBridgeQueryPlanner>,
     service_registry: Arc<ServiceRegistry>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
@@ -68,7 +68,7 @@ impl ApolloRouter {
 
         Self {
             naive_introspection,
-            query_planner_service: QueryPlannerService::new(query_planner),
+            query_planner_service: query_planner,
             service_registry,
             query_cache: Arc::new(QueryCache::new(query_cache_limit)),
             schema,
