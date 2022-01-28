@@ -1,11 +1,16 @@
+mod execution_service;
+mod graphql_subgraph_service;
+mod query_planner_service;
+mod router_service;
+
+pub use self::execution_service::*;
+pub use self::graphql_subgraph_service::*;
+pub use self::query_planner_service::*;
+pub use self::router_service::*;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use static_assertions::assert_impl_all;
 use std::sync::Arc;
-pub mod execution_service;
-pub mod graphql_subgraph_service;
-pub mod query_planner_service;
-pub mod router_service;
 
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
