@@ -2,8 +2,8 @@ use crate::{RouterResponse, SubgraphRequest};
 use std::collections::HashMap;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
+use tower::BoxError;
 use tower::ServiceExt;
-use tower::{BoxError, ServiceBuilder};
 
 pub struct ServiceRegistry {
     services: HashMap<
@@ -14,15 +14,12 @@ pub struct ServiceRegistry {
 
 impl ServiceRegistry {
     pub(crate) fn new(
-        concurrency: usize,
-        services: HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>,
+        services: HashMap<
+            String,
+            Buffer<BoxService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
+        >,
     ) -> Self {
-        Self {
-            services: services
-                .into_iter()
-                .map(|(name, s)| (name, ServiceBuilder::new().buffer(concurrency).service(s)))
-                .collect(),
-        }
+        Self { services }
     }
 
     pub fn get(

@@ -1,47 +1,70 @@
-use crate::apollo_router::ApolloRouter;
 use crate::configuration::Configuration;
-use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
+use apollo_router_core::{
+    Context, PluggableRouterServiceBuilder, Plugin, RouterRequest, RouterResponse, Schema,
+    SubgraphRequest,
+};
+use http::{Request, Response};
+use static_assertions::assert_impl_all;
 use std::sync::Arc;
+use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
+use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower_service::Service;
+use typed_builder::TypedBuilder;
 
 /// Factory for creating graphs.
 ///
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
-#[async_trait::async_trait]
-pub(crate) trait RouterFactory<Router, ExecutionService> {
-    async fn create(
+pub trait RouterFactory: Send + Sync + 'static {
+    type RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static;
+
+    fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<graphql::RouterService<Router, ExecutionService>>,
-    ) -> graphql::RouterService<Router, ExecutionService>;
+        previous_router: Option<Self::RouterService>,
+    ) -> Self::RouterService;
 }
 
-#[derive(Default)]
-pub(crate) struct ApolloRouterFactory {}
+assert_impl_all!(ApolloRouterFactory: Send);
+#[derive(Default, TypedBuilder)]
+pub struct ApolloRouterFactory {
+    plugins: Vec<Box<dyn Plugin>>,
+    services: Vec<(
+        String,
+        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
+    )>,
+}
 
-#[async_trait::async_trait]
-impl RouterFactory<ApolloRouter, graphql::ExecutionService> for ApolloRouterFactory {
-    async fn create(
+impl RouterFactory for ApolloRouterFactory {
+    type RouterService = Buffer<
+        BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
+        Request<graphql::Request>,
+    >;
+    fn create(
         &self,
         configuration: &Configuration,
-        schema: Arc<graphql::Schema>,
-        previous_router: Option<graphql::RouterService<ApolloRouter, graphql::ExecutionService>>,
-    ) -> graphql::RouterService<ApolloRouter, graphql::ExecutionService> {
-        let mut service_registry = graphql::ServiceRegistry::new();
-        for (name, subgraph) in &configuration.subgraphs {
-            let fetcher =
-                ReqwestSubgraphService::new(name.to_owned(), subgraph.routing_url.to_owned());
-            service_registry.insert(name, fetcher);
-        }
-        graphql::RouterService::new(Arc::new(
-            ApolloRouter::new(
-                Arc::new(service_registry),
-                schema,
-                previous_router.map(|r| r.into_inner()),
-            )
-            .await,
-        ))
+        schema: Arc<Schema>,
+        previous_router: Option<Self::RouterService>,
+    ) -> Self::RouterService {
+        //TODO Use the plugins, services and config tp build the pipeline.
+
+        let concurrency = 20000;
+        ServiceBuilder::new().buffer(concurrency).service(
+            PluggableRouterServiceBuilder::new(schema, concurrency)
+                .build()
+                .map_request(|http_request| RouterRequest {
+                    http_request,
+                    context: Context::new(),
+                })
+                .map_response(|response| response.response)
+                .boxed_clone(),
+        )
     }
 }

@@ -4,7 +4,7 @@ use futures::FutureExt;
 use tower::util::BoxService;
 use tower::BoxError;
 
-pub trait Plugin {
+pub trait Plugin: Send + Sync + 'static {
     //Configuration is untyped. Implementations may marshal to a strongly typed object
     fn configure(&mut self, _configuration: serde_json::Value) -> Result<(), BoxError> {
         Ok(())

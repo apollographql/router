@@ -137,7 +137,7 @@ impl PluggableRouterServiceBuilder {
             .map(|(name, s)| {
                 (
                     name.clone(),
-                    ServiceBuilder::new().service(
+                    ServiceBuilder::new().buffer(self.concurrency).service(
                         self.plugins
                             .iter_mut()
                             .fold(s, |acc, e| e.subgraph_service(&name, acc)),
@@ -154,7 +154,7 @@ impl PluggableRouterServiceBuilder {
                 self.plugins.iter_mut().fold(
                     ExecutionService::builder()
                         .schema(self.schema.clone())
-                        .subgraph_services(self.concurrency, subgraphs)
+                        .subgraph_services(subgraphs)
                         .build()
                         .boxed(),
                     |acc, e| e.execution_service(acc),

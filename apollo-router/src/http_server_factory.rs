@@ -1,15 +1,19 @@
 use super::FederatedServerError;
 use crate::configuration::Configuration;
-use apollo_router_core::{prelude::*, RouterService};
+use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
+use http::Request;
+use http::Response;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower::BoxError;
+use tower::Service;
 
 /// Factory for creating the http server component.
 ///
@@ -17,20 +21,22 @@ use tokio::net::TcpListener;
 /// necessary e.g. when listen address changes.
 #[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
-    fn create<S>(
+    fn create<RS>(
         &self,
-        service: S,
+        service: RS,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
-        S: Clone
-            + tower::Service<graphql::RouterRequest, Response = graphql::RouterResponse>
-            + Send
+        RS: Service<
+                Request<graphql::Request>,
+                Response = Response<graphql::Response>,
+                Error = BoxError,
+            > + Send
             + Sync
+            + Clone
             + 'static,
-        <S as tower::Service<graphql::RouterRequest>>::Future: std::marker::Send,
-        <S as tower::Service<graphql::RouterRequest>>::Error: std::marker::Send;
+        <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send;
 }
 
 /// A handle with with a client can shut down the server gracefully.
@@ -75,14 +81,23 @@ impl HttpServerHandle {
         self.server_future.await.map(|_| ())
     }
 
-    pub(crate) async fn restart<Router, ServerFactory, ExecutionService>(
+    pub(crate) async fn restart<RS, SF>(
         self,
-        factory: &ServerFactory,
-        router: RouterService<Router, ExecutionService>,
+        factory: &SF,
+        router: RS,
         configuration: Arc<Configuration>,
     ) -> Result<Self, FederatedServerError>
     where
-        ServerFactory: HttpServerFactory,
+        SF: HttpServerFactory,
+        RS: Service<
+                Request<graphql::Request>,
+                Response = Response<graphql::Response>,
+                Error = BoxError,
+            > + Send
+            + Sync
+            + Clone
+            + 'static,
+        <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {

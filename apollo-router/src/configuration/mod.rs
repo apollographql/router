@@ -68,7 +68,7 @@ pub struct Configuration {
     /// Mapping of name to subgraph that the router may contact.
     #[serde(default)]
     #[builder(default)]
-    pub extensions: graphql::Object,
+    pub plugins: graphql::Object,
 }
 
 fn default_listen() -> SocketAddr {

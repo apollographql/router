@@ -13,7 +13,7 @@ pub struct Context<T = Arc<http::Request<Request>>> {
 }
 
 impl Context<()> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Context {
             request: (),
             extensions: Default::default(),

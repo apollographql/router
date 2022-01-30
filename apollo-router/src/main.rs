@@ -2,8 +2,8 @@
 
 use anyhow::{ensure, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::GLOBAL_ENV_FILTER;
-use apollo_router::{ApolloRouter, ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
+use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
 use std::ffi::OsStr;
@@ -166,7 +166,7 @@ async fn rt_main() -> Result<()> {
     let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
     opentelemetry::global::set_text_map_propagator(propagator);
 
-    let server = ApolloRouter::builder()
+    let server = ApolloRouterBuilder::default()
         .configuration(configuration)
         .schema(schema)
         .shutdown(ShutdownKind::CtrlC)

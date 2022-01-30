@@ -108,6 +108,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "serde_yaml",
+ "static_assertions",
  "structopt",
  "task-local-extensions",
  "test-log",
@@ -123,6 +124,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "typed-builder",
+ "url",
  "uuid",
  "warp",
 ]

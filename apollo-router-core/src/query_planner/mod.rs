@@ -7,10 +7,7 @@ use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
 use std::collections::HashSet;
-use tower::Service;
-use tower::ServiceExt;
 use tracing::Instrument;
-
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}

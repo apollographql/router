@@ -5,28 +5,31 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::{prelude::*, RouterService};
+use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
+use http::{Request, Response};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use tower::BoxError;
+use tower_service::Service;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
 #[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<Router, ExecutionService> {
+enum PrivateState<RS> {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<Router>,
+        phantom: PhantomData<RS>,
     },
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
         #[derivative(Debug = "ignore")]
-        router: RouterService<Router, ExecutionService>,
+        router: RS,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -39,19 +42,24 @@ enum PrivateState<Router, ExecutionService> {
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, Router, FA, ExecutionService>
+pub(crate) struct StateMachine<S, RS, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactory<Router, ExecutionService>,
+    FA: RouterFactory<RouterService = RS>,
+    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<(Router, ExecutionService)>,
+    phantom: PhantomData<RS>,
 }
 
-impl<Router, ExecutionService> From<&PrivateState<Router, ExecutionService>> for State {
-    fn from(private_state: &PrivateState<Router, ExecutionService>) -> Self {
+impl<RS> From<&PrivateState<RS>> for State {
+    fn from(private_state: &PrivateState<RS>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -68,10 +76,16 @@ impl<Router, ExecutionService> From<&PrivateState<Router, ExecutionService>> for
     }
 }
 
-impl<S, Router, FA, ExecutionService> StateMachine<S, Router, FA, ExecutionService>
+impl<S, RS, FA> StateMachine<S, RS, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactory<Router, ExecutionService>,
+    FA: RouterFactory<RouterService = RS>,
+    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -98,8 +112,7 @@ where
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, Router, FA>>::notify_state_listener(&mut state_listener, initial_state)
-            .await;
+        <StateMachine<S, RS, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -178,10 +191,11 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
 
                             let schema = Arc::new(*new_schema);
-                            let router = self
-                                .router_factory
-                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
-                                .await;
+                            let router = self.router_factory.create(
+                                &derived_configuration,
+                                Arc::clone(&schema),
+                                Some(router),
+                            );
 
                             match server_handle
                                 .restart(
@@ -232,10 +246,11 @@ where
                         }
                         Ok(()) => {
                             let derived_configuration = Arc::new(derived_configuration);
-                            let router = self
-                                .router_factory
-                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
-                                .await;
+                            let router = self.router_factory.create(
+                                &derived_configuration,
+                                Arc::clone(&schema),
+                                Some(router),
+                            );
 
                             match server_handle
                                 .restart(
@@ -266,7 +281,7 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, Router, FA, ExecutionService>>::notify_state_listener(
+                <StateMachine<S, RS, FA>>::notify_state_listener(
                     &mut state_listener,
                     new_public_state,
                 )
@@ -300,10 +315,7 @@ where
         }
     }
 
-    async fn maybe_transition_to_running(
-        &self,
-        state: PrivateState<Router, ExecutionService>,
-    ) -> PrivateState<Router, ExecutionService> {
+    async fn maybe_transition_to_running(&self, state: PrivateState<RS>) -> PrivateState<RS> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
@@ -328,10 +340,11 @@ where
                 }
                 Ok(()) => {
                     let schema = Arc::new(schema);
-                    let router = self
-                        .router_factory
-                        .create(&derived_configuration, Arc::clone(&schema), None)
-                        .await;
+                    let router = self.router_factory.create(
+                        &derived_configuration,
+                        Arc::clone(&schema),
+                        None,
+                    );
 
                     match self
                         .http_server_factory

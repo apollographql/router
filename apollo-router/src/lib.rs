@@ -4,8 +4,8 @@ mod apollo_router;
 pub mod configuration;
 mod files;
 mod http_server_factory;
-mod reqwest_subgraph_service;
-mod router_factory;
+pub mod reqwest_subgraph_service;
+pub mod router_factory;
 mod state_machine;
 mod trace;
 mod warp_http_server_factory;
@@ -16,6 +16,7 @@ use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
+use apollo_router_core::{Plugin, RouterResponse, SubgraphRequest};
 use configuration::Configuration;
 use derivative::Derivative;
 use derive_more::Display;
@@ -32,7 +33,9 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use typed_builder::TypedBuilder;
+use tower::buffer::Buffer;
+use tower::util::BoxCloneService;
+use tower::BoxError;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -338,9 +341,10 @@ impl ShutdownKind {
 /// };
 /// ```
 ///
-#[derive(TypedBuilder, Debug)]
-#[builder(field_defaults(setter(into)))]
-pub struct ApolloRouter {
+pub struct ApolloRouter<RF>
+where
+    RF: Send + 'static,
+{
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
 
@@ -348,8 +352,75 @@ pub struct ApolloRouter {
     schema: SchemaKind,
 
     /// A future that when resolved will shut down the server.
-    #[builder(default = ShutdownKind::None)]
     shutdown: ShutdownKind,
+
+    router_factory: RF,
+}
+
+#[derive(Default)]
+pub struct ApolloRouterBuilder {
+    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
+    configuration: Option<ConfigurationKind>,
+
+    /// The Schema that the server will use. This can be static or a stream for hot reloading.
+    schema: Option<SchemaKind>,
+
+    /// A future that when resolved will shut down the server.
+    shutdown: Option<ShutdownKind>,
+
+    plugins: Vec<Box<dyn Plugin>>,
+    services: Vec<(
+        String,
+        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
+    )>,
+}
+
+impl ApolloRouterBuilder {
+    pub fn configuration(mut self, configuration: ConfigurationKind) -> Self {
+        self.configuration = Some(configuration);
+        self
+    }
+
+    pub fn schema(mut self, schema: SchemaKind) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
+    pub fn shutdown(mut self, shutdown: ShutdownKind) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> ApolloRouterBuilder {
+        self.plugins.push(Box::new(plugin));
+        self
+    }
+
+    pub fn with_subgraph_service(
+        mut self,
+        name: &str,
+        service: Buffer<
+            BoxCloneService<SubgraphRequest, RouterResponse, BoxError>,
+            SubgraphRequest,
+        >,
+    ) -> ApolloRouterBuilder {
+        self.services.push((name.to_string(), service));
+        self
+    }
+
+    pub fn build(self) -> ApolloRouter<ApolloRouterFactory> {
+        ApolloRouter {
+            configuration: self
+                .configuration
+                .expect("Configuration must be set on builder"),
+            schema: self.schema.expect("Schema must be set on builder"),
+            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            router_factory: ApolloRouterFactory::builder()
+                .plugins(self.plugins)
+                .services(self.services)
+                .build(),
+        }
+    }
 }
 
 /// Messages that are broadcast across the app.
@@ -458,7 +529,7 @@ impl Future for FederatedServerHandle {
     }
 }
 
-impl ApolloRouter {
+impl<RouterFactory: Send> ApolloRouter<RouterFactory> {
     /// Start the federated server on a separate thread.
     ///
     /// The returned handle allows the user to await until the server is ready and shutdown.
@@ -473,10 +544,12 @@ impl ApolloRouter {
         let state_machine = StateMachine::new(
             server_factory,
             Some(state_listener),
+            //TODO use the router factory that go built
+            //self.router_factory
             ApolloRouterFactory::default(),
         );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let result = spawn(async {
+        let result = spawn(async move {
             state_machine
                 .process_events(self.generate_event_stream(shutdown_receiver))
                 .await

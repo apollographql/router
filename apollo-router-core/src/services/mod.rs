@@ -4,7 +4,6 @@ mod router_service;
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::prelude::graphql::*;
-use futures::future::BoxFuture;
 use static_assertions::assert_impl_all;
 use std::sync::Arc;
 

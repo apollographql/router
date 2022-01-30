@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower_service::Service;
@@ -14,7 +15,7 @@ use typed_builder::TypedBuilder;
 pub struct ExecutionService {
     schema: Arc<Schema>,
 
-    #[builder(setter(transform = |concurrency: usize, services: HashMap<String, BoxService<SubgraphRequest, RouterResponse, BoxError>>| Arc::new(ServiceRegistry::new(concurrency, services))))]
+    #[builder(setter(transform = |services: HashMap<String, Buffer<BoxService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>>| Arc::new(ServiceRegistry::new(services))))]
     subgraph_services: Arc<ServiceRegistry>,
 }
 
