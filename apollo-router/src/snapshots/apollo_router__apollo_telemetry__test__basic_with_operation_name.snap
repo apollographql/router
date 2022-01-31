@@ -1,8 +1,0 @@
----
-source: apollo-router/src/apollo_telemetry.rs
-assertion_line: 438
-expression: normalized
-
----
-# OpName
-query OpName { user { name } } 

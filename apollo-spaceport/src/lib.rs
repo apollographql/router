@@ -228,7 +228,6 @@ pub mod spaceport {
     use prost::Message;
     use prost_types::Timestamp;
     use reqwest::Client;
-    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
     use std::io::Write;
     use std::net::SocketAddr;
@@ -283,13 +282,6 @@ pub mod spaceport {
         }
     }
 
-    /// Response from Apollo Ingress
-    #[derive(Debug, Deserialize, Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ApolloResponse {
-        traces_ignored: bool,
-    }
-
     /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
     pub struct ReportSpaceport {
         addr: SocketAddr,
@@ -315,7 +307,7 @@ pub mod spaceport {
             let tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>> =
                 Arc::new(Mutex::new(HashMap::new()));
             let task_tpq = tpq.clone();
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(100);
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(10);
             tokio::task::spawn(async move {
                 let client = Client::new();
                 let mut interval = interval(Duration::from_secs(5));
@@ -403,7 +395,7 @@ pub mod spaceport {
                 .build()
                 .map_err(|e| Status::unavailable(e.to_string()))?;
 
-            for i in 0..4 {
+            for i in 0..5 {
                 // We know these requests can be cloned
                 let my_req = req.try_clone().expect("requests must be clone-able");
                 match client.execute(my_req).await {
@@ -412,14 +404,7 @@ pub mod spaceport {
                             .text()
                             .await
                             .map_err(|e| Status::internal(e.to_string()))?;
-                        tracing::debug!("text: {:?}", data);
-                        /*
-                        let ar: ApolloResponse = v
-                            .json()
-                            .await
-                            .map_err(|e| Status::internal(e.to_string()))?;
-                        tracing::debug!("json: {:?}", ar);
-                        */
+                        tracing::debug!("ingress response text: {:?}", data);
                         let response = ReporterResponse {
                             message: "Report accepted".to_string(),
                         };
@@ -427,33 +412,17 @@ pub mod spaceport {
                     }
                     Err(e) => {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
+                        if i == 4 {
+                            return Err(Status::unavailable(e.to_string()));
+                        }
                         backoff += Duration::from_millis(50);
                         tokio::time::sleep(backoff).await;
                     }
                 }
             }
-            // One last try to transfer, if fail, report unavailable
-            match client.execute(req).await {
-                Ok(v) => {
-                    let data = v
-                        .text()
-                        .await
-                        .map_err(|e| Status::internal(e.to_string()))?;
-                    tracing::debug!("text: {:?}", data);
-                    /*
-                    let ar: ApolloResponse = v
-                        .json()
-                        .await
-                        .map_err(|e| Status::internal(e.to_string()))?;
-                    tracing::debug!("json: {:?}", ar);
-                    */
-                    let response = ReporterResponse {
-                        message: "Report accepted".to_string(),
-                    };
-                    Ok(Response::new(response))
-                }
-                Err(e) => Err(Status::unavailable(e.to_string())),
-            }
+            // The compiler can't figure out the exit paths are covered,
+            // so to keep it happy have...
+            Err(Status::unavailable("should not happen..."))
         }
     }
 
@@ -483,9 +452,6 @@ pub mod spaceport {
             &self,
             record: StatsOrTrace,
         ) -> Result<Response<ReporterResponse>, Status> {
-            let response = ReporterResponse {
-                message: "Report accepted".to_string(),
-            };
             let mut tpq = self.tpq.lock().await;
             let graph_map = tpq
                 .entry(record.graph().unwrap())
@@ -506,19 +472,27 @@ pub mod spaceport {
             // because we are just hinting to the spaceport that it's probably a
             // good idea to try to transfer data up to the ingress. Multiple
             // notifications just trigger more transfers.
+            //
+            // 5000 is a fairly arbitrary number which indicates that we are adding
+            // a lot of data for transfer. It is intended to represent a rate of
+            // approx. 1,000 records/second.
             let total = self.total.fetch_add(1, Ordering::SeqCst);
             if total > 5000 {
                 let mut backoff = Duration::from_millis(0);
-                for i in 0..4 {
+                for i in 0..5 {
                     match self.tx.send(()).await {
                         Ok(_v) => {
                             self.total.store(0, Ordering::SeqCst);
-                            return Ok(Response::new(response));
+                            break;
                         }
                         Err(e) => {
                             tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
                             if i == 4 {
-                                return Err(Status::unavailable(e.to_string()));
+                                // Not being able to trigger a transfer isn't an "error". We can
+                                // let the client know that the transfer was Ok and hope that the
+                                // backend server eventually catches up with the workload and
+                                // clears the incoming trigger messages.
+                                break;
                             } else {
                                 backoff += Duration::from_millis(50);
                                 tokio::time::sleep(backoff).await;
@@ -528,6 +502,9 @@ pub mod spaceport {
                 }
             }
 
+            let response = ReporterResponse {
+                message: "Report accepted".to_string(),
+            };
             Ok(Response::new(response))
         }
     }

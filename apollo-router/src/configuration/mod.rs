@@ -66,7 +66,7 @@ pub struct Configuration {
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
 
-    /// Studio Usage configuration.
+    /// Spaceport configuration.
     #[serde(default)]
     #[builder(default)]
     pub spaceport: Option<SpaceportConfig>,

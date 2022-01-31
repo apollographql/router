@@ -55,6 +55,22 @@ expression: get_spans()
           },
           "children": {}
         },
+        "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
+          "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
+          "record": {
+            "entries": [],
+            "metadata": {
+              "name": "plan",
+              "target": "apollo_router_core::query_planner::router_bridge_query_planner",
+              "level": "DEBUG",
+              "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
+              "fields": {
+                "names": []
+              }
+            }
+          },
+          "children": {}
+        },
         "apollo_router_core::query_planner::validate": {
           "name": "apollo_router_core::query_planner::validate",
           "record": {

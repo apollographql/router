@@ -1,8 +1,0 @@
----
-source: apollo-router/src/apollo_telemetry.rs
-assertion_line: 423
-expression: normalized
-
----
-## GraphQLUnknownOperationName
-

@@ -24,8 +24,6 @@ otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
 anyhow = "1.0.53"
-# apollo-parser = "0.2.0"
-# apollo-parser = { path = "../../apollo-rs/crates/apollo-parser" }
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "ff317c7e85165bb6c380284b63c55d8af877fb7b" }
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.52"
@@ -87,7 +85,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }
-tracing-test = "0.2.1"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
 
 [[test]]

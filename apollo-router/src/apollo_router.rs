@@ -95,7 +95,6 @@ impl Router<ApolloPreparedQuery> for ApolloRouter {
                 request.operation_name.to_owned(),
                 Default::default(),
             )
-            .instrument(tracing::trace_span!("query_get"))
             .await?;
 
         tracing::debug!("query plan\n{:#?}", query_plan);
