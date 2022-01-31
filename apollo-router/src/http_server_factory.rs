@@ -62,8 +62,7 @@ impl HttpServerHandle {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        #[allow(unused_variables)]
-        let listener = self.server_future.await?;
+        let _listener = self.server_future.await?;
         #[cfg(unix)]
         {
             if let ListenAddr::UnixSocket(path) = self.listen_address {
