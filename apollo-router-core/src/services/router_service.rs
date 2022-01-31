@@ -75,7 +75,7 @@ where
 
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
-    concurrency: usize,
+    buffer: usize,
     plugins: Vec<Box<dyn Plugin>>,
     services: Vec<(
         String,
@@ -84,10 +84,10 @@ pub struct PluggableRouterServiceBuilder {
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, concurrency: usize) -> Self {
+    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
         Self {
             schema,
-            concurrency,
+            buffer,
             plugins: Default::default(),
             services: Default::default(),
         }
@@ -124,7 +124,7 @@ impl PluggableRouterServiceBuilder {
         //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let query_planner_service = ServiceBuilder::new()
             .boxed_clone()
-            .buffer(self.concurrency)
+            .buffer(self.buffer)
             .service(self.plugins.iter_mut().fold(
                 RouterBridgeQueryPlanner::new(self.schema.clone()).boxed(),
                 |acc, e| e.query_planning_service(acc),
@@ -137,7 +137,7 @@ impl PluggableRouterServiceBuilder {
             .map(|(name, s)| {
                 (
                     name.clone(),
-                    ServiceBuilder::new().buffer(self.concurrency).service(
+                    ServiceBuilder::new().buffer(self.buffer).service(
                         self.plugins
                             .iter_mut()
                             .fold(s, |acc, e| e.subgraph_service(&name, acc)),
@@ -149,7 +149,7 @@ impl PluggableRouterServiceBuilder {
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let execution_service = ServiceBuilder::new()
             .boxed_clone()
-            .buffer(self.concurrency)
+            .buffer(self.buffer)
             .service(
                 self.plugins.iter_mut().fold(
                     ExecutionService::builder()
@@ -164,7 +164,7 @@ impl PluggableRouterServiceBuilder {
         //Router service takes a graphql::Request and outputs a graphql::Response
         let router_service = ServiceBuilder::new()
             .boxed_clone()
-            .buffer(self.concurrency)
+            .buffer(self.buffer)
             .service(
                 self.plugins.iter_mut().fold(
                     RouterService::builder()

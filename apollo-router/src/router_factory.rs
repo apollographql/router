@@ -55,9 +55,9 @@ impl RouterFactory for ApolloRouterFactory {
     ) -> Self::RouterService {
         //TODO Use the plugins, services and config tp build the pipeline.
 
-        let concurrency = 20000;
-        ServiceBuilder::new().buffer(concurrency).service(
-            PluggableRouterServiceBuilder::new(schema, concurrency)
+        let buffer = 20000;
+        ServiceBuilder::new().buffer(buffer).service(
+            PluggableRouterServiceBuilder::new(schema, buffer)
                 .build()
                 .map_request(|http_request| RouterRequest {
                     http_request,
