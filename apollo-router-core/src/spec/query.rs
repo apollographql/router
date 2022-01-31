@@ -213,12 +213,7 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn validate_variables(
-        &self,
-        request: impl AsRef<Request>,
-        schema: &Schema,
-    ) -> Result<(), Response> {
-        let request = request.as_ref();
+    pub fn validate_variables(&self, request: &Request, schema: &Schema) -> Result<(), Response> {
         let operation_name = request.operation_name.as_deref();
         let operation_variable_types =
             self.operations

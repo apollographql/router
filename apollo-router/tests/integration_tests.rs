@@ -1,7 +1,7 @@
 use apollo_router::configuration::Configuration;
-use apollo_router::http_subgraph::HttpSubgraphFetcher;
-use apollo_router::ApolloRouter;
+use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
+use apollo_router_core::PluggableRouterServiceBuilder;
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::ValueExt;
 use maplit::hashmap;
@@ -10,6 +10,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
+use tower::Service;
 use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
@@ -30,14 +31,14 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let frontend_request = http::Request::builder()
+        let http_request = http::Request::builder()
         .method("GET")
         .body(request)
         .unwrap();
 
         let request = graphql::RouterRequest {
-            context: graphql::Object::default(),
-            frontend_request,
+            context: graphql::Context::new(),
+            http_request,
         };
 
         let (actual, registry) = query_rust(request).await;
@@ -173,14 +174,14 @@ async fn missing_variables() {
         )
         .build();
 
-    let frontend_request = http::Request::builder()
+    let http_request = http::Request::builder()
         .method("GET")
         .body(request)
         .unwrap();
 
     let request = graphql::RouterRequest {
-        context: graphql::Object::default(),
-        frontend_request,
+        context: graphql::Context::new(),
+        http_request,
     };
     let (response, _) = query_rust(request).await;
     let expected = vec![
@@ -223,31 +224,27 @@ async fn query_rust(
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
 
-    let mut service_registry = graphql::ServiceRegistry::new();
+    let mut builder = PluggableRouterServiceBuilder::new(schema, 10);
     for (name, subgraph) in &config.subgraphs {
         let cloned_counter = counting_registry.clone();
+        let cloned_name = name.clone();
 
-        let fetcher = graphql::FetcherService::new(HttpSubgraphFetcher::new(
-            name.to_owned(),
-            subgraph.routing_url.to_owned(),
-        ))
-        .map_request(move |request: SubgraphRequest| {
-            let cloned_counter = cloned_counter.clone();
-            cloned_counter.increment(request.service_name.as_str());
+        let service = ReqwestSubgraphService::new(name.to_owned(), subgraph.routing_url.to_owned())
+            .map_request(move |request: SubgraphRequest| {
+                let cloned_counter = cloned_counter.clone();
+                cloned_counter.increment(cloned_name.as_str());
 
-            request
-        });
-        service_registry.insert(name, fetcher);
+                request
+            });
+        builder = builder.with_subgraph_service(name, service);
     }
 
-    let router = ApolloRouter::new(Arc::new(service_registry), schema, None).await;
+    let mut router = builder.build();
 
-    let stream = match router.prepare_query(request.frontend_request.body()).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
+    let stream = router.call(request).await.unwrap();
+    let (_, response) = stream.response.into_parts();
 
-    (stream, counting_registry)
+    (response, counting_registry)
 }
 
 #[derive(Debug, Clone)]
