@@ -140,8 +140,12 @@ impl ReportHeader {
         };
 
         header.hostname = hostname()?;
-        header.agent_version = std::env!("CARGO_PKG_VERSION").to_string();
-        header.runtime_version = std::env!("CARGO_PKG_NAME").to_string();
+        header.agent_version = format!(
+            "{}-{}",
+            std::env!("CARGO_PKG_NAME"),
+            std::env!("CARGO_PKG_VERSION")
+        );
+        header.runtime_version = "rust".to_string();
         header.uname = get_uname()?;
         header.graph_ref = graph.to_string();
         Ok(header)

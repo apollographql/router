@@ -225,7 +225,6 @@ impl From<&StudioGraph> for ReporterGraph {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
-        tracing::info!("batch size: {}", batch.len());
         if self.graph.is_none() {
             // It's an error to try and export statistics without
             // graph details. We enforce that elsewhere in the code
