@@ -27,5 +27,5 @@ subgraphs:
   reviews:
     routing_url: "http://localhost:4002/graphql"
 opentelemetry: ~
-extensions: {}
+plugins: {}
 

@@ -616,9 +616,9 @@ mod tests {
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
-        ApolloRouter::builder()
-            .configuration(configuration)
-            .schema(Box::new(schema))
+        ApolloRouterBuilder::default()
+            .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+            .schema(SchemaKind::Instance(Box::new(schema)))
             .build()
             .serve()
     }

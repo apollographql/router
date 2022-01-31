@@ -23,5 +23,5 @@ subgraphs:
   example:
     routing_url: "http://foo/"
 opentelemetry: ~
-extensions: {}
+plugins: {}
 

@@ -379,13 +379,14 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::http_server_factory::MockHttpServerFactory;
     use crate::router_factory::RouterFactory;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
+    use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
+    use std::task::{Context, Poll};
     use test_log::test;
     use tokio::net::TcpListener;
     use url::Url;
@@ -639,7 +640,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
+            .returning(|_, _, _| MockMyRouter::new());
         // second call, configuration is empty, we should take the URL from the graph
         router_factory
             .expect_create()
@@ -653,7 +654,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
+            .returning(|_, _, _| MockMyRouter::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -724,7 +725,7 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
+            .returning(|_, _, _| MockMyRouter::new());
         // second call, configuration is still empty, we should take the URL from the new supergraph
         router_factory
             .expect_create()
@@ -739,7 +740,7 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
+            .returning(|_, _, _| MockMyRouter::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -791,57 +792,80 @@ mod tests {
         #[derive(Debug)]
         MyRouterFactory {}
 
-        #[async_trait::async_trait]
-        impl RouterFactory<MockMyRouter> for MyRouterFactory {
-            async fn create(
+        impl RouterFactory for MyRouterFactory {
+            type RouterService = MockMyRouter;
+            fn create(
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
-                previous_router: Option<RouterService<MockMyRouter>>,
-            ) -> RouterService<MockMyRouter>;
+                previous_router: Option<MockMyRouter>,
+            ) -> MockMyRouter;
         }
     }
 
     mock! {
         #[derive(Debug)]
-        MyFetcher {}
+        MyRouter {
+            fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> <MockMyRouter as Service<Request<graphql::Request>>>::Future;
+        }
 
-        #[async_trait::async_trait]
-        impl graphql::Fetcher for MyFetcher {
-            async fn stream(
-                &self,
-                request: &graphql::SubgraphRequest,
-            ) -> Result<graphql::RouterResponse, graphql::FetchError>;
+        impl Clone for MyRouter {
+            fn clone(&self) -> MockMyRouter;
+        }
+    }
+
+    //mockall does not handle well the lifetime on Context
+    impl Service<Request<graphql::Request>> for MockMyRouter {
+        type Response = Response<graphql::Response>;
+        type Error = BoxError;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+            self.poll_ready()
+        }
+        fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
+            self.service_call(req)
         }
     }
 
     mock! {
         #[derive(Debug)]
-        MyRouter {}
-
-        #[async_trait::async_trait]
-        impl graphql::Router for MyRouter {
-            type PreparedQuery = MockMyRoute;
-
-            async fn prepare_query(
-                &self,
-                request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::Response>;
+        MyHttpServerFactory{
+            fn create_server(&self,
+                configuration: Arc<Configuration>,
+                listener: Option<TcpListener>,) -> Result<HttpServerHandle, FederatedServerError>;
         }
     }
 
-    mock! {
-        #[derive(Debug)]
-        MyRoute {}
+    impl HttpServerFactory for MockMyHttpServerFactory {
+        type Future =
+            Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
 
-        #[async_trait::async_trait]
-        impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: graphql::RouterRequest) -> graphql::Response;
+        fn create<RS>(
+            &self,
+            _service: RS,
+            configuration: Arc<Configuration>,
+            listener: Option<TcpListener>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+        where
+            RS: Service<
+                    Request<graphql::Request>,
+                    Response = Response<graphql::Response>,
+                    Error = BoxError,
+                > + Send
+                + Sync
+                + Clone
+                + 'static,
+            <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+        {
+            let res = self.create_server(configuration, listener);
+            Box::pin(async move { res })
         }
     }
 
     async fn execute(
-        server_factory: MockHttpServerFactory,
+        server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterFactory,
         events: Vec<Event>,
         expected_states: Vec<State>,
@@ -859,19 +883,17 @@ mod tests {
     fn create_mock_server_factory(
         expect_times_called: usize,
     ) -> (
-        MockHttpServerFactory,
+        MockMyHttpServerFactory,
         Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     ) {
-        let mut server_factory = MockHttpServerFactory::new();
+        let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
         server_factory
-            .expect_create()
+            .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |_: RouterService<MockMyRouter>,
-                      configuration: Arc<Configuration>,
-                      listener: Option<TcpListener>| {
+                move |configuration: Arc<Configuration>, listener: Option<TcpListener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -886,13 +908,11 @@ mod tests {
                         })
                     };
 
-                    Box::pin(async move {
-                        Ok(HttpServerHandle::new(
-                            shutdown_sender,
-                            Box::pin(server),
-                            configuration.server.listen,
-                        ))
-                    })
+                    Ok(HttpServerHandle::new(
+                        shutdown_sender,
+                        Box::pin(server),
+                        configuration.server.listen,
+                    ))
                 },
             );
         (server_factory, shutdown_receivers)
@@ -903,7 +923,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _| RouterService::new(Arc::new(MockMyRouter::new())));
+            .returning(|_, _, _| MockMyRouter::new());
         router_factory
     }
 }

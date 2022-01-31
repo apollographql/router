@@ -16,5 +16,5 @@ opentelemetry:
       exporter:
         grpc: ~
       trace_config: ~
-extensions: {}
+plugins: {}
 

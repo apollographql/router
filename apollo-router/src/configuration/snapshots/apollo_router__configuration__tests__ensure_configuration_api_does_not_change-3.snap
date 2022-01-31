@@ -12,5 +12,5 @@ subgraphs:
     routing_url: "http://foo/"
 opentelemetry:
   jaeger: ~
-extensions: {}
+plugins: {}
 

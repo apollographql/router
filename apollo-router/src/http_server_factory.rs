@@ -6,8 +6,6 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use http::Request;
 use http::Response;
-#[cfg(test)]
-use mockall::{automock, predicate::*};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -19,14 +17,15 @@ use tower::Service;
 ///
 /// This trait enables us to test that `StateMachine` correctly recreates the http server when
 /// necessary e.g. when listen address changes.
-#[cfg_attr(test, automock)]
 pub(crate) trait HttpServerFactory {
+    type Future: Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send;
+
     fn create<RS>(
         &self,
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<TcpListener>,
-    ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+    ) -> Self::Future
     where
         RS: Service<
                 Request<graphql::Request>,

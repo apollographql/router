@@ -47,5 +47,5 @@ opentelemetry:
                 String:
                   - value1
                   - value2
-extensions: {}
+plugins: {}
 
