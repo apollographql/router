@@ -11,7 +11,7 @@ mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
-use crate::router_factory::ApolloRouterFactory;
+use crate::router_factory::{ApolloRouterFactory, RouterFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -25,6 +25,7 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
+use http::{Request, Response};
 use once_cell::sync::OnceCell;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,7 @@ use tokio::task::spawn;
 use tower::buffer::Buffer;
 use tower::util::BoxCloneService;
 use tower::BoxError;
+use tower_service::Service;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -343,7 +345,13 @@ impl ShutdownKind {
 ///
 pub struct ApolloRouter<RF>
 where
-    RF: Send + 'static,
+    RF: RouterFactory,
+    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
 {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
@@ -354,7 +362,7 @@ where
     /// A future that when resolved will shut down the server.
     shutdown: ShutdownKind,
 
-    router_factory: RF,
+    router_factory: Option<RF>,
 }
 
 #[derive(Default)]
@@ -415,10 +423,12 @@ impl ApolloRouterBuilder {
                 .expect("Configuration must be set on builder"),
             schema: self.schema.expect("Schema must be set on builder"),
             shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: ApolloRouterFactory::builder()
-                .plugins(self.plugins)
-                .services(self.services)
-                .build(),
+            router_factory: Some(
+                ApolloRouterFactory::builder()
+                    .plugins(self.plugins)
+                    .services(self.services)
+                    .build(),
+            ),
         }
     }
 }
@@ -529,7 +539,16 @@ impl Future for FederatedServerHandle {
     }
 }
 
-impl<RouterFactory: Send> ApolloRouter<RouterFactory> {
+impl<RF> ApolloRouter<RF>
+where
+    RF: RouterFactory,
+    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
+{
     /// Start the federated server on a separate thread.
     ///
     /// The returned handle allows the user to await until the server is ready and shutdown.
@@ -538,16 +557,11 @@ impl<RouterFactory: Send> ApolloRouter<RouterFactory> {
     ///
     /// returns: FederatedServerHandle
     ///
-    pub fn serve(self) -> FederatedServerHandle {
+    pub fn serve(mut self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = WarpHttpServerFactory::new();
-        let state_machine = StateMachine::new(
-            server_factory,
-            Some(state_listener),
-            //TODO use the router factory that go built
-            //self.router_factory
-            ApolloRouterFactory::default(),
-        );
+        let state_machine =
+            StateMachine::new(server_factory, Some(state_listener), self.router_factory.take().expect("Router factory should have been populated"));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let result = spawn(async move {
             state_machine
