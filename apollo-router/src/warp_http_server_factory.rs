@@ -444,7 +444,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         MyRouter {
-            fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
+            //fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
             fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
         }
 
@@ -459,8 +459,9 @@ mod tests {
         type Error = BoxError;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-            self.poll_ready()
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+            //self.poll_ready()
+            Poll::Ready(Ok(()))
         }
         fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
             let res = self.service_call(req);
@@ -468,13 +469,21 @@ mod tests {
         }
     }
 
+    fn make_router() -> MockMyRouter {
+        let mut router = MockMyRouter::new();
+        router.expect_clone().returning(make_router);
+
+        router
+    }
+
     macro_rules! init {
         ($listen_address:expr, $fetcher:ident => $expect_prepare_query:block) => {{
             #[allow(unused_mut)]
-            let mut $fetcher = MockMyRouter::new();
+            let mut $fetcher = make_router();
             $expect_prepare_query;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = $fetcher;
+
             let server = server_factory
                 .create(
                     fetcher,

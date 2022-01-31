@@ -640,7 +640,14 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| {
+                let mut router = MockMyRouter::new();
+
+                router
+                    .expect_clone()
+                    .return_once(move || MockMyRouter::new());
+                router
+            });
         // second call, configuration is empty, we should take the URL from the graph
         router_factory
             .expect_create()
@@ -654,7 +661,14 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| {
+                let mut router = MockMyRouter::new();
+
+                router
+                    .expect_clone()
+                    .return_once(move || MockMyRouter::new());
+                router
+            });
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -725,7 +739,14 @@ mod tests {
                     == "http://accounts/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| {
+                let mut router = MockMyRouter::new();
+
+                router
+                    .expect_clone()
+                    .return_once(move || MockMyRouter::new());
+                router
+            });
         // second call, configuration is still empty, we should take the URL from the new supergraph
         router_factory
             .expect_create()
@@ -740,7 +761,14 @@ mod tests {
                     == "http://localhost:4001/graphql"
             })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(|_, _, _| {
+                let mut router = MockMyRouter::new();
+
+                router
+                    .expect_clone()
+                    .return_once(move || MockMyRouter::new());
+                router
+            });
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert!(matches!(
@@ -821,7 +849,7 @@ mod tests {
         type Error = BoxError;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
         fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
@@ -920,10 +948,18 @@ mod tests {
 
     fn create_mock_router_factory(expect_times_called: usize) -> MockMyRouterFactory {
         let mut router_factory = MockMyRouterFactory::new();
+
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(move |_, _, _| {
+                let mut router = MockMyRouter::new();
+
+                router
+                    .expect_clone()
+                    .return_once(move || MockMyRouter::new());
+                router
+            });
         router_factory
     }
 }
