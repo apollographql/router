@@ -1,7 +1,5 @@
 use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use async_trait::async_trait;
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use tower::util::BoxService;
 use tower::BoxError;
 
