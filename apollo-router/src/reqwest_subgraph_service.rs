@@ -10,7 +10,11 @@ pub struct ReqwestSubgraphService {
     http_client: reqwest_middleware::ClientWithMiddleware,
     service: Arc<String>,
     // TODO not used because provided by SubgraphRequest
-    url: Arc<reqwest::Url>,
+    // FIXME: debatable because here we would end up reparsing the URL on every call
+    // which would be a performance regression. The SubgraphRequest type should provide
+    // a url::Url instead of using the http crate
+    // for now, to make things work, if the URL in the request is /, we use this URL
+    url: reqwest::Url,
 }
 
 impl ReqwestSubgraphService {
@@ -29,7 +33,7 @@ impl ReqwestSubgraphService {
             .with(LoggingMiddleware::new(&service))
             .build(),
             service: Arc::new(service),
-            url: Arc::new(url),
+            url: url,
         }
     }
 }
@@ -52,16 +56,17 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         }: graphql::SubgraphRequest,
     ) -> Self::Future {
         let http_client = self.http_client.clone();
+        let target_url = if http_request.uri() == "/" {
+            self.url.clone()
+        } else {
+            reqwest::Url::parse(&http_request.uri().to_string()).expect("todo")
+        };
+
         Box::pin(async move {
-            tracing::debug!(
-                "Making request to {} {:?}",
-                http_request.uri(),
-                http_request,
-            );
+            tracing::debug!("Making request to {} {:?}", target_url, http_request,);
             let (
                 http::request::Parts {
                     method,
-                    uri,
                     version,
                     headers,
                     extensions: _,
