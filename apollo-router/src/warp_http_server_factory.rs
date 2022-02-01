@@ -388,18 +388,17 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use mockall::{mock, predicate::*};
+    use mockall::mock;
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
         ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
         LOCATION, ORIGIN,
     };
     use reqwest::redirect::Policy;
-    use reqwest::{Method, StatusCode};
+    use reqwest::{Client, Method, StatusCode};
     use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
-    use std::task::{Context, Poll};
     use test_log::test;
 
     macro_rules! assert_header {
@@ -443,79 +442,58 @@ mod tests {
 
     mock! {
         #[derive(Debug)]
-        MyRouter {
-            //fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
-        }
-
-        impl Clone for MyRouter {
-            fn clone(&self) -> MockMyRouter;
+        RouterService {
+            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
         }
     }
 
-    //mockall does not handle well the lifetime on Context
-    impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = Response<graphql::Response>;
-        type Error = BoxError;
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
+        let server_factory = WarpHttpServerFactory::new();
+        let (service, mut handle) = tower_test::mock::spawn();
 
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-            //self.poll_ready()
-            Poll::Ready(Ok(()))
-        }
-        fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
-            let res = self.service_call(req);
-            Box::pin(async move { res })
-        }
-    }
-
-    fn make_router() -> MockMyRouter {
-        let mut router = MockMyRouter::new();
-        router.expect_clone().returning(make_router);
-
-        router
-    }
-
-    macro_rules! init {
-        ($listen_address:expr, $fetcher:ident => $expect_prepare_query:block) => {{
-            #[allow(unused_mut)]
-            let mut $fetcher = make_router();
-            $expect_prepare_query;
-            let server_factory = WarpHttpServerFactory::new();
-            let fetcher = $fetcher;
-
-            let server = server_factory
-                .create(
-                    fetcher,
-                    Arc::new(
-                        Configuration::builder()
-                            .server(
-                                crate::configuration::Server::builder()
-                                    .listen(SocketAddr::from_str($listen_address).unwrap())
-                                    .cors(Some(
-                                        Cors::builder()
-                                            .origins(vec!["http://studio".to_string()])
-                                            .build(),
-                                    ))
-                                    .build(),
-                            )
-                            .subgraphs(Default::default())
-                            .build(),
-                    ),
-                    None,
-                )
-                .await?;
-            let client = reqwest::Client::builder()
-                .redirect(Policy::none())
-                .build()
-                .unwrap();
-            (server, client)
-        }};
+        tokio::spawn(async move {
+            loop {
+                while let Some((request, responder)) = handle.next_request().await {
+                    match mock.service_call(request) {
+                        Ok(response) => responder.send_response(response),
+                        Err(err) => responder.send_error(err),
+                    }
+                }
+            }
+        });
+        let server = server_factory
+            .create(
+                service.into_inner(),
+                Arc::new(
+                    Configuration::builder()
+                        .server(
+                            crate::configuration::Server::builder()
+                                .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                                .cors(Some(
+                                    Cors::builder()
+                                        .origins(vec!["http://studio".to_string()])
+                                        .build(),
+                                ))
+                                .build(),
+                        )
+                        .subgraphs(Default::default())
+                        .build(),
+                ),
+                None,
+            )
+            .await
+            .expect("Failed to create server factory");
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()
+            .unwrap();
+        (server, client)
     }
 
     #[test(tokio::test)]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
 
         for url in vec![
             format!("http://{}/", server.listen_address()),
@@ -564,8 +542,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn malformed_request() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
-
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
         let response = client
             .post(format!("http://{}/graphql", server.listen_address()))
             .body("Garbage")
@@ -582,14 +560,18 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
-            fetcher.expect_service_call()
-                .times(2)
-                .returning(move |_| {
-                    let example_response = example_response.clone();
-                    Ok(http::Response::builder().status(200).body(example_response).unwrap())
-                })
-        });
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(example_response)
+                    .unwrap())
+            });
+        let (server, client) = init(expectations).await;
         let url = format!("http://{}/graphql", server.listen_address());
         // Post query
         let response = client
@@ -626,18 +608,23 @@ mod tests {
 
     #[test(tokio::test)]
     async fn response_failure() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
-            fetcher.expect_service_call()
-                .times(1)
-                .returning(move |_| {
-                    let example_response = graphql::FetchError::SubrequestHttpError {
-                        service: "Mock service".to_string(),
-                        reason: "Mock error".to_string(),
-                    }
-                    .to_response(true);
-                    Ok(http::Response::builder().status(200).body(example_response).unwrap())
-                })
-        });
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .returning(move |_| {
+                let example_response = graphql::FetchError::SubrequestHttpError {
+                    service: "Mock service".to_string(),
+                    reason: "Mock error".to_string(),
+                }
+                .to_response(true);
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(example_response)
+                    .unwrap())
+            });
+        let (server, client) = init(expectations).await;
+
         let response = client
             .post(format!("http://{}/graphql", server.listen_address()))
             .body(
@@ -667,7 +654,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn cors_preflight() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
 
         for url in vec![
             format!("http://{}/", server.listen_address()),
