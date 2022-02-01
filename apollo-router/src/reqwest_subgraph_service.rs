@@ -79,11 +79,12 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                 .request(method, target_url)
                 .json(&body)
                 .build()?;
-            *request.headers_mut() = headers;
+            request.headers_mut().extend(headers.into_iter());
             *request.version_mut() = version;
-            let response = http_client.execute(request).await?;
 
+            let response = http_client.execute(request).await?;
             let graphql: graphql::Response = serde_json::from_slice(&response.bytes().await?)?;
+
             Ok(graphql::RouterResponse {
                 response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
                 context,
