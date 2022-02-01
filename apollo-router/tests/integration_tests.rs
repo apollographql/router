@@ -224,7 +224,7 @@ async fn query_rust(
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
 
-    let mut builder = PluggableRouterServiceBuilder::new(schema, 10);
+    let mut builder = PluggableRouterServiceBuilder::new(schema, 10, tracing::Dispatch::default());
     for (name, subgraph) in &config.subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

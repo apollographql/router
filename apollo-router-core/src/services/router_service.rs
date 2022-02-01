@@ -7,9 +7,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
+use tracing::instrument::WithSubscriber;
+use tracing::Dispatch;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
@@ -81,15 +84,17 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, RouterResponse, BoxError>,
     )>,
+    dispatcher: Dispatch,
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
+    pub fn new(schema: Arc<Schema>, buffer: usize, dispatcher: Dispatch) -> Self {
         Self {
             schema,
             buffer,
             plugins: Default::default(),
             services: Default::default(),
+            dispatcher,
         }
     }
 
@@ -135,14 +140,15 @@ impl PluggableRouterServiceBuilder {
             .services
             .into_iter()
             .map(|(name, s)| {
-                (
-                    name.clone(),
-                    ServiceBuilder::new().buffer(self.buffer).service(
-                        self.plugins
-                            .iter_mut()
-                            .fold(s, |acc, e| e.subgraph_service(&name, acc)),
-                    ),
-                )
+                let service = self
+                    .plugins
+                    .iter_mut()
+                    .fold(s, |acc, e| e.subgraph_service(&name, acc));
+
+                let (service, worker) = Buffer::pair(service, self.buffer);
+                tokio::spawn(worker.with_subscriber(self.dispatcher.clone()));
+
+                (name.clone(), service)
             })
             .collect();
 

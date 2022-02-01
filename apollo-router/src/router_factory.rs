@@ -54,9 +54,14 @@ impl RouterFactory for ApolloRouterFactory {
         schema: Arc<Schema>,
         previous_router: Option<Self::RouterService>,
     ) -> Self::RouterService {
+        let dispatcher = configuration
+            .subscriber
+            .clone()
+            .map(tracing::Dispatch::new)
+            .unwrap_or_default();
         let buffer = 20000;
         //TODO Use the plugins, services and config tp build the pipeline.
-        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
+        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher);
 
         for (name, subgraph) in &configuration.subgraphs {
             builder = builder.with_subgraph_service(
