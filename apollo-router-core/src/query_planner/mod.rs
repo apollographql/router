@@ -220,7 +220,7 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
-    use tower_service::Service;
+    use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
     /// A fetch node.
@@ -351,13 +351,13 @@ mod fetch {
                 context: context.clone(),
             };
 
-            let mut service = service_registry
+            let service = service_registry
                 .get(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service
-                .call(subgraph_request)
+                .oneshot(subgraph_request)
                 .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
                 .await
                 .map_err(|e| FetchError::SubrequestHttpError {

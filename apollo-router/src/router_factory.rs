@@ -1,4 +1,5 @@
 use crate::configuration::Configuration;
+use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
     Context, PluggableRouterServiceBuilder, Plugin, RouterRequest, RouterResponse, Schema,
@@ -53,11 +54,19 @@ impl RouterFactory for ApolloRouterFactory {
         schema: Arc<Schema>,
         previous_router: Option<Self::RouterService>,
     ) -> Self::RouterService {
-        //TODO Use the plugins, services and config tp build the pipeline.
-
         let buffer = 20000;
+        //TODO Use the plugins, services and config tp build the pipeline.
+        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
+
+        for (name, subgraph) in &configuration.subgraphs {
+            builder = builder.with_subgraph_service(
+                &name,
+                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
+            );
+        }
+
         ServiceBuilder::new().buffer(buffer).service(
-            PluggableRouterServiceBuilder::new(schema, buffer)
+            builder
                 .build()
                 .map_request(|http_request| RouterRequest {
                     http_request,
