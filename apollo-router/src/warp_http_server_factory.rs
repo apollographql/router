@@ -336,14 +336,14 @@ where
     }
 }
 
-async fn stream_request<RS>(mut service: RS, request: Request<graphql::Request>) -> String
+async fn stream_request<RS>(service: RS, request: Request<graphql::Request>) -> String
 where
     RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Clone
         + 'static,
 {
-    match service.call(request).await {
+    match service.oneshot(request).await {
         Err(_) => String::new(),
         Ok(response) => {
             let span = Span::current();
