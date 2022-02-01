@@ -74,8 +74,11 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                 },
                 body,
             ) = http_request.into_parts();
-            let mut request =
-                reqwest::Request::new(method, reqwest::Url::parse(&uri.to_string()).expect("todo"));
+
+            let mut request = http_client
+                .request(method, target_url)
+                .json(&body)
+                .build()?;
             *request.headers_mut() = headers;
             *request.version_mut() = version;
             let response = http_client.execute(request).await?;
