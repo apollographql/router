@@ -1,9 +1,11 @@
 use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
+use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use tower::util::BoxService;
 use tower::BoxError;
 
+#[async_trait]
 pub trait Plugin: Send + Sync + 'static {
     //Configuration is untyped. Implementations may marshal to a strongly typed object
     fn configure(&mut self, _configuration: serde_json::Value) -> Result<(), BoxError> {
@@ -11,11 +13,11 @@ pub trait Plugin: Send + Sync + 'static {
     }
 
     // Plugins will receive a notification that they should start up and shut down.
-    fn startup(&mut self) -> BoxFuture<Result<(), BoxError>> {
-        async { Ok(()) }.boxed()
+    async fn startup(&mut self) -> Result<(), BoxError> {
+        Ok(())
     }
-    fn shutdown(&mut self) -> BoxFuture<Result<(), BoxError>> {
-        async { Ok(()) }.boxed()
+    async fn shutdown(&mut self) -> Result<(), BoxError> {
+        Ok(())
     }
 
     fn router_service(
