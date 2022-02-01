@@ -127,13 +127,14 @@ impl PluggableRouterServiceBuilder {
         self.plugins.reverse();
 
         //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let query_planner_service = ServiceBuilder::new()
-            .boxed_clone()
-            .buffer(self.buffer)
-            .service(self.plugins.iter_mut().fold(
+        let (query_planner_service, query_worker) = Buffer::pair(
+            ServiceBuilder::new().service(self.plugins.iter_mut().fold(
                 RouterBridgeQueryPlanner::new(self.schema.clone()).boxed(),
                 |acc, e| e.query_planning_service(acc),
-            ));
+            )),
+            self.buffer,
+        );
+        tokio::spawn(query_worker.with_subscriber(self.dispatcher.clone()));
 
         //SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -153,10 +154,8 @@ impl PluggableRouterServiceBuilder {
             .collect();
 
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
-        let execution_service = ServiceBuilder::new()
-            .boxed_clone()
-            .buffer(self.buffer)
-            .service(
+        let (execution_service, execution_worker) = Buffer::pair(
+            ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
                     ExecutionService::builder()
                         .schema(self.schema.clone())
@@ -165,13 +164,14 @@ impl PluggableRouterServiceBuilder {
                         .boxed(),
                     |acc, e| e.execution_service(acc),
                 ),
-            );
+            ),
+            self.buffer,
+        );
+        tokio::spawn(execution_worker.with_subscriber(self.dispatcher.clone()));
 
         //Router service takes a graphql::Request and outputs a graphql::Response
-        let router_service = ServiceBuilder::new()
-            .boxed_clone()
-            .buffer(self.buffer)
-            .service(
+        let (router_service, router_worker) = Buffer::pair(
+            ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
                     RouterService::builder()
                         .query_planner_service(query_planner_service)
@@ -180,8 +180,11 @@ impl PluggableRouterServiceBuilder {
                         .boxed(),
                     |acc, e| e.router_service(acc),
                 ),
-            );
+            ),
+            self.buffer,
+        );
+        tokio::spawn(router_worker.with_subscriber(self.dispatcher.clone()));
 
-        router_service
+        router_service.boxed_clone()
     }
 }
