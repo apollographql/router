@@ -241,7 +241,7 @@ async fn query_rust(
 
     let mut router = builder.build();
 
-    let stream = router.call(request).await.unwrap();
+    let stream = router.ready().await.unwrap().call(request).await.unwrap();
     let (_, response) = stream.response.into_parts();
 
     (response, counting_registry)
