@@ -12,6 +12,7 @@ use tower::buffer::Buffer;
 use tower::util::BoxCloneService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
+use tracing::instrument::WithSubscriber;
 use typed_builder::TypedBuilder;
 
 /// Factory for creating graphs.
@@ -61,7 +62,7 @@ impl RouterFactory for ApolloRouterFactory {
             .unwrap_or_default();
         let buffer = 20000;
         //TODO Use the plugins, services and config tp build the pipeline.
-        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher);
+        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
         for (name, subgraph) in &configuration.subgraphs {
             builder = builder.with_subgraph_service(
@@ -70,15 +71,20 @@ impl RouterFactory for ApolloRouterFactory {
             );
         }
 
-        ServiceBuilder::new().buffer(buffer).service(
-            builder
-                .build()
-                .map_request(|http_request| RouterRequest {
-                    http_request,
-                    context: Context::new(),
-                })
-                .map_response(|response| response.response)
-                .boxed_clone(),
-        )
+        let (service, worker) = Buffer::pair(
+            ServiceBuilder::new().service(
+                builder
+                    .build()
+                    .map_request(|http_request| RouterRequest {
+                        http_request,
+                        context: Context::new(),
+                    })
+                    .map_response(|response| response.response)
+                    .boxed_clone(),
+            ),
+            buffer,
+        );
+        tokio::spawn(worker.with_subscriber(dispatcher));
+        service
     }
 }
