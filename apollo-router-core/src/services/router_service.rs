@@ -231,8 +231,9 @@ impl PluggableRouterServiceBuilder {
         // NaiveIntrospection instantiation can potentially block for some time
         let naive_introspection = {
             let schema = Arc::clone(&self.schema);
-            // this was previously under a spawn_blocking
-            NaiveIntrospection::from_schema(&schema)
+            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&self.schema))
+                .await
+                .expect("NaiveIntrospection instantiation panicked")
         };
 
         /*FIXME
@@ -253,6 +254,7 @@ impl PluggableRouterServiceBuilder {
             }
         }
         */
+
         //Router service takes a graphql::Request and outputs a graphql::Response
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().service(
