@@ -83,99 +83,90 @@ impl PlanNode {
         schema: &'a Schema,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
-        Box::pin(
-            async move {
-                tracing::trace!("Executing plan:\n{:#?}", self);
-                let mut value;
-                let mut errors = Vec::new();
+        Box::pin(async move {
+            tracing::trace!("Executing plan:\n{:#?}", self);
+            let mut value;
+            let mut errors = Vec::new();
 
-                match self {
-                    PlanNode::Sequence { nodes } => {
-                        let sequence_span = tracing::info_span!("sequence");
-                        let _entered = sequence_span.enter();
+            match self {
+                PlanNode::Sequence { nodes } => {
+                    let sequence_span = tracing::info_span!("sequence");
+                    let _entered = sequence_span.enter();
 
-                        value = parent_value.clone();
-                        for node in nodes {
-                            let (v, err) = node
-                                .execute_recursively(
-                                    current_dir,
-                                    context,
-                                    service_registry,
-                                    schema,
-                                    &value,
-                                )
-                                .in_current_span()
-                                .await;
-                            value.deep_merge(v);
-                            errors.extend(err.into_iter());
-                        }
-                    }
-                    PlanNode::Parallel { nodes } => {
-                        let parallel_span = tracing::info_span!("parallel");
-                        let _entered = parallel_span.enter();
-                        value = Value::default();
-
-                        let mut stream: stream::FuturesUnordered<_> = nodes
-                            .iter()
-                            .map(|plan| {
-                                plan.execute_recursively(
-                                    current_dir,
-                                    context,
-                                    service_registry,
-                                    schema,
-                                    parent_value,
-                                )
-                                .in_current_span()
-                            })
-                            .collect();
-
-                        while let Some((v, err)) = stream.next().in_current_span().await {
-                            value.deep_merge(v);
-                            errors.extend(err.into_iter());
-                        }
-                    }
-                    PlanNode::Flatten(FlattenNode { path, node }) => {
+                    value = parent_value.clone();
+                    for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
-                                // this is the only command that actually changes the "current dir"
-                                &current_dir.join(path),
-                                context,
-                                service_registry,
-                                schema,
-                                parent_value,
-                            )
-                            .instrument(tracing::trace_span!("flatten"))
-                            .await;
-
-                        value = v;
-                        errors.extend(err.into_iter());
-                    }
-                    PlanNode::Fetch(fetch_node) => {
-                        match fetch_node
-                            .fetch_node(
-                                parent_value,
                                 current_dir,
                                 context,
                                 service_registry,
                                 schema,
+                                &value,
                             )
-                            .instrument(tracing::info_span!("fetch"))
-                            .await
-                        {
-                            Ok(v) => value = v,
-                            Err(err) => {
-                                failfast_error!("Fetch error: {}", err);
-                                errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
-                                value = Value::default();
-                            }
+                            .in_current_span()
+                            .await;
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                    }
+                }
+                PlanNode::Parallel { nodes } => {
+                    let parallel_span = tracing::info_span!("parallel");
+                    let _entered = parallel_span.enter();
+                    value = Value::default();
+
+                    let mut stream: stream::FuturesUnordered<_> = nodes
+                        .iter()
+                        .map(|plan| {
+                            plan.execute_recursively(
+                                current_dir,
+                                context,
+                                service_registry,
+                                schema,
+                                parent_value,
+                            )
+                            .in_current_span()
+                        })
+                        .collect();
+
+                    while let Some((v, err)) = stream.next().in_current_span().await {
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
+                    }
+                }
+                PlanNode::Flatten(FlattenNode { path, node }) => {
+                    let (v, err) = node
+                        .execute_recursively(
+                            // this is the only command that actually changes the "current dir"
+                            &current_dir.join(path),
+                            context,
+                            service_registry,
+                            schema,
+                            parent_value,
+                        )
+                        .instrument(tracing::trace_span!("flatten"))
+                        .await;
+
+                    value = v;
+                    errors.extend(err.into_iter());
+                }
+                PlanNode::Fetch(fetch_node) => {
+                    match fetch_node
+                        .fetch_node(parent_value, current_dir, context, service_registry, schema)
+                        .instrument(tracing::info_span!("fetch"))
+                        .await
+                    {
+                        Ok(v) => value = v,
+                        Err(err) => {
+                            failfast_error!("Fetch error: {}", err);
+                            errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            value = Value::default();
                         }
                     }
                 }
-
-                (value, errors)
             }
-            .instrument(tracing::info_span!("step")),
-        )
+
+            (value, errors)
+        })
     }
 
     /// Retrieves all the services used across all plan nodes.

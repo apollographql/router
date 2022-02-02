@@ -35,15 +35,31 @@ expression: get_spans()
       },
       "children": {}
     },
-    "apollo_router_core::query_planner::step": {
-      "name": "apollo_router_core::query_planner::step",
+    "apollo_router_core::services::execution_service::execute": {
+      "name": "apollo_router_core::services::execution_service::execute",
       "record": {
         "entries": [],
         "metadata": {
-          "name": "step",
-          "target": "apollo_router_core::query_planner",
+          "name": "execute",
+          "target": "apollo_router_core::services::execution_service",
+          "level": "DEBUG",
+          "module_path": "apollo_router_core::services::execution_service",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router_core::services::execution_service::execution": {
+      "name": "apollo_router_core::services::execution_service::execution",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "execution",
+          "target": "apollo_router_core::services::execution_service",
           "level": "INFO",
-          "module_path": "apollo_router_core::query_planner",
+          "module_path": "apollo_router_core::services::execution_service",
           "fields": {
             "names": []
           }

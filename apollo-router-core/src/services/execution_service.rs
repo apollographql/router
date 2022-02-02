@@ -9,6 +9,7 @@ use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower_service::Service;
+use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
@@ -35,12 +36,14 @@ impl Service<PlannedRequest> for ExecutionService {
         Poll::Ready(Ok(()))
     }
 
+    #[tracing::instrument(name = "execute", level = "debug", skip_all)]
     fn call(&mut self, req: PlannedRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
             let response = req
                 .query_plan
                 .execute(&req.context, &this.subgraph_services, &this.schema)
+                .instrument(tracing::info_span!("execution"))
                 .await;
 
             // Note that request context is not propagated from downstream.
