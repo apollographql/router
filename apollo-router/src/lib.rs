@@ -1,6 +1,5 @@
 //! Starts a server that will handle http graphql requests.
 
-mod apollo_router;
 pub mod configuration;
 mod files;
 mod http_server_factory;
@@ -10,7 +9,6 @@ mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-pub use self::apollo_router::*;
 use crate::router_factory::{ApolloRouterFactory, RouterFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
