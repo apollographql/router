@@ -55,6 +55,27 @@ expression: get_spans()
           },
           "children": {}
         },
+        "apollo_router_core::spec::query::validate_variables": {
+          "name": "apollo_router_core::spec::query::validate_variables",
+          "record": {
+            "entries": [
+              [
+                "message",
+                "Received variable unknown to the query: [\"topProductsFirst\", \"reviewsForAuthorAuthorId\"]"
+              ]
+            ],
+            "metadata": {
+              "name": "validate_variables",
+              "target": "apollo_router_core::spec::query",
+              "level": "TRACE",
+              "module_path": "apollo_router_core::spec::query",
+              "fields": {
+                "names": []
+              }
+            }
+          },
+          "children": {}
+        },
         "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
           "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
           "record": {
@@ -104,6 +125,1053 @@ expression: get_spans()
         }
       },
       "children": {
+        "apollo_router::apollo_router::execution": {
+          "name": "apollo_router::apollo_router::execution",
+          "record": {
+            "entries": [
+              [
+                "message",
+                "Executing plan:\nSequence {\n    nodes: [\n        Fetch(\n            FetchNode {\n                service_name: \"products\",\n                requires: [],\n                variable_usages: [],\n                operation: \"{topProducts{__typename upc name}}\",\n            },\n        ),\n        Flatten(\n            FlattenNode {\n                path: Path(\n                    [\n                        Key(\n                            \"topProducts\",\n                        ),\n                        Flatten,\n                    ],\n                ),\n                node: Fetch(\n                    FetchNode {\n                        service_name: \"reviews\",\n                        requires: [\n                            InlineFragment(\n                                InlineFragment {\n                                    type_condition: Some(\n                                        \"Product\",\n                                    ),\n                                    selections: [\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"__typename\",\n                                                selections: None,\n                                            },\n                                        ),\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"upc\",\n                                                selections: None,\n                                            },\n                                        ),\n                                    ],\n                                },\n                            ),\n                        ],\n                        variable_usages: [],\n                        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}\",\n                    },\n                ),\n            },\n        ),\n        Parallel {\n            nodes: [\n                Flatten(\n                    FlattenNode {\n                        path: Path(\n                            [\n                                Key(\n                                    \"topProducts\",\n                                ),\n                                Flatten,\n                                Key(\n                                    \"reviews\",\n                                ),\n                                Flatten,\n                                Key(\n                                    \"product\",\n                                ),\n                            ],\n                        ),\n                        node: Fetch(\n                            FetchNode {\n                                service_name: \"products\",\n                                requires: [\n                                    InlineFragment(\n                                        InlineFragment {\n                                            type_condition: Some(\n                                                \"Product\",\n                                            ),\n                                            selections: [\n                                                Field(\n                                                    Field {\n                                                        alias: None,\n                                                        name: \"__typename\",\n                                                        selections: None,\n                                                    },\n                                                ),\n                                                Field(\n                                                    Field {\n                                                        alias: None,\n                                                        name: \"upc\",\n                                                        selections: None,\n                                                    },\n                                                ),\n                                            ],\n                                        },\n                                    ),\n                                ],\n                                variable_usages: [],\n                                operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\",\n                            },\n                        ),\n                    },\n                ),\n                Flatten(\n                    FlattenNode {\n                        path: Path(\n                            [\n                                Key(\n                                    \"topProducts\",\n                                ),\n                                Flatten,\n                                Key(\n                                    \"reviews\",\n                                ),\n                                Flatten,\n                                Key(\n                                    \"author\",\n                                ),\n                            ],\n                        ),\n                        node: Fetch(\n                            FetchNode {\n                                service_name: \"accounts\",\n                                requires: [\n                                    InlineFragment(\n                                        InlineFragment {\n                                            type_condition: Some(\n                                                \"User\",\n                                            ),\n                                            selections: [\n                                                Field(\n                                                    Field {\n                                                        alias: None,\n                                                        name: \"__typename\",\n                                                        selections: None,\n                                                    },\n                                                ),\n                                                Field(\n                                                    Field {\n                                                        alias: None,\n                                                        name: \"id\",\n                                                        selections: None,\n                                                    },\n                                                ),\n                                            ],\n                                        },\n                                    ),\n                                ],\n                                variable_usages: [],\n                                operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\",\n                            },\n                        ),\n                    },\n                ),\n            ],\n        },\n    ],\n}"
+              ]
+            ],
+            "metadata": {
+              "name": "execution",
+              "target": "apollo_router::apollo_router",
+              "level": "TRACE",
+              "module_path": "apollo_router::apollo_router",
+              "fields": {
+                "names": []
+              }
+            }
+          },
+          "children": {
+            "apollo_router_core::query_planner::sequence": {
+              "name": "apollo_router_core::query_planner::sequence",
+              "record": {
+                "entries": [
+                  [
+                    "message",
+                    "Executing plan:\nFetch(\n    FetchNode {\n        service_name: \"products\",\n        requires: [],\n        variable_usages: [],\n        operation: \"{topProducts{__typename upc name}}\",\n    },\n)"
+                  ]
+                ],
+                "metadata": {
+                  "name": "sequence",
+                  "target": "apollo_router_core::query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router_core::query_planner",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {
+                "apollo_router_core::query_planner::fetch": {
+                  "name": "apollo_router_core::query_planner::fetch",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "fetch",
+                      "target": "apollo_router_core::query_planner",
+                      "level": "TRACE",
+                      "module_path": "apollo_router_core::query_planner",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {
+                    "apollo_router_core::query_planner::fetch::subfetch": {
+                      "name": "apollo_router_core::query_planner::fetch::subfetch",
+                      "record": {
+                        "entries": [
+                          [
+                            "service",
+                            "products"
+                          ]
+                        ],
+                        "metadata": {
+                          "name": "subfetch",
+                          "target": "apollo_router_core::query_planner::fetch",
+                          "level": "TRACE",
+                          "module_path": "apollo_router_core::query_planner::fetch",
+                          "fields": {
+                            "names": [
+                              "service"
+                            ]
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::fetch::make_variables": {
+                          "name": "apollo_router_core::query_planner::fetch::make_variables",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "make_variables",
+                              "target": "apollo_router_core::query_planner::fetch",
+                              "level": "DEBUG",
+                              "module_path": "apollo_router_core::query_planner::fetch",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {}
+                        },
+                        "apollo_router_core::query_planner::fetch::subfetch_stream": {
+                          "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "subfetch_stream",
+                              "target": "apollo_router_core::query_planner::fetch",
+                              "level": "TRACE",
+                              "module_path": "apollo_router_core::query_planner::fetch",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router::http_subgraph::http-subgraph-request": {
+                              "name": "apollo_router::http_subgraph::http-subgraph-request",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "message",
+                                    "Request to service products: Request { method: POST, url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4003), path: \"/graphql\", query: None, fragment: None }, headers: {\"content-type\": \"application/json\"} }"
+                                  ],
+                                  [
+                                    "message",
+                                    "Response from service products: Ok(Response { url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4003), path: \"/graphql\", query: None, fragment: None }, status: 200, headers: {\"access-control-allow-origin\": \"*\", \"content-type\": \"application/json; charset=utf-8\", \"content-length\": \"177\", \"etag\": \"W/\\\"b1-Y8o3PLbyS5MFGm0lxBhM0S3tJHw\\\"\", \"date\": \"Wed, 02 Feb 2022 10:54:16 GMT\", \"connection\": \"keep-alive\", \"keep-alive\": \"timeout=5\"} })"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "http-subgraph-request",
+                                  "target": "apollo_router::http_subgraph",
+                                  "level": "TRACE",
+                                  "module_path": "apollo_router::http_subgraph",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {
+                                "reqwest_tracing::middleware::HTTP request": {
+                                  "name": "reqwest_tracing::middleware::HTTP request",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "http.method",
+                                        "POST"
+                                      ],
+                                      [
+                                        "http.scheme",
+                                        "http"
+                                      ],
+                                      [
+                                        "http.host",
+                                        "localhost"
+                                      ],
+                                      [
+                                        "net.host.port",
+                                        "4003"
+                                      ],
+                                      [
+                                        "otel.kind",
+                                        "client"
+                                      ],
+                                      [
+                                        "otel.name",
+                                        "POST /graphql"
+                                      ],
+                                      [
+                                        "otel.status_code",
+                                        "OK"
+                                      ],
+                                      [
+                                        "http.status_code",
+                                        200
+                                      ],
+                                      [
+                                        "http.user_agent",
+                                        ""
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "HTTP request",
+                                      "target": "reqwest_tracing::middleware",
+                                      "level": "INFO",
+                                      "module_path": "reqwest_tracing::middleware",
+                                      "fields": {
+                                        "names": [
+                                          "http.method",
+                                          "http.scheme",
+                                          "http.host",
+                                          "net.host.port",
+                                          "otel.kind",
+                                          "otel.name",
+                                          "otel.status_code",
+                                          "http.user_agent",
+                                          "http.status_code",
+                                          "error.message",
+                                          "error.cause_chain"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
+                            },
+                            "apollo_router::http_subgraph::aggregate_response_data": {
+                              "name": "apollo_router::http_subgraph::aggregate_response_data",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "aggregate_response_data",
+                                  "target": "apollo_router::http_subgraph",
+                                  "level": "DEBUG",
+                                  "module_path": "apollo_router::http_subgraph",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {}
+                            },
+                            "apollo_router::http_subgraph::parse_subgraph_response": {
+                              "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "parse_subgraph_response",
+                                  "target": "apollo_router::http_subgraph",
+                                  "level": "DEBUG",
+                                  "module_path": "apollo_router::http_subgraph",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {}
+                            }
+                          }
+                        },
+                        "apollo_router_core::query_planner::fetch::response_insert": {
+                          "name": "apollo_router_core::query_planner::fetch::response_insert",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "response_insert",
+                              "target": "apollo_router_core::query_planner::fetch",
+                              "level": "DEBUG",
+                              "module_path": "apollo_router_core::query_planner::fetch",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "apollo_router_core::query_planner::sequence": {
+              "name": "apollo_router_core::query_planner::sequence",
+              "record": {
+                "entries": [
+                  [
+                    "message",
+                    "Executing plan:\nFlatten(\n    FlattenNode {\n        path: Path(\n            [\n                Key(\n                    \"topProducts\",\n                ),\n                Flatten,\n            ],\n        ),\n        node: Fetch(\n            FetchNode {\n                service_name: \"reviews\",\n                requires: [\n                    InlineFragment(\n                        InlineFragment {\n                            type_condition: Some(\n                                \"Product\",\n                            ),\n                            selections: [\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"__typename\",\n                                        selections: None,\n                                    },\n                                ),\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"upc\",\n                                        selections: None,\n                                    },\n                                ),\n                            ],\n                        },\n                    ),\n                ],\n                variable_usages: [],\n                operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}\",\n            },\n        ),\n    },\n)"
+                  ]
+                ],
+                "metadata": {
+                  "name": "sequence",
+                  "target": "apollo_router_core::query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router_core::query_planner",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {
+                "apollo_router_core::query_planner::flatten": {
+                  "name": "apollo_router_core::query_planner::flatten",
+                  "record": {
+                    "entries": [
+                      [
+                        "message",
+                        "Executing plan:\nFetch(\n    FetchNode {\n        service_name: \"reviews\",\n        requires: [\n            InlineFragment(\n                InlineFragment {\n                    type_condition: Some(\n                        \"Product\",\n                    ),\n                    selections: [\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"__typename\",\n                                selections: None,\n                            },\n                        ),\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"upc\",\n                                selections: None,\n                            },\n                        ),\n                    ],\n                },\n            ),\n        ],\n        variable_usages: [],\n        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}\",\n    },\n)"
+                      ]
+                    ],
+                    "metadata": {
+                      "name": "flatten",
+                      "target": "apollo_router_core::query_planner",
+                      "level": "TRACE",
+                      "module_path": "apollo_router_core::query_planner",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {
+                    "apollo_router_core::query_planner::fetch": {
+                      "name": "apollo_router_core::query_planner::fetch",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "fetch",
+                          "target": "apollo_router_core::query_planner",
+                          "level": "TRACE",
+                          "module_path": "apollo_router_core::query_planner",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::fetch::subfetch": {
+                          "name": "apollo_router_core::query_planner::fetch::subfetch",
+                          "record": {
+                            "entries": [
+                              [
+                                "service",
+                                "reviews"
+                              ]
+                            ],
+                            "metadata": {
+                              "name": "subfetch",
+                              "target": "apollo_router_core::query_planner::fetch",
+                              "level": "TRACE",
+                              "module_path": "apollo_router_core::query_planner::fetch",
+                              "fields": {
+                                "names": [
+                                  "service"
+                                ]
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router_core::query_planner::fetch::make_variables": {
+                              "name": "apollo_router_core::query_planner::fetch::make_variables",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "make_variables",
+                                  "target": "apollo_router_core::query_planner::fetch",
+                                  "level": "DEBUG",
+                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {}
+                            },
+                            "apollo_router_core::query_planner::fetch::subfetch_stream": {
+                              "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                              "record": {
+                                "entries": [],
+                                "metadata": {
+                                  "name": "subfetch_stream",
+                                  "target": "apollo_router_core::query_planner::fetch",
+                                  "level": "TRACE",
+                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router::http_subgraph::http-subgraph-request": {
+                                  "name": "apollo_router::http_subgraph::http-subgraph-request",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "message",
+                                        "Request to service reviews: Request { method: POST, url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4002), path: \"/graphql\", query: None, fragment: None }, headers: {\"content-type\": \"application/json\"} }"
+                                      ],
+                                      [
+                                        "message",
+                                        "Response from service reviews: Ok(Response { url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4002), path: \"/graphql\", query: None, fragment: None }, status: 200, headers: {\"access-control-allow-origin\": \"*\", \"content-type\": \"application/json; charset=utf-8\", \"content-length\": \"451\", \"etag\": \"W/\\\"1c3-2PXRrHmGtNT0yCyxGtxoPCkCLGo\\\"\", \"date\": \"Wed, 02 Feb 2022 10:54:16 GMT\", \"connection\": \"keep-alive\", \"keep-alive\": \"timeout=5\"} })"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "http-subgraph-request",
+                                      "target": "apollo_router::http_subgraph",
+                                      "level": "TRACE",
+                                      "module_path": "apollo_router::http_subgraph",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "reqwest_tracing::middleware::HTTP request": {
+                                      "name": "reqwest_tracing::middleware::HTTP request",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "http.method",
+                                            "POST"
+                                          ],
+                                          [
+                                            "http.scheme",
+                                            "http"
+                                          ],
+                                          [
+                                            "http.host",
+                                            "localhost"
+                                          ],
+                                          [
+                                            "net.host.port",
+                                            "4002"
+                                          ],
+                                          [
+                                            "otel.kind",
+                                            "client"
+                                          ],
+                                          [
+                                            "otel.name",
+                                            "POST /graphql"
+                                          ],
+                                          [
+                                            "otel.status_code",
+                                            "OK"
+                                          ],
+                                          [
+                                            "http.status_code",
+                                            200
+                                          ],
+                                          [
+                                            "http.user_agent",
+                                            ""
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "HTTP request",
+                                          "target": "reqwest_tracing::middleware",
+                                          "level": "INFO",
+                                          "module_path": "reqwest_tracing::middleware",
+                                          "fields": {
+                                            "names": [
+                                              "http.method",
+                                              "http.scheme",
+                                              "http.host",
+                                              "net.host.port",
+                                              "otel.kind",
+                                              "otel.name",
+                                              "otel.status_code",
+                                              "http.user_agent",
+                                              "http.status_code",
+                                              "error.message",
+                                              "error.cause_chain"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                },
+                                "apollo_router::http_subgraph::aggregate_response_data": {
+                                  "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "aggregate_response_data",
+                                      "target": "apollo_router::http_subgraph",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::http_subgraph",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router::http_subgraph::parse_subgraph_response": {
+                                  "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "parse_subgraph_response",
+                                      "target": "apollo_router::http_subgraph",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::http_subgraph",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
+                            },
+                            "apollo_router_core::query_planner::fetch::response_insert": {
+                              "name": "apollo_router_core::query_planner::fetch::response_insert",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "message",
+                                    "Received entities: Array([Object({\"reviews\": Array([Object({\"id\": String(\"1\"), \"product\": Object({\"__typename\": String(\"Product\"), \"upc\": String(\"1\")}), \"author\": Object({\"__typename\": String(\"User\"), \"id\": String(\"1\")})}), Object({\"id\": String(\"4\"), \"product\": Object({\"__typename\": String(\"Product\"), \"upc\": String(\"1\")}), \"author\": Object({\"__typename\": String(\"User\"), \"id\": String(\"2\")})})])}), Object({\"reviews\": Array([Object({\"id\": String(\"2\"), \"product\": Object({\"__typename\": String(\"Product\"), \"upc\": String(\"2\")}), \"author\": Object({\"__typename\": String(\"User\"), \"id\": String(\"1\")})})])}), Object({\"reviews\": Array([Object({\"id\": String(\"3\"), \"product\": Object({\"__typename\": String(\"Product\"), \"upc\": String(\"3\")}), \"author\": Object({\"__typename\": String(\"User\"), \"id\": String(\"2\")})})])})])"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "response_insert",
+                                  "target": "apollo_router_core::query_planner::fetch",
+                                  "level": "DEBUG",
+                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                  "fields": {
+                                    "names": []
+                                  }
+                                }
+                              },
+                              "children": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "apollo_router_core::query_planner::sequence": {
+              "name": "apollo_router_core::query_planner::sequence",
+              "record": {
+                "entries": [
+                  [
+                    "message",
+                    "Executing plan:\nParallel {\n    nodes: [\n        Flatten(\n            FlattenNode {\n                path: Path(\n                    [\n                        Key(\n                            \"topProducts\",\n                        ),\n                        Flatten,\n                        Key(\n                            \"reviews\",\n                        ),\n                        Flatten,\n                        Key(\n                            \"product\",\n                        ),\n                    ],\n                ),\n                node: Fetch(\n                    FetchNode {\n                        service_name: \"products\",\n                        requires: [\n                            InlineFragment(\n                                InlineFragment {\n                                    type_condition: Some(\n                                        \"Product\",\n                                    ),\n                                    selections: [\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"__typename\",\n                                                selections: None,\n                                            },\n                                        ),\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"upc\",\n                                                selections: None,\n                                            },\n                                        ),\n                                    ],\n                                },\n                            ),\n                        ],\n                        variable_usages: [],\n                        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\",\n                    },\n                ),\n            },\n        ),\n        Flatten(\n            FlattenNode {\n                path: Path(\n                    [\n                        Key(\n                            \"topProducts\",\n                        ),\n                        Flatten,\n                        Key(\n                            \"reviews\",\n                        ),\n                        Flatten,\n                        Key(\n                            \"author\",\n                        ),\n                    ],\n                ),\n                node: Fetch(\n                    FetchNode {\n                        service_name: \"accounts\",\n                        requires: [\n                            InlineFragment(\n                                InlineFragment {\n                                    type_condition: Some(\n                                        \"User\",\n                                    ),\n                                    selections: [\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"__typename\",\n                                                selections: None,\n                                            },\n                                        ),\n                                        Field(\n                                            Field {\n                                                alias: None,\n                                                name: \"id\",\n                                                selections: None,\n                                            },\n                                        ),\n                                    ],\n                                },\n                            ),\n                        ],\n                        variable_usages: [],\n                        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\",\n                    },\n                ),\n            },\n        ),\n    ],\n}"
+                  ]
+                ],
+                "metadata": {
+                  "name": "sequence",
+                  "target": "apollo_router_core::query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router_core::query_planner",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {
+                "apollo_router_core::query_planner::parallel": {
+                  "name": "apollo_router_core::query_planner::parallel",
+                  "record": {
+                    "entries": [
+                      [
+                        "message",
+                        "Executing plan:\nFlatten(\n    FlattenNode {\n        path: Path(\n            [\n                Key(\n                    \"topProducts\",\n                ),\n                Flatten,\n                Key(\n                    \"reviews\",\n                ),\n                Flatten,\n                Key(\n                    \"product\",\n                ),\n            ],\n        ),\n        node: Fetch(\n            FetchNode {\n                service_name: \"products\",\n                requires: [\n                    InlineFragment(\n                        InlineFragment {\n                            type_condition: Some(\n                                \"Product\",\n                            ),\n                            selections: [\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"__typename\",\n                                        selections: None,\n                                    },\n                                ),\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"upc\",\n                                        selections: None,\n                                    },\n                                ),\n                            ],\n                        },\n                    ),\n                ],\n                variable_usages: [],\n                operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\",\n            },\n        ),\n    },\n)"
+                      ],
+                      [
+                        "message",
+                        "Executing plan:\nFlatten(\n    FlattenNode {\n        path: Path(\n            [\n                Key(\n                    \"topProducts\",\n                ),\n                Flatten,\n                Key(\n                    \"reviews\",\n                ),\n                Flatten,\n                Key(\n                    \"author\",\n                ),\n            ],\n        ),\n        node: Fetch(\n            FetchNode {\n                service_name: \"accounts\",\n                requires: [\n                    InlineFragment(\n                        InlineFragment {\n                            type_condition: Some(\n                                \"User\",\n                            ),\n                            selections: [\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"__typename\",\n                                        selections: None,\n                                    },\n                                ),\n                                Field(\n                                    Field {\n                                        alias: None,\n                                        name: \"id\",\n                                        selections: None,\n                                    },\n                                ),\n                            ],\n                        },\n                    ),\n                ],\n                variable_usages: [],\n                operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\",\n            },\n        ),\n    },\n)"
+                      ]
+                    ],
+                    "metadata": {
+                      "name": "parallel",
+                      "target": "apollo_router_core::query_planner",
+                      "level": "INFO",
+                      "module_path": "apollo_router_core::query_planner",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {
+                    "apollo_router_core::query_planner::flatten": {
+                      "name": "apollo_router_core::query_planner::flatten",
+                      "record": {
+                        "entries": [
+                          [
+                            "message",
+                            "Executing plan:\nFetch(\n    FetchNode {\n        service_name: \"products\",\n        requires: [\n            InlineFragment(\n                InlineFragment {\n                    type_condition: Some(\n                        \"Product\",\n                    ),\n                    selections: [\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"__typename\",\n                                selections: None,\n                            },\n                        ),\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"upc\",\n                                selections: None,\n                            },\n                        ),\n                    ],\n                },\n            ),\n        ],\n        variable_usages: [],\n        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\",\n    },\n)"
+                          ]
+                        ],
+                        "metadata": {
+                          "name": "flatten",
+                          "target": "apollo_router_core::query_planner",
+                          "level": "TRACE",
+                          "module_path": "apollo_router_core::query_planner",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::fetch": {
+                          "name": "apollo_router_core::query_planner::fetch",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "fetch",
+                              "target": "apollo_router_core::query_planner",
+                              "level": "TRACE",
+                              "module_path": "apollo_router_core::query_planner",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router_core::query_planner::fetch::subfetch": {
+                              "name": "apollo_router_core::query_planner::fetch::subfetch",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "service",
+                                    "products"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "subfetch",
+                                  "target": "apollo_router_core::query_planner::fetch",
+                                  "level": "TRACE",
+                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                  "fields": {
+                                    "names": [
+                                      "service"
+                                    ]
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router_core::query_planner::fetch::make_variables": {
+                                  "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "make_variables",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router_core::query_planner::fetch::subfetch_stream": {
+                                  "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "subfetch_stream",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "TRACE",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router::http_subgraph::http-subgraph-request": {
+                                      "name": "apollo_router::http_subgraph::http-subgraph-request",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "message",
+                                            "Request to service products: Request { method: POST, url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4003), path: \"/graphql\", query: None, fragment: None }, headers: {\"content-type\": \"application/json\"} }"
+                                          ],
+                                          [
+                                            "message",
+                                            "Response from service products: Ok(Response { url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4003), path: \"/graphql\", query: None, fragment: None }, status: 200, headers: {\"access-control-allow-origin\": \"*\", \"content-type\": \"application/json; charset=utf-8\", \"content-length\": \"93\", \"etag\": \"W/\\\"5d-OR5VUJJHztOuJLviKIdg7asUINo\\\"\", \"date\": \"Wed, 02 Feb 2022 10:54:16 GMT\", \"connection\": \"keep-alive\", \"keep-alive\": \"timeout=5\"} })"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "http-subgraph-request",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "TRACE",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "reqwest_tracing::middleware::HTTP request": {
+                                          "name": "reqwest_tracing::middleware::HTTP request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "http.method",
+                                                "POST"
+                                              ],
+                                              [
+                                                "http.scheme",
+                                                "http"
+                                              ],
+                                              [
+                                                "http.host",
+                                                "localhost"
+                                              ],
+                                              [
+                                                "net.host.port",
+                                                "4003"
+                                              ],
+                                              [
+                                                "otel.kind",
+                                                "client"
+                                              ],
+                                              [
+                                                "otel.name",
+                                                "POST /graphql"
+                                              ],
+                                              [
+                                                "otel.status_code",
+                                                "OK"
+                                              ],
+                                              [
+                                                "http.status_code",
+                                                200
+                                              ],
+                                              [
+                                                "http.user_agent",
+                                                ""
+                                              ]
+                                            ],
+                                            "metadata": {
+                                              "name": "HTTP request",
+                                              "target": "reqwest_tracing::middleware",
+                                              "level": "INFO",
+                                              "module_path": "reqwest_tracing::middleware",
+                                              "fields": {
+                                                "names": [
+                                                  "http.method",
+                                                  "http.scheme",
+                                                  "http.host",
+                                                  "net.host.port",
+                                                  "otel.kind",
+                                                  "otel.name",
+                                                  "otel.status_code",
+                                                  "http.user_agent",
+                                                  "http.status_code",
+                                                  "error.message",
+                                                  "error.cause_chain"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
+                                      }
+                                    },
+                                    "apollo_router::http_subgraph::aggregate_response_data": {
+                                      "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "aggregate_response_data",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::http_subgraph::parse_subgraph_response": {
+                                      "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "parse_subgraph_response",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                },
+                                "apollo_router_core::query_planner::fetch::response_insert": {
+                                  "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "message",
+                                        "Received entities: Array([Object({\"name\": String(\"Table\")}), Object({\"name\": String(\"Table\")}), Object({\"name\": String(\"Couch\")}), Object({\"name\": String(\"Chair\")})])"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "response_insert",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "apollo_router_core::query_planner::flatten": {
+                      "name": "apollo_router_core::query_planner::flatten",
+                      "record": {
+                        "entries": [
+                          [
+                            "message",
+                            "Executing plan:\nFetch(\n    FetchNode {\n        service_name: \"accounts\",\n        requires: [\n            InlineFragment(\n                InlineFragment {\n                    type_condition: Some(\n                        \"User\",\n                    ),\n                    selections: [\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"__typename\",\n                                selections: None,\n                            },\n                        ),\n                        Field(\n                            Field {\n                                alias: None,\n                                name: \"id\",\n                                selections: None,\n                            },\n                        ),\n                    ],\n                },\n            ),\n        ],\n        variable_usages: [],\n        operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\",\n    },\n)"
+                          ]
+                        ],
+                        "metadata": {
+                          "name": "flatten",
+                          "target": "apollo_router_core::query_planner",
+                          "level": "TRACE",
+                          "module_path": "apollo_router_core::query_planner",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {
+                        "apollo_router_core::query_planner::fetch": {
+                          "name": "apollo_router_core::query_planner::fetch",
+                          "record": {
+                            "entries": [],
+                            "metadata": {
+                              "name": "fetch",
+                              "target": "apollo_router_core::query_planner",
+                              "level": "TRACE",
+                              "module_path": "apollo_router_core::query_planner",
+                              "fields": {
+                                "names": []
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router_core::query_planner::fetch::subfetch": {
+                              "name": "apollo_router_core::query_planner::fetch::subfetch",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "service",
+                                    "accounts"
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "subfetch",
+                                  "target": "apollo_router_core::query_planner::fetch",
+                                  "level": "TRACE",
+                                  "module_path": "apollo_router_core::query_planner::fetch",
+                                  "fields": {
+                                    "names": [
+                                      "service"
+                                    ]
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router_core::query_planner::fetch::make_variables": {
+                                  "name": "apollo_router_core::query_planner::fetch::make_variables",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "make_variables",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router_core::query_planner::fetch::subfetch_stream": {
+                                  "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "subfetch_stream",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "TRACE",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router::http_subgraph::http-subgraph-request": {
+                                      "name": "apollo_router::http_subgraph::http-subgraph-request",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "message",
+                                            "Request to service accounts: Request { method: POST, url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4001), path: \"/graphql\", query: None, fragment: None }, headers: {\"content-type\": \"application/json\"} }"
+                                          ],
+                                          [
+                                            "message",
+                                            "Response from service accounts: Ok(Response { url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4001), path: \"/graphql\", query: None, fragment: None }, status: 200, headers: {\"access-control-allow-origin\": \"*\", \"content-type\": \"application/json; charset=utf-8\", \"content-length\": \"119\", \"etag\": \"W/\\\"77-KOW/CX9jvRG5JAboLhBXk1h5X5M\\\"\", \"date\": \"Wed, 02 Feb 2022 10:54:16 GMT\", \"connection\": \"keep-alive\", \"keep-alive\": \"timeout=5\"} })"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "http-subgraph-request",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "TRACE",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "reqwest_tracing::middleware::HTTP request": {
+                                          "name": "reqwest_tracing::middleware::HTTP request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "http.method",
+                                                "POST"
+                                              ],
+                                              [
+                                                "http.scheme",
+                                                "http"
+                                              ],
+                                              [
+                                                "http.host",
+                                                "localhost"
+                                              ],
+                                              [
+                                                "net.host.port",
+                                                "4001"
+                                              ],
+                                              [
+                                                "otel.kind",
+                                                "client"
+                                              ],
+                                              [
+                                                "otel.name",
+                                                "POST /graphql"
+                                              ],
+                                              [
+                                                "otel.status_code",
+                                                "OK"
+                                              ],
+                                              [
+                                                "http.status_code",
+                                                200
+                                              ],
+                                              [
+                                                "http.user_agent",
+                                                ""
+                                              ]
+                                            ],
+                                            "metadata": {
+                                              "name": "HTTP request",
+                                              "target": "reqwest_tracing::middleware",
+                                              "level": "INFO",
+                                              "module_path": "reqwest_tracing::middleware",
+                                              "fields": {
+                                                "names": [
+                                                  "http.method",
+                                                  "http.scheme",
+                                                  "http.host",
+                                                  "net.host.port",
+                                                  "otel.kind",
+                                                  "otel.name",
+                                                  "otel.status_code",
+                                                  "http.user_agent",
+                                                  "http.status_code",
+                                                  "error.message",
+                                                  "error.cause_chain"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
+                                      }
+                                    },
+                                    "apollo_router::http_subgraph::aggregate_response_data": {
+                                      "name": "apollo_router::http_subgraph::aggregate_response_data",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "aggregate_response_data",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::http_subgraph::parse_subgraph_response": {
+                                      "name": "apollo_router::http_subgraph::parse_subgraph_response",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "parse_subgraph_response",
+                                          "target": "apollo_router::http_subgraph",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::http_subgraph",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                },
+                                "apollo_router_core::query_planner::fetch::response_insert": {
+                                  "name": "apollo_router_core::query_planner::fetch::response_insert",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "message",
+                                        "Received entities: Array([Object({\"name\": String(\"Ada Lovelace\")}), Object({\"name\": String(\"Alan Turing\")}), Object({\"name\": String(\"Ada Lovelace\")}), Object({\"name\": String(\"Alan Turing\")})])"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "response_insert",
+                                      "target": "apollo_router_core::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router_core::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "apollo_router::apollo_router::format_response": {
           "name": "apollo_router::apollo_router::format_response",
           "record": {
@@ -115,6 +1183,114 @@ expression: get_spans()
               "module_path": "apollo_router::apollo_router",
               "fields": {
                 "names": []
+              }
+            }
+          },
+          "children": {
+            "apollo_router_core::spec::query::format_response": {
+              "name": "apollo_router_core::spec::query::format_response",
+              "record": {
+                "entries": [],
+                "metadata": {
+                  "name": "format_response",
+                  "target": "apollo_router_core::spec::query",
+                  "level": "TRACE",
+                  "module_path": "apollo_router_core::spec::query",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {}
+            }
+          }
+        }
+      }
+    },
+    "apollo_router::http_subgraph::http-subgraph-request": {
+      "name": "apollo_router::http_subgraph::http-subgraph-request",
+      "record": {
+        "entries": [
+          [
+            "message",
+            "Request to service federated: Request { method: POST, url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4100), path: \"/graphql\", query: None, fragment: None }, headers: {\"content-type\": \"application/json\"} }"
+          ],
+          [
+            "message",
+            "Response from service federated: Ok(Response { url: Url { scheme: \"http\", cannot_be_a_base: false, username: \"\", password: None, host: Some(Domain(\"localhost\")), port: Some(4100), path: \"/graphql\", query: None, fragment: None }, status: 200, headers: {\"access-control-allow-origin\": \"*\", \"content-type\": \"application/json; charset=utf-8\", \"content-length\": \"462\", \"etag\": \"W/\\\"1ce-QpDPC2hxla1mABGYfWRbgbxWwts\\\"\", \"date\": \"Wed, 02 Feb 2022 10:54:16 GMT\", \"connection\": \"keep-alive\", \"keep-alive\": \"timeout=5\"} })"
+          ]
+        ],
+        "metadata": {
+          "name": "http-subgraph-request",
+          "target": "apollo_router::http_subgraph",
+          "level": "TRACE",
+          "module_path": "apollo_router::http_subgraph",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {
+        "reqwest_tracing::middleware::HTTP request": {
+          "name": "reqwest_tracing::middleware::HTTP request",
+          "record": {
+            "entries": [
+              [
+                "http.method",
+                "POST"
+              ],
+              [
+                "http.scheme",
+                "http"
+              ],
+              [
+                "http.host",
+                "localhost"
+              ],
+              [
+                "net.host.port",
+                "4100"
+              ],
+              [
+                "otel.kind",
+                "client"
+              ],
+              [
+                "otel.name",
+                "POST /graphql"
+              ],
+              [
+                "otel.status_code",
+                "OK"
+              ],
+              [
+                "http.status_code",
+                200
+              ],
+              [
+                "http.user_agent",
+                ""
+              ]
+            ],
+            "metadata": {
+              "name": "HTTP request",
+              "target": "reqwest_tracing::middleware",
+              "level": "INFO",
+              "module_path": "reqwest_tracing::middleware",
+              "fields": {
+                "names": [
+                  "http.method",
+                  "http.scheme",
+                  "http.host",
+                  "net.host.port",
+                  "otel.kind",
+                  "otel.name",
+                  "otel.status_code",
+                  "http.user_agent",
+                  "http.status_code",
+                  "error.message",
+                  "error.cause_chain"
+                ]
               }
             }
           },
