@@ -535,6 +535,50 @@ mod tests {
         (server, client)
     }
 
+    #[cfg(unix)]
+    async fn init_unix(
+        mut mock: MockRouterService,
+        temp_dir: &tempfile::TempDir,
+    ) -> HttpServerHandle {
+        let server_factory = WarpHttpServerFactory::new();
+        let (service, mut handle) = tower_test::mock::spawn();
+
+        tokio::spawn(async move {
+            loop {
+                while let Some((request, responder)) = handle.next_request().await {
+                    match mock.service_call(request) {
+                        Ok(response) => responder.send_response(response),
+                        Err(err) => responder.send_error(err),
+                    }
+                }
+            }
+        });
+        let server = server_factory
+            .create(
+                service.into_inner(),
+                Arc::new(
+                    Configuration::builder()
+                        .server(
+                            crate::configuration::Server::builder()
+                                .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
+                                .cors(Some(
+                                    Cors::builder()
+                                        .origins(vec!["http://studio".to_string()])
+                                        .build(),
+                                ))
+                                .build(),
+                        )
+                        .subgraphs(Default::default())
+                        .build(),
+                ),
+                None,
+            )
+            .await
+            .expect("Failed to create server factory");
+
+        server
+    }
+
     #[test(tokio::test)]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
         let expectations = MockRouterService::new();
@@ -618,7 +662,7 @@ mod tests {
                     .unwrap())
             });
         let (server, client) = init(expectations).await;
-        let url = format!("http://{}/graphql", server.listen_address());
+        let url = format!("{}/graphql", server.listen_address());
 
         // Post query
         let response = client
@@ -764,37 +808,17 @@ mod tests {
             .build();
         let example_response = expected_response.clone();
 
-        #[allow(unused_mut)]
-        let mut fetcher = MockMyRouter::new();
-        fetcher.expect_prepare_query().times(2).returning(move |_| {
-            let actual_response = example_response.clone();
-            Err(actual_response)
-        });
-
-        let server_factory = WarpHttpServerFactory::new();
-        let fetcher = Arc::new(fetcher);
-        let server = server_factory
-            .create(
-                fetcher.to_owned(),
-                Arc::new(
-                    Configuration::builder()
-                        .server(
-                            crate::configuration::Server::builder()
-                                .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                                .cors(Some(
-                                    Cors::builder()
-                                        .origins(vec!["http://studio".to_string()])
-                                        .build(),
-                                ))
-                                .build(),
-                        )
-                        .subgraphs(Default::default())
-                        .build(),
-                ),
-                None,
-            )
-            .await
-            .unwrap();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_| {
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(example_response.clone())
+                    .unwrap())
+            });
+        let server = init_unix(expectations, &temp_dir).await;
 
         let output =
             send_to_unix_socket(server.listen_address(), "POST", r#"{"query":"query"}"#).await;

@@ -860,7 +860,7 @@ mod tests {
         MyHttpServerFactory{
             fn create_server(&self,
                 configuration: Arc<Configuration>,
-                listener: Option<TcpListener>,) -> Result<HttpServerHandle, FederatedServerError>;
+                listener: Option<Listener>,) -> Result<HttpServerHandle, FederatedServerError>;
         }
     }
 
@@ -872,7 +872,7 @@ mod tests {
             &self,
             _service: RS,
             configuration: Arc<Configuration>,
-            listener: Option<TcpListener>,
+            listener: Option<Listener>,
         ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
         where
             RS: Service<
@@ -919,7 +919,7 @@ mod tests {
             .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |configuration: Arc<Configuration>, listener: Option<TcpListener>| {
+                move |configuration: Arc<Configuration>, listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
