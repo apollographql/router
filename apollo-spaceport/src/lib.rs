@@ -247,6 +247,9 @@ pub mod spaceport {
     pub use crate::agent::reporter_server::{Reporter, ReporterServer};
     use crate::agent::{ReporterGraph, ReporterResponse};
 
+    type TPQMap = HashMap<String, report::TracesAndStats>;
+    type GraphMap = Arc<Mutex<HashMap<ReporterGraph, TPQMap>>>;
+
     static DEFAULT_INGRESS: &str =
         "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
@@ -289,8 +292,9 @@ pub mod spaceport {
     /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
     pub struct ReportSpaceport {
         addr: SocketAddr,
-        // This HashMap will only have a single entry if used internally from a router.
-        tpq: Arc<Mutex<HashMap<ReporterGraph, HashMap<String, report::TracesAndStats>>>>,
+        // This Map will only have a single entry if used internally from a router.
+        // (because a router can only be serving a single graph)
+        tpq: GraphMap,
         tx: Sender<()>,
         total: AtomicU32,
     }
@@ -520,39 +524,37 @@ pub mod spaceport {
         let mut all_entries = task_tpq.lock().await;
         let drained = all_entries
             .drain()
+            .filter(|(_graph, tpq)| !tpq.is_empty())
             .collect::<Vec<(ReporterGraph, HashMap<String, report::TracesAndStats>)>>();
         // Release the lock ASAP so that clients can continue to add data
         drop(all_entries);
-        let mut results = vec![];
+        let mut results = Vec::with_capacity(drained.len());
         for (graph, tpq) in drained {
-            if !tpq.is_empty() {
-                tracing::info!("submitting: {} records", tpq.len());
-                tracing::debug!("containing: {:?}", tpq);
-                match crate::Report::try_new(&graph.reference) {
-                    Ok(mut report) => {
-                        report.traces_per_query = tpq;
-                        let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                            Ok(t) => t,
-                            Err(e) => {
-                                results.push(Err(Status::internal(e.to_string())));
-                                continue;
-                            }
-                        };
-                        let seconds = time.as_secs();
-                        let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-                        let ts_end = Timestamp {
-                            seconds: seconds as i64,
-                            nanos: nanos as i32,
-                        };
-                        report.end_time = Some(ts_end);
+            tracing::info!("submitting: {} records", tpq.len());
+            tracing::debug!("containing: {:?}", tpq);
+            match crate::Report::try_new(&graph.reference) {
+                Ok(mut report) => {
+                    report.traces_per_query = tpq;
+                    let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            results.push(Err(Status::internal(e.to_string())));
+                            continue;
+                        }
+                    };
+                    let seconds = time.as_secs();
+                    let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
+                    let ts_end = Timestamp {
+                        seconds: seconds as i64,
+                        nanos: nanos as i32,
+                    };
+                    report.end_time = Some(ts_end);
 
-                        results
-                            .push(ReportSpaceport::submit_report(client, graph.key, report).await)
-                    }
-                    Err(e) => {
-                        results.push(Err(Status::internal(e.to_string())));
-                        continue;
-                    }
+                    results.push(ReportSpaceport::submit_report(client, graph.key, report).await)
+                }
+                Err(e) => {
+                    results.push(Err(Status::internal(e.to_string())));
+                    continue;
                 }
             }
         }
