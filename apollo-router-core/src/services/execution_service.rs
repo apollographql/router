@@ -1,8 +1,7 @@
 use crate::SubgraphRequest;
 use crate::{PlannedRequest, RouterResponse, Schema, ServiceRegistry};
+use futures::future::BoxFuture;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -23,7 +22,7 @@ pub struct ExecutionService {
 impl Service<PlannedRequest> for ExecutionService {
     type Response = RouterResponse;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(
         &mut self,

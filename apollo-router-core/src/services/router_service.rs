@@ -3,8 +3,7 @@ use crate::{
     Context, NaiveIntrospection, PlannedRequest, Plugin, QueryCache, RouterBridgeQueryPlanner,
     RouterRequest, RouterResponse, Schema, SubgraphRequest,
 };
-use std::future::Future;
-use std::pin::Pin;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -44,7 +43,7 @@ where
 {
     type Response = RouterResponse;
     type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // We need to obtain references to two hot services for use in call.
@@ -94,7 +93,7 @@ where
                 .await;
 
             if let Some(err) = query.as_ref().and_then(|q| {
-                q.validate_variables(&request.http_request.body(), &schema)
+                q.validate_variables(request.http_request.body(), &schema)
                     .err()
             }) {
                 Ok(RouterResponse {

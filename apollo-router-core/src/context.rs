@@ -42,3 +42,9 @@ impl<T> Context<T> {
         self.extensions.write()
     }
 }
+
+impl Default for Context<()> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
