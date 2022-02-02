@@ -223,8 +223,13 @@ async fn query_rust(
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
+    let dispatcher = config
+        .subscriber
+        .clone()
+        .map(tracing::Dispatch::new)
+        .unwrap_or_default();
 
-    let mut builder = PluggableRouterServiceBuilder::new(schema, 10, tracing::Dispatch::default());
+    let mut builder = PluggableRouterServiceBuilder::new(schema, 10, dispatcher);
     for (name, subgraph) in &config.subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
