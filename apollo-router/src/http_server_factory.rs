@@ -1,15 +1,13 @@
 use super::FederatedServerError;
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ListenAddr};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use http::Request;
 use http::Response;
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tower::BoxError;
 use tower::Service;
 
@@ -24,7 +22,7 @@ pub(crate) trait HttpServerFactory {
         &self,
         service: RS,
         configuration: Arc<Configuration>,
-        listener: Option<TcpListener>,
+        listener: Option<Listener>,
     ) -> Self::Future
     where
         RS: Service<
@@ -50,21 +48,18 @@ pub(crate) struct HttpServerHandle {
 
     /// Future to wait on for graceful shutdown
     #[derivative(Debug = "ignore")]
-    server_future: Pin<Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>>,
+    server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
 
     /// The listen address that the server is actually listening on.
     /// If the socket address specified port zero the OS will assign a random free port.
-    #[allow(dead_code)]
-    listen_address: SocketAddr,
+    listen_address: ListenAddr,
 }
 
 impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
-        server_future: Pin<
-            Box<dyn Future<Output = Result<TcpListener, FederatedServerError>> + Send>,
-        >,
-        listen_address: SocketAddr,
+        server_future: Pin<Box<dyn Future<Output = Result<Listener, FederatedServerError>> + Send>>,
+        listen_address: ListenAddr,
     ) -> Self {
         Self {
             shutdown_sender,
@@ -77,7 +72,14 @@ impl HttpServerHandle {
         if let Err(_err) = self.shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
-        self.server_future.await.map(|_| ())
+        let _listener = self.server_future.await?;
+        #[cfg(unix)]
+        {
+            if let ListenAddr::UnixSocket(path) = self.listen_address {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) async fn restart<RS, SF>(
@@ -131,27 +133,61 @@ impl HttpServerHandle {
         Ok(handle)
     }
 
-    pub(crate) fn listen_address(&self) -> SocketAddr {
-        self.listen_address
+    pub(crate) fn listen_address(&self) -> &ListenAddr {
+        &self.listen_address
     }
 }
+
+#[cfg(unix)]
+pub type Listener = tokio_util::either::Either<tokio::net::TcpListener, tokio::net::UnixListener>;
+#[cfg(not(unix))]
+pub type Listener = tokio::net::TcpListener;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::channel::oneshot;
+    use std::net::SocketAddr;
     use std::str::FromStr;
     use test_log::test;
 
     #[test(tokio::test)]
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        #[cfg(unix)]
+        let listener: Listener = tokio_util::either::Either::Left(
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        );
+        #[cfg(not(unix))]
+        let listener: Listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok(listener)).boxed(),
-            SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+        )
+        .shutdown()
+        .await
+        .expect("Should have waited for shutdown");
+
+        shutdown_receiver
+            .await
+            .expect("Should have been send notification to shutdown");
+    }
+
+    #[test(tokio::test)]
+    #[cfg(unix)]
+    async fn sanity_unix() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sock = temp_dir.as_ref().join("sock");
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        let listener: Listener =
+            tokio_util::either::Either::Right(tokio::net::UnixListener::bind(&sock).unwrap());
+
+        HttpServerHandle::new(
+            shutdown_sender,
+            futures::future::ready(Ok(listener)).boxed(),
+            ListenAddr::UnixSocket(sock),
         )
         .shutdown()
         .await

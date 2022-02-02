@@ -12,7 +12,7 @@ license-file = "./LICENSE"
 failfast = []
 
 [dependencies]
-apollo-parser = "0.2.0"
+apollo-parser = "0.2.1"
 async-trait = "0.1.52"
 atty = "0.2.14"
 bytes = "1.1.0"
@@ -33,7 +33,7 @@ serde_json = { version = "1.0.78", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"]}
 static_assertions = "1.1.0"
 thiserror = "1.0.30"
-tokio = { version = "1.16.0", features = ["rt", "sync"] }
+tokio = { version = "1.16.1", features = ["rt", "sync"] }
 tower = { version="0.4.11", features = ["util", "buffer"] }
 tower-service = "0.3.1"
 tracing = "0.1.29"
