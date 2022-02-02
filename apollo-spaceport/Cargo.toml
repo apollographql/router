@@ -38,8 +38,3 @@ path = "src/lib.rs"
 [[bin]]
 name = "spaceport"
 path = "src/spaceport.rs"
-
-# client binary
-[[bin]]
-name = "client"
-path = "src/client.rs"

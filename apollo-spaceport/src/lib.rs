@@ -6,8 +6,8 @@ mod agent {
     tonic::include_proto!("agent");
 }
 
-/// The spaceport module contains the server components
-pub mod spaceport;
+/// The server module contains the server components
+pub mod server;
 
 use agent::reporter_client::ReporterClient;
 pub use agent::ReporterGraph;

@@ -6,7 +6,7 @@ use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::{Configuration, SpaceportConfig};
 use apollo_router_core::prelude::*;
-use apollo_spaceport::spaceport::ReportSpaceport;
+use apollo_spaceport::server::ReportSpaceport;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
