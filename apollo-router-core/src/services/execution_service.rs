@@ -52,7 +52,8 @@ impl Service<PlannedRequest> for ExecutionService {
                 response: http::Response::new(response),
                 context: req.context,
             })
-        };
+        }
+        .in_current_span();
         Box::pin(fut)
     }
 }
