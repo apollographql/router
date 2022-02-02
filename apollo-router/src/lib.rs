@@ -307,16 +307,16 @@ impl ShutdownKind {
 ///
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::ApolloRouter;
-/// use apollo_router::ShutdownKind;
+/// use apollo_router::ApolloRouterBuilder;
+/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = ApolloRouter::builder()
-///             .configuration(configuration)
-///             .schema(schema)
+///     let server = ApolloRouterBuilder::default()
+///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+///             .schema(SchemaKind::Instance(Box::new(schema)))
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     server.serve().await;
@@ -326,16 +326,16 @@ impl ShutdownKind {
 /// Shutdown via handle.
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::ApolloRouter;
-/// use apollo_router::ShutdownKind;
+/// use apollo_router::ApolloRouterBuilder;
+/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = ApolloRouter::builder()
-///             .configuration(configuration)
-///             .schema(schema)
+///     let server = ApolloRouterBuilder::default()
+///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+///             .schema(SchemaKind::Instance(Box::new(schema)))
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     let handle = server.serve();
