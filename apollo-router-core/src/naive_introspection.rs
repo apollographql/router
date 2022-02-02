@@ -24,7 +24,7 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 });
 
 /// A cache containing our well known introspection queries.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NaiveIntrospection {
     cache: HashMap<String, Response>,
 }

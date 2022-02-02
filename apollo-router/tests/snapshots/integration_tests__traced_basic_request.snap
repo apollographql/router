@@ -19,6 +19,38 @@ expression: get_spans()
     }
   },
   "children": {
+    "apollo_router_core::naive_introspection::naive_introspection_population": {
+      "name": "apollo_router_core::naive_introspection::naive_introspection_population",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "naive_introspection_population",
+          "target": "apollo_router_core::naive_introspection",
+          "level": "INFO",
+          "module_path": "apollo_router_core::naive_introspection",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router_core::services::router_service::query_parsing": {
+      "name": "apollo_router_core::services::router_service::query_parsing",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "query_parsing",
+          "target": "apollo_router_core::services::router_service",
+          "level": "INFO",
+          "module_path": "apollo_router_core::services::router_service",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
     "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
       "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
       "record": {
@@ -255,6 +287,22 @@ expression: get_spans()
           }
         }
       }
+    },
+    "apollo_router_core::services::router_service::format_response": {
+      "name": "apollo_router_core::services::router_service::format_response",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "format_response",
+          "target": "apollo_router_core::services::router_service",
+          "level": "DEBUG",
+          "module_path": "apollo_router_core::services::router_service",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
     }
   }
 }
