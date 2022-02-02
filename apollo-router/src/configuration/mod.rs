@@ -12,6 +12,7 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -77,8 +78,8 @@ pub struct Configuration {
     pub graph: Option<StudioGraph>,
 }
 
-fn default_listen() -> SocketAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap()
+fn default_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
 impl Configuration {
@@ -143,13 +144,58 @@ pub struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_listen")]
-    #[builder(default_code = "default_listen()")]
-    pub listen: SocketAddr,
+    #[builder(default_code = "default_listen()", setter(into))]
+    pub listen: ListenAddr,
 
     /// Cross origin request headers.
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+}
+
+/// Listening address.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ListenAddr {
+    /// Socket address.
+    SocketAddr(SocketAddr),
+    /// Unix socket.
+    #[cfg(unix)]
+    UnixSocket(PathBuf),
+}
+
+impl From<SocketAddr> for ListenAddr {
+    fn from(addr: SocketAddr) -> Self {
+        Self::SocketAddr(addr)
+    }
+}
+
+#[cfg(unix)]
+impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>>
+    for ListenAddr
+{
+    fn from(
+        addr: tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>,
+    ) -> Self {
+        match addr {
+            tokio_util::either::Either::Left(addr) => Self::SocketAddr(addr),
+            tokio_util::either::Either::Right(addr) => Self::UnixSocket(
+                addr.as_pathname()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+}
+
+impl fmt::Display for ListenAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::SocketAddr(addr) => write!(f, "http://{}", addr),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 /// Cross origin request configuration.

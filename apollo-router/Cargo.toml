@@ -55,7 +55,9 @@ serde_yaml = "0.8.23"
 structopt = "0.3.26"
 task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
-tokio = { version = "1.15.0", features = ["full"] }
+tokio = { version = "1.16.1", features = ["full"] }
+# TODO wait for tokio-util > 0.6.9 to release
+tokio-util = { git = "https://github.com/tokio-rs/tokio.git", rev = "91b9850", features = ["net", "codec"] }
 # don't bump it to 0.6 until opentelemetry-otlp does
 tonic = { version = "0.5.2", optional = true }
 tower = "0.4.11"
@@ -79,6 +81,7 @@ maplit = "1.0.2"
 mockall = "0.11.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
+tempfile = "3.3.0"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 test-span = "0.3"
 tracing-subscriber = { version = "0.3", default-features = false, features = [

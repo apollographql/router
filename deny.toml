@@ -120,4 +120,4 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["open-telemetry", "apollographql"]
+github = ["open-telemetry", "apollographql", "tokio-rs"]
