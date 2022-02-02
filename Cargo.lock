@@ -201,7 +201,7 @@ dependencies = [
  "sys-info",
  "tokio",
  "tonic 0.6.2",
- "tonic-build",
+ "tonic-build 0.6.2",
  "tracing",
  "tracing-subscriber",
  "uname",
@@ -2356,11 +2356,11 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-http 0.5.0 (git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=6b3aa02aa)",
  "prost 0.8.0",
- "prost-build",
+ "prost-build 0.8.0",
  "serde",
  "thiserror",
  "tonic 0.5.2",
- "tonic-build",
+ "tonic-build 0.5.2",
 ]
 
 [[package]]
@@ -2664,6 +2664,26 @@ dependencies = [
  "petgraph 0.5.1",
  "prost 0.8.0",
  "prost-types 0.8.0",
+ "tempfile",
+ "which",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62941722fb675d463659e49c4f3fe1fe792ff24fe5bbaa9c08cd3b98a1c354f5"
+dependencies = [
+ "bytes",
+ "heck 0.3.3",
+ "itertools",
+ "lazy_static",
+ "log",
+ "multimap",
+ "petgraph 0.6.0",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
+ "regex",
  "tempfile",
  "which",
 ]
@@ -3799,7 +3819,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12b52d07035516c2b74337d2ac7746075e7dcae7643816c1b12c5ff8a7484c08"
 dependencies = [
  "proc-macro2",
- "prost-build",
+ "prost-build 0.8.0",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9403f1bafde247186684b230dc6f38b5cd514584e8bec1dd32514be4745fa757"
+dependencies = [
+ "proc-macro2",
+ "prost-build 0.9.0",
  "quote",
  "syn",
 ]
