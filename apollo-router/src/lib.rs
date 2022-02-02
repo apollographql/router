@@ -17,7 +17,7 @@ use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use configuration::Configuration;
+use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -26,7 +26,6 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -380,7 +379,7 @@ pub enum State {
     Startup,
 
     /// The server is running on a particular address.
-    Running { address: SocketAddr, schema: String },
+    Running { address: ListenAddr, schema: String },
 
     /// The server has stopped.
     Stopped,
@@ -405,7 +404,7 @@ impl FederatedServerHandle {
     /// scenarios.
     ///
     /// returns: Option<SocketAddr>
-    pub async fn ready(&mut self) -> Option<SocketAddr> {
+    pub async fn ready(&mut self) -> Option<ListenAddr> {
         self.state_receiver()
             .map(|state| {
                 if let State::Running { address, .. } = state {
@@ -542,26 +541,26 @@ mod tests {
     #[test(tokio::test)]
     async fn basic_request() {
         let mut server_handle = init_with_server();
-        let socket = server_handle.ready().await.expect("Server never ready");
-        assert_federated_response(&socket, r#"{ topProducts { name } }"#).await;
+        let listen_addr = server_handle.ready().await.expect("Server never ready");
+        assert_federated_response(&listen_addr, r#"{ topProducts { name } }"#).await;
         server_handle.shutdown().await.expect("Could not shutdown");
     }
 
-    async fn assert_federated_response(socket: &SocketAddr, request: &str) {
+    async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = graphql::Request::builder().query(request).build();
-        let expected = query(socket, request.clone()).await.unwrap();
+        let expected = query(listen_addr, request.clone()).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
     async fn query(
-        socket: &SocketAddr,
+        listen_addr: &ListenAddr,
         request: graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
         HttpSubgraphFetcher::new(
             "federated",
-            Url::parse(&format!("http://{}/graphql", socket)).unwrap(),
+            Url::parse(&format!("{}/graphql", listen_addr)).unwrap(),
         )
         .stream(request)
         .await

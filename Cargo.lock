@@ -109,10 +109,12 @@ dependencies = [
  "serde_yaml",
  "structopt",
  "task-local-extensions",
+ "tempfile",
  "test-log",
  "test-span",
  "thiserror",
  "tokio",
+ "tokio-util 0.7.0",
  "tonic",
  "tower",
  "tower-http",
@@ -1369,7 +1371,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tracing",
 ]
 
@@ -2761,7 +2763,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.6.9",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3498,9 +3500,8 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbbf1c778ec206785635ce8ad57fe52b3009ae9e0c9f574a728f3049d3e55838"
+version = "1.16.1"
+source = "git+https://github.com/tokio-rs/tokio.git?rev=91b9850#91b98505059017808221aa6432aa7437b7100497"
 dependencies = [
  "bytes",
  "libc",
@@ -3528,8 +3529,7 @@ dependencies = [
 [[package]]
 name = "tokio-macros"
 version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b557f72f448c511a979e2564e55d74e6c4432fc96ff4f6241bc6bded342643b7"
+source = "git+https://github.com/tokio-rs/tokio.git?rev=91b9850#91b98505059017808221aa6432aa7437b7100497"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3583,6 +3583,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.7.0"
+source = "git+https://github.com/tokio-rs/tokio.git?rev=91b9850#91b98505059017808221aa6432aa7437b7100497"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "log",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tonic"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3606,7 +3619,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tower",
  "tower-layer",
  "tower-service",
@@ -3641,7 +3654,7 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -3971,7 +3984,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.6.9",
  "tower-service",
  "tracing",
 ]

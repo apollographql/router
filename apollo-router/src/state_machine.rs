@@ -67,7 +67,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address(),
+                address: server_handle.listen_address().to_owned(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -390,7 +390,7 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::http_server_factory::MockHttpServerFactory;
+    use crate::http_server_factory::{Listener, MockHttpServerFactory};
     use crate::router_factory::RouterFactory;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
@@ -398,7 +398,6 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Mutex;
     use test_log::test;
-    use tokio::net::TcpListener;
     use url::Url;
 
     #[test(tokio::test)]
@@ -471,7 +470,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -507,11 +506,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: schema.to_string(),
                     },
                     State::Stopped
@@ -556,11 +555,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -617,7 +616,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -704,7 +703,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -776,14 +775,14 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
                         }"#.to_string()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -877,7 +876,7 @@ mod tests {
             .returning(
                 move |_: Arc<MockMyRouter>,
                       configuration: Arc<Configuration>,
-                      listener: Option<TcpListener>| {
+                      listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -888,7 +887,16 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            #[cfg(unix)]
+                            {
+                                tokio_util::either::Either::Left(
+                                    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                                )
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            }
                         })
                     };
 
@@ -896,7 +904,7 @@ mod tests {
                         Ok(HttpServerHandle::new(
                             shutdown_sender,
                             Box::pin(server),
-                            configuration.server.listen,
+                            configuration.server.listen.clone(),
                         ))
                     })
                 },
