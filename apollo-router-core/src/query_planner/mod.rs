@@ -325,7 +325,8 @@ mod fetch {
                 ..
             } = self;
 
-            let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
+            let query_span =
+                tracing::info_span!("subfetch_stream", service = service_name.as_str());
 
             let Variables { variables, paths } = query_span.in_scope(|| {
                 Variables::new(

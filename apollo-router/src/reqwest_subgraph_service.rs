@@ -3,6 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
+use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
@@ -61,9 +62,9 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         } else {
             reqwest::Url::parse(&http_request.uri().to_string()).expect("todo")
         };
+        let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            tracing::debug!("Making request to {} {:?}", target_url, http_request,);
             let (
                 http::request::Parts {
                     method,
@@ -83,7 +84,28 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
             *request.version_mut() = version;
 
             let response = http_client.execute(request).await?;
-            let graphql: graphql::Response = serde_json::from_slice(&response.bytes().await?)?;
+            let body = response
+                .bytes()
+                .instrument(tracing::debug_span!("aggregate_response_data"))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = format!("{:?}", err).as_str());
+
+                    graphql::FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
+
+            let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
+                .in_scope(|| {
+                    graphql::Response::from_bytes(&service_name, body).map_err(|error| {
+                        graphql::FetchError::SubrequestMalformedResponse {
+                            service: service_name.clone(),
+                            reason: error.to_string(),
+                        }
+                    })
+                })?;
 
             Ok(graphql::RouterResponse {
                 response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
