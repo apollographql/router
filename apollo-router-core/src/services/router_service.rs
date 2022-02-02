@@ -44,6 +44,10 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // We need to obtain references to two hot services for use in call.
+        // The reason for us to clone here is that the async block needs to own the hot services,
+        // and cloning will produce a cold service. Therefore cloning in `RouterService#call` is not
+        // a valid course of action.
         if vec![
             self.ready_query_planner_service
                 .get_or_insert_with(|| self.query_planner_service.clone())
@@ -61,9 +65,9 @@ where
     }
 
     fn call(&mut self, request: RouterRequest) -> Self::Future {
+        //Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
-        //Here we convert to an unplanned request, this is where context gets created
         let fut = async move {
             let planned_query = planning.call(request).await;
             match planned_query {
