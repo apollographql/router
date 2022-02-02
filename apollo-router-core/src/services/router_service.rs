@@ -230,8 +230,8 @@ impl PluggableRouterServiceBuilder {
 
         // NaiveIntrospection instantiation can potentially block for some time
         let naive_introspection = {
-            let schema = Arc::clone(&self.schema);
-            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&self.schema))
+            let schema = self.schema.clone();
+            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
                 .await
                 .expect("NaiveIntrospection instantiation panicked")
         };
