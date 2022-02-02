@@ -6,7 +6,8 @@ pub use caching_query_planner::*;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
@@ -59,7 +60,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        context: &'a Context,
+        context: &'a Arc<RwLock<Context>>,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -78,7 +79,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        context: &'a Context,
+        context: &'a Arc<RwLock<Context>>,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -211,6 +212,7 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
+    use tokio::sync::RwLock;
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
@@ -240,21 +242,21 @@ mod fetch {
 
     impl Variables {
         #[instrument(level = "debug", name = "make_variables", skip_all)]
-        fn new(
+        async fn new(
             requires: &[Selection],
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            context: &Context,
+            context: &Arc<RwLock<Context>>,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
+            let ctx = context.read().await;
+            let body = ctx.request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
+
                 variables.extend(variable_usages.iter().filter_map(|key| {
-                    context
-                        .request
-                        .body()
-                        .variables
+                    body.variables
                         .get_key_value(key.as_str())
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
@@ -287,10 +289,7 @@ mod fetch {
                     variables: variable_usages
                         .iter()
                         .filter_map(|key| {
-                            context
-                                .request
-                                .body()
-                                .variables
+                            body.variables
                                 .get_key_value(key.as_str())
                                 .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                         })
@@ -306,7 +305,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            context: &'a Context,
+            context: &'a Arc<RwLock<Context>>,
             service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
@@ -319,16 +318,16 @@ mod fetch {
             let query_span =
                 tracing::info_span!("subfetch_stream", service = service_name.as_str());
 
-            let Variables { variables, paths } = query_span.in_scope(|| {
-                Variables::new(
-                    &self.requires,
-                    self.variable_usages.as_ref(),
-                    data,
-                    current_dir,
-                    context,
-                    schema,
-                )
-            })?;
+            let Variables { variables, paths } = Variables::new(
+                &self.requires,
+                self.variable_usages.as_ref(),
+                data,
+                current_dir,
+                context,
+                schema,
+            )
+            .instrument(query_span.clone())
+            .await?;
 
             let subgraph_request = SubgraphRequest {
                 http_request: http::Request::builder()

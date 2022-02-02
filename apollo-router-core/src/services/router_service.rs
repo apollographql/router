@@ -6,6 +6,7 @@ use crate::{
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
+use tokio::sync::RwLock;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
@@ -81,7 +82,9 @@ where
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(response),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context: Arc::new(RwLock::new(
+                        Context::new().with_request(Arc::new(request.http_request)),
+                    )),
                 })
             });
         }
@@ -98,7 +101,9 @@ where
             }) {
                 Ok(RouterResponse {
                     response: http::Response::new(err),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context: Arc::new(RwLock::new(
+                        Context::new().with_request(Arc::new(request.http_request)),
+                    )),
                 })
             } else {
                 let operation_name = request.http_request.body().operation_name.clone();

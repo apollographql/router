@@ -39,9 +39,10 @@ impl Service<PlannedRequest> for ExecutionService {
     fn call(&mut self, req: PlannedRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
+            let context = req.context;
             let response = req
                 .query_plan
-                .execute(&req.context, &this.subgraph_services, &this.schema)
+                .execute(&context, &this.subgraph_services, &this.schema)
                 .instrument(tracing::info_span!("execution"))
                 .await;
 
@@ -49,7 +50,7 @@ impl Service<PlannedRequest> for ExecutionService {
             // Context contains a mutex for state however so in practice
             Ok(RouterResponse {
                 response: http::Response::new(response),
-                context: req.context,
+                context,
             })
         }
         .in_current_span();

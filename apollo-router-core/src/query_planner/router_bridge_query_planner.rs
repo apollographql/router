@@ -7,6 +7,7 @@ use router_bridge::plan;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::task;
+use tokio::sync::RwLock;
 
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -100,7 +101,9 @@ impl tower::Service<RouterRequest> for RouterBridgeQueryPlanner {
             {
                 Ok(query_plan) => Ok(PlannedRequest {
                     query_plan,
-                    context: request.context.with_request(Arc::new(request.http_request)),
+                    context: Arc::new(RwLock::new(
+                        request.context.with_request(Arc::new(request.http_request)),
+                    )),
                 }),
                 Err(e) => Err(tower::BoxError::from(e)),
             }

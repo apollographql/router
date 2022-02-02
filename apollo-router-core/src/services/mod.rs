@@ -10,6 +10,7 @@ use http::HeaderValue;
 use static_assertions::assert_impl_all;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower::layer::util::Stack;
 use tower::ServiceBuilder;
 
@@ -35,14 +36,14 @@ assert_impl_all!(PlannedRequest: Send);
 pub struct PlannedRequest {
     pub query_plan: Arc<QueryPlan>,
 
-    pub context: Context,
+    pub context: Arc<RwLock<Context>>,
 }
 
 assert_impl_all!(SubgraphRequest: Send);
 pub struct SubgraphRequest {
     pub http_request: http::Request<Request>,
 
-    pub context: Context,
+    pub context: Arc<RwLock<Context>>,
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
@@ -56,7 +57,7 @@ assert_impl_all!(RouterResponse: Send);
 pub struct RouterResponse {
     pub response: http::Response<Response>,
 
-    pub context: Context,
+    pub context: Arc<RwLock<Context>>,
 }
 
 impl AsRef<Request> for http::Request<Request> {

@@ -25,7 +25,6 @@ macro_rules! failfast_error {
 mod cache;
 mod context;
 mod error;
-mod extensions;
 mod json_ext;
 mod layers;
 mod naive_introspection;
@@ -42,7 +41,6 @@ mod traits;
 pub use cache::*;
 pub use context::*;
 pub use error::*;
-pub use extensions::*;
 pub use json_ext::*;
 pub use layers::*;
 pub use naive_introspection::*;

@@ -1,7 +1,5 @@
 use crate::prelude::graphql::*;
-use futures::prelude::*;
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Clone)]
 pub struct Context<T = Arc<http::Request<Request>>> {
@@ -9,7 +7,7 @@ pub struct Context<T = Arc<http::Request<Request>>> {
     pub request: T,
 
     // Allows adding custom extensions to the context.
-    extensions: Arc<RwLock<Extensions>>,
+    extensions: Object,
 }
 
 impl Context<()> {
@@ -34,12 +32,12 @@ impl Context<()> {
 }
 
 impl<T> Context<T> {
-    pub fn extensions(&self) -> impl Future<Output = RwLockReadGuard<Extensions>> {
-        self.extensions.read()
+    pub fn extensions(&self) -> &Object {
+        &self.extensions
     }
 
-    pub fn extensions_mut(&self) -> impl Future<Output = RwLockWriteGuard<Extensions>> {
-        self.extensions.write()
+    pub fn extensions_mut(&mut self) -> &mut Object {
+        &mut self.extensions
     }
 }
 
