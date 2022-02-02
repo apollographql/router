@@ -175,7 +175,7 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub fn build(mut self) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    pub async fn build(mut self) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
         //Reverse the order of the plugins for usability
         self.plugins.reverse();
 

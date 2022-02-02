@@ -246,7 +246,7 @@ async fn query_rust(
         builder = builder.with_subgraph_service(name, service);
     }
 
-    let mut router = builder.build();
+    let mut router = builder.build().await;
 
     let stream = router.ready().await.unwrap().call(request).await.unwrap();
     let (_, response) = stream.response.into_parts();

@@ -19,6 +19,7 @@ use typed_builder::TypedBuilder;
 ///
 /// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
 /// necessary e.g. when schema changes.
+#[async_trait::async_trait]
 pub trait RouterFactory: Send + Sync + 'static {
     type RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
@@ -26,7 +27,7 @@ pub trait RouterFactory: Send + Sync + 'static {
         + Clone
         + 'static;
 
-    fn create(
+    async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
@@ -44,12 +45,13 @@ pub struct ApolloRouterFactory {
     )>,
 }
 
+#[async_trait::async_trait]
 impl RouterFactory for ApolloRouterFactory {
     type RouterService = Buffer<
         BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
         Request<graphql::Request>,
     >;
-    fn create(
+    async fn create(
         &self,
         configuration: &Configuration,
         schema: Arc<Schema>,
@@ -75,6 +77,7 @@ impl RouterFactory for ApolloRouterFactory {
             ServiceBuilder::new().service(
                 builder
                     .build()
+                    .await
                     .map_request(|http_request| RouterRequest {
                         http_request,
                         context: Context::new(),

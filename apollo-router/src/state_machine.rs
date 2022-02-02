@@ -191,11 +191,10 @@ where
                             let derived_configuration = Arc::new(derived_configuration);
 
                             let schema = Arc::new(*new_schema);
-                            let router = self.router_factory.create(
-                                &derived_configuration,
-                                Arc::clone(&schema),
-                                Some(router),
-                            );
+                            let router = self
+                                .router_factory
+                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
+                                .await;
 
                             match server_handle
                                 .restart(
@@ -246,11 +245,10 @@ where
                         }
                         Ok(()) => {
                             let derived_configuration = Arc::new(derived_configuration);
-                            let router = self.router_factory.create(
-                                &derived_configuration,
-                                Arc::clone(&schema),
-                                Some(router),
-                            );
+                            let router = self
+                                .router_factory
+                                .create(&derived_configuration, Arc::clone(&schema), Some(router))
+                                .await;
 
                             match server_handle
                                 .restart(
@@ -340,11 +338,10 @@ where
                 }
                 Ok(()) => {
                     let schema = Arc::new(schema);
-                    let router = self.router_factory.create(
-                        &derived_configuration,
-                        Arc::clone(&schema),
-                        None,
-                    );
+                    let router = self
+                        .router_factory
+                        .create(&derived_configuration, Arc::clone(&schema), None)
+                        .await;
 
                     match self
                         .http_server_factory
@@ -820,9 +817,10 @@ mod tests {
         #[derive(Debug)]
         MyRouterFactory {}
 
+        #[async_trait::async_trait]
         impl RouterFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
-            fn create(
+            async fn create(
                 &self,
                 configuration: &Configuration,
                 schema: Arc<graphql::Schema>,
