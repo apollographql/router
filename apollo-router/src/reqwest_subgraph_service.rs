@@ -34,7 +34,7 @@ impl ReqwestSubgraphService {
             .with(LoggingMiddleware::new(&service))
             .build(),
             service: Arc::new(service),
-            url: url,
+            url,
         }
     }
 }
