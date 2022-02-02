@@ -205,7 +205,6 @@ async fn missing_variables() {
     );
 }
 
-#[tracing::instrument(skip_all, level = "info")]
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     Ok(reqwest::Client::new()
         .post("http://localhost:4100/graphql")
@@ -218,7 +217,6 @@ async fn query_node(request: &graphql::Request) -> Result<graphql::Response, gra
         .expect("couldn't deserialize response"))
 }
 
-#[tracing::instrument(skip_all, level = "info")]
 async fn query_rust(
     request: graphql::RouterRequest,
 ) -> (graphql::Response, CountingServiceRegistry) {
