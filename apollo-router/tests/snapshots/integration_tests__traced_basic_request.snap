@@ -19,22 +19,6 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router_core::naive_introspection::naive_introspection_population": {
-      "name": "apollo_router_core::naive_introspection::naive_introspection_population",
-      "record": {
-        "entries": [],
-        "metadata": {
-          "name": "naive_introspection_population",
-          "target": "apollo_router_core::naive_introspection",
-          "level": "INFO",
-          "module_path": "apollo_router_core::naive_introspection",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {}
-    },
     "apollo_router_core::services::router_service::query_parsing": {
       "name": "apollo_router_core::services::router_service::query_parsing",
       "record": {
