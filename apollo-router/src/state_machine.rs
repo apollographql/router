@@ -379,6 +379,7 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterFactory;
     use futures::channel::oneshot;
+    use futures::future::BoxFuture;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
     use std::pin::Pin;
@@ -640,9 +641,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
 
-                router
-                    .expect_clone()
-                    .return_once(move || MockMyRouter::new());
+                router.expect_clone().return_once(MockMyRouter::new);
                 router
             });
         // second call, configuration is empty, we should take the URL from the graph
@@ -661,9 +660,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
 
-                router
-                    .expect_clone()
-                    .return_once(move || MockMyRouter::new());
+                router.expect_clone().return_once(MockMyRouter::new);
                 router
             });
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
@@ -739,9 +736,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
 
-                router
-                    .expect_clone()
-                    .return_once(move || MockMyRouter::new());
+                router.expect_clone().return_once(MockMyRouter::new);
                 router
             });
         // second call, configuration is still empty, we should take the URL from the new supergraph
@@ -761,9 +756,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
 
-                router
-                    .expect_clone()
-                    .return_once(move || MockMyRouter::new());
+                router.expect_clone().return_once(MockMyRouter::new);
                 router
             });
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
@@ -845,7 +838,7 @@ mod tests {
     impl Service<Request<graphql::Request>> for MockMyRouter {
         type Response = Response<graphql::Response>;
         type Error = BoxError;
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
@@ -962,9 +955,7 @@ mod tests {
             .returning(move |_, _, _| {
                 let mut router = MockMyRouter::new();
 
-                router
-                    .expect_clone()
-                    .return_once(move || MockMyRouter::new());
+                router.expect_clone().return_once(MockMyRouter::new);
                 router
             });
         router_factory

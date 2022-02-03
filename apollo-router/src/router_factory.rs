@@ -55,7 +55,7 @@ impl RouterFactory for ApolloRouterFactory {
         &self,
         configuration: &Configuration,
         schema: Arc<Schema>,
-        previous_router: Option<Self::RouterService>,
+        _previous_router: Option<Self::RouterService>,
     ) -> Self::RouterService {
         let dispatcher = configuration
             .subscriber
@@ -68,7 +68,7 @@ impl RouterFactory for ApolloRouterFactory {
 
         for (name, subgraph) in &configuration.subgraphs {
             builder = builder.with_subgraph_service(
-                &name,
+                name,
                 ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
             );
         }
