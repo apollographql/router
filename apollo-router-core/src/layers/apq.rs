@@ -1,6 +1,7 @@
 use crate::RouterRequest;
-use moka::future::Cache;
+use moka::sync::Cache;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::task::Poll;
 use tower::{Layer, Service};
 
@@ -12,7 +13,7 @@ pub struct PersistedQuery {
 }
 
 pub struct APQ {
-    cache: Cache<String, String>,
+    cache: Cache<Vec<u8>, String>,
 }
 
 impl APQ {
@@ -28,7 +29,7 @@ where
     S: Service<RouterRequest>,
 {
     service: S,
-    cache: Cache<String, String>,
+    cache: Cache<Vec<u8>, String>,
 }
 
 impl<S> APQService<S>
@@ -67,29 +68,43 @@ where
 
     type Future = <S as Service<RouterRequest>>::Future;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: RouterRequest) -> Self::Future {
         let cache = self.cache.clone();
 
         let req = {
-            let apq: Option<PersistedQuery> = req
+            let maybe_query_hash: Option<Vec<u8>> = req
                 .http_request
                 .body()
                 .extensions
                 .get("persistedQuery")
-                .and_then(|value| serde_json_bytes::from_value(value.clone()).ok());
+                .and_then(|value| {
+                    serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
+                })
+                .and_then(|persisted_query| {
+                    hex::decode(persisted_query.sha256hash.as_bytes()).ok()
+                });
 
             let graphql_request = req.http_request.body_mut();
-            match (apq, graphql_request) {
-                (Some(apq), graphql_request) if !graphql_request.query.is_empty() => {
-                    // todo: async
-                    cache.blocking_insert(apq.sha256hash, graphql_request.query.clone())
+            match (maybe_query_hash, graphql_request) {
+                (Some(query_hash), graphql_request) if !graphql_request.query.is_empty() => {
+                    if query_matches_hash(graphql_request.query.as_str(), query_hash.as_slice()) {
+                        tracing::trace!("apq: cache insert");
+                        cache.insert(query_hash, graphql_request.query.clone())
+                    } else {
+                        tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
+                    }
                 }
-                (Some(apq), graphql_request) => {
-                    graphql_request.query = cache.get(&apq.sha256hash).unwrap_or_default();
+                (Some(apq_hash), graphql_request) => {
+                    if let Some(query) = cache.get(&apq_hash) {
+                        tracing::trace!("apq: cache hit");
+                        graphql_request.query = query;
+                    } else {
+                        tracing::trace!("apq: cache miss");
+                    }
                 }
                 _ => {}
             }
@@ -98,6 +113,12 @@ where
         };
         self.service.call(req)
     }
+}
+
+fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
+    let mut digest = Sha256::new();
+    digest.update(query.as_bytes());
+    hash == digest.finalize().as_slice()
 }
 
 #[cfg(test)]
@@ -136,7 +157,7 @@ mod apq_tests {
     {
         type Response = Res;
 
-        type Error = BoxError; // We'll panic if something is wrong
+        type Error = BoxError;
 
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -154,6 +175,7 @@ mod apq_tests {
             async move { res }.boxed()
         }
     }
+
     #[tokio::test]
     async fn it_works() {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
@@ -238,6 +260,13 @@ mod apq_tests {
                 assert_eq!(persisted_query.sha256hash, hash3);
 
                 assert!(!req.http_request.body().query.is_empty());
+
+                let hash = hex::decode(hash3.as_bytes()).unwrap();
+
+                assert!(query_matches_hash(
+                    req.http_request.body().query.as_str(),
+                    hash.as_slice()
+                ));
 
                 Ok(RouterResponse {
                     response: Response::new(crate::Response {
