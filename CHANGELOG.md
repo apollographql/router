@@ -12,6 +12,58 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🛠 Maintenance
 ## 📚 Documentation -->
 
+# [v0.1.0-alpha.4] 2022-02-03
+
+## :sparkles: Features
+
+- **Unix socket support** via [#158](https://github.com/apollographql/router/issues/158)
+
+  _...and via upstream [`tokios-rs/tokio#4385`](https://github.com/tokio-rs/tokio/pull/4385)_
+
+  The Router can now listen on Unix domain sockets (i.e., IPC) in addition to the existing IP-based (port) listening.  This should bring further compatibility with upstream intermediaries who also allow support this form of communication!
+
+  _(Thank you to [@cecton](https://github.com/cecton), both for the PR that landed this feature but also for contributing the upstream PR to `tokio`.)_
+
+## :bug: Fixes
+
+- **Resolved hangs occurring on Router reload when `jaeger` was configured** via [#337](https://github.com/apollographql/router/pull/337)
+
+  Synchronous calls being made to [`opentelemetry::global::set_tracer_provider`] were causing the runtime to misbehave when the configuration (file) was adjusted (and thus, hot-reloaded) on account of the root context of that call being asynchronous.
+
+  This change adjusts the call to be made from a new thread.  Since this only affected _potential_ runtime configuration changes (again, hot-reloads on a configuration change), the thread spawn is  a reasonable solution.
+
+  [`opentelemetry::global::set_tracer_provider`]: https://docs.rs/opentelemetry/0.10.0/opentelemetry/global/fn.set_tracer_provider.html
+
+## :nail_care: Improvements
+
+> Most of the improvements this time are internal to the code-base but that doesn't mean we shouldn't talk about them.  A great developer experience matters both internally and externally! :smile_cat:
+
+- **Store JSON strings in a `bytes::Bytes` instance** via [#284](https://github.com/apollographql/router/pull/284)
+
+  The router does a a fair bit of deserialization, filtering, aggregation and re-serializing of JSON objects.  Since we currently operate on a dynamic schema, we've been relying on [`serde_json::Value`] to represent this data internally.
+
+  After this change, that `Value` type is now replaced with an equivalent type from a new [`serde_json_bytes`], which acts as an envelope around an underlying `bytes::Bytes`.  This allows us to refer to the buffer that contained the JSON data while avoiding the allocation and copying costs on each string for values that are largely unused by the Router directly.
+
+  This should offer future benefits when implementing &mdash; e.g., query de-duplication and caching &mdash; since a single buffer will be usable by multiple responses at the same time.
+
+  [`serde_json::Value`]: https://docs.rs/serde_json/0.9.8/serde_json/enum.Value.html
+  [`serde_json_bytes`]: https://crates.io/crates/serde_json_bytes
+  [`bytes::Bytes`]: https://docs.rs/bytes/0.4.12/bytes/struct.Bytes.html
+
+-  **Development workflow improvement** via [#367](https://github.com/apollographql/router/pull/367)
+
+   Polished away some existing _Problems_ reported by `rust-analyzer` and added troubleshooting instructions to our documentation.
+
+- **Removed unnecessary `Arc` from `PreparedQuery`'s `execute`** via [#328](https://github.com/apollographql/router/pull/328)
+
+  _...and followed up with [#367](https://github.com/apollographql/router/pull/367)_
+
+- **Bumped/upstream improvements to `test_span`** via [#359](https://github.com/apollographql/router/pull/359)
+
+  _...and [`apollographql/test-span#11`](https://github.com/apollographql/test-span/pull/11) upstream_
+
+  Internally, this is just a version bump to the Router, but it required upstream changes to the `test-span` crate.  The bump brings new filtering abilities and adjusts the verbosity of spans tracing levels, and removes non-determinism from tests.
+
 # [v0.1.0-alpha.3] 2022-01-11
 
 ## :rocket::waxing_crescent_moon: Public alpha release

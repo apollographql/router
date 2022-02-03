@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
