@@ -135,6 +135,8 @@ where
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
         // Studio Agent Spaceport listener
+        // TODO: This code will be moving when we add support for Tower
+        // to the router. Leaving here until that time.
         let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
 
         tokio::spawn(async move {
