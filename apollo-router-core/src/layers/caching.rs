@@ -6,7 +6,7 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tower::util::BoxCloneService;
-use tower::Service;
+use tower::{Layer, Service};
 
 pub enum State<ServiceFuture, CacheInsertFuture> {
     CacheGet,
@@ -118,7 +118,7 @@ where
     }
 }
 
-pub struct CachingService<InnerService, Request>
+pub struct CachedService<InnerService, Request>
 where
     InnerService: Service<Request>,
     Request: Clone + Hash + Eq + Send + Sync,
@@ -128,7 +128,7 @@ where
     cache: Cache<Request, InnerService::Response>,
 }
 
-impl<InnerService, Request> CachingService<InnerService, Request>
+impl<InnerService, Request> CachedService<InnerService, Request>
 where
     InnerService: Service<Request> + Clone + Send + 'static,
     Request: Clone + Hash + Eq + Send + Sync,
@@ -136,17 +136,15 @@ where
     InnerService::Future: Send + 'static,
     Request: 'static,
 {
-    pub fn from_service(
-        service: BoxCloneService<Request, InnerService::Response, InnerService::Error>,
-    ) -> Self {
+    pub fn new(service: InnerService, capacity: u64) -> Self {
         Self {
-            service,
-            cache: Cache::new(4096),
+            service: BoxCloneService::new(service),
+            cache: Cache::new(capacity),
         }
     }
 }
 
-impl<InnerService, Request> Service<Request> for CachingService<InnerService, Request>
+impl<InnerService, Request> Service<Request> for CachedService<InnerService, Request>
 where
     Request: Clone + Hash + Eq + Send + Sync + 'static,
     InnerService::Response: Send + Sync + Clone + 'static,
@@ -164,5 +162,22 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         CacheResponseFuture::new(self.service.clone(), request, self.cache.clone())
+    }
+}
+
+impl<S, R> Layer<S> for CachedService<S, R>
+where
+    S: Service<R> + Clone + Send + 'static,
+    R: Clone + Hash + Eq + Send + Sync,
+    <S as Service<R>>::Future: Send + 'static,
+    <S as Service<R>>::Response: Send + Sync + Clone + 'static,
+{
+    type Service = CachedService<S, R>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        CachedService {
+            cache: self.cache.clone(),
+            service: BoxCloneService::new(service),
+        }
     }
 }
