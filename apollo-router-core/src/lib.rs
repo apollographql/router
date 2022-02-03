@@ -36,6 +36,8 @@ mod response;
 mod service_registry;
 mod services;
 mod spec;
+#[cfg(feature = "test_utils")]
+pub mod test_utils;
 mod traits;
 
 pub use cache::*;

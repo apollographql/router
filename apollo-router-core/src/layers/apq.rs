@@ -124,46 +124,13 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
-    use crate::{Context, RouterResponse};
-    use futures::{Future, FutureExt};
-    use http::{Request, Response};
-    use mockall::automock;
-    use serde_json_bytes::Value;
-    use std::{borrow::Cow, pin::Pin, sync::Arc};
-    use tokio::sync::RwLock;
-    use tower::{BoxError, ServiceExt};
-
-    #[automock]
-    trait TestService<Req, Res>
-    where
-        Req: 'static,
-        Res: Send + 'static,
-    {
-        fn mock_call(&self, req: Req) -> Result<Res, BoxError>;
-    }
-
-    impl<Req, Res> Service<Req> for MockTestService<Req, Res>
-    where
-        Res: Send + 'static,
-    {
-        type Response = Res;
-
-        type Error = BoxError;
-
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
-
-        fn poll_ready(
-            &mut self,
-            _cx: &mut std::task::Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: Req) -> Self::Future {
-            let res = self.mock_call(req);
-            async move { res }.boxed()
-        }
-    }
+    use crate::{
+        test_utils::{structures::RouterResponseBuilder, MockTestService, RouterRequestBuilder},
+        RouterResponse,
+    };
+    use serde_json_bytes::json;
+    use std::borrow::Cow;
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_works() {
@@ -192,19 +159,7 @@ mod apq_tests {
 
                 assert!(req.http_request.body().query.is_empty());
 
-                Ok(RouterResponse {
-                    response: Response::new(crate::Response {
-                        label: Default::default(),
-                        data: Value::Null,
-                        path: Default::default(),
-                        has_next: Default::default(),
-                        errors: Default::default(),
-                        extensions: Default::default(),
-                    }),
-                    context: Arc::new(RwLock::new(
-                        Context::new().with_request(Arc::new(req.http_request)),
-                    )),
-                })
+                Ok(RouterResponseBuilder::new().build())
             });
         mock_service
             // the second one should have the right APQ header and the full query string
@@ -225,19 +180,7 @@ mod apq_tests {
 
                 assert!(!req.http_request.body().query.is_empty());
 
-                Ok(RouterResponse {
-                    response: Response::new(crate::Response {
-                        label: Default::default(),
-                        data: Value::Null,
-                        path: Default::default(),
-                        has_next: Default::default(),
-                        errors: Default::default(),
-                        extensions: Default::default(),
-                    }),
-                    context: Arc::new(RwLock::new(
-                        Context::new().with_request(Arc::new(req.http_request)),
-                    )),
-                })
+                Ok(RouterResponseBuilder::new().build())
             });
         mock_service
             // the second last one should have the right APQ header and the full query string
@@ -266,58 +209,133 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse {
-                    response: Response::new(crate::Response {
-                        label: Default::default(),
-                        data: Value::Null,
-                        path: Default::default(),
-                        has_next: Default::default(),
-                        errors: Default::default(),
-                        extensions: Default::default(),
-                    }),
-                    context: Arc::new(RwLock::new(
-                        Context::new().with_request(Arc::new(req.http_request)),
-                    )),
-                })
+                Ok(RouterResponseBuilder::new().build())
             });
 
         // WOW :D
         let mut service_stack = APQ::with_capacity(1).layer(mock_service);
 
-        let hash_only = RouterRequest {
-            http_request: Request::new(crate::Request {
-                query: Default::default(),
-                operation_name: Default::default(),
-                variables: Default::default(),
-                extensions: serde_json::from_str(r#"{"persistedQuery":{"version":1,"sha256Hash":"ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}"#).unwrap(),
+        let request_builder = RouterRequestBuilder::new().with_named_extension(
+            "persistedQuery",
+            json!({
+                "version" : 1,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
-            context: Context::new(),
-        };
-        let hash_and_full_query = RouterRequest {
-            http_request: Request::new(crate::Request {
-                query: "{__typename}".to_string(),
-                operation_name: Default::default(),
-                variables: Default::default(),
-                extensions: serde_json::from_str(r#"{"persistedQuery":{"version":1,"sha256Hash":"ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}"#).unwrap(),
-            }),
-            context: Context::new(),
-        };
+        );
 
-        // TODO: let's use an http::Request that implements clone or something
-        let hash_only_again = RouterRequest {
-            http_request: Request::new(crate::Request {
-                query: Default::default(),
-                operation_name: Default::default(),
-                variables: Default::default(),
-                extensions: serde_json::from_str(r#"{"persistedQuery":{"version":1,"sha256Hash":"ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"}}"#).unwrap(),
-            }),
-            context: Context::new(),
-        };
+        let hash_only = request_builder.build();
+
+        let second_hash_only = request_builder.build();
+
+        let with_query = request_builder.with_query("{__typename}").build();
 
         let services = service_stack.ready().await.unwrap();
 
         services.call(hash_only).await.unwrap();
-        services.call(hash_and_full_query).await.unwrap();
-        services.call(hash_only_again).await.unwrap();
+        services.call(with_query).await.unwrap();
+        services.call(second_hash_only).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_doesnt_update_the_cache_if_the_hash_is_not_valid() {
+        let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
+        let hash2 = hash.clone();
+        let hash3 = hash.clone();
+
+        let mut mock_service = MockTestService::<RouterRequest, RouterResponse>::new();
+        // the first one should have lead to an APQ error
+        // claiming the server doesn't have a query string for a given hash
+        mock_service
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                let as_json = req
+                    .http_request
+                    .body()
+                    .extensions
+                    .get("persistedQuery")
+                    .unwrap();
+
+                let persisted_query: PersistedQuery =
+                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+
+                assert_eq!(persisted_query.sha256hash, hash);
+
+                assert!(req.http_request.body().query.is_empty());
+
+                Ok(RouterResponseBuilder::new().build())
+            });
+        mock_service
+            // the second one should have the right APQ header and the full query string
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                let as_json = req
+                    .http_request
+                    .body()
+                    .extensions
+                    .get("persistedQuery")
+                    .unwrap();
+
+                let persisted_query: PersistedQuery =
+                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+
+                assert_eq!(persisted_query.sha256hash, hash2);
+
+                assert!(!req.http_request.body().query.is_empty());
+
+                Ok(RouterResponseBuilder::new().build())
+            });
+        mock_service
+            // the second last one should have the right APQ header and the full query string
+            // even though the query string wasn't provided by the client
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                let as_json = req
+                    .http_request
+                    .body()
+                    .extensions
+                    .get("persistedQuery")
+                    .unwrap();
+
+                let persisted_query: PersistedQuery =
+                    serde_json_bytes::from_value(as_json.clone()).unwrap();
+
+                assert_eq!(persisted_query.sha256hash, hash3);
+
+                assert!(req.http_request.body().query.is_empty());
+
+                let hash = hex::decode(hash3.as_bytes()).unwrap();
+
+                assert!(!query_matches_hash(
+                    req.http_request.body().query.as_str(),
+                    hash.as_slice()
+                ));
+
+                Ok(RouterResponseBuilder::new().build())
+            });
+
+        let mut service_stack = APQ::with_capacity(1).layer(mock_service);
+
+        let request_builder = RouterRequestBuilder::new().with_named_extension(
+            "persistedQuery",
+            json!({
+                "version" : 1,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+            }),
+        );
+
+        let hash_only = request_builder.build();
+
+        let second_hash_only = request_builder.build();
+
+        let with_query = request_builder.with_query("{__typename}").build();
+
+        let services = service_stack.ready().await.unwrap();
+
+        services.call(hash_only).await.unwrap();
+        services.call(with_query).await.unwrap();
+        services.call(second_hash_only).await.unwrap();
     }
 }
