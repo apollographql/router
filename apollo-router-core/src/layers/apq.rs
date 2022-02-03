@@ -127,31 +127,22 @@ mod apq_tests {
     use crate::{Context, RouterResponse};
     use futures::{Future, FutureExt};
     use http::{Request, Response};
+    use mockall::automock;
     use serde_json_bytes::Value;
     use std::{borrow::Cow, pin::Pin, sync::Arc};
     use tokio::sync::RwLock;
     use tower::{BoxError, ServiceExt};
 
-    struct MockService<Req, Res> {
-        nth_call: usize,
-        mocks: Vec<Box<dyn Fn(Req) -> Result<Res, BoxError>>>,
+    #[automock]
+    trait TestService<Req, Res>
+    where
+        Req: 'static,
+        Res: Send + 'static,
+    {
+        fn mock_call(&self, req: Req) -> Result<Res, BoxError>;
     }
 
-    impl<Req, Res> MockService<Req, Res> {
-        pub fn new() -> Self {
-            Self {
-                nth_call: 0,
-                mocks: Vec::new(),
-            }
-        }
-
-        pub fn add_mock(mut self, mock: impl Fn(Req) -> Result<Res, BoxError> + 'static) -> Self {
-            self.mocks.push(Box::new(mock));
-            self
-        }
-    }
-
-    impl<Req, Res> Service<Req> for MockService<Req, Res>
+    impl<Req, Res> Service<Req> for MockTestService<Req, Res>
     where
         Res: Send + 'static,
     {
@@ -169,9 +160,7 @@ mod apq_tests {
         }
 
         fn call(&mut self, req: Req) -> Self::Future {
-            let index = self.nth_call;
-            self.nth_call += 1;
-            let res = self.mocks[index](req);
+            let res = self.mock_call(req);
             async move { res }.boxed()
         }
     }
@@ -182,10 +171,13 @@ mod apq_tests {
         let hash2 = hash.clone();
         let hash3 = hash.clone();
 
-        let mock_service = MockService::<RouterRequest, RouterResponse>::new()
-            // the first one should have lead to an APQ error
-            // claiming the server doesn't have a query string for a given hash
-            .add_mock(move |req: RouterRequest| {
+        let mut mock_service = MockTestService::<RouterRequest, RouterResponse>::new();
+        // the first one should have lead to an APQ error
+        // claiming the server doesn't have a query string for a given hash
+        mock_service
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
                 let as_json = req
                     .http_request
                     .body()
@@ -213,9 +205,12 @@ mod apq_tests {
                         Context::new().with_request(Arc::new(req.http_request)),
                     )),
                 })
-            })
+            });
+        mock_service
             // the second one should have the right APQ header and the full query string
-            .add_mock(move |req: RouterRequest| {
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
                 let as_json = req
                     .http_request
                     .body()
@@ -243,10 +238,13 @@ mod apq_tests {
                         Context::new().with_request(Arc::new(req.http_request)),
                     )),
                 })
-            })
+            });
+        mock_service
             // the second last one should have the right APQ header and the full query string
             // even though the query string wasn't provided by the client
-            .add_mock(move |req: RouterRequest| {
+            .expect_mock_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
                 let as_json = req
                     .http_request
                     .body()
