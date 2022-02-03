@@ -28,6 +28,8 @@ type TPQMap = HashMap<String, TracesAndStats>;
 type GraphMap = Arc<Mutex<HashMap<ReporterGraph, TPQMap>>>;
 
 static DEFAULT_INGRESS: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
+static TRIGGER_BATCH_LIMIT: u32 = 50;
 
 /// Allows common transfer code to be more easily represented
 #[allow(clippy::large_enum_variant)]
@@ -72,7 +74,7 @@ pub struct ReportSpaceport {
     // (because a router can only be serving a single graph)
     tpq: GraphMap,
     tx: Sender<()>,
-    total: AtomicU32,
+    total: Arc<AtomicU32>,
 }
 
 impl ReportSpaceport {
@@ -91,16 +93,18 @@ impl ReportSpaceport {
         let tpq: GraphMap = Arc::new(Mutex::new(HashMap::new()));
         let task_tpq = tpq.clone();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(10);
+        let total = Arc::new(AtomicU32::new(0u32));
+        let my_total = total.clone();
         tokio::task::spawn(async move {
             let client = Client::new();
-            let mut interval = interval(Duration::from_secs(5));
+            let mut interval = interval(INGRESS_CLOCK_TICK);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             interval.tick().await;
             loop {
                 tokio::select! {
                     biased;
                     mopt = rx.recv() => {
-                        tracing::trace!("spaceport triggered");
+                        tracing::debug!("spaceport triggered");
                         match mopt {
                             Some(_msg) => {
                                 for result in extract_tpq(&client, task_tpq.clone()).await {
@@ -114,7 +118,8 @@ impl ReportSpaceport {
                         }
                     },
                     _ = interval.tick() => {
-                        tracing::trace!("spaceport ticked");
+                        tracing::debug!("spaceport ticked");
+                        my_total.store(0, Ordering::SeqCst);
                         for result in extract_tpq(&client, task_tpq.clone()).await {
                             match result {
                                 Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
@@ -129,7 +134,7 @@ impl ReportSpaceport {
             addr,
             tpq,
             tx,
-            total: AtomicU32::new(0u32),
+            total,
         }
     }
 
@@ -254,31 +259,21 @@ impl ReportSpaceport {
         // good idea to try to transfer data up to the ingress. Multiple
         // notifications just trigger more transfers.
         //
-        // 5000 is a fairly arbitrary number which indicates that we are adding
-        // a lot of data for transfer. It is intended to represent a rate of
-        // approx. 1,000 records/second.
+        // TRIGGER_BATCH_LIMIT is a fairly arbitrary number which indicates
+        // that we are adding a lot of data for transfer. It is derived
+        // empirically from load testing.
         let total = self.total.fetch_add(1, Ordering::SeqCst);
-        if total > 5000 {
-            let mut backoff = Duration::from_millis(0);
-            for i in 0..5 {
-                match self.tx.send(()).await {
-                    Ok(_v) => {
-                        self.total.store(0, Ordering::SeqCst);
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::warn!("attempt: {}, could not trigger transfer: {}", i + 1, e);
-                        if i == 4 {
-                            // Not being able to trigger a transfer isn't an "error". We can
-                            // let the client know that the transfer was Ok and hope that the
-                            // backend server eventually catches up with the workload and
-                            // clears the incoming trigger messages.
-                            break;
-                        } else {
-                            backoff += Duration::from_millis(50);
-                            tokio::time::sleep(backoff).await;
-                        }
-                    }
+        if total > TRIGGER_BATCH_LIMIT {
+            match self.tx.send(()).await {
+                Ok(_v) => {
+                    self.total.store(0, Ordering::SeqCst);
+                }
+                Err(e) => {
+                    // Not being able to trigger a transfer isn't an "error". We can
+                    // let the client know that the transfer was Ok and hope that the
+                    // backend server eventually catches up with the workload and
+                    // clears the incoming trigger messages.
+                    tracing::warn!("could not trigger transfer: {}", e);
                 }
             }
         }
