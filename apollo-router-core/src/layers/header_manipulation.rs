@@ -89,21 +89,20 @@ where
         {
             //Add the header to the request and pass it on to the service.
             let subgraph_request_headers = request.http_request.headers_mut();
-            // FIXME: we should make this async, and the whole body should be a future
-            let ctx = (*request.context).blocking_read();
+
             match &self.operation {
                 Operation::PropagateAll => {
-                    for (header_name, header_value) in ctx.request.headers() {
+                    for (header_name, header_value) in request.context.request.headers() {
                         subgraph_request_headers.insert(header_name, header_value.clone());
                     }
                 }
                 Operation::Propagate(header_name) => {
-                    if let Some(header) = ctx.request.headers().get(header_name) {
+                    if let Some(header) = request.context.request.headers().get(header_name) {
                         subgraph_request_headers.insert(header_name.to_owned(), header.clone());
                     }
                 }
                 Operation::PropagateOrDefault(header_name, default_value) => {
-                    if let Some(header) = ctx.request.headers().get(header_name) {
+                    if let Some(header) = request.context.request.headers().get(header_name) {
                         subgraph_request_headers.insert(header_name.to_owned(), header.clone());
                     } else {
                         subgraph_request_headers

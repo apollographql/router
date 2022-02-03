@@ -6,8 +6,7 @@ pub use caching_query_planner::*;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::RwLock;
+use std::collections::HashSet;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
@@ -60,7 +59,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        context: &'a Arc<RwLock<Context>>,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -79,7 +78,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        context: &'a Arc<RwLock<Context>>,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -212,7 +211,6 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
@@ -247,11 +245,10 @@ mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            context: &Arc<RwLock<Context>>,
+            context: &Context,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
-            let ctx = context.read().await;
-            let body = ctx.request.body();
+            let body = context.request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -305,7 +302,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            context: &'a Arc<RwLock<Context>>,
+            context: &'a Context,
             service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {

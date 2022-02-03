@@ -5,7 +5,6 @@ use futures::future::BoxFuture;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task;
-use tokio::sync::RwLock;
 
 type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 
@@ -90,9 +89,7 @@ where
                 .map_err(|err| err.into())
                 .map(|query_plan| PlannedRequest {
                     query_plan,
-                    context: Arc::new(RwLock::new(
-                        request.context.with_request(Arc::new(request.http_request)),
-                    )),
+                    context: request.context.with_request(Arc::new(request.http_request)),
                 })
         })
     }
