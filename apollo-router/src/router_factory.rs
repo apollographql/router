@@ -66,11 +66,17 @@ impl RouterFactory for ApolloRouterFactory {
         //TODO Use the plugins, services and config tp build the pipeline.
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
-        for (name, subgraph) in &configuration.subgraphs {
-            builder = builder.with_subgraph_service(
-                name,
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            );
+        if self.services.is_empty() {
+            for (name, subgraph) in &configuration.subgraphs {
+                builder = builder.with_subgraph_service(
+                    name,
+                    ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
+                );
+            }
+        } else {
+            for (name, subgraph) in &self.services {
+                builder = builder.with_subgraph_service(name, subgraph.clone());
+            }
         }
 
         let (service, worker) = Buffer::pair(
