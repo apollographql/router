@@ -1,4 +1,4 @@
-use crate::RouterRequest;
+use crate::{RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -46,7 +46,7 @@ where
 
 impl<S> Layer<S> for APQ
 where
-    S: Service<RouterRequest>,
+    S: Service<RouterRequest, Response = RouterResponse>,
 {
     type Service = APQService<S>;
 
@@ -124,9 +124,8 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
-    use crate::{
-        test_utils::{structures::RouterResponseBuilder, MockTestService, RouterRequestBuilder},
-        RouterResponse,
+    use crate::test_utils::{
+        structures::RouterResponseBuilder, MockRouterService, RouterRequestBuilder,
     };
     use serde_json_bytes::json;
     use std::borrow::Cow;
@@ -138,11 +137,11 @@ mod apq_tests {
         let hash2 = hash.clone();
         let hash3 = hash.clone();
 
-        let mut mock_service = MockTestService::<RouterRequest, RouterResponse>::new();
+        let mut mock_service = MockRouterService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
         mock_service
-            .expect_mock_call()
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -163,7 +162,7 @@ mod apq_tests {
             });
         mock_service
             // the second one should have the right APQ header and the full query string
-            .expect_mock_call()
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -185,7 +184,7 @@ mod apq_tests {
         mock_service
             // the second last one should have the right APQ header and the full query string
             // even though the query string wasn't provided by the client
-            .expect_mock_call()
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -212,8 +211,9 @@ mod apq_tests {
                 Ok(RouterResponseBuilder::new().build())
             });
 
-        // WOW :D
-        let mut service_stack = APQ::with_capacity(1).layer(mock_service);
+        let mock = mock_service.build();
+
+        let mut service_stack = APQ::with_capacity(1).layer(mock);
 
         let request_builder = RouterRequestBuilder::new().with_named_extension(
             "persistedQuery",
@@ -230,9 +230,12 @@ mod apq_tests {
         let with_query = request_builder.with_query("{__typename}").build();
 
         let services = service_stack.ready().await.unwrap();
-
         services.call(hash_only).await.unwrap();
+
+        let services = services.ready().await.unwrap();
         services.call(with_query).await.unwrap();
+
+        let services = services.ready().await.unwrap();
         services.call(second_hash_only).await.unwrap();
     }
 
@@ -242,11 +245,11 @@ mod apq_tests {
         let hash2 = hash.clone();
         let hash3 = hash.clone();
 
-        let mut mock_service = MockTestService::<RouterRequest, RouterResponse>::new();
+        let mut mock_service_builder = MockRouterService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
-        mock_service
-            .expect_mock_call()
+        mock_service_builder
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -265,9 +268,9 @@ mod apq_tests {
 
                 Ok(RouterResponseBuilder::new().build())
             });
-        mock_service
+        mock_service_builder
             // the second one should have the right APQ header and the full query string
-            .expect_mock_call()
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -286,10 +289,10 @@ mod apq_tests {
 
                 Ok(RouterResponseBuilder::new().build())
             });
-        mock_service
+        mock_service_builder
             // the second last one should have the right APQ header and the full query string
             // even though the query string wasn't provided by the client
-            .expect_mock_call()
+            .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
                 let as_json = req
@@ -316,6 +319,8 @@ mod apq_tests {
                 Ok(RouterResponseBuilder::new().build())
             });
 
+        let mock_service = mock_service_builder.build();
+
         let mut service_stack = APQ::with_capacity(1).layer(mock_service);
 
         let request_builder = RouterRequestBuilder::new().with_named_extension(
@@ -327,15 +332,16 @@ mod apq_tests {
         );
 
         let hash_only = request_builder.build();
-
         let second_hash_only = request_builder.build();
-
         let with_query = request_builder.with_query("{__typename}").build();
 
         let services = service_stack.ready().await.unwrap();
-
         services.call(hash_only).await.unwrap();
+
+        let services = services.ready().await.unwrap();
         services.call(with_query).await.unwrap();
+
+        let services = services.ready().await.unwrap();
         services.call(second_hash_only).await.unwrap();
     }
 }

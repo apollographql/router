@@ -1,33 +1,38 @@
-use futures::{Future, FutureExt};
+use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use mockall::automock;
-use std::{pin::Pin, task::Poll};
 use tower::{BoxError, Service};
 
-#[automock]
-pub trait TestService<Req, Res>
-where
-    Req: 'static,
-    Res: Send + 'static,
-{
-    fn mock_call(&self, req: Req) -> Result<Res, BoxError>;
+macro_rules! mock_service {
+    ($name:ident, $request_type:ty, $response_type:ty) => {
+        paste::item! {
+            #[automock]
+            pub trait [<$name Service>] {
+                fn call(&self, req: $request_type) -> Result<$response_type, BoxError>;
+            }
+
+            impl [<Mock $name Service>] {
+                pub fn build(self) -> impl Service<$request_type, Response = $response_type, Error = BoxError> {
+                    let (service, mut handle) = tower_test::mock::spawn();
+
+                    tokio::spawn(async move {
+                        loop {
+                            while let Some((request, responder)) = handle.next_request().await {
+                                match self.call(request) {
+                                    Ok(response) => responder.send_response(response),
+                                    Err(err) => responder.send_error(err),
+                                }
+                            }
+                        }
+                    });
+
+                    service.into_inner()
+                }
+            }
+        }
+    };
 }
 
-impl<Req, Res> Service<Req> for MockTestService<Req, Res>
-where
-    Res: Send + 'static,
-{
-    type Response = Res;
-
-    type Error = BoxError;
-
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
-
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, req: Req) -> Self::Future {
-        let res = self.mock_call(req);
-        async move { res }.boxed()
-    }
-}
+mock_service!(Router, RouterRequest, RouterResponse);
+mock_service!(QueryPlanning, RouterRequest, PlannedRequest);
+mock_service!(Execution, PlannedRequest, RouterResponse);
+mock_service!(Subgraph, SubgraphRequest, RouterResponse);
