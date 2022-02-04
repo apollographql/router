@@ -572,7 +572,6 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    #[ignore]
     async fn config_by_file_watching() {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");

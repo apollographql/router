@@ -24,8 +24,8 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
 
-type TPQMap = HashMap<String, TracesAndStats>;
-type GraphMap = Arc<Mutex<HashMap<ReporterGraph, TPQMap>>>;
+type QueryUsageMap = HashMap<String, TracesAndStats>;
+type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsageMap>>>;
 
 static DEFAULT_INGRESS: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
@@ -72,7 +72,7 @@ pub struct ReportSpaceport {
     addr: SocketAddr,
     // This Map will only have a single entry if used internally from a router.
     // (because a router can only be serving a single graph)
-    tpq: GraphMap,
+    graph_usage: GraphUsageMap,
     tx: Sender<()>,
     total: Arc<AtomicU32>,
 }
@@ -90,11 +90,11 @@ impl ReportSpaceport {
     pub fn new(addr: SocketAddr) -> Self {
         // Spawn a task which will check if there are reports to
         // submit every interval.
-        let tpq: GraphMap = Arc::new(Mutex::new(HashMap::new()));
-        let task_tpq = tpq.clone();
+        let graph_usage: GraphUsageMap = Arc::new(Mutex::new(HashMap::new()));
+        let task_graph_usage = graph_usage.clone();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(10);
         let total = Arc::new(AtomicU32::new(0u32));
-        let my_total = total.clone();
+        let task_total = total.clone();
         tokio::task::spawn(async move {
             let client = Client::new();
             let mut interval = interval(INGRESS_CLOCK_TICK);
@@ -107,7 +107,7 @@ impl ReportSpaceport {
                         tracing::debug!("spaceport triggered");
                         match mopt {
                             Some(_msg) => {
-                                for result in extract_tpq(&client, task_tpq.clone()).await {
+                                for result in extract_graph_usage(&client, task_graph_usage.clone()).await {
                                     match result {
                                         Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                         Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -119,8 +119,8 @@ impl ReportSpaceport {
                     },
                     _ = interval.tick() => {
                         tracing::debug!("spaceport ticked");
-                        my_total.store(0, Ordering::SeqCst);
-                        for result in extract_tpq(&client, task_tpq.clone()).await {
+                        task_total.store(0, Ordering::SeqCst);
+                        for result in extract_graph_usage(&client, task_graph_usage.clone()).await {
                             match result {
                                 Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
                                 Err(e) => tracing::error!("Report submission failed: {}", e),
@@ -132,7 +132,7 @@ impl ReportSpaceport {
         });
         Self {
             addr,
-            tpq,
+            graph_usage,
             tx,
             total,
         }
@@ -185,8 +185,8 @@ impl ReportSpaceport {
 
         for i in 0..5 {
             // We know these requests can be cloned
-            let my_req = req.try_clone().expect("requests must be clone-able");
-            match client.execute(my_req).await {
+            let task_req = req.try_clone().expect("requests must be clone-able");
+            match client.execute(task_req).await {
                 Ok(v) => {
                     let data = v
                         .text()
@@ -240,8 +240,8 @@ impl ReportSpaceport {
         &self,
         record: StatsOrTrace,
     ) -> Result<Response<ReporterResponse>, Status> {
-        let mut tpq = self.tpq.lock().await;
-        let graph_map = tpq
+        let mut graph_usage = self.graph_usage.lock().await;
+        let graph_map = graph_usage
             .entry(record.graph().unwrap())
             .or_insert_with(HashMap::new);
         let entry = graph_map
@@ -251,8 +251,8 @@ impl ReportSpaceport {
             StatsOrTrace::Stats(mut s) => entry.stats_with_context.push(s.stats.take().unwrap()),
             StatsOrTrace::Trace(mut t) => entry.trace.push(t.trace.take().unwrap()),
         }
-        // Drop the tpq lock to maximise concurrency
-        drop(tpq);
+        // Drop the graph_usage lock to maximise concurrency
+        drop(graph_usage);
 
         // This is inherently both imprecise and racy, but it doesn't matter
         // because we are just hinting to the spaceport that it's probably a
@@ -285,24 +285,24 @@ impl ReportSpaceport {
     }
 }
 
-async fn extract_tpq(
+async fn extract_graph_usage(
     client: &Client,
-    task_tpq: GraphMap,
+    task_graph_usage: GraphUsageMap,
 ) -> Vec<Result<Response<ReporterResponse>, Status>> {
-    let mut all_entries = task_tpq.lock().await;
+    let mut all_entries = task_graph_usage.lock().await;
     let drained = all_entries
         .drain()
-        .filter(|(_graph, tpq)| !tpq.is_empty())
-        .collect::<Vec<(ReporterGraph, TPQMap)>>();
+        .filter(|(_graph, graph_usage)| !graph_usage.is_empty())
+        .collect::<Vec<(ReporterGraph, QueryUsageMap)>>();
     // Release the lock ASAP so that clients can continue to add data
     drop(all_entries);
     let mut results = Vec::with_capacity(drained.len());
-    for (graph, tpq) in drained {
-        tracing::info!("submitting: {} records", tpq.len());
-        tracing::debug!("containing: {:?}", tpq);
+    for (graph, graph_usage) in drained {
+        tracing::info!("submitting: {} records", graph_usage.len());
+        tracing::debug!("containing: {:?}", graph_usage);
         match crate::Report::try_new(&graph.reference) {
             Ok(mut report) => {
-                report.traces_per_query = tpq;
+                report.traces_per_query = graph_usage;
                 let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
                     Ok(t) => t,
                     Err(e) => {

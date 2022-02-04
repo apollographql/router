@@ -30,7 +30,6 @@ use apollo_parser::{ast, Parser};
 use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
-use once_cell::sync::OnceCell;
 use opentelemetry::{
     global,
     runtime::Tokio,
@@ -387,7 +386,7 @@ struct DurationHistogram {
 impl DurationHistogram {
     const DEFAULT_SIZE: usize = 74; // Taken from TS implementation
     const MAXIMUM_SIZE: usize = 383; // Taken from TS implementation
-    const EXPONENT_LOG: OnceCell<f64> = OnceCell::new();
+    const EXPONENT_LOG: f64 = 0.13750352375f64; // log2(1.1) Update when log2() is a const fn (see: https://github.com/rust-lang/rust/issues/57241)
 
     fn new(init_size: Option<usize>) -> Self {
         Self {
@@ -400,9 +399,7 @@ impl DurationHistogram {
         // If you use as_micros() here to avoid the divide, tests will fail
         // Because, internally, as_micros() is losing remainders
         let log_duration = f64::log2(duration.as_nanos() as f64 / 1000.0);
-        let unbounded_bucket = f64::ceil(
-            log_duration / DurationHistogram::EXPONENT_LOG.get_or_init(|| f64::log2(1.1)),
-        );
+        let unbounded_bucket = f64::ceil(log_duration / DurationHistogram::EXPONENT_LOG);
 
         if unbounded_bucket.is_nan() || unbounded_bucket <= 0f64 {
             return 0;
