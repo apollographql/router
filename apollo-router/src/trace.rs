@@ -120,7 +120,29 @@ pub(crate) fn try_initialize_subscriber(
             };
             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
             opentelemetry::global::set_error_handler(handle_error)?;
-            Ok(Arc::new(subscriber.with(telemetry)))
+            // It's difficult to extend the OTLP model with an additional exporter
+            // as we do when Jaeger is being used. In this case we simply add the
+            // agent as a new layer and proceed from there.
+            let subscriber = subscriber.with(telemetry);
+            if graph_config.is_some() {
+                // Add spaceport agent as an OT pipeline
+                let tracer = match new_pipeline()
+                    .with_spaceport_config(spaceport_config)
+                    .with_graph_config(graph_config)
+                    .install_batch()
+                {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!("error installing spaceport telemetry: {}", e);
+                        return Err(Box::new(e));
+                    }
+                };
+                let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+                tracing::info!("Adding agent telemetry");
+                Ok(Arc::new(subscriber.with(agent)))
+            } else {
+                Ok(Arc::new(subscriber))
+            }
         }
         None => {
             if graph_config.is_some() {
