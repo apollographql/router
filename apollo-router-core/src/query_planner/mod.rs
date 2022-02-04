@@ -334,7 +334,7 @@ mod fetch {
                     .method(http::Method::POST)
                     .body(
                         Request::builder()
-                            .query(operation)
+                            .query(Some(operation.clone()))
                             .variables(Arc::new(variables))
                             .build(),
                     )

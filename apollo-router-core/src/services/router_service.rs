@@ -1,7 +1,8 @@
+use crate::apq::APQService;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     CachingQueryPlanner, Context, NaiveIntrospection, PlannedRequest, Plugin, QueryCache,
-    RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    RequestError, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -75,11 +76,14 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        if let Some(response) = self
-            .naive_introspection
-            .get(&request.http_request.body().query)
-        {
-            return Box::pin(async move {
+        let query = if let Some(query) = &request.http_request.body().query {
+            query.clone()
+        } else {
+            return Box::pin(async { Err(RequestError::NoQuery.into()) });
+        };
+
+        if let Some(response) = self.naive_introspection.get(query.as_str()) {
+            return Box::pin(async {
                 Ok(RouterResponse {
                     response: http::Response::new(response),
                     context: Arc::new(RwLock::new(
@@ -87,11 +91,11 @@ where
                     )),
                 })
             });
-        }
+        };
 
         let fut = async move {
             let query = query_cache
-                .get_query(&request.http_request.body().query)
+                .get_query(query)
                 .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
@@ -274,14 +278,17 @@ impl PluggableRouterServiceBuilder {
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
-                    RouterService::builder()
-                        .query_planner_service(query_planner_service)
-                        .query_execution_service(execution_service)
-                        .schema(self.schema)
-                        .query_cache(query_cache)
-                        .naive_introspection(naive_introspection)
-                        .build()
-                        .boxed(),
+                    APQService::new(
+                        RouterService::builder()
+                            .query_planner_service(query_planner_service)
+                            .query_execution_service(execution_service)
+                            .schema(self.schema)
+                            .query_cache(query_cache)
+                            .naive_introspection(naive_introspection)
+                            .build(),
+                        512,
+                    )
+                    .boxed(),
                     |acc, e| e.router_service(acc),
                 ),
             ),

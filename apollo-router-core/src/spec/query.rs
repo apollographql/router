@@ -7,7 +7,7 @@ use tracing::level_filters::LevelFilter;
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {
-    string: String,
+    string: Option<String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -18,8 +18,8 @@ pub struct Query {
 
 impl Query {
     /// Returns a reference to the underlying query string.
-    pub fn as_str(&self) -> &str {
-        self.string.as_str()
+    pub fn as_str(&self) -> Option<&String> {
+        self.string.as_ref()
     }
 
     /// Re-format the response value to match this query.
@@ -119,7 +119,7 @@ impl Query {
             .collect();
 
         Some(Query {
-            string,
+            string: Some(string),
             fragments,
             operations,
             operation_type_map,
@@ -510,9 +510,10 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
-                .query($query)
+                .query(Some($query.to_string()))
                 .build();
-            let query = Query::parse(&request.query).expect("could not parse query");
+            let query = Query::parse(&request.query.clone().unwrap_or_default())
+                .expect("could not parse query");
             query.validate_variables(&request, &schema)
         }};
     }

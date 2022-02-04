@@ -78,13 +78,13 @@ where
 impl<S> Service<RouterRequest> for APQService<S>
 where
     S: Service<RouterRequest, Response = RouterResponse, Error = BoxError>,
-    S::Future: 'static,
+    S::Future: Send + 'static,
 {
     type Response = <S as Service<RouterRequest>>::Response;
 
     type Error = <S as Service<RouterRequest>>::Error;
 
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -106,20 +106,21 @@ where
                     hex::decode(persisted_query.sha256hash.as_bytes()).ok()
                 });
 
-            let graphql_request = req.http_request.body_mut();
-            match (maybe_query_hash, graphql_request) {
-                (Some(query_hash), graphql_request) if !graphql_request.query.is_empty() => {
-                    if query_matches_hash(graphql_request.query.as_str(), query_hash.as_slice()) {
+            let body_query = req.http_request.body().query.clone();
+
+            match (maybe_query_hash, body_query) {
+                (Some(query_hash), Some(query)) => {
+                    if query_matches_hash(query.as_str(), query_hash.as_slice()) {
                         tracing::trace!("apq: cache insert");
-                        apq.cache.insert(query_hash, graphql_request.query.clone())
+                        apq.cache.insert(query_hash, query.clone());
                     } else {
                         tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
                     }
                 }
-                (Some(apq_hash), graphql_request) => {
-                    if let Some(query) = apq.cache.get(&apq_hash) {
+                (Some(apq_hash), _) => {
+                    if let Some(cached_query) = apq.cache.get(&apq_hash) {
                         tracing::trace!("apq: cache hit");
-                        graphql_request.query = query;
+                        req.http_request.body_mut().query = Some(cached_query);
                     } else {
                         tracing::trace!("apq: cache miss");
                         let res = apq
@@ -197,7 +198,7 @@ mod apq_tests {
 
                 assert_eq!(persisted_query.sha256hash, hash2);
 
-                assert!(!req.http_request.body().query.is_empty());
+                assert!(req.http_request.body().query.is_some());
 
                 Ok(RouterResponseBuilder::new().build())
             });
@@ -219,12 +220,12 @@ mod apq_tests {
 
                 assert_eq!(persisted_query.sha256hash, hash3);
 
-                assert!(!req.http_request.body().query.is_empty());
+                assert!(req.http_request.body().query.is_some());
 
                 let hash = hex::decode(hash3.as_bytes()).unwrap();
 
                 assert!(query_matches_hash(
-                    req.http_request.body().query.as_str(),
+                    req.http_request.body().query.clone().unwrap().as_str(),
                     hash.as_slice()
                 ));
 
@@ -303,7 +304,7 @@ mod apq_tests {
 
                 assert_eq!(persisted_query.sha256hash, hash2);
 
-                assert!(!req.http_request.body().query.is_empty());
+                assert!(req.http_request.body().query.is_some());
 
                 Ok(RouterResponseBuilder::new().build())
             });
@@ -325,12 +326,17 @@ mod apq_tests {
 
                 assert_eq!(persisted_query.sha256hash, hash3);
 
-                assert!(req.http_request.body().query.is_empty());
+                assert!(req.http_request.body().query.is_some());
 
                 let hash = hex::decode(hash3.as_bytes()).unwrap();
 
                 assert!(!query_matches_hash(
-                    req.http_request.body().query.as_str(),
+                    req.http_request
+                        .body()
+                        .query
+                        .clone()
+                        .unwrap_or_default()
+                        .as_str(),
                     hash.as_slice()
                 ));
 

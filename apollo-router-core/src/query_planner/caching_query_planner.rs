@@ -76,24 +76,29 @@ where
     }
 
     fn call(&mut self, request: RouterRequest) -> Self::Future {
-        let body = request.http_request.body();
+        let body = request.http_request.body().clone();
 
-        let key = (
-            body.query.to_owned(),
-            body.operation_name.to_owned(),
-            QueryPlanOptions::default(),
-        );
         let cm = self.cm.clone();
         Box::pin(async move {
-            cm.get(key)
-                .await
-                .map_err(|err| err.into())
-                .map(|query_plan| PlannedRequest {
-                    query_plan,
-                    context: Arc::new(RwLock::new(
-                        request.context.with_request(Arc::new(request.http_request)),
-                    )),
-                })
+            // TODO: something with keyref and stuff
+            if let Some(query) = body.query {
+                let key = (
+                    query,
+                    body.operation_name.to_owned(),
+                    QueryPlanOptions::default(),
+                );
+                cm.get(key)
+                    .await
+                    .map_err(|err| err.into())
+                    .map(|query_plan| PlannedRequest {
+                        query_plan,
+                        context: Arc::new(RwLock::new(
+                            request.context.with_request(Arc::new(request.http_request)),
+                        )),
+                    })
+            } else {
+                return Err(RequestError::NoQuery.into());
+            }
         })
     }
 }

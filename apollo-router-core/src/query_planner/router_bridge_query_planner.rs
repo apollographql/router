@@ -91,9 +91,10 @@ impl tower::Service<RouterRequest> for RouterBridgeQueryPlanner {
         let this = self.clone();
         let fut = async move {
             let body = request.http_request.body();
+            let query = body.query.clone().ok_or(QueryPlannerError::EmptyPlan)?;
             match this
                 .get(
-                    body.query.to_owned(),
+                    query.to_owned(),
                     body.operation_name.to_owned(),
                     QueryPlanOptions::default(),
                 )

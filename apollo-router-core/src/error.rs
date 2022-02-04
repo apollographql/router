@@ -202,6 +202,13 @@ pub enum CacheResolverError {
     RetrievalError(Arc<QueryPlannerError>),
 }
 
+/// Error types for a Request
+#[derive(Error, Debug, Display, Clone)]
+pub enum RequestError {
+    /// No query to resolve and no APQ extension hash
+    NoQuery,
+}
+
 impl From<QueryPlannerError> for CacheResolverError {
     fn from(err: QueryPlannerError) -> Self {
         CacheResolverError::RetrievalError(Arc::new(err))

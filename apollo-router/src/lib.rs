@@ -630,7 +630,9 @@ mod tests {
     }
 
     async fn assert_federated_response(socket: &SocketAddr, request: &str) {
-        let request = graphql::Request::builder().query(request).build();
+        let request = graphql::Request::builder()
+            .query(request.to_string())
+            .build();
         let expected = query(socket, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();

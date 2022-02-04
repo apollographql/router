@@ -22,7 +22,7 @@ impl RouterRequestBuilder {
         let this = self.clone();
         crate::RouterRequest {
             http_request: Request::new(crate::Request {
-                query: this.query.unwrap_or_default(),
+                query: this.query,
                 operation_name: this.operation_name,
                 variables: this.variables.unwrap_or_default(),
                 extensions: this.extensions.unwrap_or_default(),

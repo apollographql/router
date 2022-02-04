@@ -1,6 +1,7 @@
 use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use mockall::automock;
-use tower::{BoxError, Service};
+use tower::BoxError;
+use tower_test::mock::Mock;
 
 macro_rules! mock_service {
     ($name:ident, $request_type:ty, $response_type:ty) => {
@@ -11,7 +12,7 @@ macro_rules! mock_service {
             }
 
             impl [<Mock $name Service>] {
-                pub fn build(self) -> impl Service<$request_type, Response = $response_type, Error = BoxError> {
+                pub fn build(self) -> Mock<$request_type,$response_type> {
                     let (service, mut handle) = tower_test::mock::spawn();
 
                     tokio::spawn(async move {
