@@ -1,16 +1,19 @@
 use crate::configuration::Configuration;
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
+use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
     Context, PluggableRouterServiceBuilder, Plugin, RouterRequest, RouterResponse, Schema,
     SubgraphRequest,
 };
+use http::header::HeaderName;
 use http::{Request, Response};
 use static_assertions::assert_impl_all;
+use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use typed_builder::TypedBuilder;
@@ -78,10 +81,30 @@ impl RouterServiceFactory for ApolloRouterFactory {
 
         if self.services.is_empty() {
             for (name, subgraph) in &configuration.subgraphs {
-                builder = builder.with_subgraph_service(
-                    name,
-                    ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-                );
+                let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
+                    name.to_string(),
+                    subgraph.routing_url.clone(),
+                ));
+
+                for extension in &subgraph.extensions {
+                    match extension.get("kind").as_ref().and_then(|v| v.as_str()) {
+                        Some("header") => {
+                            if let Some(header_name) =
+                                extension.get("propagate").as_ref().and_then(|v| v.as_str())
+                            {
+                                subgraph_service =
+                                    BoxLayer::new(HeaderManipulationLayer::propagate(
+                                        HeaderName::from_str(header_name).unwrap(),
+                                    ))
+                                    .layer(subgraph_service);
+                            }
+                        }
+                        _ => { //FIXME
+                        }
+                    }
+                }
+
+                builder = builder.with_subgraph_service(name, subgraph_service);
             }
         } else {
             for (name, subgraph) in &self.services {

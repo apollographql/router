@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 384
+assertion_line: 443
 expression: config
 
 ---
@@ -10,6 +10,7 @@ server:
 subgraphs:
   example:
     routing_url: "http://foo/"
+    extensions: []
 opentelemetry:
   jaeger:
     collector_endpoint: "http://example.org/"

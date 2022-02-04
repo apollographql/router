@@ -3,7 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, Object};
 use derivative::Derivative;
 use displaydoc::Display;
 use opentelemetry::sdk::trace::Sampler;
@@ -11,6 +11,7 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
@@ -98,8 +99,13 @@ impl Configuration {
                             });
                         }
                         Ok(routing_url) => {
-                            self.subgraphs
-                                .insert(name.to_owned(), Subgraph { routing_url });
+                            self.subgraphs.insert(
+                                name.to_owned(),
+                                Subgraph {
+                                    routing_url,
+                                    extensions: Vec::new(),
+                                },
+                            );
                         }
                     }
                 }
@@ -129,6 +135,11 @@ impl Configuration {
 pub struct Subgraph {
     /// The url for the subgraph.
     pub routing_url: Url,
+
+    /// Filter extensions configuration
+    #[serde(default)]
+    #[builder(default)]
+    pub extensions: Vec<Value>,
 }
 
 /// Configuration options pertaining to the http server component.
@@ -478,12 +489,14 @@ mod tests {
                         "inventory".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://inventory/graphql").unwrap(),
+                            extensions: Vec::new(),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://products/graphql").unwrap(),
+                            extensions: Vec::new(),
                         },
                     ),
                 ]
