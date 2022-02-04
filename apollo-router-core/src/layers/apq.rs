@@ -1,9 +1,10 @@
-use crate::{RouterRequest, RouterResponse};
+use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
+use futures::Future;
 use moka::sync::Cache;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::task::Poll;
-use tower::{Layer, Service};
+use std::{pin::Pin, sync::Arc, task::Poll};
+use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
@@ -60,13 +61,14 @@ where
 
 impl<S> Service<RouterRequest> for APQService<S>
 where
-    S: Service<RouterRequest>,
+    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError>,
+    S::Future: 'static,
 {
     type Response = <S as Service<RouterRequest>>::Response;
 
     type Error = <S as Service<RouterRequest>>::Error;
 
-    type Future = <S as Service<RouterRequest>>::Future;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -104,6 +106,10 @@ where
                         graphql_request.query = query;
                     } else {
                         tracing::trace!("apq: cache miss");
+                        let res = RouterResponseBuilder::new()
+                            .with_context(req.context.with_request(Arc::new(req.http_request)))
+                            .build();
+                        return Box::pin(async move { Ok(res) });
                     }
                 }
                 _ => {}
@@ -111,7 +117,7 @@ where
 
             req
         };
-        self.service.call(req)
+        Box::pin(self.service.call(req))
     }
 }
 
@@ -140,28 +146,10 @@ mod apq_tests {
         let mut mock_service = MockRouterService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
+        // it should have not been forwarded to our mock service
+
+        // the second one should have the right APQ header and the full query string
         mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: RouterRequest| {
-                let as_json = req
-                    .http_request
-                    .body()
-                    .extensions
-                    .get("persistedQuery")
-                    .unwrap();
-
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
-
-                assert_eq!(persisted_query.sha256hash, hash);
-
-                assert!(req.http_request.body().query.is_empty());
-
-                Ok(RouterResponseBuilder::new().build())
-            });
-        mock_service
-            // the second one should have the right APQ header and the full query string
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
@@ -248,28 +236,10 @@ mod apq_tests {
         let mut mock_service_builder = MockRouterService::new();
         // the first one should have lead to an APQ error
         // claiming the server doesn't have a query string for a given hash
+        // it should have not been forwarded to our mock service
+
+        // the second one should have the right APQ header and the full query string
         mock_service_builder
-            .expect_call()
-            .times(1)
-            .returning(move |req: RouterRequest| {
-                let as_json = req
-                    .http_request
-                    .body()
-                    .extensions
-                    .get("persistedQuery")
-                    .unwrap();
-
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
-
-                assert_eq!(persisted_query.sha256hash, hash);
-
-                assert!(req.http_request.body().query.is_empty());
-
-                Ok(RouterResponseBuilder::new().build())
-            });
-        mock_service_builder
-            // the second one should have the right APQ header and the full query string
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
