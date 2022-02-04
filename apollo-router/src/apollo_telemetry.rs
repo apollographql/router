@@ -173,7 +173,7 @@ pub struct Exporter {
     collector: String,
     graph: Option<StudioGraph>,
     reporter: tokio::sync::OnceCell<Reporter>,
-    normalized_queries: HashMap<(String, String), String>,
+    normalized_queries: HashMap<String, String>,
 }
 
 impl Exporter {
@@ -262,17 +262,14 @@ impl SpanExporter for Exporter {
                 let operation_name = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("operation_name"));
-                let op_name: String = match operation_name {
-                    Some(v) => v.as_str().into_owned(),
-                    None => GRAPHQL_UNKNOWN_OPERATION_NAME.to_string(),
-                };
-                // XXX The normalize function isn't complete yet, but does the
-                // minimum amount of normalization.
-                // Cache the normalized keys since this is a fairly slow
-                // operation...
+                // XXX Since normalization is expensive, try to reduce the
+                // amount of normalization by doing an exact string match
+                // on a query. This might not save a lot of work and may
+                // result in too much caching, so re-visit this decision
+                // post-integration.
                 let key = self
                     .normalized_queries
-                    .entry((op_name, query.as_str().to_string()))
+                    .entry(query.as_str().to_string())
                     .or_insert_with(|| normalize(operation_name, &query.as_str()));
 
                 // Retrieve DurationHistogram from our HashMap, or add a new one
