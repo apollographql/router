@@ -4,14 +4,18 @@ mod router_service;
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::header_manipulation::HeaderManipulationLayer;
+use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use http::header::{HeaderName, COOKIE};
 use http::HeaderValue;
+use moka::sync::Cache;
 use static_assertions::assert_impl_all;
+use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::layer::util::Stack;
 use tower::ServiceBuilder;
+use tower_service::Service;
 
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
@@ -90,6 +94,24 @@ pub trait ServiceBuilderExt<L> {
         value: HeaderValue,
     ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
     fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+        self,
+        cache: Cache<Key, Value>,
+        key_fn: KeyFn,
+        value_fn: ValueFn,
+        response_fn: ResponseFn,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+    where
+        Request: Send,
+        S: Service<Request> + Send,
+        Key: Send + Sync + Eq + Hash + Clone + 'static,
+        Value: Send + Sync + Clone + 'static,
+        KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
+        ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
+        ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
+        <S as Service<Request>>::Error: Send + Sync,
+        <S as Service<Request>>::Response: Send,
+        <S as Service<Request>>::Future: Send;
 }
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
@@ -142,5 +164,27 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
     fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
         self.layer(HeaderManipulationLayer::propagate(COOKIE))
+    }
+
+    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+        self,
+        cache: Cache<Key, Value>,
+        key_fn: KeyFn,
+        value_fn: ValueFn,
+        response_fn: ResponseFn,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+    where
+        Request: Send,
+        S: Service<Request> + Send,
+        Key: Send + Sync + Eq + Hash + Clone + 'static,
+        Value: Send + Sync + Clone + 'static,
+        KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
+        ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
+        ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
+        <S as Service<Request>>::Error: Send + Sync,
+        <S as Service<Request>>::Response: Send,
+        <S as Service<Request>>::Future: Send,
+    {
+        self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
     }
 }
