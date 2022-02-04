@@ -2,6 +2,7 @@ use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, Router
 use futures::Future;
 use moka::sync::Cache;
 use serde::Deserialize;
+use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
 use std::{pin::Pin, sync::Arc, task::Poll};
 use tower::{BoxError, Layer, Service};
@@ -13,24 +14,39 @@ pub struct PersistedQuery {
     pub sha256hash: String,
 }
 
+#[derive(Clone)]
 pub struct APQ {
     cache: Cache<Vec<u8>, String>,
+    response_builder: RouterResponseBuilder,
 }
 
 impl APQ {
     pub fn with_capacity(capacity: u64) -> Self {
         Self {
             cache: Cache::new(capacity),
+            response_builder: RouterResponseBuilder::new().push_error(crate::Error {
+                message: "PersistedQueryNotFound".to_string(),
+                locations: Default::default(),
+                path: Default::default(),
+                extensions: serde_json_bytes::from_value(json!({
+                      "code": "PERSISTED_QUERY_NOT_FOUND",
+                      "exception": {
+                      "stacktrace": [
+                          "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                      ],
+                  },
+                }))
+                .unwrap(),
+            }),
         }
     }
 }
-
 pub struct APQService<S>
 where
     S: Service<RouterRequest>,
 {
     service: S,
-    cache: Cache<Vec<u8>, String>,
+    apq: APQ,
 }
 
 impl<S> APQService<S>
@@ -40,7 +56,7 @@ where
     pub fn new(service: S, capacity: u64) -> Self {
         Self {
             service,
-            cache: Cache::new(capacity),
+            apq: APQ::with_capacity(capacity),
         }
     }
 }
@@ -53,7 +69,7 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         APQService {
-            cache: self.cache.clone(),
+            apq: self.clone(),
             service,
         }
     }
@@ -75,7 +91,7 @@ where
     }
 
     fn call(&mut self, mut req: RouterRequest) -> Self::Future {
-        let cache = self.cache.clone();
+        let apq = self.apq.clone();
 
         let req = {
             let maybe_query_hash: Option<Vec<u8>> = req
@@ -95,18 +111,19 @@ where
                 (Some(query_hash), graphql_request) if !graphql_request.query.is_empty() => {
                     if query_matches_hash(graphql_request.query.as_str(), query_hash.as_slice()) {
                         tracing::trace!("apq: cache insert");
-                        cache.insert(query_hash, graphql_request.query.clone())
+                        apq.cache.insert(query_hash, graphql_request.query.clone())
                     } else {
                         tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
                     }
                 }
                 (Some(apq_hash), graphql_request) => {
-                    if let Some(query) = cache.get(&apq_hash) {
+                    if let Some(query) = apq.cache.get(&apq_hash) {
                         tracing::trace!("apq: cache hit");
                         graphql_request.query = query;
                     } else {
                         tracing::trace!("apq: cache miss");
-                        let res = RouterResponseBuilder::new()
+                        let res = apq
+                            .response_builder
                             .with_context(req.context.with_request(Arc::new(req.http_request)))
                             .build();
                         return Box::pin(async move { Ok(res) });
@@ -142,6 +159,21 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
         let hash2 = hash.clone();
         let hash3 = hash.clone();
+
+        let expected_apq_miss_error = crate::Error {
+            message: "PersistedQueryNotFound".to_string(),
+            locations: Default::default(),
+            path: Default::default(),
+            extensions: serde_json_bytes::from_value(json!({
+                  "code": "PERSISTED_QUERY_NOT_FOUND",
+                  "exception": {
+                  "stacktrace": [
+                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                  ],
+              },
+            }))
+            .unwrap(),
+        };
 
         let mut mock_service = MockRouterService::new();
         // the first one should have lead to an APQ error
@@ -218,7 +250,8 @@ mod apq_tests {
         let with_query = request_builder.with_query("{__typename}").build();
 
         let services = service_stack.ready().await.unwrap();
-        services.call(hash_only).await.unwrap();
+        let apq_error = services.call(hash_only).await.unwrap();
+        assert_eq!(apq_error.response.body().errors[0], expected_apq_miss_error);
 
         let services = services.ready().await.unwrap();
         services.call(with_query).await.unwrap();
@@ -232,6 +265,21 @@ mod apq_tests {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
         let hash3 = hash.clone();
+
+        let expected_apq_miss_error = crate::Error {
+            message: "PersistedQueryNotFound".to_string(),
+            locations: Default::default(),
+            path: Default::default(),
+            extensions: serde_json_bytes::from_value(json!({
+                  "code": "PERSISTED_QUERY_NOT_FOUND",
+                  "exception": {
+                  "stacktrace": [
+                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                  ],
+              },
+            }))
+            .unwrap(),
+        };
 
         let mut mock_service_builder = MockRouterService::new();
         // the first one should have lead to an APQ error
@@ -306,12 +354,21 @@ mod apq_tests {
         let with_query = request_builder.with_query("{__typename}").build();
 
         let services = service_stack.ready().await.unwrap();
-        services.call(hash_only).await.unwrap();
+        // This apq call will miss
+        let apq_error = services.call(hash_only).await.unwrap();
+        assert_eq!(apq_error.response.body().errors[0], expected_apq_miss_error);
 
+        // sha256 is wrong, apq insert won't happen
         let services = services.ready().await.unwrap();
         services.call(with_query).await.unwrap();
 
         let services = services.ready().await.unwrap();
-        services.call(second_hash_only).await.unwrap();
+
+        // apq insert failed, this call will miss
+        let second_apq_error = services.call(second_hash_only).await.unwrap();
+        assert_eq!(
+            second_apq_error.response.body().errors[0],
+            expected_apq_miss_error
+        );
     }
 }
