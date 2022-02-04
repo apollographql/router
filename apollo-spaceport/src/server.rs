@@ -27,7 +27,8 @@ use tonic::{Request, Response, Status};
 type QueryUsageMap = HashMap<String, TracesAndStats>;
 type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsageMap>>>;
 
-static DEFAULT_INGRESS: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
+    "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
 static TRIGGER_BATCH_LIMIT: u32 = 50;
 
@@ -106,26 +107,14 @@ impl ReportSpaceport {
                     mopt = rx.recv() => {
                         tracing::debug!("spaceport triggered");
                         match mopt {
-                            Some(_msg) => {
-                                for result in extract_graph_usage(&client, task_graph_usage.clone()).await {
-                                    match result {
-                                        Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-                                        Err(e) => tracing::error!("Report submission failed: {}", e),
-                                    }
-                                }
-                            },
+                            Some(_msg) => process_all_graphs(&client, task_graph_usage.clone()).await,
                             None => break
                         }
                     },
                     _ = interval.tick() => {
                         tracing::debug!("spaceport ticked");
                         task_total.store(0, Ordering::SeqCst);
-                        for result in extract_graph_usage(&client, task_graph_usage.clone()).await {
-                            match result {
-                                Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-                                Err(e) => tracing::error!("Report submission failed: {}", e),
-                            }
-                        }
+                        process_all_graphs(&client, task_graph_usage.clone()).await;
                     }
                 };
             }
@@ -169,9 +158,9 @@ impl ReportSpaceport {
             .finish()
             .map_err(|e| Status::internal(e.to_string()))?;
         let mut backoff = Duration::from_millis(0);
-        let ingress = match std::env::var("APOLLO_INGRESS") {
+        let ingress = match std::env::var("APOLLO_USAGE_REPORTING_INGRESS_URL") {
             Ok(v) => v,
-            Err(_e) => DEFAULT_INGRESS.to_string(),
+            Err(_e) => DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL.to_string(),
         };
         let req = client
             .post(ingress)
@@ -282,6 +271,15 @@ impl ReportSpaceport {
             message: "Report accepted".to_string(),
         };
         Ok(Response::new(response))
+    }
+}
+
+async fn process_all_graphs(client: &Client, task_graph_usage: GraphUsageMap) {
+    for result in extract_graph_usage(client, task_graph_usage).await {
+        match result {
+            Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
+            Err(e) => tracing::error!("Report submission failed: {}", e),
+        }
     }
 }
 

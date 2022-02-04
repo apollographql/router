@@ -1,5 +1,5 @@
 # Apollo Telemetry
-Transfer statistics from router to apollo ingress.
+Transfer statistics (e.g., operation usage) to Apollo Studio's ingress
 
 ## Authentication
 
