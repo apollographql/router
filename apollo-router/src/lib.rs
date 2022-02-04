@@ -361,7 +361,7 @@ where
     /// A future that when resolved will shut down the server.
     shutdown: ShutdownKind,
 
-    router_factory: Option<RF>,
+    router_factory: RF,
 }
 
 #[derive(Default)]
@@ -422,12 +422,10 @@ impl ApolloRouterBuilder {
                 .expect("Configuration must be set on builder"),
             schema: self.schema.expect("Schema must be set on builder"),
             shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: Some(
-                ApolloRouterFactory::builder()
-                    .plugins(self.plugins)
-                    .services(self.services)
-                    .build(),
-            ),
+            router_factory: ApolloRouterFactory::builder()
+                .plugins(self.plugins)
+                .services(self.services)
+                .build(),
         }
     }
 }
@@ -558,23 +556,26 @@ where
     ///
     /// returns: FederatedServerHandle
     ///
-    pub fn serve(mut self) -> FederatedServerHandle {
+    pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = WarpHttpServerFactory::new();
-        let state_machine =
-            StateMachine::new(server_factory, Some(state_listener), self.router_factory.take().expect("Router factory should have been populated"));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let result = spawn(async move {
-            state_machine
-                .process_events(self.generate_event_stream(shutdown_receiver))
-                .await
-        })
-        .map(|r| match r {
-            Ok(Ok(ok)) => Ok(ok),
-            Ok(Err(err)) => Err(err),
-            Err(_err) => Err(FederatedServerError::StartupError),
-        })
-        .boxed();
+        let event_stream = Self::generate_event_stream(
+            self.shutdown,
+            self.configuration,
+            self.schema,
+            shutdown_receiver,
+        );
+
+        let state_machine =
+            StateMachine::new(server_factory, Some(state_listener), self.router_factory);
+        let result = spawn(async move { state_machine.process_events(event_stream).await })
+            .map(|r| match r {
+                Ok(Ok(ok)) => Ok(ok),
+                Ok(Err(err)) => Err(err),
+                Err(_err) => Err(FederatedServerError::StartupError),
+            })
+            .boxed();
 
         FederatedServerHandle {
             result,
@@ -587,14 +588,16 @@ where
     /// This merges all contributing streams and sets up shutdown handling.
     /// When a shutdown message is received no more events are emitted.
     fn generate_event_stream(
-        self,
+        shutdown: ShutdownKind,
+        configuration: ConfigurationKind,
+        schema: SchemaKind,
         shutdown_receiver: oneshot::Receiver<()>,
     ) -> impl Stream<Item = Event> {
         // Chain is required so that the final shutdown message is sent.
         let messages = stream::select_all(vec![
-            self.shutdown.into_stream().boxed(),
-            self.configuration.into_stream().boxed(),
-            self.schema.into_stream().boxed(),
+            shutdown.into_stream().boxed(),
+            configuration.into_stream().boxed(),
+            schema.into_stream().boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
         .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
