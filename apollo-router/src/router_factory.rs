@@ -15,12 +15,12 @@ use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use typed_builder::TypedBuilder;
 
-/// Factory for creating graphs.
+/// Factory for creating a RouterService
 ///
-/// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
-/// necessary e.g. when schema changes.
+/// Instances of this traits are used by the StateMachine to generate a new
+/// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterFactory: Send + Sync + 'static {
+pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Sync
@@ -36,6 +36,7 @@ pub trait RouterFactory: Send + Sync + 'static {
 }
 
 assert_impl_all!(ApolloRouterFactory: Send);
+/// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default, TypedBuilder)]
 pub struct ApolloRouterFactory {
     plugins: Vec<Box<dyn Plugin>>,
@@ -46,7 +47,7 @@ pub struct ApolloRouterFactory {
 }
 
 #[async_trait::async_trait]
-impl RouterFactory for ApolloRouterFactory {
+impl RouterServiceFactory for ApolloRouterFactory {
     type RouterService = Buffer<
         BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
         Request<graphql::Request>,

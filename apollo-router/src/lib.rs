@@ -9,7 +9,7 @@ mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-use crate::router_factory::{ApolloRouterFactory, RouterFactory};
+use crate::router_factory::{ApolloRouterFactory, RouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -342,13 +342,15 @@ impl ShutdownKind {
 ///
 pub struct ApolloRouter<RF>
 where
-    RF: RouterFactory,
-    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RF: RouterServiceFactory,
+    <RF as RouterServiceFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Sync
         + Clone
         + 'static,
-    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
+    <<RF as RouterServiceFactory>::RouterService as Service<
+        http::Request<apollo_router_core::Request>,
+    >>::Future: std::marker::Send,
 {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
@@ -538,13 +540,15 @@ impl Future for FederatedServerHandle {
 
 impl<RF> ApolloRouter<RF>
 where
-    RF: RouterFactory,
-    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RF: RouterServiceFactory,
+    <RF as RouterServiceFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Sync
         + Clone
         + 'static,
-    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
+    <<RF as RouterServiceFactory>::RouterService as Service<
+        http::Request<apollo_router_core::Request>,
+    >>::Future: std::marker::Send,
 {
     /// Start the federated server on a separate thread.
     ///

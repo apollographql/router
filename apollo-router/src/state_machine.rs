@@ -1,5 +1,5 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
-use super::router_factory::RouterFactory;
+use super::router_factory::RouterServiceFactory;
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
@@ -45,7 +45,7 @@ enum PrivateState<RS> {
 pub(crate) struct StateMachine<S, RS, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactory<RouterService = RS>,
+    FA: RouterServiceFactory<RouterService = RS>,
     RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Sync
@@ -79,7 +79,7 @@ impl<RS> From<&PrivateState<RS>> for State {
 impl<S, RS, FA> StateMachine<S, RS, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactory<RouterService = RS>,
+    FA: RouterServiceFactory<RouterService = RS>,
     RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
         + Send
         + Sync
@@ -377,7 +377,7 @@ mod tests {
     use super::*;
     use crate::configuration::Subgraph;
     use crate::http_server_factory::Listener;
-    use crate::router_factory::RouterFactory;
+    use crate::router_factory::RouterServiceFactory;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use mockall::{mock, predicate::*};
@@ -811,7 +811,7 @@ mod tests {
         MyRouterFactory {}
 
         #[async_trait::async_trait]
-        impl RouterFactory for MyRouterFactory {
+        impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
             async fn create(
                 &self,
