@@ -23,7 +23,6 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use http::{Request, Response};
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -343,14 +342,6 @@ impl ShutdownKind {
 pub struct ApolloRouter<RF>
 where
     RF: RouterServiceFactory,
-    <RF as RouterServiceFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    <<RF as RouterServiceFactory>::RouterService as Service<
-        http::Request<apollo_router_core::Request>,
-    >>::Future: std::marker::Send,
 {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
@@ -539,14 +530,6 @@ impl Future for FederatedServerHandle {
 impl<RF> ApolloRouter<RF>
 where
     RF: RouterServiceFactory,
-    <RF as RouterServiceFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    <<RF as RouterServiceFactory>::RouterService as Service<
-        http::Request<apollo_router_core::Request>,
-    >>::Future: std::marker::Send,
 {
     /// Start the federated server on a separate thread.
     ///

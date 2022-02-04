@@ -21,11 +21,16 @@ use typed_builder::TypedBuilder;
 /// RouterService from configuration when it changes
 #[async_trait::async_trait]
 pub trait RouterServiceFactory: Send + Sync + 'static {
-    type RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
+    type RouterService: Service<
+            Request<graphql::Request>,
+            Response = Response<graphql::Response>,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send
         + Sync
         + Clone
         + 'static;
+    type Future: Send;
 
     async fn create(
         &self,
@@ -52,6 +57,8 @@ impl RouterServiceFactory for ApolloRouterFactory {
         BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
         Request<graphql::Request>,
     >;
+    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+
     async fn create(
         &self,
         configuration: &Configuration,

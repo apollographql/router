@@ -8,11 +8,7 @@ use crate::configuration::Configuration;
 use apollo_router_core::prelude::*;
 use futures::channel::mpsc;
 use futures::prelude::*;
-use http::{Request, Response};
-use std::marker::PhantomData;
 use std::sync::Arc;
-use tower::BoxError;
-use tower_service::Service;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -23,7 +19,6 @@ enum PrivateState<RS> {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<RS>,
     },
     Running {
         configuration: Arc<Configuration>,
@@ -42,20 +37,14 @@ enum PrivateState<RS> {
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
 /// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, RS, FA>
+pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory<RouterService = RS>,
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
+    FA: RouterServiceFactory,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<RS>,
 }
 
 impl<RS> From<&PrivateState<RS>> for State {
@@ -76,16 +65,10 @@ impl<RS> From<&PrivateState<RS>> for State {
     }
 }
 
-impl<S, RS, FA> StateMachine<S, RS, FA>
+impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterServiceFactory<RouterService = RS>,
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    FA: RouterServiceFactory + Send,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -96,7 +79,6 @@ where
             http_server_factory,
             state_listener,
             router_factory,
-            phantom: Default::default(),
         }
     }
 
@@ -108,11 +90,10 @@ where
         let mut state = Startup {
             configuration: None,
             schema: None,
-            phantom: PhantomData,
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, RS, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
+        <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
@@ -121,7 +102,6 @@ where
                     self.maybe_transition_to_running(Startup {
                         configuration,
                         schema: Some(*new_schema),
-                        phantom: PhantomData,
                     })
                     .await
                 }
@@ -130,7 +110,6 @@ where
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
                         schema,
-                        phantom: PhantomData,
                     })
                     .await
                 }
@@ -279,11 +258,8 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, RS, FA>>::notify_state_listener(
-                    &mut state_listener,
-                    new_public_state,
-                )
-                .await;
+                <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
+                    .await;
             }
             tracing::debug!("Transitioned to state {:?}", &new_state);
             state = new_state;
@@ -313,11 +289,13 @@ where
         }
     }
 
-    async fn maybe_transition_to_running(&self, state: PrivateState<RS>) -> PrivateState<RS> {
+    async fn maybe_transition_to_running(
+        &self,
+        state: PrivateState<<FA as RouterServiceFactory>::RouterService>,
+    ) -> PrivateState<<FA as RouterServiceFactory>::RouterService> {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
-            phantom: _,
         } = state
         {
             tracing::debug!("Starting http");
@@ -333,7 +311,6 @@ where
                     Startup {
                         configuration: Some(configuration),
                         schema: Some(schema),
-                        phantom: PhantomData,
                     }
                 }
                 Ok(()) => {
@@ -380,6 +357,7 @@ mod tests {
     use crate::router_factory::RouterServiceFactory;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
+    use http::{Request, Response};
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
     use std::pin::Pin;
@@ -387,6 +365,7 @@ mod tests {
     use std::sync::Mutex;
     use std::task::{Context, Poll};
     use test_log::test;
+    use tower::{BoxError, Service};
     use url::Url;
 
     #[test(tokio::test)]
@@ -813,6 +792,8 @@ mod tests {
         #[async_trait::async_trait]
         impl RouterServiceFactory for MyRouterFactory {
             type RouterService = MockMyRouter;
+            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+
             async fn create(
                 &self,
                 configuration: &Configuration,
