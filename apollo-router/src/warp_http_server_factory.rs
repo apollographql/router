@@ -766,7 +766,7 @@ mod tests {
             .reply(&filter)
             .await;
 
-        insta::assert_debug_snapshot!(res);
+        insta::assert_debug_snapshot!("health_check", res);
     }
 
     #[test(tokio::test)]
