@@ -235,7 +235,7 @@ impl SpanExporter for Exporter {
         // Each report is unique by client name, client version and key (derived from op_name)
         // The dh_map contains a batch specific map, keyed on the unique report triple,
         // referencing DurationHistogram values.
-        // After processing the batch, we drain the HashMap and send the generated reports
+        // After processing the batch, we consume the HashMap and send the generated reports
         // to the Reporter.
         let mut dh_map = HashMap::new();
         /*
@@ -297,7 +297,7 @@ impl SpanExporter for Exporter {
         let graph: ReporterGraph = self.graph.as_ref().unwrap().into();
 
         // Report our consolidated statistics
-        for ((client_name, client_version, key), dh) in dh_map.drain() {
+        for ((client_name, client_version, key), dh) in dh_map.into_iter() {
             tracing::debug!("reporting entries: {}", dh.entries);
             let stats = ContextualizedStats {
                 context: Some(StatsContext {
