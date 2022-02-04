@@ -14,7 +14,6 @@ use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use apollo_router_core::{Plugin, RouterResponse, SubgraphRequest};
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::Display;
@@ -30,10 +29,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
-use tower::BoxError;
-use tower_service::Service;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -356,7 +351,7 @@ where
 }
 
 #[derive(Default)]
-pub struct ApolloRouterBuilder {
+pub struct ApolloRouterBuilder<Factory = ()> {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: Option<ConfigurationKind>,
 
@@ -366,11 +361,7 @@ pub struct ApolloRouterBuilder {
     /// A future that when resolved will shut down the server.
     shutdown: Option<ShutdownKind>,
 
-    plugins: Vec<Box<dyn Plugin>>,
-    services: Vec<(
-        String,
-        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
-    )>,
+    router_factory: Factory,
 }
 
 impl ApolloRouterBuilder {
@@ -389,21 +380,17 @@ impl ApolloRouterBuilder {
         self
     }
 
-    pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> ApolloRouterBuilder {
-        self.plugins.push(Box::new(plugin));
-        self
-    }
-
-    pub fn with_subgraph_service(
-        mut self,
-        name: &str,
-        service: Buffer<
-            BoxCloneService<SubgraphRequest, RouterResponse, BoxError>,
-            SubgraphRequest,
-        >,
-    ) -> ApolloRouterBuilder {
-        self.services.push((name.to_string(), service));
-        self
+    /// Use a custom RouterServiceFactory
+    pub fn with_factory<RF>(self, router_factory: RF) -> ApolloRouterBuilder<RF>
+    where
+        RF: RouterServiceFactory,
+    {
+        ApolloRouterBuilder {
+            configuration: self.configuration,
+            schema: self.schema,
+            shutdown: self.shutdown,
+            router_factory,
+        }
     }
 
     pub fn build(self) -> ApolloRouter<ApolloRouterFactory> {
@@ -413,10 +400,20 @@ impl ApolloRouterBuilder {
                 .expect("Configuration must be set on builder"),
             schema: self.schema.expect("Schema must be set on builder"),
             shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: ApolloRouterFactory::builder()
-                .plugins(self.plugins)
-                .services(self.services)
-                .build(),
+            router_factory: ApolloRouterFactory::builder().build(),
+        }
+    }
+}
+
+impl<RF: RouterServiceFactory> ApolloRouterBuilder<RF> {
+    pub fn build(self) -> ApolloRouter<RF> {
+        ApolloRouter {
+            configuration: self
+                .configuration
+                .expect("Configuration must be set on builder"),
+            schema: self.schema.expect("Schema must be set on builder"),
+            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            router_factory: self.router_factory,
         }
     }
 }

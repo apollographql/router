@@ -44,7 +44,9 @@ assert_impl_all!(ApolloRouterFactory: Send);
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default, TypedBuilder)]
 pub struct ApolloRouterFactory {
+    #[builder(default)]
     plugins: Vec<Box<dyn Plugin>>,
+    #[builder(default)]
     services: Vec<(
         String,
         Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
