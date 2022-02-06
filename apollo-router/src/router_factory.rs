@@ -1,4 +1,4 @@
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
@@ -35,7 +35,7 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
         configuration: &Configuration,
         schema: Arc<graphql::Schema>,
         previous_router: Option<Self::RouterService>,
-    ) -> Self::RouterService;
+    ) -> Result<Self::RouterService, BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -55,7 +55,13 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         configuration: &Configuration,
         schema: Arc<Schema>,
         _previous_router: Option<Self::RouterService>,
-    ) -> Self::RouterService {
+    ) -> Result<Self::RouterService, BoxError> {
+        let mut errors: Vec<ConfigurationError> = Vec::default();
+        let mut configuration = configuration.clone();
+        if let Err(mut e) = configuration.load_subgraphs(&schema) {
+            errors.append(&mut e);
+        }
+
         let dispatcher = configuration
             .subscriber
             .clone()
@@ -107,6 +113,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             buffer,
         );
         tokio::spawn(worker.with_subscriber(dispatcher));
-        service
+        Ok(service)
     }
 }
