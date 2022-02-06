@@ -70,11 +70,11 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 subgraph.routing_url.clone(),
             ));
 
-            for extension in &subgraph.extensions {
-                match extension.get("kind").as_ref().and_then(|v| v.as_str()) {
+            for layers in &subgraph.layers {
+                match layers.get("kind").as_ref().and_then(|v| v.as_str()) {
                     Some("header") => {
                         if let Some(header_name) =
-                            extension.get("propagate").as_ref().and_then(|v| v.as_str())
+                            layers.get("propagate").as_ref().and_then(|v| v.as_str())
                         {
                             subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
                                 HeaderName::from_str(header_name).unwrap(),
@@ -89,6 +89,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
+
+        for (_name, _plugin) in &configuration.plugins {}
 
         let (service, worker) = Buffer::pair(
             ServiceBuilder::new().service(

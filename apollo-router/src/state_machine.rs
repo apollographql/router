@@ -355,7 +355,6 @@ mod tests {
     use crate::configuration::Subgraph;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
-    use apollo_router_core::Object;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use http::{Request, Response};
@@ -558,14 +557,14 @@ mod tests {
                                         "accounts".to_string(),
                                         Subgraph {
                                             routing_url: Url::parse("http://accounts/graphql").unwrap(),
-                                            extensions: Vec::new(),
+                                            layers: Vec::new(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
                                             routing_url: Url::parse("http://accounts/graphql").unwrap(),
-                                            extensions: Vec::new(),
+                                            layers: Vec::new(),
                                         }
                                     )
                                 ]
@@ -660,7 +659,7 @@ mod tests {
                                         "accounts".to_string(),
                                         Subgraph {
                                             routing_url: Url::parse("http://accounts/graphql").unwrap(),
-                                            extensions: Vec::new(),
+                                            layers: Vec::new(),
                                         }
                                     ),
                                 ]

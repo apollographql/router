@@ -103,7 +103,7 @@ impl Configuration {
                                 name.to_owned(),
                                 Subgraph {
                                     routing_url,
-                                    extensions: Vec::new(),
+                                    layers: Vec::new(),
                                 },
                             );
                         }
@@ -139,7 +139,7 @@ pub struct Subgraph {
     /// Filter extensions configuration
     #[serde(default)]
     #[builder(default)]
-    pub extensions: Vec<Value>,
+    pub layers: Vec<Value>,
 }
 
 /// Configuration options pertaining to the http server component.
@@ -489,14 +489,14 @@ mod tests {
                         "inventory".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://inventory/graphql").unwrap(),
-                            extensions: Vec::new(),
+                            layers: Vec::new(),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://products/graphql").unwrap(),
-                            extensions: Vec::new(),
+                            layers: Vec::new(),
                         },
                     ),
                 ]
