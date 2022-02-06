@@ -2,13 +2,9 @@ use crate::configuration::Configuration;
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
-use apollo_router_core::{
-    Context, PluggableRouterServiceBuilder, Plugin, RouterRequest, RouterResponse, Schema,
-    SubgraphRequest,
-};
+use apollo_router_core::{Context, PluggableRouterServiceBuilder, RouterRequest, Schema};
 use http::header::HeaderName;
 use http::{Request, Response};
-use static_assertions::assert_impl_all;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
@@ -16,7 +12,6 @@ use tower::util::{BoxCloneService, BoxLayer, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
-use typed_builder::TypedBuilder;
 
 /// Factory for creating a RouterService
 ///
@@ -43,21 +38,12 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     ) -> Self::RouterService;
 }
 
-assert_impl_all!(ApolloRouterFactory: Send);
 /// Main implementation of the RouterService factory, supporting the extensions system
-#[derive(Default, TypedBuilder)]
-pub struct ApolloRouterFactory {
-    #[builder(default)]
-    plugins: Vec<Box<dyn Plugin>>,
-    #[builder(default)]
-    services: Vec<(
-        String,
-        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
-    )>,
-}
+#[derive(Default)]
+pub struct YamlRouterServiceFactory {}
 
 #[async_trait::async_trait]
-impl RouterServiceFactory for ApolloRouterFactory {
+impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
         BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
         Request<graphql::Request>,
@@ -76,40 +62,32 @@ impl RouterServiceFactory for ApolloRouterFactory {
             .map(tracing::Dispatch::new)
             .unwrap_or_default();
         let buffer = 20000;
-        //TODO Use the plugins, services and config tp build the pipeline.
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
-        if self.services.is_empty() {
-            for (name, subgraph) in &configuration.subgraphs {
-                let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
-                    name.to_string(),
-                    subgraph.routing_url.clone(),
-                ));
+        for (name, subgraph) in &configuration.subgraphs {
+            let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
+                name.to_string(),
+                subgraph.routing_url.clone(),
+            ));
 
-                for extension in &subgraph.extensions {
-                    match extension.get("kind").as_ref().and_then(|v| v.as_str()) {
-                        Some("header") => {
-                            if let Some(header_name) =
-                                extension.get("propagate").as_ref().and_then(|v| v.as_str())
-                            {
-                                subgraph_service =
-                                    BoxLayer::new(HeaderManipulationLayer::propagate(
-                                        HeaderName::from_str(header_name).unwrap(),
-                                    ))
-                                    .layer(subgraph_service);
-                            }
-                        }
-                        _ => { //FIXME
+            for extension in &subgraph.extensions {
+                match extension.get("kind").as_ref().and_then(|v| v.as_str()) {
+                    Some("header") => {
+                        if let Some(header_name) =
+                            extension.get("propagate").as_ref().and_then(|v| v.as_str())
+                        {
+                            subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
+                                HeaderName::from_str(header_name).unwrap(),
+                            ))
+                            .layer(subgraph_service);
                         }
                     }
+                    _ => { //FIXME
+                    }
                 }
+            }
 
-                builder = builder.with_subgraph_service(name, subgraph_service);
-            }
-        } else {
-            for (name, subgraph) in &self.services {
-                builder = builder.with_subgraph_service(name, subgraph.clone());
-            }
+            builder = builder.with_subgraph_service(name, subgraph_service);
         }
 
         let (service, worker) = Buffer::pair(

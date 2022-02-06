@@ -3,7 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
-use apollo_router_core::{prelude::*, Object};
+use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
 use opentelemetry::sdk::trace::Sampler;

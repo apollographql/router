@@ -9,7 +9,7 @@ mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-use crate::router_factory::{ApolloRouterFactory, RouterServiceFactory};
+use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
@@ -393,14 +393,14 @@ impl ApolloRouterBuilder {
         }
     }
 
-    pub fn build(self) -> ApolloRouter<ApolloRouterFactory> {
+    pub fn build(self) -> ApolloRouter<YamlRouterServiceFactory> {
         ApolloRouter {
             configuration: self
                 .configuration
                 .expect("Configuration must be set on builder"),
             schema: self.schema.expect("Schema must be set on builder"),
             shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: ApolloRouterFactory::builder().build(),
+            router_factory: YamlRouterServiceFactory::default(),
         }
     }
 }
