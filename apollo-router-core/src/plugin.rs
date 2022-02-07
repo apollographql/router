@@ -1,6 +1,5 @@
 use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use async_trait::async_trait;
-use futures::future::BoxFuture;
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,9 +22,13 @@ pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, fn() -> Box<dyn DynPl
 }
 
 #[async_trait]
-pub trait Plugin: Default + Send + Sync + 'static {
+pub trait Plugin: Send + Sync + 'static {
     type Config;
     fn configure(&mut self, _configuration: Self::Config) -> Result<(), BoxError> {
+        Ok(())
+    }
+
+    fn configure_from_json(&mut self, _configuration: &Value) -> Result<(), BoxError> {
         Ok(())
     }
 
@@ -67,10 +70,14 @@ pub trait Plugin: Default + Send + Sync + 'static {
     }
 }
 
+#[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
     fn configure(&mut self, _configuration: &Value) -> Result<(), BoxError>;
-    fn startup<'a>(&'a mut self) -> BoxFuture<'a, Result<(), BoxError>>;
-    fn shutdown<'a>(&'a mut self) -> BoxFuture<'a, Result<(), BoxError>>;
+
+    // Plugins will receive a notification that they should start up and shut down.
+    async fn startup(&mut self) -> Result<(), BoxError>;
+
+    async fn shutdown(&mut self) -> Result<(), BoxError>;
 
     fn router_service(
         &mut self,
@@ -92,4 +99,80 @@ pub trait DynPlugin: Send + Sync + 'static {
         _name: &str,
         service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, RouterResponse, BoxError>;
+}
+
+#[async_trait]
+impl<T> DynPlugin for T
+where
+    T: Plugin,
+{
+    fn configure(&mut self, configuration: &Value) -> Result<(), BoxError> {
+        self.configure_from_json(configuration)
+    }
+
+    // Plugins will receive a notification that they should start up and shut down.
+    async fn startup(&mut self) -> Result<(), BoxError> {
+        self.startup().await
+    }
+
+    async fn shutdown(&mut self) -> Result<(), BoxError> {
+        self.shutdown().await
+    }
+
+    fn router_service(
+        &mut self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        self.router_service(service)
+    }
+
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
+    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+        self.query_planning_service(service)
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
+    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
+        self.execution_service(service)
+    }
+
+    fn subgraph_service(
+        &mut self,
+        name: &str,
+        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
+        self.subgraph_service(name, service)
+    }
+}
+
+// For use when creating plugins
+
+// Register a plugin with a name
+#[macro_export]
+macro_rules! plugin_register {
+    ($key: literal, $value: ident) => {
+        startup::on_startup! {
+            // Register the plugin factory function
+            apollo_router_core::plugins_mut().insert($key.to_string(), || Box::new($value::default()));
+        }
+    };
+}
+
+// Create a json configure method
+#[macro_export]
+macro_rules! configure_from_json {
+    () => {
+        // The macro will expand into the contents of this block.
+        fn configure_from_json(
+            &mut self,
+            configuration: &serde_json::Value,
+        ) -> Result<(), BoxError> {
+            let conf = serde_json::from_value(configuration.clone())?;
+            self.configure(conf)
+        }
+    };
 }
