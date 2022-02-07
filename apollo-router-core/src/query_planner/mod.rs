@@ -90,10 +90,8 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
-                    let sequence_span = tracing::info_span!("sequence");
-                    let _entered = sequence_span.enter();
-
                     value = parent_value.clone();
+                    let span = tracing::info_span!("sequence");
                     for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
@@ -103,6 +101,7 @@ impl PlanNode {
                                 schema,
                                 &value,
                             )
+                            .instrument(span.clone())
                             .in_current_span()
                             .await;
                         value.deep_merge(v);
@@ -110,10 +109,9 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    let parallel_span = tracing::info_span!("parallel");
-                    let _entered = parallel_span.enter();
                     value = Value::default();
 
+                    let span = tracing::info_span!("parallel");
                     let mut stream: stream::FuturesUnordered<_> = nodes
                         .iter()
                         .map(|plan| {
@@ -124,11 +122,16 @@ impl PlanNode {
                                 schema,
                                 parent_value,
                             )
-                            .in_current_span()
+                            .instrument(span.clone())
                         })
                         .collect();
 
-                    while let Some((v, err)) = stream.next().in_current_span().await {
+                    while let Some((v, err)) = stream
+                        .next()
+                        .instrument(span.clone())
+                        .in_current_span()
+                        .await
+                    {
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
                     }
