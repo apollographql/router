@@ -166,7 +166,6 @@ macro_rules! plugin_register {
 #[macro_export]
 macro_rules! configure_from_json {
     () => {
-        // The macro will expand into the contents of this block.
         fn configure_from_json(
             &mut self,
             configuration: &serde_json::Value,
