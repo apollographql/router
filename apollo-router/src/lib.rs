@@ -61,6 +61,9 @@ pub enum FederatedServerError {
     /// Could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
 
+    /// Could not create the HTTP pipeline: {0}
+    ServiceCreationError(tower::BoxError),
+
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
 }

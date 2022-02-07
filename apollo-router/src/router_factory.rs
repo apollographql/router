@@ -30,11 +30,11 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
         + 'static;
     type Future: Send;
 
-    async fn create(
-        &self,
-        configuration: &Configuration,
+    async fn create<'a>(
+        &'a self,
+        configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<Self::RouterService>,
+        previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError>;
 }
 
@@ -50,14 +50,14 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     >;
     type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
 
-    async fn create(
-        &self,
-        configuration: &Configuration,
+    async fn create<'a>(
+        &'a self,
+        configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<Self::RouterService>,
+        _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
-        let mut configuration = configuration.clone();
+        let mut configuration = (*configuration).clone();
         if let Err(mut e) = configuration.load_subgraphs(&schema) {
             errors.append(&mut e);
         }
