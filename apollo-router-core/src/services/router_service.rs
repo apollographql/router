@@ -1,3 +1,4 @@
+use crate::plugin::DynPlugin;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     CachingQueryPlanner, Context, NaiveIntrospection, PlannedRequest, Plugin, QueryCache,
@@ -131,7 +132,7 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     buffer: usize,
-    plugins: Vec<Box<dyn Plugin>>,
+    plugins: Vec<Box<dyn DynPlugin>>,
     services: Vec<(
         String,
         BoxService<SubgraphRequest, RouterResponse, BoxError>,
@@ -150,8 +151,16 @@ impl PluggableRouterServiceBuilder {
         }
     }
 
-    pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> PluggableRouterServiceBuilder {
+    pub fn with_plugin<E: Plugin + DynPlugin + 'static>(
+        mut self,
+        plugin: E,
+    ) -> PluggableRouterServiceBuilder {
         self.plugins.push(Box::new(plugin));
+        self
+    }
+
+    pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
+        self.plugins.push(plugin);
         self
     }
 

@@ -1,13 +1,15 @@
 //! Starts a server that will handle http graphql requests.
-
 pub mod configuration;
 mod files;
 mod http_server_factory;
+mod plugins;
 pub mod reqwest_subgraph_service;
 pub mod router_factory;
 mod state_machine;
 mod trace;
 mod warp_http_server_factory;
+
+pub use apollo_router_macros::router_plugin;
 
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;

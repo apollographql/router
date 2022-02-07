@@ -1,0 +1,16 @@
+[package]
+name = "apollo-router-macros"
+version = "0.1.0-alpha.3"
+edition = "2021"
+
+[lib]
+proc-macro = true
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+convert_case="0.4.0"
+once_cell = "1.9.0"
+proc-macro2 = "1.0.32"
+quote = "1.0.10"
+syn = { version = "1.0.82", features = ["full", "extra-traits"] }
+

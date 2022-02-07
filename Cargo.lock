@@ -82,6 +82,7 @@ version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "apollo-router-core",
+ "apollo-router-macros",
  "async-trait",
  "atty",
  "bytes",
@@ -108,6 +109,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "serde_yaml",
+ "startup",
  "static_assertions",
  "structopt",
  "task-local-extensions",
@@ -184,6 +186,17 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "typed-builder",
+]
+
+[[package]]
+name = "apollo-router-macros"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "convert_case",
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3367,6 +3380,12 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
+
+[[package]]
+name = "startup"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4b82fbe497696de0a02ab63e42cf58b4d64333da2b550494eaa676c98d932f"
 
 [[package]]
 name = "static_assertions"

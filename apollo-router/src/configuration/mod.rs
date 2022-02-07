@@ -11,6 +11,7 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::Map;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
@@ -40,6 +41,12 @@ pub enum ConfigurationError {
     MissingSubgraphUrl(String),
     /// Invalid URL for subgraph {subgraph}: {url}
     InvalidSubgraphUrl { subgraph: String, url: String },
+    /// Unknown plugin {0}
+    PluginUnknown(String),
+    /// Plugin {plugin} could not be configured: {error}
+    PluginConfiguration { plugin: String, error: String },
+    /// The configuration contained errors.
+    InvalidConfiguration,
 }
 
 /// The configuration for the router.
@@ -67,10 +74,10 @@ pub struct Configuration {
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
 
-    /// Mapping of name to subgraph that the router may contact.
+    /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: graphql::Object,
+    pub plugins: Map<String, Value>,
 }
 
 fn default_listen() -> ListenAddr {
@@ -136,7 +143,7 @@ pub struct Subgraph {
     /// The url for the subgraph.
     pub routing_url: Url,
 
-    /// Filter extensions configuration
+    /// Layer configuration
     #[serde(default)]
     #[builder(default)]
     pub layers: Vec<Value>,

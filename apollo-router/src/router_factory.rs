@@ -95,8 +95,38 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
+        {
+            let plugin_registry = apollo_router_core::plugins();
+            for (name, configuration) in &configuration.plugins {
+                let name = name.as_str().to_string();
+                match plugin_registry.get(name.as_str()) {
+                    Some(factory) => {
+                        let mut plugin = (*factory)();
+                        match plugin.configure(configuration) {
+                            Ok(_) => {
+                                builder = builder.with_dyn_plugin(plugin);
+                            }
+                            Err(err) => {
+                                errors.push(ConfigurationError::PluginConfiguration {
+                                    plugin: name,
+                                    error: err.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    None => {
+                        errors.push(ConfigurationError::PluginUnknown(name));
+                    }
+                }
+            }
+        }
 
-        for (_name, _plugin) in &configuration.plugins {}
+        if !errors.is_empty() {
+            for error in errors {
+                tracing::error!("{:#}", error);
+            }
+            return Err(Box::new(ConfigurationError::InvalidConfiguration));
+        }
 
         let (service, worker) = Buffer::pair(
             ServiceBuilder::new().service(

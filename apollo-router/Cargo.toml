@@ -25,6 +25,7 @@ otlp-http = ["opentelemetry-otlp/http-proto"]
 [dependencies]
 anyhow = "1.0.53"
 apollo-router-core = { path = "../apollo-router-core" }
+apollo-router-macros = { path = "../apollo-router-macros"}
 async-trait = "0.1.52"
 atty = "0.2.14"
 bytes = "1.1.0"
@@ -51,6 +52,7 @@ reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = "1.0.78"
 serde_yaml = "0.8.23"
+startup = "0.1.1"
 static_assertions = "1.1.0"
 structopt = "0.3.26"
 task-local-extensions = "0.1.1"
