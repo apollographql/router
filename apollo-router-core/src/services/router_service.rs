@@ -278,6 +278,7 @@ impl PluggableRouterServiceBuilder {
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
+                    // TODO: maybe make it optional although enabled by default?
                     APQService::new(
                         RouterService::builder()
                             .query_planner_service(query_planner_service)

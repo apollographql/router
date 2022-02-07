@@ -2,7 +2,6 @@ use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
-use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::Request;
 use hyper::server::conn::Http;
@@ -18,6 +17,7 @@ use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use urlencoding::decode_binary;
 use warp::host::Authority;
 use warp::{
     http::{header::HeaderMap, StatusCode, Uri},
@@ -205,24 +205,32 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
         .and(warp::host::optional())
-        .and(warp::body::bytes())
+        .and(warp::query::raw())
         .and(warp::header::headers_cloned())
         .and_then(
             move |accept: Option<String>,
                   host: Option<Authority>,
-                  body: Bytes,
+                  query: String,
                   header_map: HeaderMap| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
-                    } else if let Ok(request) = graphql::Request::from_bytes(body) {
-                        run_graphql_request(service, http::Method::GET, request, header_map).await
                     } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid GraphQL request",
-                            StatusCode::BAD_REQUEST,
-                        ))
+                        // decode percent encoded string
+                        // from the docs `Unencoded `+` is preserved literally, and _not_ changed to a space.`,
+                        // so let's do it I guess
+                        let query = query.replace('+', " ");
+                        let decoded_query = decode_binary(query.as_bytes());
+                        if let Ok(request) = serde_json::from_slice(&decoded_query) {
+                            run_graphql_request(service, http::Method::GET, request, header_map)
+                                .await
+                        } else {
+                            Box::new(warp::reply::with_status(
+                                "Invalid url encoded GraphQL request",
+                                StatusCode::BAD_REQUEST,
+                            ))
+                        }
                     };
 
                     Ok::<_, warp::reject::Rejection>(reply)
