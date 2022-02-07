@@ -156,7 +156,7 @@ impl ReportHeader {
 }
 
 /// The Reporter accepts requests from clients to transfer statistics
-/// and traces to the Apollo Ingress spaceport.
+/// and traces to the Apollo spaceport.
 #[derive(Debug)]
 pub struct Reporter {
     client: ReporterClient<Channel>,
