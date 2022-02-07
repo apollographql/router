@@ -22,7 +22,7 @@ pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, fn() -> Box<dyn DynPl
 }
 
 #[async_trait]
-pub trait Plugin: Send + Sync + 'static {
+pub trait Plugin: Default + Send + Sync + 'static {
     type Config;
     fn configure(&mut self, _configuration: Self::Config) -> Result<(), BoxError> {
         Ok(())
