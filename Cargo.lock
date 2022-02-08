@@ -82,7 +82,6 @@ version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "apollo-router-core",
- "apollo-router-macros",
  "async-trait",
  "atty",
  "bytes",
@@ -186,17 +185,6 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "typed-builder",
-]
-
-[[package]]
-name = "apollo-router-macros"
-version = "0.1.0-alpha.3"
-dependencies = [
- "convert_case",
- "once_cell",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

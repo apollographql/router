@@ -4,7 +4,6 @@ members = [
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
-    "apollo-router-macros",
     "xtask",
 ]
 

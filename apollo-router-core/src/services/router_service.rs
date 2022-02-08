@@ -1,8 +1,7 @@
-use crate::plugin::DynPlugin;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, Context, NaiveIntrospection, PlannedRequest, Plugin, QueryCache,
-    RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    CachingQueryPlanner, Context, DynPlugin, NaiveIntrospection, PlannedRequest, Plugin,
+    QueryCache, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -151,7 +150,7 @@ impl PluggableRouterServiceBuilder {
         }
     }
 
-    pub fn with_plugin<E: Plugin + DynPlugin + 'static>(
+    pub fn with_plugin<E: DynPlugin + Plugin>(
         mut self,
         plugin: E,
     ) -> PluggableRouterServiceBuilder {

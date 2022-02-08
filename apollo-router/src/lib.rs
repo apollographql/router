@@ -9,8 +9,6 @@ mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-pub use apollo_router_macros::router_plugin;
-
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
