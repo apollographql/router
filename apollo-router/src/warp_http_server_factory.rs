@@ -18,7 +18,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Level, Span};
+use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -339,9 +339,20 @@ where
         })
 }
 
+#[tracing::instrument(skip_all,
+    name = "graphql_request",
+    fields(
+        query = %request.query,
+        operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
+        client_name,
+        client_version
+    ),
+    level = "info"
+)]
 fn run_graphql_request<RS>(
     service: RS,
     method: http::Method,
+
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
@@ -352,6 +363,18 @@ where
         + 'static,
     <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
+    if let Some(client_name) = header_map.get("apollographql-client-name") {
+        // Record the client name as part of the current span
+        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
+    }
+    if let Some(client_version) = header_map.get("apollographql-client-version") {
+        // Record the client version as part of the current span
+        Span::current().record(
+            "client_version",
+            &client_version.to_str().unwrap_or_default(),
+        );
+    }
+
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
         injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
@@ -367,9 +390,7 @@ where
                     .unwrap();
                 *http_request.headers_mut() = header_map;
 
-                let response = stream_request(service, http_request)
-                    .instrument(tracing::info_span!("graphql_request"))
-                    .await;
+                let response = stream_request(service, http_request).await;
 
                 Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
             }
@@ -796,7 +817,7 @@ mod tests {
             .reply(&filter)
             .await;
 
-        insta::assert_debug_snapshot!(res);
+        insta::assert_debug_snapshot!("health_check", res);
     }
 
     #[test(tokio::test)]

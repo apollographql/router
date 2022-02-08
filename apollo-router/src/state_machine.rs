@@ -4,11 +4,13 @@ use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, SpaceportConfig};
 use apollo_router_core::prelude::*;
 use apollo_router_core::Schema;
+use apollo_spaceport::server::ReportSpaceport;
 use futures::channel::mpsc;
 use futures::prelude::*;
+use std::pin::Pin;
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -37,7 +39,7 @@ enum PrivateState<RS> {
 /// If config and schema are not supplied then the machine ends with an error.
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
-/// At any point a shutdown event will case the machine to try to get to stopped state.  
+/// At any point a shutdown event will cause the machine to try to get to stopped state.  
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
@@ -66,6 +68,37 @@ impl<RS> From<&PrivateState<RS>> for State {
     }
 }
 
+// For use when we have an external collector. Makes selecting over
+// events simpler
+async fn do_nothing(_addr_str: String) -> bool {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+// For use when we have an internal collector.
+async fn do_listen(addr_str: String) -> bool {
+    tracing::info!("spawning an internal spaceport");
+    // Spawn a spaceport server to handle statistics
+    let addr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("could not parse spaceport address: {}", e);
+            return false;
+        }
+    };
+
+    let spaceport = ReportSpaceport::new(addr);
+
+    if let Err(e) = spaceport.serve().await {
+        tracing::error!("spaceport did not terminate normally: {}", e);
+        return false;
+    }
+    true
+}
+
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
@@ -88,6 +121,49 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
+        // Studio Agent Spaceport listener
+        // TODO: This code will be moving when we add support for Tower
+        // to the router. Leaving here until that time.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
+
+        tokio::spawn(async move {
+            let mut current_listener = "".to_string();
+            let mut current_operation: fn(
+                msg: String,
+            )
+                -> Pin<Box<dyn Future<Output = bool> + Send>> = |msg| Box::pin(do_nothing(msg));
+
+            loop {
+                tokio::select! {
+                    biased;
+                    mopt = rx.recv() => {
+                        match mopt {
+                            Some(msg) => {
+                                tracing::info!(?msg);
+                                // Save our target listener for later use
+                                current_listener = msg.listener.clone();
+                                // Configure which function to call
+                                if msg.external {
+                                    current_operation = |msg| Box::pin(do_nothing(msg));
+                                } else {
+                                    current_operation = |msg| Box::pin(do_listen(msg));
+                                }
+                            },
+                            None => break
+                        }
+                    },
+                    x = current_operation(current_listener.clone()) => {
+                        // The only time a current_operation will return is failure
+                        // from the server. If this happens, wait for a while
+                        // then try again.
+                        tracing::info!(%x, "current_operation");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                };
+            }
+            tracing::info!("terminating spaceport loop");
+        });
+
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -108,13 +184,29 @@ where
                     .into_ok_or_err2(),
 
                 // Startup: Handle schema updates, maybe transition to running.
-                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => self
-                    .maybe_transition_to_running(Startup {
+                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.spaceport {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                        }
+                    }
+                    self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
                         schema,
                     })
                     .await
-                    .into_ok_or_err2(),
+                    .into_ok_or_err2()
+                }
 
                 // Startup: Missing configuration.
                 (
@@ -174,6 +266,22 @@ where
                     UpdateConfiguration(new_configuration),
                 ) => {
                     tracing::info!("Reloading configuration");
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.spaceport {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                        }
+                    }
+
                     self.reload_server(
                         configuration,
                         schema,

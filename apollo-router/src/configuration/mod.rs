@@ -3,6 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -78,6 +79,16 @@ pub struct Configuration {
     #[serde(default)]
     #[builder(default)]
     pub plugins: Map<String, Value>,
+
+    /// Spaceport configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub spaceport: Option<SpaceportConfig>,
+
+    /// Studio Graph configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub graph: Option<StudioGraph>,
 }
 
 fn default_listen() -> ListenAddr {
@@ -277,6 +288,46 @@ impl Cors {
             cors.allow_any_origin()
         } else {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
+        }
+    }
+}
+
+fn default_collector() -> String {
+    DEFAULT_SERVER_URL.to_string()
+}
+
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
+
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+#[derive(Clone, Derivative, Deserialize, Serialize)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct StudioGraph {
+    pub(crate) reference: String,
+
+    #[derivative(Debug = "ignore")]
+    pub(crate) key: String,
+}
+
+impl Default for SpaceportConfig {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external: false,
         }
     }
 }

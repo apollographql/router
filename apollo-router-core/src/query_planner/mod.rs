@@ -155,7 +155,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
                         .fetch_node(parent_value, current_dir, context, service_registry, schema)
-                        .instrument(tracing::info_span!("fetch"))
+                        .instrument(tracing::trace_span!("fetch"))
                         .await
                     {
                         Ok(v) => value = v,
@@ -242,7 +242,7 @@ mod fetch {
     }
 
     impl Variables {
-        #[instrument(level = "debug", name = "make_variables", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "make_variables")]
         async fn new(
             requires: &[Selection],
             variable_usages: &[String],
@@ -315,8 +315,7 @@ mod fetch {
                 ..
             } = self;
 
-            let query_span =
-                tracing::info_span!("subfetch_stream", service = service_name.as_str());
+            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
 
             let Variables { variables, paths } = Variables::new(
                 &self.requires,
@@ -369,7 +368,7 @@ mod fetch {
             })
         }
 
-        #[instrument(level = "debug", name = "response_insert", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,

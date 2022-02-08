@@ -130,7 +130,7 @@ mod tests {
             )
             .await
             .unwrap();
-        insta::assert_debug_snapshot!(result);
+        insta::assert_debug_snapshot!("plan", result);
     }
 
     #[test]
@@ -144,6 +144,7 @@ mod tests {
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
         insta::assert_debug_snapshot!(
+            "empty_query_plan_should_be_a_planner_error",
             RouterBridgeQueryPlanner::new(Arc::new(
                 include_str!("testdata/schema.graphql").parse().unwrap(),
             ))
