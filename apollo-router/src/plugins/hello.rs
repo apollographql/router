@@ -1,4 +1,4 @@
-use apollo_router_core::{configure_from_json, plugin_register, Plugin};
+use apollo_router_core::{register_plugin, Plugin};
 use serde::Deserialize;
 use tower::BoxError;
 
@@ -17,11 +17,9 @@ impl Plugin for Hello {
         tracing::info!("Hello {}!", configuration.name);
         Ok(())
     }
-
-    configure_from_json!();
 }
 
-plugin_register!("hello", Hello);
+register_plugin!("hello", Hello);
 
 #[cfg(test)]
 mod tests {

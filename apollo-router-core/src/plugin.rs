@@ -1,6 +1,7 @@
 use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -74,6 +75,8 @@ pub trait Plugin: Default + Send + Sync + 'static {
 pub trait DynPlugin: Send + Sync + 'static {
     fn configure(&mut self, _configuration: &Value) -> Result<(), BoxError>;
 
+    fn configure_from_json(&mut self, configuration: &serde_json::Value) -> Result<(), BoxError>;
+
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
@@ -105,9 +108,15 @@ pub trait DynPlugin: Send + Sync + 'static {
 impl<T> DynPlugin for T
 where
     T: Plugin,
+    for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
     fn configure(&mut self, configuration: &Value) -> Result<(), BoxError> {
         self.configure_from_json(configuration)
+    }
+
+    fn configure_from_json(&mut self, configuration: &serde_json::Value) -> Result<(), BoxError> {
+        let conf = serde_json::from_value(configuration.clone())?;
+        self.configure(conf)
     }
 
     // Plugins will receive a notification that they should start up and shut down.
@@ -153,25 +162,11 @@ where
 
 // Register a plugin with a name
 #[macro_export]
-macro_rules! plugin_register {
+macro_rules! register_plugin {
     ($key: literal, $value: ident) => {
         startup::on_startup! {
             // Register the plugin factory function
             apollo_router_core::plugins_mut().insert($key.to_string(), || Box::new($value::default()));
-        }
-    };
-}
-
-// Create a json configure method
-#[macro_export]
-macro_rules! configure_from_json {
-    () => {
-        fn configure_from_json(
-            &mut self,
-            configuration: &serde_json::Value,
-        ) -> Result<(), BoxError> {
-            let conf = serde_json::from_value(configuration.clone())?;
-            self.configure(conf)
         }
     };
 }
