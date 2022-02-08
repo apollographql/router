@@ -44,6 +44,7 @@ use opentelemetry::{
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::task::JoinError;
 
@@ -77,6 +78,9 @@ impl Default for PipelineBuilder {
 }
 
 impl PipelineBuilder {
+    const DEFAULT_BATCH_SIZE: usize = 65_536;
+    const DEFAULT_QUEUE_SIZE: usize = 65_536;
+
     /// Assign the SDK trace configuration.
     #[allow(dead_code)]
     pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
@@ -100,9 +104,52 @@ impl PipelineBuilder {
     pub fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
         let exporter = self.get_exporter()?;
 
+        // Users can override the default batch and queue sizes, but they can't
+        // set them to be lower than our specified defaults;
+        let queue_size = match std::env::var("OTEL_BSP_MAX_QUEUE_SIZE")
+            .ok()
+            .and_then(|queue_size| usize::from_str(&queue_size).ok())
+        {
+            Some(v) => {
+                let result = usize::max(PipelineBuilder::DEFAULT_QUEUE_SIZE, v);
+                if result > v {
+                    tracing::warn!(
+                        "Ignoring 'OTEL_BSP_MAX_QUEUE_SIZE' setting. Cannot set max queue size lower than {}",
+                        PipelineBuilder::DEFAULT_QUEUE_SIZE
+                    );
+                }
+                result
+            }
+            None => PipelineBuilder::DEFAULT_QUEUE_SIZE,
+        };
+        let batch_size = match std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+            .ok()
+            .and_then(|batch_size| usize::from_str(&batch_size).ok())
+        {
+            Some(v) => {
+                let result = usize::max(PipelineBuilder::DEFAULT_BATCH_SIZE, v);
+                if result > v {
+                    tracing::warn!(
+                        "Ignoring 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE' setting. Cannot set max export batch size lower than {}",
+                        PipelineBuilder::DEFAULT_BATCH_SIZE
+                    );
+                }
+                // Batch size must be <= queue size
+                if result > queue_size {
+                    tracing::warn!(
+                        "Clamping 'OTEL_BSP_MAX_EXPORT_BATCH_SIZE' setting to {}. Cannot set max export batch size greater than max queue size",
+                        queue_size
+                    );
+                    queue_size
+                } else {
+                    result
+                }
+            }
+            None => PipelineBuilder::DEFAULT_BATCH_SIZE,
+        };
         let batch = sdk::trace::BatchSpanProcessor::builder(exporter, Tokio)
-            .with_max_queue_size(65_536)
-            .with_max_export_batch_size(65_536)
+            .with_max_queue_size(queue_size)
+            .with_max_export_batch_size(batch_size)
             .build();
 
         let mut provider_builder = sdk::trace::TracerProvider::builder().with_span_processor(batch);
