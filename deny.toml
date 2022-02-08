@@ -78,6 +78,12 @@ expression = "LicenseRef-ELv2"
 license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
+name = "apollo-spaceport"
+expression = "LicenseRef-ELv2"
+version = "0.1.0-alpha.4"
+license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
+
+[[licenses.clarify]]
 name = "encoding_rs"
 version = "*"
 expression = "(Apache-2.0 OR MIT) AND BSD-3-Clause"

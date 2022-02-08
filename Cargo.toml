@@ -1,6 +1,7 @@
 [workspace]
 default-members = ["apollo-router", "apollo-router-core"]
 members = [
+    "apollo-spaceport",
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",

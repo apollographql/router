@@ -140,6 +140,25 @@ subgraphs:
   products:
     routing_url: http://localhost:4003/graphql
 
+# Spaceport configuration. These vales are the default values if not specified
+spaceport:
+  # Should we spawn a Spaceport or talk to an existing external Spaceport?
+  external: false
+  # What's the address of the Spaceport?
+  collector: https://127.0.0.1:50051
+  # Where should we listen IF we have spawned an internal Spaceport?
+  listener: 0.0.0.0:50051
+
+# Apollo Studio Graph configuration details
+# If we don't specify a graph section, then no statistics are collected for
+# processing, since there is no point collecting statistics unless we have
+# somewhere to send them.
+graph:
+  # Which graph should our Spaceport be sending data about?
+  reference: Benchmarking@current
+  # Key which is used to send data
+  key: service:<redacted>
+
 # OpenTelemetry configuration, see next section
 # opentelemetry:
 ```

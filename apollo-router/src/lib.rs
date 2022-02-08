@@ -1,6 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
 mod apollo_router;
+mod apollo_telemetry;
 pub mod configuration;
 mod files;
 mod http_server_factory;
@@ -12,6 +13,7 @@ mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
+use crate::configuration::SpaceportConfig;
 use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
@@ -65,6 +67,9 @@ pub enum FederatedServerError {
 
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// Could not configure spaceport: {0}
+    ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -235,7 +240,7 @@ impl ConfigurationKind {
                         config.subscriber = Some(subscriber);
                     }
                     Err(err) => {
-                        tracing::error!("Could not initialize tracing subscriber: {}", err,)
+                        tracing::error!("Could not initialize tracing subscriber: {}", err,);
                     }
                 };
                 UpdateConfiguration(config)

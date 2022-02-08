@@ -72,7 +72,7 @@ impl ApolloRouter {
 
 #[async_trait::async_trait]
 impl Router<ApolloPreparedQuery> for ApolloRouter {
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn prepare_query(&self, request: &Request) -> Result<ApolloPreparedQuery, Response> {
         if let Some(response) = self.naive_introspection.get(&request.query) {
             return Err(response);
@@ -120,12 +120,12 @@ pub struct ApolloPreparedQuery {
 
 #[async_trait::async_trait]
 impl PreparedQuery for ApolloPreparedQuery {
-    #[tracing::instrument(level = "debug", skip_all)]
+    #[tracing::instrument(skip_all, level = "debug")]
     async fn execute(self, request: Request) -> Response {
         let mut response = self
             .query_plan
             .execute(&request, self.service_registry.as_ref(), &self.schema)
-            .instrument(tracing::info_span!("execution"))
+            .instrument(tracing::trace_span!("execution"))
             .await;
 
         if let Some(query) = self.query {

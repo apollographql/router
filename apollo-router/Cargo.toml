@@ -24,6 +24,7 @@ otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
 anyhow = "1.0.53"
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "ff317c7e85165bb6c380284b63c55d8af877fb7b" }
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.52"
 atty = "0.2.14"
@@ -44,6 +45,7 @@ opentelemetry-jaeger = { version = "0.15.0", features = [
 opentelemetry-otlp = { version = "0.9.0", default-features = false, features = [
     "serialize",
 ], optional = true }
+prost-types = "0.9.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 reqwest-middleware = "0.1.4"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
@@ -67,6 +69,7 @@ tracing-subscriber = { version = "0.3.7", features = ["json"] }
 
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
+apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
