@@ -79,6 +79,13 @@ impl<T> Response<T> {
     pub fn into_body(self) -> T {
         self.inner.into_body()
     }
+
+    pub fn map<F, U>(self, f: F) -> Response<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.inner.map(f).into()
+    }
 }
 
 impl<T> Deref for Response<T> {

@@ -10,6 +10,7 @@ use crate::prelude::graphql::*;
 use http::header::{HeaderName, COOKIE};
 use http::HeaderValue;
 use moka::sync::Cache;
+use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -17,14 +18,6 @@ use std::sync::Arc;
 use tower::layer::util::Stack;
 use tower::ServiceBuilder;
 use tower_service::Service;
-
-// the parsed graphql Request, HTTP headers and contextual data for extensions
-pub struct RouterRequest {
-    pub http_request: http_compat::Request<Request>,
-
-    // Context for extension
-    pub context: Context<()>,
-}
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -35,9 +28,37 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-assert_impl_all!(PlannedRequest: Send);
-/// TODO confusing name since this is a Response
-pub struct PlannedRequest {
+#[derive(Serialize, Deserialize)]
+pub enum ResponseBody {
+    GraphQL(Response),
+    RawJSON(serde_json::Value),
+    RawString(String),
+}
+
+assert_impl_all!(RouterRequest: Send);
+// the parsed graphql Request, HTTP headers and contextual data for extensions
+pub struct RouterRequest {
+    pub http_request: http_compat::Request<Request>,
+
+    // Context for extension
+    pub context: Context<()>,
+}
+
+assert_impl_all!(RouterResponse: Send);
+pub struct RouterResponse {
+    pub response: http_compat::Response<ResponseBody>,
+    pub context: Context,
+}
+
+assert_impl_all!(QueryPlannerRequest: Send);
+pub struct QueryPlannerRequest {
+    pub request: Request,
+
+    pub context: Context,
+}
+
+assert_impl_all!(QueryPlannerResponse: Send);
+pub struct QueryPlannerResponse {
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
@@ -50,15 +71,22 @@ pub struct SubgraphRequest {
     pub context: Context,
 }
 
-assert_impl_all!(QueryPlannerRequest: Send);
-pub struct QueryPlannerRequest {
-    pub options: QueryPlanOptions,
+assert_impl_all!(SubgraphResponse: Send);
+pub struct SubgraphResponse {
+    pub response: http_compat::Response<Response>,
 
     pub context: Context,
 }
 
-assert_impl_all!(RouterResponse: Send);
-pub struct RouterResponse {
+assert_impl_all!(ExecutionRequest: Send);
+pub struct ExecutionRequest {
+    pub query_plan: Arc<QueryPlan>,
+
+    pub context: Context,
+}
+
+assert_impl_all!(ExecutionResponse: Send);
+pub struct ExecutionResponse {
     pub response: http_compat::Response<Response>,
 
     pub context: Context,

@@ -3,6 +3,7 @@ use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
 use apollo_router_core::prelude::*;
+use apollo_router_core::ResponseBody;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
@@ -51,11 +52,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
         listener: Option<Listener>,
     ) -> Self::Future
     where
-        RS: Service<
-                Request<graphql::Request>,
-                Response = Response<graphql::Response>,
-                Error = BoxError,
-            > + Send
+        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
+            + Send
             + Sync
             + Clone
             + 'static,
@@ -240,7 +238,7 @@ fn get_graphql_request_or_redirect<RS>(
     service: RS,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
         + Send
         + Clone
         + 'static,
@@ -319,7 +317,7 @@ fn post_graphql_request<RS>(
     service: RS,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
         + Send
         + Clone
         + 'static,
@@ -357,7 +355,7 @@ fn run_graphql_request<RS>(
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
 where
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
         + Send
         + Clone
         + 'static,
@@ -404,7 +402,7 @@ where
 
 async fn stream_request<RS>(service: RS, request: Request<graphql::Request>) -> String
 where
-    RS: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
+    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
         + Send
         + Clone
         + 'static,
@@ -415,8 +413,13 @@ where
             let span = Span::current();
             // TODO headers
             tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
-                serde_json::to_string(response.body())
-                    .expect("serde_json::Value serialization will not fail")
+                match response.into_body() {
+                    ResponseBody::GraphQL(graphql) => serde_json::to_string(&graphql)
+                        .expect("serde_json::Value serialization will not fail"),
+                    ResponseBody::RawJSON(json) => serde_json::to_string(&json)
+                        .expect("serde_json::Value serialization will not fail"),
+                    ResponseBody::RawString(string) => string,
+                }
             })
         }
     }
@@ -509,7 +512,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
         }
     }
 
@@ -679,7 +682,7 @@ mod tests {
                 let example_response = example_response.clone();
                 Ok(http::Response::builder()
                     .status(200)
-                    .body(example_response)
+                    .body(ResponseBody::GraphQL(example_response))
                     .unwrap()
                     .into())
             });
@@ -733,7 +736,7 @@ mod tests {
                 .to_response(true);
                 Ok(http::Response::builder()
                     .status(200)
-                    .body(example_response)
+                    .body(ResponseBody::GraphQL(example_response))
                     .unwrap()
                     .into())
             });
@@ -838,7 +841,7 @@ mod tests {
             .returning(move |_| {
                 Ok(http::Response::builder()
                     .status(200)
-                    .body(example_response.clone())
+                    .body(ResponseBody::GraphQL(example_response.clone()))
                     .unwrap()
                     .into())
             });

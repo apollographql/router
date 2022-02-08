@@ -1,7 +1,9 @@
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, Context, DynPlugin, NaiveIntrospection, PlannedRequest, Plugin,
-    QueryCache, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
+    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -30,11 +32,11 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
 impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
     for RouterService<QueryPlannerService, ExecutionService>
 where
-    QueryPlannerService: Service<RouterRequest, Response = PlannedRequest, Error = BoxError>
+    QueryPlannerService: Service<QueryPlannerRequest, Response = QueryPlannerResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
-    ExecutionService: Service<PlannedRequest, Response = RouterResponse, Error = BoxError>
+    ExecutionService: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -80,7 +82,7 @@ where
         {
             return Box::pin(async move {
                 Ok(RouterResponse {
-                    response: http::Response::new(response).into(),
+                    response: http::Response::new(ResponseBody::GraphQL(response)).into(),
                     context: Context::new().with_request(Arc::new(request.http_request)),
                 })
             });
@@ -97,14 +99,26 @@ where
                     .err()
             }) {
                 Ok(RouterResponse {
-                    response: http::Response::new(err).into(),
+                    response: http::Response::new(ResponseBody::GraphQL(err)).into(),
                     context: Context::new().with_request(Arc::new(request.http_request)),
                 })
             } else {
                 let operation_name = request.http_request.body().operation_name.clone();
-                let planned_query = planning.call(request).await;
+                let planned_query = planning
+                    .call(QueryPlannerRequest {
+                        request: request.http_request.body().clone(),
+                        context: request.context.with_request(Arc::new(request.http_request)),
+                    })
+                    .await;
                 let mut response = match planned_query {
-                    Ok(planned_query) => execution.call(planned_query).await,
+                    Ok(planned_query) => {
+                        execution
+                            .call(ExecutionRequest {
+                                query_plan: planned_query.query_plan,
+                                context: planned_query.context,
+                            })
+                            .await
+                    }
                     Err(err) => Err(err),
                 };
 
@@ -120,7 +134,10 @@ where
                     }
                 }
 
-                response
+                response.map(|execution_response| RouterResponse {
+                    response: execution_response.response.map(ResponseBody::GraphQL),
+                    context: execution_response.context,
+                })
             }
         };
 
@@ -134,7 +151,7 @@ pub struct PluggableRouterServiceBuilder {
     plugins: Vec<Box<dyn DynPlugin>>,
     services: Vec<(
         String,
-        BoxService<SubgraphRequest, RouterResponse, BoxError>,
+        BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
     dispatcher: Dispatch,
 }
@@ -166,7 +183,7 @@ impl PluggableRouterServiceBuilder {
     pub fn with_subgraph_service<
         S: Service<
                 SubgraphRequest,
-                Response = RouterResponse,
+                Response = SubgraphResponse,
                 Error = Box<(dyn std::error::Error + Send + Sync + 'static)>,
             > + Send
             + 'static,
