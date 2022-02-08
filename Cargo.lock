@@ -177,6 +177,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_bytes",
+ "serde_urlencoded",
  "sha2",
  "static_assertions",
  "test-log",
@@ -189,6 +190,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "typed-builder",
+ "urlencoding",
 ]
 
 [[package]]

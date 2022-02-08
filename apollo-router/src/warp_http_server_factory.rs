@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{from_urlencoded_query, prelude::*};
 use futures::{channel::oneshot, prelude::*};
 use http::Request;
 use hyper::server::conn::Http;
@@ -17,7 +17,6 @@ use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use urlencoding::decode_binary;
 use warp::host::Authority;
 use warp::{
     http::{header::HeaderMap, StatusCode, Uri},
@@ -205,7 +204,11 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
         .and(warp::host::optional())
-        .and(warp::query::raw())
+        .and(
+            warp::query::raw()
+                .or(warp::any().map(|| String::default()))
+                .unify(),
+        )
         .and(warp::header::headers_cloned())
         .and_then(
             move |accept: Option<String>,
@@ -217,12 +220,7 @@ where
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
                     } else {
-                        // decode percent encoded string
-                        // from the docs `Unencoded `+` is preserved literally, and _not_ changed to a space.`,
-                        // so let's do it I guess
-                        let query = query.replace('+', " ");
-                        let decoded_query = decode_binary(query.as_bytes());
-                        if let Ok(request) = serde_json::from_slice(&decoded_query) {
+                        if let Ok(request) = from_urlencoded_query(query) {
                             run_graphql_request(service, http::Method::GET, request, header_map)
                                 .await
                         } else {
@@ -529,20 +527,6 @@ mod tests {
                 )],
                 "Incorrect redirect url"
             );
-
-            // application/json, but the query body is empty
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "application/json")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::BAD_REQUEST,
-                "{}",
-                response.text().await.unwrap(),
-            );
         }
 
         server.shutdown().await
@@ -716,3 +700,9 @@ mod tests {
         insta::assert_debug_snapshot!(res);
     }
 }
+
+// curl -v -G -H 'Accept: application/json' 'http://localhost:4000/graphql' --data-urlencode '{ "query" : "{ topProducts { upc name reviews { id product { name } author { id name } } } }", "extensions": { "persistedQuery" : { "version" : 1, "sha256Hash" : "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f" } } }'
+
+// curl -v -G -H 'Accept: application/json' 'http://localhost:4000/graphql' --data-urlencode '{ "extensions": { "persistedQuery" : { "version" : 1, "sha256Hash" : "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f" } } }'
+
+//  curl -v -G -H 'Accept: application/json' 'http://localhost:4000/graphql' --data-urlencode 'query={ topProducts { upc name reviews { id product { name } author { id name } } } }' --data-urlencode 'extensions={ "persistedQuery" : { "version" : 1, "sha256Hash" : "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f" } }'

@@ -1,5 +1,5 @@
 use crate::{Context, Error, Object, Path};
-use http::{Request, Response};
+use http::{Request, Response, StatusCode};
 use serde_json_bytes::{ByteString, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -39,6 +39,21 @@ impl RouterResponseBuilder {
                 })))
             }))),
         }
+    }
+    pub fn error_with_status(&self, error: String, status: StatusCode) -> crate::RouterResponse {
+        let this = self.clone();
+        todo!();
+        // crate::RouterResponse {
+        //     response: Response::builder().status(status).body(error).unwrap(),
+        //     context: Arc::new(RwLock::new(this.context.unwrap_or_else(|| {
+        //         Context::new().with_request(Arc::new(Request::new(crate::Request {
+        //             query: Default::default(),
+        //             operation_name: Default::default(),
+        //             variables: Default::default(),
+        //             extensions: Default::default(),
+        //         })))
+        //     }))),
+        // }
     }
     pub fn with_label(self, label: impl AsRef<str>) -> Self {
         Self {

@@ -1,5 +1,6 @@
 use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
 use futures::Future;
+use http::StatusCode;
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -114,7 +115,7 @@ where
                         tracing::trace!("apq: cache insert");
                         apq.cache.insert(query_hash, query.clone());
                     } else {
-                        tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
+                        tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                     }
                 }
                 (Some(apq_hash), _) => {
@@ -132,7 +133,21 @@ where
                 }
                 _ => {}
             }
-
+            // A query must be available at this point
+            if req.http_request.body().query.is_none()
+                || req.http_request.body().query == Some("".to_string())
+            {
+                // TODO: this behaves the way the gateway does.
+                // however this is not json, despite clients providint the `Accept: application/json` header.
+                let res = apq
+                    .response_builder
+                    .with_context(req.context.with_request(Arc::new(req.http_request)))
+                    .error_with_status(
+                        "Must provide query string.".to_string(),
+                        StatusCode::BAD_REQUEST,
+                    );
+                return Box::pin(async move { Ok(res) });
+            }
             req
         };
         Box::pin(self.service.call(req))

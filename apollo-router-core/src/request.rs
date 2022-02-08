@@ -1,9 +1,13 @@
 use crate::prelude::graphql::*;
 use bytes::Bytes;
 use derivative::Derivative;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{DeserializeOwned, Error},
+    Deserialize, Serialize,
+};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
+use urlencoding::decode;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
@@ -34,6 +38,43 @@ pub struct Request {
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     #[builder(default)]
     pub extensions: Object,
+}
+
+pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+    // decode percent encoded string
+    // from the docs `Unencoded `+` is preserved literally, and _not_ changed to a space.`,
+    // so let's do it I guess
+    let query = url_encoded_query.replace('+', " ");
+    let decoded_string = decode(query.as_str()).unwrap();
+    let urldecoded: serde_json::Value =
+        serde_urlencoded::from_str(&decoded_string).map_err(|e| serde_json::Error::custom(e))?;
+
+    let operation_name = get(&urldecoded, "operationName").unwrap();
+    let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
+        Some(query.clone())
+    } else {
+        None
+    };
+    let variables = Arc::new(get(&urldecoded, "variables")?.unwrap_or_default());
+    let extensions: Object = get(&urldecoded, "extensions").unwrap().unwrap_or_default();
+
+    Ok(Request::builder()
+        .query(query)
+        .variables(variables)
+        .operation_name(operation_name)
+        .extensions(extensions)
+        .build())
+}
+
+fn get<T: DeserializeOwned>(
+    object: &serde_json::Value,
+    key: &str,
+) -> Result<Option<T>, serde_json::Error> {
+    if let Some(serde_json::Value::String(byte_string)) = object.get(key) {
+        Some(serde_json::from_str(byte_string.as_str())).transpose()
+    } else {
+        Ok(None)
+    }
 }
 
 // NOTE: this deserialize helper is used to transform `null` to Default::default()
@@ -154,5 +195,29 @@ mod tests {
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
+    }
+
+    #[test]
+    fn from_urlencoded_query_works() {
+        let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
+
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "extensions": {
+                  "persistedQuery": {
+                      "version": 1,
+                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+                  }
+                }
+            })
+            .to_string()
+            .as_str(),
+        ).unwrap();
+
+        let req = from_urlencoded_query(query_string).unwrap();
+
+        assert_eq!(expected_result, req);
     }
 }
