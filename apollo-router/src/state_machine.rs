@@ -454,9 +454,9 @@ mod tests {
     use crate::configuration::Subgraph;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
+    use apollo_router_core::http_compat::{Request, Response};
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
-    use http::{Request, Response};
     use mockall::{mock, predicate::*, Sequence};
     use std::net::SocketAddr;
     use std::pin::Pin;
@@ -854,7 +854,7 @@ mod tests {
                 + Sync
                 + Clone
                 + 'static,
-            <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+            <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
         {
             let res = self.create_server(configuration, listener);
             Box::pin(async move { res })

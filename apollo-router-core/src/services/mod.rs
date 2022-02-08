@@ -1,4 +1,5 @@
 mod execution_service;
+pub mod http_compat;
 mod router_service;
 
 pub use self::execution_service::*;
@@ -19,14 +20,14 @@ use tower_service::Service;
 
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
-    pub http_request: http::Request<Request>,
+    pub http_request: http_compat::Request<Request>,
 
     // Context for extension
     pub context: Context<()>,
 }
 
-impl From<http::Request<Request>> for RouterRequest {
-    fn from(http_request: http::Request<Request>) -> Self {
+impl From<http_compat::Request<Request>> for RouterRequest {
+    fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
             http_request,
             context: Context::new(),
@@ -44,7 +45,7 @@ pub struct PlannedRequest {
 
 assert_impl_all!(SubgraphRequest: Send);
 pub struct SubgraphRequest {
-    pub http_request: http::Request<Request>,
+    pub http_request: http_compat::Request<Request>,
 
     pub context: Context,
 }
@@ -58,18 +59,18 @@ pub struct QueryPlannerRequest {
 
 assert_impl_all!(RouterResponse: Send);
 pub struct RouterResponse {
-    pub response: http::Response<Response>,
+    pub response: http_compat::Response<Response>,
 
     pub context: Context,
 }
 
-impl AsRef<Request> for http::Request<Request> {
+impl AsRef<Request> for http_compat::Request<Request> {
     fn as_ref(&self) -> &Request {
         self.body()
     }
 }
 
-impl AsRef<Request> for Arc<http::Request<Request>> {
+impl AsRef<Request> for Arc<http_compat::Request<Request>> {
     fn as_ref(&self) -> &Request {
         self.body()
     }

@@ -1,10 +1,10 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
+use apollo_router_core::http_compat::{Request, Response};
 use apollo_router_core::prelude::*;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
-use http::Request;
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
@@ -23,7 +23,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
     http::{header::HeaderMap, StatusCode, Uri},
-    hyper::{Body, Response},
+    hyper::Body,
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -60,7 +60,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             + Clone
             + 'static,
 
-        <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+        <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -244,7 +244,7 @@ where
         + Send
         + Clone
         + 'static,
-    <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -323,7 +323,7 @@ where
         + Send
         + Clone
         + 'static,
-    <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     warp::post()
         .and(warp::path::end().or(warp::path("graphql")).unify())
@@ -361,7 +361,7 @@ where
         + Send
         + Clone
         + 'static,
-    <RS as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
@@ -390,9 +390,9 @@ where
                     .unwrap();
                 *http_request.headers_mut() = header_map;
 
-                let response = stream_request(service, http_request).await;
+                let response = stream_request(service, http_request.into()).await;
 
-                Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
+                Box::new(hyper::Response::new(Body::from(response))) as Box<dyn Reply>
             }
             Err(_) => Box::new(warp::reply::with_status(
                 "Invalid host to redirect to",
@@ -509,7 +509,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: http::Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<graphql::Response>, BoxError>;
         }
     }
 
@@ -680,7 +680,8 @@ mod tests {
                 Ok(http::Response::builder()
                     .status(200)
                     .body(example_response)
-                    .unwrap())
+                    .unwrap()
+                    .into())
             });
         let (server, client) = init(expectations).await;
         let url = format!("{}/graphql", server.listen_address());
@@ -733,7 +734,8 @@ mod tests {
                 Ok(http::Response::builder()
                     .status(200)
                     .body(example_response)
-                    .unwrap())
+                    .unwrap()
+                    .into())
             });
         let (server, client) = init(expectations).await;
 
@@ -837,7 +839,8 @@ mod tests {
                 Ok(http::Response::builder()
                     .status(200)
                     .body(example_response.clone())
-                    .unwrap())
+                    .unwrap()
+                    .into())
             });
         let server = init_unix(expectations, &temp_dir).await;
 

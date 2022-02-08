@@ -80,7 +80,7 @@ where
         {
             return Box::pin(async move {
                 Ok(RouterResponse {
-                    response: http::Response::new(response),
+                    response: http::Response::new(response).into(),
                     context: Context::new().with_request(Arc::new(request.http_request)),
                 })
             });
@@ -97,7 +97,7 @@ where
                     .err()
             }) {
                 Ok(RouterResponse {
-                    response: http::Response::new(err),
+                    response: http::Response::new(err).into(),
                     context: Context::new().with_request(Arc::new(request.http_request)),
                 })
             } else {

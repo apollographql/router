@@ -49,7 +49,7 @@ impl Service<PlannedRequest> for ExecutionService {
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
             Ok(RouterResponse {
-                response: http::Response::new(response),
+                response: http::Response::new(response).into(),
                 context,
             })
         }

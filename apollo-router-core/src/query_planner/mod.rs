@@ -337,7 +337,8 @@ mod fetch {
                             .variables(Arc::new(variables))
                             .build(),
                     )
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 context: context.clone(),
             };
 

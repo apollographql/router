@@ -107,7 +107,7 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                 })?;
 
             Ok(graphql::RouterResponse {
-                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
+                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),
                 context,
             })
         })

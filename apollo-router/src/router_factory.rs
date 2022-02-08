@@ -2,9 +2,11 @@ use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
-use apollo_router_core::{Context, PluggableRouterServiceBuilder, RouterRequest, Schema};
+use apollo_router_core::{
+    http_compat::{Request, Response},
+    Context, PluggableRouterServiceBuilder, RouterRequest, Schema,
+};
 use http::header::HeaderName;
-use http::{Request, Response};
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;

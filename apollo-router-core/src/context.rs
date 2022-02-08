@@ -1,11 +1,11 @@
+use crate::prelude::graphql::*;
+use crate::services::http_compat;
 use futures::Future;
+use std::sync::Arc;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use crate::prelude::graphql::*;
-use std::sync::Arc;
-
 #[derive(Clone)]
-pub struct Context<T = Arc<http::Request<Request>>> {
+pub struct Context<T = Arc<http_compat::Request<Request>>> {
     /// Original request to the Router.
     pub request: T,
 

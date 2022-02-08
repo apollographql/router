@@ -34,7 +34,7 @@ macro_rules! assert_federated_response {
         let http_request = http::Request::builder()
         .method("GET")
         .body(request)
-        .unwrap();
+        .unwrap().into();
 
         let request = graphql::RouterRequest {
             context: graphql::Context::new(),
@@ -181,7 +181,8 @@ async fn missing_variables() {
     let http_request = http::Request::builder()
         .method("GET")
         .body(request)
-        .unwrap();
+        .unwrap()
+        .into();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new(),
