@@ -395,7 +395,6 @@ fn normalize(op: Option<&opentelemetry::Value>, query: &str) -> String {
         return GRAPHQL_PARSE_FAILURE.to_string();
     }
     let doc = ast.document();
-    tracing::debug!("{}", doc.format());
     tracing::trace!("looking for operation: {}", op_name);
     let mut required_definitions: Vec<_> = doc
         .definitions()
