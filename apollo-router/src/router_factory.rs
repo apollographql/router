@@ -2,7 +2,9 @@ use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
-use apollo_router_core::{Context, PluggableRouterServiceBuilder, RouterRequest, Schema};
+use apollo_router_core::{
+    Context, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+};
 use http::header::HeaderName;
 use http::{Request, Response};
 use std::str::FromStr;
@@ -21,7 +23,7 @@ use tracing::instrument::WithSubscriber;
 pub trait RouterServiceFactory: Send + Sync + 'static {
     type RouterService: Service<
             Request<graphql::Request>,
-            Response = Response<graphql::Response>,
+            Response = Response<ResponseBody>,
             Error = BoxError,
             Future = Self::Future,
         > + Send
@@ -45,7 +47,7 @@ pub struct YamlRouterServiceFactory {}
 #[async_trait::async_trait]
 impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
-        BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
+        BoxCloneService<Request<graphql::Request>, Response<ResponseBody>, BoxError>,
         Request<graphql::Request>,
     >;
     type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;

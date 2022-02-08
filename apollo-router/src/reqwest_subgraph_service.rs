@@ -39,7 +39,7 @@ impl ReqwestSubgraphService {
 }
 
 impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
-    type Response = graphql::RouterResponse;
+    type Response = graphql::SubgraphResponse;
     type Error = tower::BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -106,7 +106,7 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                     })
                 })?;
 
-            Ok(graphql::RouterResponse {
+            Ok(graphql::SubgraphResponse {
                 response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
                 context,
             })

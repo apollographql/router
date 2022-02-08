@@ -1,6 +1,7 @@
 use super::FederatedServerError;
 use crate::configuration::{Configuration, ListenAddr};
 use apollo_router_core::prelude::*;
+use apollo_router_core::ResponseBody;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -25,11 +26,8 @@ pub(crate) trait HttpServerFactory {
         listener: Option<Listener>,
     ) -> Self::Future
     where
-        RS: Service<
-                Request<graphql::Request>,
-                Response = Response<graphql::Response>,
-                Error = BoxError,
-            > + Send
+        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
+            + Send
             + Sync
             + Clone
             + 'static,
@@ -90,11 +88,8 @@ impl HttpServerHandle {
     ) -> Result<Self, FederatedServerError>
     where
         SF: HttpServerFactory,
-        RS: Service<
-                Request<graphql::Request>,
-                Response = Response<graphql::Response>,
-                Error = BoxError,
-            > + Send
+        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
+            + Send
             + Sync
             + Clone
             + 'static,

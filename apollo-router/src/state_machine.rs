@@ -454,6 +454,7 @@ mod tests {
     use crate::configuration::Subgraph;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
+    use apollo_router_core::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use http::{Request, Response};
@@ -814,7 +815,7 @@ mod tests {
 
     //mockall does not handle well the lifetime on Context
     impl Service<Request<graphql::Request>> for MockMyRouter {
-        type Response = Response<graphql::Response>;
+        type Response = Response<ResponseBody>;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -848,7 +849,7 @@ mod tests {
         where
             RS: Service<
                     Request<graphql::Request>,
-                    Response = Response<graphql::Response>,
+                    Response = Response<ResponseBody>,
                     Error = BoxError,
                 > + Send
                 + Sync
