@@ -159,13 +159,10 @@ impl PipelineBuilder {
         let provider = provider_builder.build();
 
         let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
-        // The call to set_tracer_provider() manipulate a sync RwLock.
-        // Even though this code is sync, it is called from within an
-        // async context. If we don't call set_tracer_provider() from
-        // spawn_blocking() (or from a separate thread), it will cause
-        // issues with the async runtime which results in a router
-        // which no longer responds to input events.
-        // See https://github.com/apollographql/router/issues/331
+        // This code will hang unless we execute from a separate
+        // thread.  See:
+        // https://github.com/apollographql/router/issues/331
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
         // for more details and description.
         let jh = tokio::task::spawn_blocking(|| {
             opentelemetry::global::force_flush_tracer_provider();
