@@ -4,7 +4,6 @@ use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
-use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
@@ -248,18 +247,22 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
         .and(warp::host::optional())
-        .and(warp::body::bytes())
+        .and(
+            warp::query::raw()
+                .or(warp::any().map(|| String::default()))
+                .unify(),
+        )
         .and(warp::header::headers_cloned())
         .and_then(
             move |accept: Option<String>,
                   host: Option<Authority>,
-                  body: Bytes,
+                  query: String,
                   header_map: HeaderMap| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
-                    } else if let Ok(request) = graphql::Request::from_bytes(body) {
+                    } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
                         run_graphql_request(service, http::Method::GET, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
@@ -633,20 +636,6 @@ mod tests {
                     server.listen_address()
                 )],
                 "Incorrect redirect url"
-            );
-
-            // application/json, but the query body is empty
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "application/json")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::BAD_REQUEST,
-                "{}",
-                response.text().await.unwrap(),
             );
         }
 
