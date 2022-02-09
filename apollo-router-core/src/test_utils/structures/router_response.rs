@@ -45,15 +45,12 @@ impl RouterResponseBuilder {
                 .into(),
             context: this.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
-                    Request::new(
-                        crate::Request {
-                            query: Default::default(),
-                            operation_name: Default::default(),
-                            variables: Default::default(),
-                            extensions: Default::default(),
-                        }
-                        .into(),
-                    )
+                    Request::new(crate::Request {
+                        query: Default::default(),
+                        operation_name: Default::default(),
+                        variables: Default::default(),
+                        extensions: Default::default(),
+                    })
                     .into(),
                 ))
             }),

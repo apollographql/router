@@ -47,7 +47,7 @@ pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde
     let query = url_encoded_query.replace('+', " ");
     let decoded_string = decode(query.as_str()).unwrap();
     let urldecoded: serde_json::Value =
-        serde_urlencoded::from_str(&decoded_string).map_err(|e| serde_json::Error::custom(e))?;
+        serde_urlencoded::from_str(&decoded_string).map_err(serde_json::Error::custom)?;
 
     let operation_name = get(&urldecoded, "operationName").unwrap();
     let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {

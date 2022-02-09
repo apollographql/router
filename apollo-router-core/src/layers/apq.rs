@@ -1,10 +1,10 @@
 use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
-use futures::Future;
+use futures::future::BoxFuture;
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
-use std::{pin::Pin, task::Poll};
+use std::task::Poll;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -84,7 +84,7 @@ where
 
     type Error = <S as Service<RouterRequest>>::Error;
 
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -112,7 +112,7 @@ where
                 (Some(query_hash), Some(query)) => {
                     if query_matches_hash(query.as_str(), query_hash.as_slice()) {
                         tracing::trace!("apq: cache insert");
-                        apq.cache.insert(query_hash, query.clone());
+                        apq.cache.insert(query_hash, query);
                     } else {
                         tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                     }
