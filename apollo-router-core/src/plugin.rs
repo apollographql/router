@@ -11,17 +11,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tower::util::BoxService;
 use tower::BoxError;
 
-static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, fn() -> Box<dyn DynPlugin>>>> =
-    Lazy::new(|| {
-        let m = HashMap::new();
-        Mutex::new(m)
-    });
+type PluginFactory = fn() -> Box<dyn DynPlugin>;
 
-pub fn plugins() -> Arc<HashMap<String, fn() -> Box<dyn DynPlugin>>> {
+static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
+    let m = HashMap::new();
+    Mutex::new(m)
+});
+
+pub fn plugins() -> Arc<HashMap<String, PluginFactory>> {
     Arc::new(PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone())
 }
 
-pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, fn() -> Box<dyn DynPlugin>>> {
+pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, PluginFactory>> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned")
 }
 

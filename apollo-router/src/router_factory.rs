@@ -7,6 +7,7 @@ use apollo_router_core::{
     Context, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use http::header::HeaderName;
+use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
@@ -78,11 +79,11 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 subgraph.routing_url.clone(),
             ));
 
-            for layers in &subgraph.layers {
-                match layers.get("kind").as_ref().and_then(|v| v.as_str()) {
-                    Some("header") => {
+            for layer in &subgraph.layers {
+                match layer.get("kind") {
+                    Some(Value::String(kind)) if kind == "header" => {
                         if let Some(header_name) =
-                            layers.get("propagate").as_ref().and_then(|v| v.as_str())
+                            layer.get("propagate").as_ref().and_then(|v| v.as_str())
                         {
                             subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
                                 HeaderName::from_str(header_name).unwrap(),
@@ -90,8 +91,14 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                             .layer(subgraph_service);
                         }
                     }
-                    _ => { //FIXME
-                    }
+                    Some(_) => errors.push(ConfigurationError::LayerConfiguration {
+                        layer: "unknown".into(),
+                        error: "'kind' must be a string.".into(),
+                    }),
+                    _ => errors.push(ConfigurationError::LayerConfiguration {
+                        layer: "unknown".into(),
+                        error: "'kind' missing".into(),
+                    }),
                 }
             }
 
