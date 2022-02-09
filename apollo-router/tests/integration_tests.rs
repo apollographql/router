@@ -254,10 +254,7 @@ async fn query_rust(
 
     match response {
         ResponseBody::GraphQL(response) => (response, counting_registry),
-        ResponseBody::RawJSON(_) => {
-            panic!("Expected graphql response")
-        }
-        ResponseBody::RawString(_) => {
+        _ => {
             panic!("Expected graphql response")
         }
     }
