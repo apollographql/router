@@ -67,9 +67,9 @@ impl<T> From<http::Request<T>> for Request<T> {
     }
 }
 
-impl<T> Into<http::Request<T>> for Request<T> {
-    fn into(self) -> http::Request<T> {
-        self.inner
+impl<T> From<Request<T>> for http::Request<T> {
+    fn from(request: Request<T>) -> Self {
+        request.inner
     }
 }
 
@@ -115,9 +115,9 @@ impl<T> From<http::Response<T>> for Response<T> {
     }
 }
 
-impl<T> Into<http::Response<T>> for Response<T> {
-    fn into(self) -> http::Response<T> {
-        self.inner
+impl<T> From<Response<T>> for http::Response<T> {
+    fn from(response: Response<T>) -> http::Response<T> {
+        response.inner
     }
 }
 
