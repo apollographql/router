@@ -1,4 +1,7 @@
-use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
+use crate::{
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
+    RouterResponse, SubgraphRequest,
+};
 use mockall::automock;
 use tower::BoxError;
 use tower_test::mock::Mock;
@@ -34,6 +37,6 @@ macro_rules! mock_service {
 }
 
 mock_service!(Router, RouterRequest, RouterResponse);
-mock_service!(QueryPlanning, RouterRequest, PlannedRequest);
-mock_service!(Execution, PlannedRequest, RouterResponse);
+mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
+mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, RouterResponse);

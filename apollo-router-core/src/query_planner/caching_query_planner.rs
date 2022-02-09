@@ -5,7 +5,6 @@ use futures::future::BoxFuture;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task;
-use tokio::sync::RwLock;
 
 type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 
@@ -62,11 +61,15 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     }
 }
 
-impl<T: QueryPlanner> tower::Service<RouterRequest> for CachingQueryPlanner<T>
+impl<T: QueryPlanner> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
-    T: tower::Service<RouterRequest, Response = PlannedRequest, Error = tower::BoxError>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = tower::BoxError,
+    >,
 {
-    type Response = PlannedRequest;
+    type Response = QueryPlannerResponse;
     // TODO I don't think we can serialize this error back to the router response's payload
     type Error = tower::BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -75,30 +78,23 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
-        let body = request.http_request.body().clone();
+    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
+        let body = request.context.request.body();
 
+        let key = (
+            body.query.to_owned().expect("presence of a query has been checked by the apq layer in the RouterService before; qed"),
+            body.operation_name.to_owned(),
+            QueryPlanOptions::default(),
+        );
         let cm = self.cm.clone();
         Box::pin(async move {
-            // TODO: something with keyref and stuff
-            if let Some(query) = body.query {
-                let key = (
-                    query,
-                    body.operation_name.to_owned(),
-                    QueryPlanOptions::default(),
-                );
-                cm.get(key)
-                    .await
-                    .map_err(|err| err.into())
-                    .map(|query_plan| PlannedRequest {
-                        query_plan,
-                        context: Arc::new(RwLock::new(
-                            request.context.with_request(Arc::new(request.http_request)),
-                        )),
-                    })
-            } else {
-                return Err(RequestError::NoQuery.into());
-            }
+            cm.get(key)
+                .await
+                .map_err(|err| err.into())
+                .map(|query_plan| QueryPlannerResponse {
+                    query_plan,
+                    context: request.context,
+                })
         })
     }
 }

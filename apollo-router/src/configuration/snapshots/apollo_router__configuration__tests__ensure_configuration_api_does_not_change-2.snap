@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 382
+assertion_line: 497
 expression: config
 
 ---
@@ -22,6 +22,9 @@ server:
 subgraphs:
   example:
     routing_url: "http://foo/"
+    layers: []
 opentelemetry: ~
 plugins: {}
+spaceport: ~
+graph: ~
 

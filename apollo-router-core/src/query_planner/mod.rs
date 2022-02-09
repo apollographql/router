@@ -6,8 +6,7 @@ pub use caching_query_planner::*;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::RwLock;
+use std::collections::HashSet;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
@@ -60,7 +59,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        context: &'a Arc<RwLock<Context>>,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
@@ -79,7 +78,7 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        context: &'a Arc<RwLock<Context>>,
+        context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
@@ -91,10 +90,8 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence { nodes } => {
-                    let sequence_span = tracing::info_span!("sequence");
-                    let _entered = sequence_span.enter();
-
                     value = parent_value.clone();
+                    let span = tracing::info_span!("sequence");
                     for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
@@ -104,6 +101,7 @@ impl PlanNode {
                                 schema,
                                 &value,
                             )
+                            .instrument(span.clone())
                             .in_current_span()
                             .await;
                         value.deep_merge(v);
@@ -111,10 +109,9 @@ impl PlanNode {
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    let parallel_span = tracing::info_span!("parallel");
-                    let _entered = parallel_span.enter();
                     value = Value::default();
 
+                    let span = tracing::info_span!("parallel");
                     let mut stream: stream::FuturesUnordered<_> = nodes
                         .iter()
                         .map(|plan| {
@@ -125,11 +122,16 @@ impl PlanNode {
                                 schema,
                                 parent_value,
                             )
-                            .in_current_span()
+                            .instrument(span.clone())
                         })
                         .collect();
 
-                    while let Some((v, err)) = stream.next().in_current_span().await {
+                    while let Some((v, err)) = stream
+                        .next()
+                        .instrument(span.clone())
+                        .in_current_span()
+                        .await
+                    {
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
                     }
@@ -153,7 +155,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
                         .fetch_node(parent_value, current_dir, context, service_registry, schema)
-                        .instrument(tracing::info_span!("fetch"))
+                        .instrument(tracing::trace_span!("fetch"))
                         .await
                     {
                         Ok(v) => value = v,
@@ -212,7 +214,6 @@ mod fetch {
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
@@ -241,17 +242,16 @@ mod fetch {
     }
 
     impl Variables {
-        #[instrument(level = "debug", name = "make_variables", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "make_variables")]
         async fn new(
             requires: &[Selection],
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            context: &Arc<RwLock<Context>>,
+            context: &Context,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
-            let ctx = context.read().await;
-            let body = ctx.request.body();
+            let body = context.request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -305,7 +305,7 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            context: &'a Arc<RwLock<Context>>,
+            context: &'a Context,
             service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
@@ -315,8 +315,7 @@ mod fetch {
                 ..
             } = self;
 
-            let query_span =
-                tracing::info_span!("subfetch_stream", service = service_name.as_str());
+            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
 
             let Variables { variables, paths } = Variables::new(
                 &self.requires,
@@ -338,7 +337,8 @@ mod fetch {
                             .variables(Arc::new(variables))
                             .build(),
                     )
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                 context: context.clone(),
             };
 
@@ -369,7 +369,7 @@ mod fetch {
             })
         }
 
-        #[instrument(level = "debug", name = "response_insert", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,

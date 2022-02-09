@@ -1,76 +1,133 @@
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
+use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
-    Context, PluggableRouterServiceBuilder, Plugin, RouterRequest, RouterResponse, Schema,
-    SubgraphRequest,
+    http_compat::{Request, Response},
+    Context, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
-use http::{Request, Response};
-use static_assertions::assert_impl_all;
+use http::header::HeaderName;
+use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
-use typed_builder::TypedBuilder;
 
-/// Factory for creating graphs.
+/// Factory for creating a RouterService
 ///
-/// This trait enables us to test that `StateMachine` correctly recreates the ApolloRouter when
-/// necessary e.g. when schema changes.
+/// Instances of this traits are used by the StateMachine to generate a new
+/// RouterService from configuration when it changes
 #[async_trait::async_trait]
-pub trait RouterFactory: Send + Sync + 'static {
-    type RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
+pub trait RouterServiceFactory: Send + Sync + 'static {
+    type RouterService: Service<
+            Request<graphql::Request>,
+            Response = Response<ResponseBody>,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send
         + Sync
         + Clone
         + 'static;
+    type Future: Send;
 
-    async fn create(
-        &self,
-        configuration: &Configuration,
+    async fn create<'a>(
+        &'a self,
+        configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        previous_router: Option<Self::RouterService>,
-    ) -> Self::RouterService;
+        previous_router: Option<&'a Self::RouterService>,
+    ) -> Result<Self::RouterService, BoxError>;
 }
 
-assert_impl_all!(ApolloRouterFactory: Send);
-#[derive(Default, TypedBuilder)]
-pub struct ApolloRouterFactory {
-    plugins: Vec<Box<dyn Plugin>>,
-    services: Vec<(
-        String,
-        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
-    )>,
-}
+/// Main implementation of the RouterService factory, supporting the extensions system
+#[derive(Default)]
+pub struct YamlRouterServiceFactory {}
 
 #[async_trait::async_trait]
-impl RouterFactory for ApolloRouterFactory {
+impl RouterServiceFactory for YamlRouterServiceFactory {
     type RouterService = Buffer<
-        BoxCloneService<Request<graphql::Request>, Response<graphql::Response>, BoxError>,
+        BoxCloneService<Request<graphql::Request>, Response<ResponseBody>, BoxError>,
         Request<graphql::Request>,
     >;
-    async fn create(
-        &self,
-        configuration: &Configuration,
+    type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+
+    async fn create<'a>(
+        &'a self,
+        configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        previous_router: Option<Self::RouterService>,
-    ) -> Self::RouterService {
+        _previous_router: Option<&'a Self::RouterService>,
+    ) -> Result<Self::RouterService, BoxError> {
+        let mut errors: Vec<ConfigurationError> = Vec::default();
+        let mut configuration = (*configuration).clone();
+        if let Err(mut e) = configuration.load_subgraphs(&schema) {
+            errors.append(&mut e);
+        }
+
         let dispatcher = configuration
             .subscriber
             .clone()
             .map(tracing::Dispatch::new)
             .unwrap_or_default();
         let buffer = 20000;
-        //TODO Use the plugins, services and config tp build the pipeline.
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
         for (name, subgraph) in &configuration.subgraphs {
-            builder = builder.with_subgraph_service(
-                &name,
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            );
+            let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
+                name.to_string(),
+                subgraph.routing_url.clone(),
+            ));
+
+            for layers in &subgraph.layers {
+                match layers.get("kind").as_ref().and_then(|v| v.as_str()) {
+                    Some("header") => {
+                        if let Some(header_name) =
+                            layers.get("propagate").as_ref().and_then(|v| v.as_str())
+                        {
+                            subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
+                                HeaderName::from_str(header_name).unwrap(),
+                            ))
+                            .layer(subgraph_service);
+                        }
+                    }
+                    _ => { //FIXME
+                    }
+                }
+            }
+
+            builder = builder.with_subgraph_service(name, subgraph_service);
+        }
+        {
+            let plugin_registry = apollo_router_core::plugins();
+            for (name, configuration) in &configuration.plugins {
+                let name = name.as_str().to_string();
+                match plugin_registry.get(name.as_str()) {
+                    Some(factory) => {
+                        let mut plugin = (*factory)();
+                        match plugin.configure(configuration) {
+                            Ok(_) => {
+                                builder = builder.with_dyn_plugin(plugin);
+                            }
+                            Err(err) => {
+                                errors.push(ConfigurationError::PluginConfiguration {
+                                    plugin: name,
+                                    error: err.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    None => {
+                        errors.push(ConfigurationError::PluginUnknown(name));
+                    }
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            for error in errors {
+                tracing::error!("{:#}", error);
+            }
+            return Err(Box::new(ConfigurationError::InvalidConfiguration));
         }
 
         let (service, worker) = Buffer::pair(
@@ -88,6 +145,6 @@ impl RouterFactory for ApolloRouterFactory {
             buffer,
         );
         tokio::spawn(worker.with_subscriber(dispatcher));
-        service
+        Ok(service)
     }
 }

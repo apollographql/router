@@ -1,8 +1,11 @@
-use crate::{Context, Error, Object, Path};
-use http::{Request, Response, StatusCode};
-use serde_json_bytes::{ByteString, Value};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+
+use crate::{Context, Error, Object, Path};
+use http::StatusCode;
+use http::{Request, Response};
+use serde_json_bytes::{ByteString, Value};
+
+type CompatRequest = Arc<crate::http_compat::Request<crate::Request>>;
 
 #[derive(Default, Clone)]
 pub struct RouterResponseBuilder {
@@ -12,7 +15,7 @@ pub struct RouterResponseBuilder {
     has_next: Option<bool>,
     errors: Vec<Error>,
     extensions: Option<Object>,
-    context: Option<Context<Arc<Request<crate::Request>>>>,
+    context: Option<Context<CompatRequest>>,
 }
 
 impl RouterResponseBuilder {
@@ -27,23 +30,33 @@ impl RouterResponseBuilder {
         crate::RouterResponse {
             response: Response::builder()
                 .status(status)
-                .body(crate::Response {
-                    label: this.label,
-                    data: this.data.unwrap_or_default(),
-                    path: this.path,
-                    has_next: this.has_next,
-                    errors: this.errors,
-                    extensions: this.extensions.unwrap_or_default(),
-                })
-                .unwrap(),
-            context: Arc::new(RwLock::new(this.context.unwrap_or_else(|| {
-                Context::new().with_request(Arc::new(Request::new(crate::Request {
-                    query: Default::default(),
-                    operation_name: Default::default(),
-                    variables: Default::default(),
-                    extensions: Default::default(),
-                })))
-            }))),
+                .body(
+                    crate::Response {
+                        label: this.label,
+                        data: this.data.unwrap_or_default(),
+                        path: this.path,
+                        has_next: this.has_next,
+                        errors: this.errors,
+                        extensions: this.extensions.unwrap_or_default(),
+                    }
+                    .into(),
+                )
+                .expect("crate::Response implements Serialize; qed")
+                .into(),
+            context: this.context.unwrap_or_else(|| {
+                Context::new().with_request(Arc::new(
+                    Request::new(
+                        crate::Request {
+                            query: Default::default(),
+                            operation_name: Default::default(),
+                            variables: Default::default(),
+                            extensions: Default::default(),
+                        }
+                        .into(),
+                    )
+                    .into(),
+                ))
+            }),
         }
     }
     pub fn with_label(self, label: impl AsRef<str>) -> Self {
@@ -83,7 +96,7 @@ impl RouterResponseBuilder {
             ..self
         }
     }
-    pub fn with_context(self, context: Context<Arc<Request<crate::Request>>>) -> Self {
+    pub fn with_context(self, context: Context<CompatRequest>) -> Self {
         Self {
             context: Some(context),
             ..self

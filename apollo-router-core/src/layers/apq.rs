@@ -4,7 +4,7 @@ use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
-use std::{pin::Pin, sync::Arc, task::Poll};
+use std::{pin::Pin, task::Poll};
 use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -125,7 +125,7 @@ where
                         tracing::trace!("apq: cache miss");
                         let res = apq
                             .response_builder
-                            .with_context(req.context.with_request(Arc::new(req.http_request)))
+                            .with_context(req.context.with_request(req.http_request.into()))
                             .build();
                         return Box::pin(async move { Ok(res) });
                     }
@@ -143,7 +143,7 @@ where
                         path: Default::default(),
                         extensions: Default::default(),
                     })
-                    .with_context(req.context.with_request(Arc::new(req.http_request)))
+                    .with_context(req.context.with_request(req.http_request.into()))
                     .build();
                 return Box::pin(async move { Ok(res) });
             }
@@ -162,8 +162,9 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
-    use crate::test_utils::{
-        structures::RouterResponseBuilder, MockRouterService, RouterRequestBuilder,
+    use crate::{
+        test_utils::{structures::RouterResponseBuilder, MockRouterService, RouterRequestBuilder},
+        ResponseBody,
     };
     use serde_json_bytes::json;
     use std::borrow::Cow;
@@ -266,7 +267,8 @@ mod apq_tests {
 
         let services = service_stack.ready().await.unwrap();
         let apq_error = services.call(hash_only).await.unwrap();
-        assert_eq!(apq_error.response.body().errors[0], expected_apq_miss_error);
+
+        assert_error_matches(&expected_apq_miss_error, apq_error);
 
         let services = services.ready().await.unwrap();
         services.call(with_query).await.unwrap();
@@ -376,7 +378,8 @@ mod apq_tests {
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss
         let apq_error = services.call(hash_only).await.unwrap();
-        assert_eq!(apq_error.response.body().errors[0], expected_apq_miss_error);
+
+        assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
         let services = services.ready().await.unwrap();
@@ -386,10 +389,8 @@ mod apq_tests {
 
         // apq insert failed, this call will miss
         let second_apq_error = services.call(second_hash_only).await.unwrap();
-        assert_eq!(
-            second_apq_error.response.body().errors[0],
-            expected_apq_miss_error
-        );
+
+        assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }
 
     #[tokio::test]
@@ -409,7 +410,16 @@ mod apq_tests {
 
         let services = service_stack.ready().await.unwrap();
 
-        let apq_error = services.call(empty_request).await.unwrap();
-        assert_eq!(apq_error.response.body().errors[0], expected_error);
+        let actual_response = services.call(empty_request).await.unwrap();
+
+        assert_error_matches(&expected_error, actual_response);
+    }
+
+    fn assert_error_matches(expected_error: &crate::Error, response: RouterResponse) {
+        if let ResponseBody::GraphQL(graphql_response) = response.response.body() {
+            assert_eq!(&graphql_response.errors[0], expected_error);
+        } else {
+            panic!("expected a graphql response");
+        }
     }
 }

@@ -7,7 +7,6 @@ use router_bridge::plan;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::task;
-use tokio::sync::RwLock;
 
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -77,8 +76,8 @@ enum PlannerResult {
     Other,
 }
 
-impl tower::Service<RouterRequest> for RouterBridgeQueryPlanner {
-    type Response = PlannedRequest;
+impl tower::Service<QueryPlannerRequest> for RouterBridgeQueryPlanner {
+    type Response = QueryPlannerResponse;
     // TODO I don't think we can serialize this error back to the router response's payload
     type Error = tower::BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -87,24 +86,21 @@ impl tower::Service<RouterRequest> for RouterBridgeQueryPlanner {
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
+    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = request.http_request.body();
-            let query = body.query.clone().ok_or(QueryPlannerError::EmptyPlan)?;
+            let body = request.context.request.body();
             match this
                 .get(
-                    query.to_owned(),
+                    body.query.to_owned().expect("presence of a query has been checked by the apq layer in the RouterService before; qed"),
                     body.operation_name.to_owned(),
                     QueryPlanOptions::default(),
                 )
                 .await
             {
-                Ok(query_plan) => Ok(PlannedRequest {
+                Ok(query_plan) => Ok(QueryPlannerResponse {
                     query_plan,
-                    context: Arc::new(RwLock::new(
-                        request.context.with_request(Arc::new(request.http_request)),
-                    )),
+                    context: request.context,
                 }),
                 Err(e) => Err(tower::BoxError::from(e)),
             }
@@ -134,7 +130,7 @@ mod tests {
             )
             .await
             .unwrap();
-        insta::assert_debug_snapshot!(result);
+        insta::assert_debug_snapshot!("plan", result);
     }
 
     #[test]
@@ -148,6 +144,7 @@ mod tests {
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
         insta::assert_debug_snapshot!(
+            "empty_query_plan_should_be_a_planner_error",
             RouterBridgeQueryPlanner::new(Arc::new(
                 include_str!("testdata/schema.graphql").parse().unwrap(),
             ))

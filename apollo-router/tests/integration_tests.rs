@@ -1,9 +1,9 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
-use apollo_router_core::PluggableRouterServiceBuilder;
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::ValueExt;
+use apollo_router_core::{PluggableRouterServiceBuilder, ResponseBody};
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
@@ -34,7 +34,7 @@ macro_rules! assert_federated_response {
         let http_request = http::Request::builder()
         .method("GET")
         .body(request)
-        .unwrap();
+        .unwrap().into();
 
         let request = graphql::RouterRequest {
             context: graphql::Context::new(),
@@ -91,7 +91,7 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!("traced_basic_request", get_spans());
 }
 
 #[test_span(tokio::test)]
@@ -106,7 +106,7 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!("traced_basic_composition", get_spans());
 }
 
 #[tokio::test]
@@ -182,7 +182,8 @@ async fn missing_variables() {
     let http_request = http::Request::builder()
         .method("GET")
         .body(request)
-        .unwrap();
+        .unwrap()
+        .into();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new(),
@@ -252,7 +253,12 @@ async fn query_rust(
     let stream = router.ready().await.unwrap().call(request).await.unwrap();
     let (_, response) = stream.response.into_parts();
 
-    (response, counting_registry)
+    match response {
+        ResponseBody::GraphQL(response) => (response, counting_registry),
+        _ => {
+            panic!("Expected graphql response")
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

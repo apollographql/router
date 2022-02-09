@@ -1,21 +1,23 @@
 //! Starts a server that will handle http graphql requests.
 
+mod apollo_telemetry;
 pub mod configuration;
 mod files;
 mod http_server_factory;
+mod plugins;
 pub mod reqwest_subgraph_service;
 pub mod router_factory;
 mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-use crate::router_factory::{ApolloRouterFactory, RouterFactory};
+use crate::configuration::SpaceportConfig;
+use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use apollo_router_core::{Plugin, RouterResponse, SubgraphRequest};
-use configuration::Configuration;
+use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -23,19 +25,13 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use http::{Request, Response};
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tower::buffer::Buffer;
-use tower::util::BoxCloneService;
-use tower::BoxError;
-use tower_service::Service;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -66,8 +62,14 @@ pub enum FederatedServerError {
     /// Could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
 
+    /// Could not create the HTTP pipeline: {0}
+    ServiceCreationError(tower::BoxError),
+
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// Could not configure spaceport: {0}
+    ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -238,7 +240,7 @@ impl ConfigurationKind {
                         config.subscriber = Some(subscriber);
                     }
                     Err(err) => {
-                        tracing::error!("Could not initialize tracing subscriber: {}", err,)
+                        tracing::error!("Could not initialize tracing subscriber: {}", err,);
                     }
                 };
                 UpdateConfiguration(config)
@@ -343,13 +345,7 @@ impl ShutdownKind {
 ///
 pub struct ApolloRouter<RF>
 where
-    RF: RouterFactory,
-    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
+    RF: RouterServiceFactory,
 {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
@@ -360,11 +356,11 @@ where
     /// A future that when resolved will shut down the server.
     shutdown: ShutdownKind,
 
-    router_factory: Option<RF>,
+    router_factory: RF,
 }
 
 #[derive(Default)]
-pub struct ApolloRouterBuilder {
+pub struct ApolloRouterBuilder<Factory = ()> {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: Option<ConfigurationKind>,
 
@@ -374,11 +370,7 @@ pub struct ApolloRouterBuilder {
     /// A future that when resolved will shut down the server.
     shutdown: Option<ShutdownKind>,
 
-    plugins: Vec<Box<dyn Plugin>>,
-    services: Vec<(
-        String,
-        Buffer<BoxCloneService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>,
-    )>,
+    router_factory: Factory,
 }
 
 impl ApolloRouterBuilder {
@@ -397,36 +389,40 @@ impl ApolloRouterBuilder {
         self
     }
 
-    pub fn with_plugin<E: Plugin + 'static>(mut self, plugin: E) -> ApolloRouterBuilder {
-        self.plugins.push(Box::new(plugin));
-        self
+    /// Use a custom RouterServiceFactory
+    pub fn with_factory<RF>(self, router_factory: RF) -> ApolloRouterBuilder<RF>
+    where
+        RF: RouterServiceFactory,
+    {
+        ApolloRouterBuilder {
+            configuration: self.configuration,
+            schema: self.schema,
+            shutdown: self.shutdown,
+            router_factory,
+        }
     }
 
-    pub fn with_subgraph_service(
-        mut self,
-        name: &str,
-        service: Buffer<
-            BoxCloneService<SubgraphRequest, RouterResponse, BoxError>,
-            SubgraphRequest,
-        >,
-    ) -> ApolloRouterBuilder {
-        self.services.push((name.to_string(), service));
-        self
-    }
-
-    pub fn build(self) -> ApolloRouter<ApolloRouterFactory> {
+    pub fn build(self) -> ApolloRouter<YamlRouterServiceFactory> {
         ApolloRouter {
             configuration: self
                 .configuration
                 .expect("Configuration must be set on builder"),
             schema: self.schema.expect("Schema must be set on builder"),
             shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
-            router_factory: Some(
-                ApolloRouterFactory::builder()
-                    .plugins(self.plugins)
-                    .services(self.services)
-                    .build(),
-            ),
+            router_factory: YamlRouterServiceFactory::default(),
+        }
+    }
+}
+
+impl<RF: RouterServiceFactory> ApolloRouterBuilder<RF> {
+    pub fn build(self) -> ApolloRouter<RF> {
+        ApolloRouter {
+            configuration: self
+                .configuration
+                .expect("Configuration must be set on builder"),
+            schema: self.schema.expect("Schema must be set on builder"),
+            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            router_factory: self.router_factory,
         }
     }
 }
@@ -458,7 +454,7 @@ pub enum State {
     Startup,
 
     /// The server is running on a particular address.
-    Running { address: SocketAddr, schema: String },
+    Running { address: ListenAddr, schema: String },
 
     /// The server has stopped.
     Stopped,
@@ -483,7 +479,7 @@ impl FederatedServerHandle {
     /// scenarios.
     ///
     /// returns: Option<SocketAddr>
-    pub async fn ready(&mut self) -> Option<SocketAddr> {
+    pub async fn ready(&mut self) -> Option<ListenAddr> {
         self.state_receiver()
             .map(|state| {
                 if let State::Running { address, .. } = state {
@@ -539,13 +535,7 @@ impl Future for FederatedServerHandle {
 
 impl<RF> ApolloRouter<RF>
 where
-    RF: RouterFactory,
-    <RF as RouterFactory>::RouterService: Service<Request<graphql::Request>, Response = Response<graphql::Response>, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    <<RF as RouterFactory>::RouterService as Service<http::Request<apollo_router_core::Request>>>::Future: std::marker::Send
+    RF: RouterServiceFactory,
 {
     /// Start the federated server on a separate thread.
     ///
@@ -555,23 +545,26 @@ where
     ///
     /// returns: FederatedServerHandle
     ///
-    pub fn serve(mut self) -> FederatedServerHandle {
+    pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = WarpHttpServerFactory::new();
-        let state_machine =
-            StateMachine::new(server_factory, Some(state_listener), self.router_factory.take().expect("Router factory should have been populated"));
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let result = spawn(async move {
-            state_machine
-                .process_events(self.generate_event_stream(shutdown_receiver))
-                .await
-        })
-        .map(|r| match r {
-            Ok(Ok(ok)) => Ok(ok),
-            Ok(Err(err)) => Err(err),
-            Err(_err) => Err(FederatedServerError::StartupError),
-        })
-        .boxed();
+        let event_stream = Self::generate_event_stream(
+            self.shutdown,
+            self.configuration,
+            self.schema,
+            shutdown_receiver,
+        );
+
+        let state_machine =
+            StateMachine::new(server_factory, Some(state_listener), self.router_factory);
+        let result = spawn(async move { state_machine.process_events(event_stream).await })
+            .map(|r| match r {
+                Ok(Ok(ok)) => Ok(ok),
+                Ok(Err(err)) => Err(err),
+                Err(_err) => Err(FederatedServerError::StartupError),
+            })
+            .boxed();
 
         FederatedServerHandle {
             result,
@@ -584,14 +577,16 @@ where
     /// This merges all contributing streams and sets up shutdown handling.
     /// When a shutdown message is received no more events are emitted.
     fn generate_event_stream(
-        self,
+        shutdown: ShutdownKind,
+        configuration: ConfigurationKind,
+        schema: SchemaKind,
         shutdown_receiver: oneshot::Receiver<()>,
     ) -> impl Stream<Item = Event> {
         // Chain is required so that the final shutdown message is sent.
         let messages = stream::select_all(vec![
-            self.shutdown.into_stream().boxed(),
-            self.configuration.into_stream().boxed(),
-            self.schema.into_stream().boxed(),
+            shutdown.into_stream().boxed(),
+            configuration.into_stream().boxed(),
+            schema.into_stream().boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
         .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
@@ -624,27 +619,27 @@ mod tests {
     #[test(tokio::test)]
     async fn basic_request() {
         let mut server_handle = init_with_server();
-        let socket = server_handle.ready().await.expect("Server never ready");
-        assert_federated_response(&socket, r#"{ topProducts { name } }"#).await;
+        let listen_addr = server_handle.ready().await.expect("Server never ready");
+        assert_federated_response(&listen_addr, r#"{ topProducts { name } }"#).await;
         server_handle.shutdown().await.expect("Could not shutdown");
     }
 
-    async fn assert_federated_response(socket: &SocketAddr, request: &str) {
+    async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = graphql::Request::builder()
-            .query(request.to_string())
+            .query(Some(request.to_string()))
             .build();
-        let expected = query(socket, &request).await.unwrap();
+        let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
     async fn query(
-        socket: &SocketAddr,
+        listen_addr: &ListenAddr,
         request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
         Ok(reqwest::Client::new()
-            .post(format!("http://{}/graphql", socket))
+            .post(format!("{}/graphql", listen_addr))
             .json(request)
             .send()
             .await

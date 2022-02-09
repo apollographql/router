@@ -63,19 +63,25 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "router-bridge"
 expression = "LicenseRef-ELv2"
 license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
+
+[[licenses.clarify]]
+name = "apollo-spaceport"
+expression = "LicenseRef-ELv2"
+version = "0.1.0-alpha.4"
+license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "encoding_rs"
@@ -114,4 +120,4 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = ["open-telemetry", "apollographql"]
+github = ["open-telemetry", "apollographql", "tokio-rs"]

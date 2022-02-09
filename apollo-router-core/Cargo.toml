@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -13,7 +13,7 @@ failfast = []
 test_utils = ["mockall"]
 
 [dependencies]
-apollo-parser = "0.2.0"
+apollo-parser = "0.2.1"
 async-trait = "0.1.52"
 atty = "0.2.14"
 bytes = "1.1.0"
@@ -42,13 +42,14 @@ serde_urlencoded = "0.7.1"
 sha2 = "0.10.1"
 static_assertions = "1.1.0"
 thiserror = "1.0.30"
-tokio = { version = "1.16.0", features = ["rt", "sync"] }
+tokio = { version = "1.16.1", features = ["rt", "sync"] }
 tower = { version = "0.4.11", features = ["util", "buffer"] }
 tower-service = "0.3.1"
 tower-test = "0.4.0"
 tracing = "0.1.29"
 tracing-futures = "0.2.5"
 typed-builder = "0.9.1"
+url = "2.2.2"
 urlencoding = "2.1.0"
 
 [dev-dependencies]

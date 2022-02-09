@@ -1,6 +1,5 @@
 use apollo_router_core::prelude::*;
-use std::future::Future;
-use std::pin::Pin;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tracing::Instrument;
@@ -40,9 +39,9 @@ impl ReqwestSubgraphService {
 }
 
 impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
-    type Response = graphql::RouterResponse;
+    type Response = graphql::SubgraphResponse;
     type Error = tower::BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         //TODO backpressure
@@ -107,8 +106,8 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                     })
                 })?;
 
-            Ok(graphql::RouterResponse {
-                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed"),
+            Ok(graphql::SubgraphResponse {
+                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),
                 context,
             })
         })

@@ -3,6 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -11,7 +12,10 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::Map;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -38,6 +42,12 @@ pub enum ConfigurationError {
     MissingSubgraphUrl(String),
     /// Invalid URL for subgraph {subgraph}: {url}
     InvalidSubgraphUrl { subgraph: String, url: String },
+    /// Unknown plugin {0}
+    PluginUnknown(String),
+    /// Plugin {plugin} could not be configured: {error}
+    PluginConfiguration { plugin: String, error: String },
+    /// The configuration contained errors.
+    InvalidConfiguration,
 }
 
 /// The configuration for the router.
@@ -65,14 +75,24 @@ pub struct Configuration {
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
 
-    /// Mapping of name to subgraph that the router may contact.
+    /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: graphql::Object,
+    pub plugins: Map<String, Value>,
+
+    /// Spaceport configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub spaceport: Option<SpaceportConfig>,
+
+    /// Studio Graph configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub graph: Option<StudioGraph>,
 }
 
-fn default_listen() -> SocketAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap()
+fn default_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
 impl Configuration {
@@ -97,8 +117,13 @@ impl Configuration {
                             });
                         }
                         Ok(routing_url) => {
-                            self.subgraphs
-                                .insert(name.to_owned(), Subgraph { routing_url });
+                            self.subgraphs.insert(
+                                name.to_owned(),
+                                Subgraph {
+                                    routing_url,
+                                    layers: Vec::new(),
+                                },
+                            );
                         }
                     }
                 }
@@ -128,6 +153,11 @@ impl Configuration {
 pub struct Subgraph {
     /// The url for the subgraph.
     pub routing_url: Url,
+
+    /// Layer configuration
+    #[serde(default)]
+    #[builder(default)]
+    pub layers: Vec<Value>,
 }
 
 /// Configuration options pertaining to the http server component.
@@ -137,13 +167,58 @@ pub struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_listen")]
-    #[builder(default_code = "default_listen()")]
-    pub listen: SocketAddr,
+    #[builder(default_code = "default_listen()", setter(into))]
+    pub listen: ListenAddr,
 
     /// Cross origin request headers.
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+}
+
+/// Listening address.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ListenAddr {
+    /// Socket address.
+    SocketAddr(SocketAddr),
+    /// Unix socket.
+    #[cfg(unix)]
+    UnixSocket(PathBuf),
+}
+
+impl From<SocketAddr> for ListenAddr {
+    fn from(addr: SocketAddr) -> Self {
+        Self::SocketAddr(addr)
+    }
+}
+
+#[cfg(unix)]
+impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>>
+    for ListenAddr
+{
+    fn from(
+        addr: tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>,
+    ) -> Self {
+        match addr {
+            tokio_util::either::Either::Left(addr) => Self::SocketAddr(addr),
+            tokio_util::either::Either::Right(addr) => Self::UnixSocket(
+                addr.as_pathname()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+}
+
+impl fmt::Display for ListenAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::SocketAddr(addr) => write!(f, "http://{}", addr),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 /// Cross origin request configuration.
@@ -213,6 +288,46 @@ impl Cors {
             cors.allow_any_origin()
         } else {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
+        }
+    }
+}
+
+fn default_collector() -> String {
+    DEFAULT_SERVER_URL.to_string()
+}
+
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
+
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+#[derive(Clone, Derivative, Deserialize, Serialize)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct StudioGraph {
+    pub(crate) reference: String,
+
+    #[derivative(Debug = "ignore")]
+    pub(crate) key: String,
+}
+
+impl Default for SpaceportConfig {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external: false,
         }
     }
 }
@@ -432,12 +547,14 @@ mod tests {
                         "inventory".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://inventory/graphql").unwrap(),
+                            layers: Vec::new(),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
                             routing_url: Url::parse("http://products/graphql").unwrap(),
+                            layers: Vec::new(),
                         },
                     ),
                 ]

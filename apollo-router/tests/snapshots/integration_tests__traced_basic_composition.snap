@@ -96,12 +96,12 @@ expression: get_spans()
                 }
               },
               "children": {
-                "apollo_router_core::query_planner::fetch": {
-                  "name": "apollo_router_core::query_planner::fetch",
+                "apollo_router_core::query_planner::parallel": {
+                  "name": "apollo_router_core::query_planner::parallel",
                   "record": {
                     "entries": [],
                     "metadata": {
-                      "name": "fetch",
+                      "name": "parallel",
                       "target": "apollo_router_core::query_planner",
                       "level": "INFO",
                       "module_path": "apollo_router_core::query_planner",
@@ -110,196 +110,9 @@ expression: get_spans()
                       }
                     }
                   },
-                  "children": {
-                    "apollo_router_core::query_planner::fetch::subfetch_stream": {
-                      "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                      "record": {
-                        "entries": [
-                          [
-                            "service",
-                            "products"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "subfetch_stream",
-                          "target": "apollo_router_core::query_planner::fetch",
-                          "level": "INFO",
-                          "module_path": "apollo_router_core::query_planner::fetch",
-                          "fields": {
-                            "names": [
-                              "service"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router_core::query_planner::fetch::make_variables": {
-                          "name": "apollo_router_core::query_planner::fetch::make_variables",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "make_variables",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router_core::query_planner::fetch::subfetch_stream": {
-                          "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "subfetch_stream",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "INFO",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {
-                            "reqwest_tracing::middleware::HTTP request": {
-                              "name": "reqwest_tracing::middleware::HTTP request",
-                              "record": {
-                                "entries": [
-                                  [
-                                    "http.method",
-                                    "POST"
-                                  ],
-                                  [
-                                    "http.scheme",
-                                    "http"
-                                  ],
-                                  [
-                                    "http.host",
-                                    "localhost"
-                                  ],
-                                  [
-                                    "net.host.port",
-                                    "4003"
-                                  ],
-                                  [
-                                    "otel.kind",
-                                    "client"
-                                  ],
-                                  [
-                                    "otel.name",
-                                    "POST /graphql"
-                                  ],
-                                  [
-                                    "otel.status_code",
-                                    "OK"
-                                  ],
-                                  [
-                                    "http.status_code",
-                                    200
-                                  ],
-                                  [
-                                    "http.user_agent",
-                                    ""
-                                  ]
-                                ],
-                                "metadata": {
-                                  "name": "HTTP request",
-                                  "target": "reqwest_tracing::middleware",
-                                  "level": "INFO",
-                                  "module_path": "reqwest_tracing::middleware",
-                                  "fields": {
-                                    "names": [
-                                      "http.method",
-                                      "http.scheme",
-                                      "http.host",
-                                      "net.host.port",
-                                      "otel.kind",
-                                      "otel.name",
-                                      "otel.status_code",
-                                      "http.user_agent",
-                                      "http.status_code",
-                                      "error.message",
-                                      "error.cause_chain"
-                                    ]
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::reqwest_subgraph_service::aggregate_response_data": {
-                              "name": "apollo_router::reqwest_subgraph_service::aggregate_response_data",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "aggregate_response_data",
-                                  "target": "apollo_router::reqwest_subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::reqwest_subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::reqwest_subgraph_service::parse_subgraph_response": {
-                              "name": "apollo_router::reqwest_subgraph_service::parse_subgraph_response",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "parse_subgraph_response",
-                                  "target": "apollo_router::reqwest_subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::reqwest_subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            }
-                          }
-                        },
-                        "apollo_router_core::query_planner::fetch::response_insert": {
-                          "name": "apollo_router_core::query_planner::fetch::response_insert",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "response_insert",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        }
-                      }
-                    }
-                  }
+                  "children": {}
                 }
               }
-            },
-            "apollo_router_core::query_planner::parallel": {
-              "name": "apollo_router_core::query_planner::parallel",
-              "record": {
-                "entries": [],
-                "metadata": {
-                  "name": "parallel",
-                  "target": "apollo_router_core::query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
-                  "fields": {
-                    "names": []
-                  }
-                }
-              },
-              "children": {}
             }
           }
         }

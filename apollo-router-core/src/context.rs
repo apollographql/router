@@ -1,13 +1,16 @@
 use crate::prelude::graphql::*;
+use crate::services::http_compat;
+use futures::Future;
 use std::sync::Arc;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Clone)]
-pub struct Context<T = Arc<http::Request<Request>>> {
+pub struct Context<T = Arc<http_compat::Request<Request>>> {
     /// Original request to the Router.
     pub request: T,
 
     // Allows adding custom extensions to the context.
-    extensions: Object,
+    extensions: Arc<RwLock<Object>>,
 }
 
 impl Context<()> {
@@ -32,12 +35,12 @@ impl Context<()> {
 }
 
 impl<T> Context<T> {
-    pub fn extensions(&self) -> &Object {
-        &self.extensions
+    pub fn extensions(&self) -> impl Future<Output = RwLockReadGuard<Object>> {
+        self.extensions.read()
     }
 
-    pub fn extensions_mut(&mut self) -> &mut Object {
-        &mut self.extensions
+    pub fn extensions_mut(&self) -> impl Future<Output = RwLockWriteGuard<Object>> {
+        self.extensions.write()
     }
 }
 

@@ -26,7 +26,8 @@ impl RouterRequestBuilder {
                 operation_name: this.operation_name,
                 variables: this.variables.unwrap_or_default(),
                 extensions: this.extensions.unwrap_or_default(),
-            }),
+            })
+            .into(),
             context: this.context.unwrap_or_default(),
         }
     }
