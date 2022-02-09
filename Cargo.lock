@@ -172,7 +172,6 @@ dependencies = [
  "derivative",
  "displaydoc",
  "futures",
- "futures-lite",
  "hex",
  "http",
  "include_dir",

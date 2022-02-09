@@ -1,10 +1,11 @@
 use crate::apq::APQService;
+use crate::plugin_utils::structures::RouterResponseBuilder;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
     NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    RequestError, ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema,
-    SubgraphRequest, SubgraphResponse,
+    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -80,7 +81,16 @@ where
         let query = if let Some(query) = &request.http_request.body().query {
             query.clone()
         } else {
-            return Box::pin(async { Err(RequestError::NoQuery.into()) });
+            let res = RouterResponseBuilder::new()
+                .push_error(crate::Error {
+                    message: "Must provide query string.".to_string(),
+                    locations: Default::default(),
+                    path: Default::default(),
+                    extensions: Default::default(),
+                })
+                .with_context(request.context.with_request(Arc::new(request.http_request)))
+                .build();
+            return Box::pin(async move { Ok(res) });
         };
 
         if let Some(response) = self.naive_introspection.get(query.as_str()) {

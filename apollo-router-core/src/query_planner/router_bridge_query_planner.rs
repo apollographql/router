@@ -92,7 +92,9 @@ impl tower::Service<QueryPlannerRequest> for RouterBridgeQueryPlanner {
             let body = request.context.request.body();
             match this
                 .get(
-                    body.query.to_owned().expect("presence of a query has been checked by the apq layer in the RouterService before; qed"),
+                    body.query.to_owned().expect(
+                        "presence of a query has been checked by the RouterService before; qed",
+                    ),
                     body.operation_name.to_owned(),
                     QueryPlanOptions::default(),
                 )

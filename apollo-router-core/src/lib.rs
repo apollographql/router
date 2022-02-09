@@ -29,6 +29,8 @@ mod json_ext;
 mod layers;
 mod naive_introspection;
 mod plugin;
+#[cfg(feature = "test_utils")]
+pub mod plugin_utils;
 mod query_cache;
 mod query_planner;
 mod request;
@@ -36,8 +38,6 @@ mod response;
 mod service_registry;
 mod services;
 mod spec;
-#[cfg(feature = "test_utils")]
-pub mod test_utils;
 mod traits;
 
 pub use cache::*;

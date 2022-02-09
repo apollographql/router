@@ -1,4 +1,4 @@
-use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
+use crate::{plugin_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
 use futures::future::BoxFuture;
 use moka::sync::Cache;
 use serde::Deserialize;
@@ -163,7 +163,9 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 mod apq_tests {
     use super::*;
     use crate::{
-        test_utils::{structures::RouterResponseBuilder, MockRouterService, RouterRequestBuilder},
+        plugin_utils::{
+            structures::RouterResponseBuilder, MockRouterService, RouterRequestBuilder,
+        },
         ResponseBody,
     };
     use serde_json_bytes::json;
