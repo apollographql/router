@@ -51,11 +51,11 @@ impl Request {
         // from the docs `Unencoded `+` is preserved literally, and _not_ changed to a space.`,
         // so let's do it I guess
         let query = url_encoded_query.replace('+', " ");
-        let decoded_string = urlencoding::decode(query.as_str()).unwrap();
+        let decoded_string = urlencoding::decode_binary(query.as_bytes());
         let urldecoded: serde_json::Value =
-            serde_urlencoded::from_str(&decoded_string).map_err(serde_json::Error::custom)?;
+            serde_urlencoded::from_bytes(&decoded_string).map_err(serde_json::Error::custom)?;
 
-        let operation_name = get_from_urldecoded(&urldecoded, "operationName").unwrap();
+        let operation_name = get_from_urldecoded(&urldecoded, "operationName")?;
         let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
             query.as_str()
         } else {
@@ -63,9 +63,8 @@ impl Request {
         };
         let variables =
             Arc::new(get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default());
-        let extensions: Object = get_from_urldecoded(&urldecoded, "extensions")
-            .unwrap()
-            .unwrap_or_default();
+        let extensions: Object =
+            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
 
         Ok(Self::builder()
             .query(query.to_string())
