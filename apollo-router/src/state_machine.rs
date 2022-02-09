@@ -389,8 +389,8 @@ where
         PrivateState<<FA as RouterServiceFactory>::RouterService>,
         PrivateState<<FA as RouterServiceFactory>::RouterService>,
     > {
-        let new_schema = new_schema.unwrap_or(schema.clone());
-        let new_configuration = new_configuration.unwrap_or(configuration.clone());
+        let new_schema = new_schema.unwrap_or_else(|| schema.clone());
+        let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
         match self
             .router_factory
             .create(
