@@ -391,4 +391,25 @@ mod apq_tests {
             expected_apq_miss_error
         );
     }
+
+    #[tokio::test]
+    async fn it_will_error_on_empty_query_and_no_apq_header() {
+        let expected_error = crate::Error {
+            message: "Must provide query string.".to_string(),
+            locations: Default::default(),
+            path: Default::default(),
+            extensions: Default::default(),
+        };
+
+        let mock_service = MockRouterService::new().build();
+
+        let mut service_stack = APQ::with_capacity(1).layer(mock_service);
+
+        let empty_request = RouterRequestBuilder::new().build();
+
+        let services = service_stack.ready().await.unwrap();
+
+        let apq_error = services.call(empty_request).await.unwrap();
+        assert_eq!(apq_error.response.body().errors[0], expected_error);
+    }
 }
