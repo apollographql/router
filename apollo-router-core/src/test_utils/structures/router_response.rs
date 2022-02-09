@@ -20,16 +20,22 @@ impl RouterResponseBuilder {
         Default::default()
     }
     pub fn build(&self) -> crate::RouterResponse {
+        self.with_status(StatusCode::OK)
+    }
+    pub fn with_status(&self, status: StatusCode) -> crate::RouterResponse {
         let this = self.clone();
         crate::RouterResponse {
-            response: Response::new(crate::Response {
-                label: this.label,
-                data: this.data.unwrap_or_default(),
-                path: this.path,
-                has_next: this.has_next,
-                errors: this.errors,
-                extensions: this.extensions.unwrap_or_default(),
-            }),
+            response: Response::builder()
+                .status(status)
+                .body(crate::Response {
+                    label: this.label,
+                    data: this.data.unwrap_or_default(),
+                    path: this.path,
+                    has_next: this.has_next,
+                    errors: this.errors,
+                    extensions: this.extensions.unwrap_or_default(),
+                })
+                .unwrap(),
             context: Arc::new(RwLock::new(this.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(Request::new(crate::Request {
                     query: Default::default(),
@@ -39,21 +45,6 @@ impl RouterResponseBuilder {
                 })))
             }))),
         }
-    }
-    pub fn error_with_status(&self, error: String, status: StatusCode) -> crate::RouterResponse {
-        let this = self.clone();
-        todo!();
-        // crate::RouterResponse {
-        //     response: Response::builder().status(status).body(error).unwrap(),
-        //     context: Arc::new(RwLock::new(this.context.unwrap_or_else(|| {
-        //         Context::new().with_request(Arc::new(Request::new(crate::Request {
-        //             query: Default::default(),
-        //             operation_name: Default::default(),
-        //             variables: Default::default(),
-        //             extensions: Default::default(),
-        //         })))
-        //     }))),
-        // }
     }
     pub fn with_label(self, label: impl AsRef<str>) -> Self {
         Self {

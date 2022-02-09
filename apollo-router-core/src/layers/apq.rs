@@ -1,6 +1,5 @@
 use crate::{test_utils::structures::RouterResponseBuilder, RouterRequest, RouterResponse};
 use futures::Future;
-use http::StatusCode;
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -137,15 +136,15 @@ where
             if req.http_request.body().query.is_none()
                 || req.http_request.body().query == Some("".to_string())
             {
-                // TODO: this behaves the way the gateway does.
-                // however this is not json, despite clients providint the `Accept: application/json` header.
-                let res = apq
-                    .response_builder
+                let res = RouterResponseBuilder::new()
+                    .push_error(crate::Error {
+                        message: "Must provide query string.".to_string(),
+                        locations: Default::default(),
+                        path: Default::default(),
+                        extensions: Default::default(),
+                    })
                     .with_context(req.context.with_request(Arc::new(req.http_request)))
-                    .error_with_status(
-                        "Must provide query string.".to_string(),
-                        StatusCode::BAD_REQUEST,
-                    );
+                    .build();
                 return Box::pin(async move { Ok(res) });
             }
             req
