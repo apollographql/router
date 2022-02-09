@@ -16,6 +16,13 @@ impl<T> Request<T> {
     pub fn into_parts(self) -> (http::request::Parts, T) {
         self.inner.into_parts()
     }
+
+    pub fn map<F, U>(self, f: F) -> Request<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.inner.map(f).into()
+    }
 }
 
 impl<T> Deref for Request<T> {
@@ -78,6 +85,13 @@ impl<T> Response<T> {
 
     pub fn into_body(self) -> T {
         self.inner.into_body()
+    }
+
+    pub fn map<F, U>(self, f: F) -> Response<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.inner.map(f).into()
     }
 }
 

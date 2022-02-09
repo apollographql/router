@@ -1,5 +1,5 @@
-use crate::SubgraphRequest;
-use crate::{PlannedRequest, RouterResponse, Schema, ServiceRegistry};
+use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
+use crate::{Schema, ServiceRegistry};
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,12 +15,12 @@ use typed_builder::TypedBuilder;
 pub struct ExecutionService {
     schema: Arc<Schema>,
 
-    #[builder(setter(transform = |services: HashMap<String, Buffer<BoxService<SubgraphRequest, RouterResponse, BoxError>, SubgraphRequest>>| Arc::new(ServiceRegistry::new(services))))]
+    #[builder(setter(transform = |services: HashMap<String, Buffer<BoxService<SubgraphRequest, SubgraphResponse, BoxError>, SubgraphRequest>>| Arc::new(ServiceRegistry::new(services))))]
     subgraph_services: Arc<ServiceRegistry>,
 }
 
-impl Service<PlannedRequest> for ExecutionService {
-    type Response = RouterResponse;
+impl Service<ExecutionRequest> for ExecutionService {
+    type Response = ExecutionResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -36,7 +36,7 @@ impl Service<PlannedRequest> for ExecutionService {
     }
 
     #[tracing::instrument(name = "execute", level = "debug", skip_all)]
-    fn call(&mut self, req: PlannedRequest) -> Self::Future {
+    fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
             let context = req.context;
@@ -48,7 +48,7 @@ impl Service<PlannedRequest> for ExecutionService {
 
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
-            Ok(RouterResponse {
+            Ok(ExecutionResponse {
                 response: http::Response::new(response).into(),
                 context,
             })

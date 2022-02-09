@@ -1,9 +1,9 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
-use apollo_router_core::PluggableRouterServiceBuilder;
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::ValueExt;
+use apollo_router_core::{PluggableRouterServiceBuilder, ResponseBody};
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
@@ -252,7 +252,12 @@ async fn query_rust(
     let stream = router.ready().await.unwrap().call(request).await.unwrap();
     let (_, response) = stream.response.into_parts();
 
-    (response, counting_registry)
+    match response {
+        ResponseBody::GraphQL(response) => (response, counting_registry),
+        _ => {
+            panic!("Expected graphql response")
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

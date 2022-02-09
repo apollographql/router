@@ -61,11 +61,15 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     }
 }
 
-impl<T: QueryPlanner> tower::Service<RouterRequest> for CachingQueryPlanner<T>
+impl<T: QueryPlanner> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
-    T: tower::Service<RouterRequest, Response = PlannedRequest, Error = tower::BoxError>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = tower::BoxError,
+    >,
 {
-    type Response = PlannedRequest;
+    type Response = QueryPlannerResponse;
     // TODO I don't think we can serialize this error back to the router response's payload
     type Error = tower::BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -74,8 +78,8 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
-        let body = request.http_request.body();
+    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
+        let body = request.context.request.body();
 
         let key = (
             body.query.to_owned(),
@@ -87,9 +91,9 @@ where
             cm.get(key)
                 .await
                 .map_err(|err| err.into())
-                .map(|query_plan| PlannedRequest {
+                .map(|query_plan| QueryPlannerResponse {
                     query_plan,
-                    context: request.context.with_request(Arc::new(request.http_request)),
+                    context: request.context,
                 })
         })
     }

@@ -1,4 +1,7 @@
-use crate::{PlannedRequest, RouterRequest, RouterResponse, SubgraphRequest};
+use crate::{
+    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
+};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -47,23 +50,23 @@ pub trait Plugin: Default + Send + Sync + 'static {
 
     fn query_planning_service(
         &mut self,
-        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
-    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         service
     }
 
     fn execution_service(
         &mut self,
-        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
-    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         service
     }
 
     fn subgraph_service(
         &mut self,
         _name: &str,
-        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
     }
 }
@@ -86,19 +89,19 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     fn query_planning_service(
         &mut self,
-        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
-    ) -> BoxService<RouterRequest, PlannedRequest, BoxError>;
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>;
 
     fn execution_service(
         &mut self,
-        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
-    ) -> BoxService<PlannedRequest, RouterResponse, BoxError>;
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
 
     fn subgraph_service(
         &mut self,
         _name: &str,
-        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError>;
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
 }
 
 #[async_trait]
@@ -134,23 +137,23 @@ where
 
     fn query_planning_service(
         &mut self,
-        service: BoxService<RouterRequest, PlannedRequest, BoxError>,
-    ) -> BoxService<RouterRequest, PlannedRequest, BoxError> {
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         self.query_planning_service(service)
     }
 
     fn execution_service(
         &mut self,
-        service: BoxService<PlannedRequest, RouterResponse, BoxError>,
-    ) -> BoxService<PlannedRequest, RouterResponse, BoxError> {
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         self.execution_service(service)
     }
 
     fn subgraph_service(
         &mut self,
         name: &str,
-        service: BoxService<SubgraphRequest, RouterResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, RouterResponse, BoxError> {
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
     }
 }
