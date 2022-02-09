@@ -12,6 +12,7 @@ use http::HeaderValue;
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
+use std::convert::Infallible;
 use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -33,6 +34,30 @@ pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
     RawString(String),
+}
+
+impl From<Response> for ResponseBody {
+    fn from(response: Response) -> Self {
+        Self::GraphQL(response)
+    }
+}
+
+impl From<serde_json::Value> for ResponseBody {
+    fn from(json: serde_json::Value) -> Self {
+        Self::RawJSON(json)
+    }
+}
+
+// This impl is purposefully done this way to hint users this might not be what they would like to do.
+/// Creates a ResponseBody from a &str
+///
+/// /!\ No serialization or deserialization is involved,
+/// please make sure you don't want to send a GraphQL response or a Raw JSON payload instead.
+impl FromStr for ResponseBody {
+    type Err = Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::RawString(s.to_owned()))
+    }
 }
 
 assert_impl_all!(RouterRequest: Send);

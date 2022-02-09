@@ -10,6 +10,7 @@ license-file = "./LICENSE"
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
+service_mock = ["mockall", "paste", "tower-test"]
 
 [dependencies]
 apollo-parser = "0.2.1"
@@ -23,21 +24,24 @@ http = "0.2.6"
 include_dir = "0.7.2"
 lru = "0.7.2"
 miette = { version = "3.3.0", features = ["fancy"] }
-moka = { version="0.6.1", features=["future", "futures-util"]}
+mockall = { version = "0.11.0", optional = true }
+moka = { version = "0.6.1", features = ["future", "futures-util"] }
 once_cell = "1.9.0"
+paste = { version = "1.0.6", optional = true }
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 reqwest-middleware = "0.1.3"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "950eb931e38746bb7cfed05382d6970a22e43cc4" }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.78", features = ["preserve_order"] }
-serde_json_bytes = { version = "0.2.0", features = ["preserve_order"]}
+serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 static_assertions = "1.1.0"
 thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["rt", "sync"] }
-tower = { version="0.4.11", features = ["util", "buffer"] }
+tower = { version = "0.4.11", features = ["util", "buffer"] }
 tower-service = "0.3.1"
-tracing = "0.1.29"
+tower-test = { version = "0.4.0", optional = true }
+tracing = "0.1.30"
 tracing-futures = "0.2.5"
 typed-builder = "0.9.1"
 url = "2.2.2"
@@ -52,3 +56,4 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }
+apollo-router-core = { path = ".", features = ["service_mock"] }
