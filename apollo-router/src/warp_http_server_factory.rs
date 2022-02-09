@@ -412,7 +412,7 @@ where
         Ok(response) => {
             let span = Span::current();
             // TODO headers
-            tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+            tracing::trace_span!(parent: &span, "serialize_response").in_scope(|| {
                 match response.into_body() {
                     ResponseBody::GraphQL(graphql) => serde_json::to_string(&graphql)
                         .expect("serde_json::Value serialization will not fail"),
