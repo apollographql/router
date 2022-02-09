@@ -52,8 +52,6 @@ pub struct RouterResponse {
 
 assert_impl_all!(QueryPlannerRequest: Send);
 pub struct QueryPlannerRequest {
-    pub request: Request,
-
     pub context: Context,
 }
 

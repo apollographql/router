@@ -106,7 +106,6 @@ where
                 let operation_name = request.http_request.body().operation_name.clone();
                 let planned_query = planning
                     .call(QueryPlannerRequest {
-                        request: request.http_request.body().clone(),
                         context: request.context.with_request(Arc::new(request.http_request)),
                     })
                     .await;
