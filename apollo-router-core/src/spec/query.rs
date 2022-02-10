@@ -510,9 +510,15 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let request = Request::builder()
                 .variables(variables)
-                .query($query)
+                .query(Some($query.to_string()))
                 .build();
-            let query = Query::parse(&request.query).expect("could not parse query");
+            let query = Query::parse(
+                request
+                    .query
+                    .as_ref()
+                    .expect("query has been added right above; qed"),
+            )
+            .expect("could not parse query");
             query.validate_variables(&request, &schema)
         }};
     }

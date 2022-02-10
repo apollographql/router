@@ -7,7 +7,7 @@ use crate::{Context, Object};
 
 #[derive(Default, Clone)]
 pub struct RouterRequestBuilder {
-    query: String,
+    query: Option<String>,
     operation_name: Option<String>,
     variables: Option<Arc<Object>>,
     extensions: Option<Object>,
@@ -33,7 +33,7 @@ impl RouterRequestBuilder {
     }
     pub fn with_query(self, query: impl AsRef<str>) -> Self {
         Self {
-            query: query.as_ref().to_string(),
+            query: Some(query.as_ref().to_string()),
             ..self
         }
     }

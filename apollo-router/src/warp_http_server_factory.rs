@@ -340,10 +340,11 @@ where
         })
 }
 
+// TODO: do we actually wanna track query on the info level here?
 #[tracing::instrument(skip_all,
     name = "graphql_request",
     fields(
-        query = %request.query,
+        query = %request.query.clone().unwrap_or_else(|| "-".to_string()),
         operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
         client_name,
         client_version

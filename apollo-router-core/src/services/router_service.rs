@@ -1,9 +1,10 @@
+use crate::apq::APQService;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
-    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, RouterResponseBuilder,
-    Schema, SubgraphRequest, SubgraphResponse,
+    CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse, NaiveIntrospection,
+    Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterBridgeQueryPlanner, RouterRequest, RouterResponse, RouterResponseBuilder, Schema,
+    SubgraphRequest, SubgraphResponse,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -76,9 +77,11 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        let query = &request.http_request.body().query;
+        let context = request.context.with_request(Arc::new(request.http_request));
 
-        if query.is_empty() {
+        let query = context.request.body().query.clone();
+
+        if query.is_none() || query.as_ref().unwrap().is_empty() {
             let res = RouterResponseBuilder::new()
                 .push_error(crate::Error {
                     message: "Must provide query string.".to_string(),
@@ -86,44 +89,42 @@ where
                     path: Default::default(),
                     extensions: Default::default(),
                 })
-                .with_context(request.context.with_request(Arc::new(request.http_request)))
+                .with_context(context.clone())
                 .build();
             return Box::pin(async move { Ok(res) });
         };
 
-        if let Some(response) = self
-            .naive_introspection
-            .get(&request.http_request.body().query)
-        {
+        let request = Arc::clone(&context.clone().request);
+
+        let query = query.expect("checked just above; qed");
+
+        if let Some(response) = self.naive_introspection.get(query.as_str()) {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context,
                 })
             });
         }
 
         let fut = async move {
+            let body = request.body();
             let query = query_cache
-                .get_query(&request.http_request.body().query)
+                .get_query(query.as_str())
                 .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
-            if let Some(err) = query.as_ref().and_then(|q| {
-                q.validate_variables(request.http_request.body(), &schema)
-                    .err()
-            }) {
+            if let Some(err) = query
+                .as_ref()
+                .and_then(|q| q.validate_variables(body, &schema).err())
+            {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context,
                 })
             } else {
-                let operation_name = request.http_request.body().operation_name.clone();
-                let planned_query = planning
-                    .call(QueryPlannerRequest {
-                        context: request.context.with_request(Arc::new(request.http_request)),
-                    })
-                    .await;
+                let operation_name = body.operation_name.clone();
+                let planned_query = planning.call(QueryPlannerRequest { context }).await;
                 let mut response = match planned_query {
                     Ok(planned_query) => {
                         execution
@@ -308,14 +309,18 @@ impl PluggableRouterServiceBuilder {
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
-                    RouterService::builder()
-                        .query_planner_service(query_planner_service)
-                        .query_execution_service(execution_service)
-                        .schema(self.schema)
-                        .query_cache(query_cache)
-                        .naive_introspection(naive_introspection)
-                        .build()
-                        .boxed(),
+                    // TODO: maybe make it optional although enabled by default?
+                    APQService::new(
+                        RouterService::builder()
+                            .query_planner_service(query_planner_service)
+                            .query_execution_service(execution_service)
+                            .schema(self.schema)
+                            .query_cache(query_cache)
+                            .naive_introspection(naive_introspection)
+                            .build(),
+                        512, // TODO: this is totally arbitrary, what does the team think?
+                    )
+                    .boxed(),
                     |acc, e| e.router_service(acc),
                 ),
             ),

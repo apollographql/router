@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq)]
 pub struct Request {
     /// The graphql query.
-    pub query: String,
+    pub query: Option<String>,
 
     /// The optional graphql operation.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -57,9 +57,9 @@ impl Request {
 
         let operation_name = get_from_urldecoded(&urldecoded, "operationName")?;
         let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
-            query.as_str()
+            Some(query.to_string())
         } else {
-            ""
+            None
         };
         let variables =
             Arc::new(get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default());
@@ -67,7 +67,7 @@ impl Request {
             get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
 
         Ok(Self::builder()
-            .query(query.to_string())
+            .query(query)
             .variables(variables)
             .operation_name(operation_name)
             .extensions(extensions)
@@ -87,8 +87,7 @@ impl Request {
                 .unwrap_or_default();
         let query = extract_key_value_from_object!(object, "query", Value::String(s) => s)
             .map_err(serde::de::Error::custom)?
-            .map(|s| s.as_str().to_string())
-            .unwrap_or_default();
+            .map(|s| s.as_str().to_string());
         let operation_name =
             extract_key_value_from_object!(object, "operation_name", Value::String(s) => s)
                 .map_err(serde::de::Error::custom)?
