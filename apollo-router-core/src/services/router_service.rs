@@ -1,6 +1,6 @@
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
+    plugin_utils, CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
     NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
@@ -75,6 +75,20 @@ where
 
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
+
+        let query = &request.http_request.body().query;
+
+        if query.is_empty() {
+            let res = plugin_utils::RouterResponse::builder()
+                .context(request.context.with_request(Arc::new(request.http_request)))
+                .errors(vec![crate::Error {
+                    message: "Must provide query string.".to_string(),
+                    ..Default::default()
+                }])
+                .build()
+                .into();
+            return Box::pin(async move { Ok(res) });
+        };
 
         if let Some(response) = self
             .naive_introspection

@@ -29,6 +29,7 @@ mod json_ext;
 mod layers;
 mod naive_introspection;
 mod plugin;
+pub mod plugin_utils;
 mod query_cache;
 mod query_planner;
 mod request;
