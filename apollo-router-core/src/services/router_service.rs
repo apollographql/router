@@ -1,9 +1,9 @@
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
+    plugin_utils, CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
     NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, RouterResponseBuilder,
-    Schema, SubgraphRequest, SubgraphResponse,
+    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -79,13 +79,14 @@ where
         let query = &request.http_request.body().query;
 
         if query.is_empty() {
-            let res = RouterResponseBuilder::new()
-                .push_error(crate::Error {
+            let res = plugin_utils::RouterResponse::builder()
+                .context(request.context.with_request(Arc::new(request.http_request)))
+                .errors(vec![crate::Error {
                     message: "Must provide query string.".to_string(),
                     ..Default::default()
-                })
-                .with_context(request.context.with_request(Arc::new(request.http_request)))
-                .build();
+                }])
+                .build()
+                .into();
             return Box::pin(async move { Ok(res) });
         };
 
