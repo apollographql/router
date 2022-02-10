@@ -3,6 +3,7 @@ mod router_bridge_query_planner;
 mod selection;
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
+use fetch::OperationKind;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
@@ -40,6 +41,17 @@ pub(crate) enum PlanNode {
     Flatten(FlattenNode),
 }
 
+impl PlanNode {
+    pub fn contains_mutations(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::Flatten(_) => false,
+        }
+    }
+}
+
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, name = "validate", level = "debug")]
@@ -71,6 +83,10 @@ impl QueryPlan {
             .await;
 
         Response::builder().data(value).errors(errors).build()
+    }
+
+    pub fn contains_mutations(&self) -> bool {
+        self.root.contains_mutations()
     }
 }
 
@@ -209,7 +225,7 @@ impl PlanNode {
     }
 }
 
-mod fetch {
+pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
     use serde::Deserialize;
@@ -234,6 +250,18 @@ mod fetch {
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
+
+        /// The GraphQL operation kind that is used for the fetch.
+        operation_kind: OperationKind,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum OperationKind {
+        Query,
+        Mutation,
+        #[serde(other)]
+        Unknown,
     }
 
     struct Variables {
@@ -410,6 +438,10 @@ mod fetch {
 
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
+        }
+
+        pub(crate) fn operation_kind(&self) -> &OperationKind {
+            &self.operation_kind
         }
     }
 }

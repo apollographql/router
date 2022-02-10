@@ -137,28 +137,38 @@ pub struct ExecutionResponse {
     errors: Vec<Error>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
     extensions: Option<Object>,
+    #[builder(default = StatusCode::OK, setter(!strip_option))]
+    status: StatusCode,
+    #[builder(default, setter(!strip_option))]
+    headers: Vec<(String, String)>,
     context: Option<Context<CompatRequest>>,
 }
 
-impl ExecutionResponse {
-    pub fn with_status(&self, status: StatusCode) -> crate::ExecutionResponse {
+impl Into<crate::ExecutionResponse> for ExecutionResponse {
+    fn into(self) -> crate::ExecutionResponse {
         let this = self.clone();
-        crate::ExecutionResponse {
-            response: Response::builder()
-                .status(status)
-                .body(
-                    crate::Response {
-                        label: this.label,
-                        data: this.data.unwrap_or_default(),
-                        path: this.path,
-                        has_next: this.has_next,
-                        errors: this.errors,
-                        extensions: this.extensions.unwrap_or_default(),
-                    }
-                    .into(),
-                )
-                .expect("crate::Response implements Serialize; qed")
+        let mut response_builder = Response::builder().status(this.status);
+
+        for (name, value) in this.headers {
+            response_builder = response_builder.header(name, value);
+        }
+        let response = response_builder
+            .body(
+                crate::Response {
+                    label: this.label,
+                    data: this.data.unwrap_or_default(),
+                    path: this.path,
+                    has_next: this.has_next,
+                    errors: this.errors,
+                    extensions: this.extensions.unwrap_or_default(),
+                }
                 .into(),
+            )
+            .expect("crate::Response implements Serialize; qed")
+            .into();
+
+        crate::ExecutionResponse {
+            response,
             context: this.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
                     Request::new(crate::Request {
@@ -171,11 +181,5 @@ impl ExecutionResponse {
                 ))
             }),
         }
-    }
-}
-
-impl Into<crate::ExecutionResponse> for ExecutionResponse {
-    fn into(self) -> crate::ExecutionResponse {
-        self.with_status(StatusCode::OK)
     }
 }

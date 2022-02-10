@@ -1,3 +1,4 @@
+use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Dispatch, Instrument};
@@ -258,10 +259,14 @@ impl PluggableRouterServiceBuilder {
         let (execution_service, execution_worker) = Buffer::pair(
             ServiceBuilder::new().service(
                 self.plugins.iter_mut().fold(
-                    ExecutionService::builder()
-                        .schema(self.schema.clone())
-                        .subgraph_services(subgraphs)
-                        .build()
+                    ForbidHttpGetMutations {}
+                        .layer(
+                            ExecutionService::builder()
+                                .schema(self.schema.clone())
+                                .subgraph_services(subgraphs)
+                                .build()
+                                .boxed(),
+                        )
                         .boxed(),
                     |acc, e| e.execution_service(acc),
                 ),
