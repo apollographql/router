@@ -644,13 +644,9 @@ mod test {
         assert_eq!(expected, key);
     }
 
-    // QUESTION FOR REVIEWER: Should this test return "expected" or UNKNOWN_OPERATION_NAME
-    // Currently it returns UNKNOWN_OPERATION_NAME, but I'm not sure if that is spec compliant.
     #[test]
-    #[ignore]
     fn it_handles_out_of_band_name_and_no_query_name() {
-        let expected =
-            "# OneProduct\nquery ($limit: Int) { products(limit: $limit) { upc, name, price } }";
+        let expected = GRAPHQL_UNKNOWN_OPERATION_NAME;
         let op_name = Value::String("OneProduct".into());
         let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
