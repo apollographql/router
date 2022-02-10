@@ -14,7 +14,7 @@ pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
-    root: PlanNode,
+    pub(crate) root: PlanNode,
 }
 
 /// Query plans are composed of a set of nodes.
