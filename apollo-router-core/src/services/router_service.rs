@@ -82,9 +82,7 @@ where
             let res = RouterResponseBuilder::new()
                 .push_error(crate::Error {
                     message: "Must provide query string.".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
+                    ..Default::default()
                 })
                 .with_context(request.context.with_request(Arc::new(request.http_request)))
                 .build();
