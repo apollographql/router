@@ -41,7 +41,6 @@ use opentelemetry::{
     trace::{TraceError, TracerProvider},
     Value,
 };
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -285,20 +284,21 @@ impl SpanExporter for Exporter {
          * Process the batch
          */
         for span in batch.iter().filter(|span| span.name == "graphql_request") {
-            // Time may wander and if we ever receive a span where start_time >
-            // endtime, then we should just drop the span and continue processing
-            // the rest of the batch
-            if span.start_time > span.end_time {
-                continue;
-            }
-            tracing::trace!(%span.name, ?span.start_time, ?span.end_time);
-            tracing::trace!("span: {:?}", span);
+            // We can't process a span if we don't have a query
             if let Some(query) = span
                 .attributes
                 .get(&opentelemetry::Key::from_static_str("query"))
             {
-                tracing::trace!("query: {}", query);
-                let not_found = Value::String(Cow::from("not found"));
+                // Time may wander and if we ever receive a span which we can't
+                // process as a duration, then we should just ignore the span and
+                // continue processing the rest of the batch
+                let elapsed = match span.end_time.duration_since(span.start_time) {
+                    Ok(value) => value,
+                    Err(_) => continue,
+                };
+
+                tracing::trace!(%span.name, %query, ?span.start_time, ?span.end_time);
+                let not_found = Value::String("not found".into());
                 let client_name = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("client_name"))
@@ -328,7 +328,7 @@ impl SpanExporter for Exporter {
                     .or_insert_with(|| DurationHistogram::new(None));
                 // We verify at the start of this loop that start_time <= end_time, so
                 // we can be sure we'll get a valid duration_since() result and can unwrap().
-                dh.increment_duration(span.end_time.duration_since(span.start_time).unwrap(), 1);
+                dh.increment_duration(elapsed, 1);
             }
         }
 
@@ -443,7 +443,6 @@ fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
     tracing::debug!("looking for operation: {}", op_name);
     let required_definition = required_definitions.pop().unwrap();
     tracing::debug!("required_definition: {:?}", required_definition);
-    // XXX Somehow find fragments...
     let def = required_definition.format();
     format!("# {}\n{}", op_name, def)
 }
