@@ -326,8 +326,6 @@ impl SpanExporter for Exporter {
                 let dh = dh_map
                     .entry((client_name, client_version, key.clone()))
                     .or_insert_with(|| DurationHistogram::new(None));
-                // We verify at the start of this loop that start_time <= end_time, so
-                // we can be sure we'll get a valid duration_since() result and can unwrap().
                 dh.increment_duration(elapsed, 1);
             }
         }
