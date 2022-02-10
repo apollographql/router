@@ -47,10 +47,17 @@ where
 
 impl Request {
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        // decode percent encoded string
-        // from the docs `Unencoded `+` is preserved literally, and _not_ changed to a space.`,
-        // so let's do it I guess
-        let query = url_encoded_query.replace('+', " ");
+        // As explained in the form content types specification https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
+        // `Forms submitted with this content type must be encoded as follows:`
+        //
+        // Space characters are replaced by `+', and then reserved characters are escaped as described in [RFC1738], section 2.2
+        // The real percent encoding uses `%20` while form data in URLs uses `+`.
+        // This can be seen empirically by running a CURL request with a --data-urlencoded that contains spaces.
+        // however, quoting the urlencoding docs https://docs.rs/urlencoding/latest/urlencoding/fn.decode_binary.html
+        // `Unencoded `+` is preserved literally, and _not_ changed to a space.`
+        //
+        // We will thus replace '+' by "%20" below so we comply with the percent encoding specification, before decoding the parameters.
+        let query = url_encoded_query.replace('+', "%20");
         let decoded_string = urlencoding::decode_binary(query.as_bytes());
         let urldecoded: serde_json::Value =
             serde_urlencoded::from_bytes(&decoded_string).map_err(serde_json::Error::custom)?;
