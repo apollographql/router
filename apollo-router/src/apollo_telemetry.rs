@@ -291,13 +291,13 @@ impl SpanExporter for Exporter {
             if span.start_time > span.end_time {
                 continue;
             }
-            tracing::debug!(%span.name, ?span.start_time, ?span.end_time);
-            tracing::debug!("span: {:?}", span);
+            tracing::trace!(%span.name, ?span.start_time, ?span.end_time);
+            tracing::trace!("span: {:?}", span);
             if let Some(query) = span
                 .attributes
                 .get(&opentelemetry::Key::from_static_str("query"))
             {
-                tracing::debug!("query: {}", query);
+                tracing::trace!("query: {}", query);
                 let not_found = Value::String(Cow::from("not found"));
                 let client_name = span
                     .attributes
@@ -366,7 +366,7 @@ impl SpanExporter for Exporter {
                 .map_err::<TraceError, _>(|e| e.to_string().into())?
                 .into_inner()
                 .message;
-            tracing::trace!("server response: {}", msg);
+            tracing::debug!("server response: {}", msg);
         }
 
         Ok(())
@@ -411,7 +411,6 @@ fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
     // with the operation definition name.
     // If we find more than one match, then in either case we will
     // fail.
-    tracing::info!("initial operation name: {}", op_name);
     let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name == "-" {
         Box::new(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
@@ -441,8 +440,7 @@ fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
         tracing::warn!("Could not find required definition: {}", query);
         return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
     }
-    tracing::info!("final operation name: {}", op_name);
-    tracing::trace!("looking for operation: {}", op_name);
+    tracing::debug!("looking for operation: {}", op_name);
     let required_definition = required_definitions.pop().unwrap();
     tracing::debug!("required_definition: {:?}", required_definition);
     // XXX Somehow find fragments...
