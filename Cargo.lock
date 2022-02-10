@@ -165,7 +165,6 @@ name = "apollo-router-core"
 version = "0.1.0-alpha.4"
 dependencies = [
  "apollo-parser 0.2.1",
- "apollo-router-core",
  "async-trait",
  "atty",
  "bytes",
