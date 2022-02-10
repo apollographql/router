@@ -167,7 +167,7 @@ macro_rules! register_plugin {
     ($key: literal, $value: ident) => {
         startup::on_startup! {
             // Register the plugin factory function
-            apollo_router_core::plugins_mut().insert($key.to_string(), || Box::new($value::default()));
+            $crate::plugins_mut().insert($key.to_string(), || Box::new($value::default()));
         }
     };
 }

@@ -1,17 +1,14 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
-use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
-use http::header::HeaderName;
 use serde_json::Value;
-use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -81,16 +78,18 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             for layer in &subgraph.layers {
                 match layer.get("kind") {
-                    Some(Value::String(kind)) if kind == "header" => {
-                        if let Some(header_name) =
-                            layer.get("propagate").as_ref().and_then(|v| v.as_str())
-                        {
-                            subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
-                                HeaderName::from_str(header_name).unwrap(),
-                            ))
-                            .layer(subgraph_service);
+                    Some(Value::String(kind)) => match apollo_router_core::layers().get(kind) {
+                        None => {
+                            errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
                         }
-                    }
+                        Some(factory) => match (factory)(layer) {
+                            Ok(layer) => subgraph_service = layer.layer(subgraph_service),
+                            Err(err) => errors.push(ConfigurationError::LayerConfiguration {
+                                layer: "kind".into(),
+                                error: err.to_string(),
+                            }),
+                        },
+                    },
                     Some(_) => errors.push(ConfigurationError::LayerConfiguration {
                         layer: "unknown".into(),
                         error: "'kind' must be a string.".into(),

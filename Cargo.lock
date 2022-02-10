@@ -184,6 +184,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "serde_urlencoded",
+ "startup",
  "static_assertions",
  "test-log",
  "thiserror",
