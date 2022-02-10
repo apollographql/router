@@ -340,7 +340,7 @@ where
         })
 }
 
-// TODO: do we actually wanna track query on the info level here?
+// graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
 #[tracing::instrument(skip_all,
     name = "graphql_request",
     fields(
