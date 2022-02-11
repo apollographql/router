@@ -25,6 +25,7 @@ pub enum Operation {
     Remove(HeaderName),
 }
 
+// Proxy the schema to the mirror type.
 impl JsonSchema for Operation {
     fn schema_name() -> String {
         "Operation".to_string()
@@ -35,6 +36,10 @@ impl JsonSchema for Operation {
     }
 }
 
+// Mirror for deserializing operation.
+// HeaderName and HeaderValue do no implement Deserialize. So this type is used instead in
+// combination with `try_from`
+// This type also enables us to support `JsonSchema` derive.
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationDef {
