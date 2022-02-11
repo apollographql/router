@@ -5,8 +5,6 @@ use std::marker::PhantomData;
 use std::task::Poll;
 use tower::{Layer, Service};
 
-// Demonstration caching layer
-// Needs some work to make good. In particular Err responses from inner.call are not cached.
 pub struct CachingService<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
 where
     Request: Send,
