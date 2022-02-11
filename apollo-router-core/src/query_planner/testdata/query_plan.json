@@ -5,6 +5,7 @@
       "kind": "Fetch",
       "serviceName": "product",
       "variableUsages": [],
+      "operationKind": "query",
       "operation": "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}"
     },
     {
@@ -30,6 +31,7 @@
                   }
                 ],
                 "variableUsages": ["test_variable"],
+                "operationKind": "query",
                 "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}"
               }
             },
@@ -52,6 +54,7 @@
                   }
                 ],
                 "variableUsages": [],
+                "operationKind": "query",
                 "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}"
               }
             }
@@ -77,6 +80,7 @@
                   }
                 ],
                 "variableUsages": [],
+                "operationKind": "query",
                 "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}"
               }
             },
@@ -99,6 +103,7 @@
                   }
                 ],
                 "variableUsages": [],
+                "operationKind": "query",
                 "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}"
               }
             }

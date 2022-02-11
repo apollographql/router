@@ -17,11 +17,12 @@ where
     }
 }
 
+type WaitMap =
+    Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
+
 pub struct QueryDeduplicationService<S> {
     service: S,
-    wait_map: Arc<
-        Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>,
-    >,
+    wait_map: WaitMap,
 }
 
 impl<S> QueryDeduplicationService<S>
@@ -37,9 +38,7 @@ where
 
     async fn dedup(
         service: S,
-        wait_map: Arc<
-            Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>,
-        >,
+        wait_map: WaitMap,
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
