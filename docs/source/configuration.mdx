@@ -156,7 +156,7 @@ spaceport:
 graph:
   # Which graph should our Spaceport be sending data about?
   reference: Benchmarking@current
-  # Key which is used to send data
+  # Key used to send data
   key: service:<redacted>
 
 # OpenTelemetry configuration, see next section
@@ -261,3 +261,35 @@ opentelemetry:
                   - value1
                   - value2
 ```
+
+## Spaceport
+
+Spaceport reports usage data to the Apollo ingress. You can see how it is configured in the examples above.
+
+NB: This component is still evolving and you should expect functionality to change and evolve here. We are actively seeking user feedback as we work to shape this component.
+
+### No usage reporting
+
+If you don't wish to take advantage of usage reporting, then no configuration is required. This is the default.
+
+### Usage reporting
+
+You must configure the graph section. If you specify a graph section, then both the reference and the key must be specified. The reference must refer to a valid graph/version combination against which statistics are reported. The Key must be a valid API key which can be used for reporting statistics.
+For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
+The key fulfills the same function as the APOLLO_KEY environment variable.
+The reference fulfills the same function as the APOLLO_GRAPH_REF environment variable.
+NB: These environment variables are *not* currently recognised by the router. This is being tracked by [issue](https://github.com/apollographql/router/issues/425)
+
+### Spaceport Configuration
+
+The spaceport can either be run as an internal, router specific component or as an external resource shared by multiple routers.
+
+#### Internal Spaceport
+
+This is the default and is most appropriate for evaluations, demos, development support and generally getting started. This requires no configuration by default and will be automatically started if the graph configuration is present.
+In this mode it is possible to further configure the address at which the internal spaceport is listening and the address of the spaceport to use. This should only be necessary if there is a clash on the default port, for instance if running multiple routers on the same system or clashing with another application.
+
+#### External Spaceport
+
+In this case, external is true, the router will not start an internal spaceport task but will attempt to connect to an external process at the specified listener address. This mode of operation is intended for production environments where, for example, configuration of sensitive key data or allocation of reporting resources, can be centralised and tightly controlled. The listener parameter is ignored for an external spaceport. The collector parameter specifies the address of the shared spaceport.
+
