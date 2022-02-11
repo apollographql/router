@@ -2,13 +2,42 @@ use crate::layer::ConfigurableLayer;
 use crate::{register_layer, SubgraphRequest};
 use http::header::HeaderName;
 use http::HeaderValue;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::Schema;
+use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 use std::str::FromStr;
 use std::task::Poll;
 use tower::{BoxError, Layer, Service};
+
 #[derive(Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "OperationDef")]
 pub enum Operation {
+    PropagateAll,
+    Propagate {
+        name: HeaderName,
+        default_value: Option<HeaderValue>,
+    },
+    Insert {
+        name: HeaderName,
+        value: HeaderValue,
+    },
+    Remove(HeaderName),
+}
+
+impl JsonSchema for Operation {
+    fn schema_name() -> String {
+        "Operation".to_string()
+    }
+
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
+        schema_for!(OperationDef).schema.into()
+    }
+}
+
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationDef {
     PropagateAll,
     Propagate {
         name: String,
@@ -21,7 +50,34 @@ pub enum Operation {
     Remove(String),
 }
 
-#[derive(Deserialize)]
+impl TryFrom<OperationDef> for Operation {
+    type Error = BoxError;
+
+    fn try_from(value: OperationDef) -> Result<Self, Self::Error> {
+        match value {
+            OperationDef::PropagateAll => Ok(Operation::PropagateAll),
+            OperationDef::Propagate {
+                name,
+                default_value,
+            } => Ok(Operation::Propagate {
+                name: HeaderName::from_str(name.as_str())?,
+                default_value: match default_value {
+                    Some(value) => Some(HeaderValue::from_str(value.as_str())?),
+                    None => None,
+                },
+            }),
+            OperationDef::Insert { name, value } => Ok(Operation::Insert {
+                name: HeaderName::from_str(name.as_str())?,
+                value: HeaderValue::from_str(value.as_str())?,
+            }),
+            OperationDef::Remove(name) => {
+                Ok(Operation::Remove(HeaderName::from_str(name.as_str())?))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct Config {
     operations: Vec<Operation>,
@@ -37,7 +93,7 @@ impl ConfigurableLayer for HeaderManipulationLayer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, JsonSchema)]
 pub struct HeaderManipulationLayer {
     operations: Vec<Operation>,
 }
@@ -90,8 +146,8 @@ where
             for operation in &self.operations {
                 match operation {
                     Operation::PropagateAll => {
-                        for (header_name, header_value) in request.context.request.headers() {
-                            subgraph_request_headers.insert(header_name, header_value.clone());
+                        for (name, value) in request.context.request.headers() {
+                            subgraph_request_headers.insert(name, value.clone());
                         }
                     }
                     Operation::Propagate {
@@ -99,38 +155,56 @@ where
                         default_value: None,
                     } => {
                         if let Some(header) = request.context.request.headers().get(name) {
-                            subgraph_request_headers.insert(
-                                HeaderName::from_str(name.as_str()).unwrap(),
-                                header.clone(),
-                            );
+                            subgraph_request_headers.insert(name, header.clone());
                         }
                     }
                     Operation::Propagate {
                         name,
                         default_value: Some(default_value),
                     } => {
-                        let name = HeaderName::from_str(name.as_str()).unwrap();
-                        if let Some(header) = request.context.request.headers().get(&name) {
+                        if let Some(header) = request.context.request.headers().get(name) {
                             subgraph_request_headers.insert(name, header.clone());
                         } else {
-                            subgraph_request_headers.insert(
-                                name,
-                                HeaderValue::from_str(default_value.as_str()).unwrap(),
-                            );
+                            subgraph_request_headers.insert(name, default_value.clone());
                         }
                     }
                     Operation::Insert { name, value } => {
-                        let name = HeaderName::from_str(name.as_str()).unwrap();
-                        subgraph_request_headers
-                            .insert(name, HeaderValue::from_str(value.as_str()).unwrap());
+                        subgraph_request_headers.insert(name, value.clone());
                     }
-                    Operation::Remove(header_name) => {
-                        subgraph_request_headers.remove(header_name);
+                    Operation::Remove(name) => {
+                        subgraph_request_headers.remove(name);
                     }
                 }
             }
         }
 
         self.service.call(request)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::header_manipulation::Operation;
+    use serde_json::json;
+
+    #[test]
+    fn test_invalid_header() {
+        assert_eq!(
+            serde_json::from_value::<Operation>(json! (
+                {"propagate": {"name": "f\n"}}
+            ))
+            .err()
+            .unwrap()
+            .to_string(),
+            "invalid HTTP header name"
+        );
+    }
+
+    #[test]
+    fn test_valid_header() {
+        assert!(serde_json::from_value::<Operation>(json! (
+            {"propagate": {"name": "f"}}
+        ))
+        .is_ok());
     }
 }
