@@ -938,9 +938,9 @@ dependencies = [
 
 [[package]]
 name = "deno_core"
-version = "0.112.0"
+version = "0.118.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b0a532994e7d5ddfc029a33a67709c91e6c8926b97e4825e4d3056ee11abfc"
+checksum = "68be6990e070141d1413797b84d8a05d3eb426fa18a9962ecf21d2f045014db4"
 dependencies = [
  "anyhow",
  "futures",
@@ -2950,7 +2950,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation.git?rev=950eb931e38746bb7cfed05382d6970a22e43cc4#950eb931e38746bb7cfed05382d6970a22e43cc4"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=14ad25067091e9114d9abae03181604b8baeea6b#14ad25067091e9114d9abae03181604b8baeea6b"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3194,9 +3194,9 @@ dependencies = [
 
 [[package]]
 name = "serde_v8"
-version = "0.23.0"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "487456399b8722492bdc4c1834397f91c935247590dae30f8e779b7f48e3181a"
+checksum = "27266c014ef9b11fcf7f1a248f25603529432aab4d0ce777d6c6f6aea2b367bb"
 dependencies = [
  "serde",
  "serde_bytes",
@@ -4101,9 +4101,9 @@ dependencies = [
 
 [[package]]
 name = "v8"
-version = "0.36.0"
+version = "0.38.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "506523e86ccc15982be412bdde87a142771c139e94a8ecedda1da051a079b81d"
+checksum = "684e95fe02e0acfeaf630df3a1623f6ad02145f9a92c54ceae8a1923319d3273"
 dependencies = [
  "bitflags",
  "fslock",
