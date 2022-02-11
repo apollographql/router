@@ -140,24 +140,11 @@ subgraphs:
   products:
     routing_url: http://localhost:4003/graphql
 
-# Spaceport configuration. These vales are the default values if not specified
-spaceport:
-  # Should we spawn a Spaceport or talk to an existing external Spaceport?
-  external: false
-  # What's the address of the Spaceport?
-  collector: https://127.0.0.1:50051
-  # Where should we listen IF we have spawned an internal Spaceport?
-  listener: 0.0.0.0:50051
+# graph configuration, see later section
+# graph:
 
-# Apollo Studio Graph configuration details
-# If we don't specify a graph section, then no statistics are collected for
-# processing, since there is no point collecting statistics unless we have
-# somewhere to send them.
-graph:
-  # Which graph should our Spaceport be sending data about?
-  reference: Benchmarking@current
-  # Key used to send data
-  key: service:<redacted>
+# spaceport configuration, see later section
+# spaceport:
 
 # OpenTelemetry configuration, see next section
 # opentelemetry:
@@ -274,6 +261,18 @@ If you don't wish to take advantage of usage reporting, then no configuration is
 
 ### Usage reporting
 
+```yaml:title=configuration.yaml
+# Apollo Studio Graph configuration details
+# If we don't specify a graph section, then no statistics are collected for
+# processing, since there is no point collecting statistics unless we have
+# somewhere to send them.
+graph:
+  # Which graph should our Spaceport be sending data about?
+  reference: Benchmarking@current
+  # Key used to send data
+  key: service:<redacted>
+```
+
 You must configure the graph section. If you specify a graph section, then both the reference and the key must be specified. The reference must refer to a valid graph/version combination against which statistics are reported. The Key must be a valid API key which can be used for reporting statistics.
 For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
 The key fulfills the same function as the APOLLO_KEY environment variable.
@@ -283,6 +282,17 @@ NB: These environment variables are *not* currently recognised by the router. Th
 ### Spaceport Configuration
 
 The spaceport can either be run as an internal, router specific component or as an external resource shared by multiple routers.
+
+```yaml:title=configuration.yaml
+# Spaceport configuration. These values are the default values if not specified
+spaceport:
+  # Should we spawn a Spaceport or talk to an existing external Spaceport?
+  external: false
+  # What's the address of the Spaceport?
+  collector: https://127.0.0.1:50051
+  # Where should we listen IF we have spawned an internal Spaceport?
+  listener: 0.0.0.0:50051
+```
 
 #### Internal Spaceport
 
