@@ -2,20 +2,19 @@ use crate::{
     ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
     RouterResponse, SubgraphRequest,
 };
-use mockall::automock;
-use tower::BoxError;
-use tower_test::mock::Mock;
 
+#[macro_export]
 macro_rules! mock_service {
     ($name:ident, $request_type:ty, $response_type:ty) => {
         paste::item! {
-            #[automock]
+            #[mockall::automock]
+            #[allow(dead_code)]
             pub trait [<$name Service>] {
-                fn call(&self, req: $request_type) -> Result<$response_type, BoxError>;
+                fn call(&self, req: $request_type) -> Result<$response_type, tower::BoxError>;
             }
 
             impl [<Mock $name Service>] {
-                pub fn build(self) -> Mock<$request_type,$response_type> {
+                pub fn build(self) -> tower_test::mock::Mock<$request_type,$response_type> {
                     let (service, mut handle) = tower_test::mock::spawn();
 
                     tokio::spawn(async move {
