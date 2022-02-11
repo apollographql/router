@@ -53,6 +53,7 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         let graphql::SubgraphRequest {
             http_request,
             context,
+            ..
         } = request;
 
         let http_client = self.http_client.clone();

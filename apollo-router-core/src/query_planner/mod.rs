@@ -236,7 +236,8 @@ mod fetch {
         operation: String,
 
         /// The kind of operation (query, mutation or subscription)
-        operationKind: String,
+        #[serde(rename(deserialize = "operationKind"))]
+        operation_kind: String,
     }
 
     struct Variables {
@@ -314,6 +315,7 @@ mod fetch {
         ) -> Result<Value, FetchError> {
             let FetchNode {
                 operation,
+                operation_kind,
                 service_name,
                 ..
             } = self;
@@ -343,6 +345,12 @@ mod fetch {
                     .unwrap()
                     .into(),
                 context: context.clone(),
+                operation_kind: match operation_kind.as_str() {
+                    "query" => OperationKind::Query,
+                    "mutation" => OperationKind::Mutation,
+                    "subscription" => OperationKind::Subscription,
+                    _ => unreachable!(),
+                },
             };
 
             let service = service_registry

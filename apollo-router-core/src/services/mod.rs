@@ -92,6 +92,15 @@ pub struct SubgraphRequest {
     pub http_request: http_compat::Request<Request>,
 
     pub context: Context,
+
+    pub operation_kind: OperationKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OperationKind {
+    Query,
+    Mutation,
+    Subscription,
 }
 
 assert_impl_all!(SubgraphResponse: Send);

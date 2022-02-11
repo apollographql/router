@@ -1,4 +1,4 @@
-use crate::{http_compat, Request, SubgraphRequest, SubgraphResponse};
+use crate::{http_compat, OperationKind, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tokio::sync::broadcast::{self, Sender};
@@ -118,9 +118,14 @@ where
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let service = self.service.clone();
-        let wait_map = self.wait_map.clone();
+        let mut service = self.service.clone();
 
-        Box::pin(async move { Self::dedup(service, wait_map, request).await })
+        if request.operation_kind == OperationKind::Query {
+            let wait_map = self.wait_map.clone();
+
+            Box::pin(async move { Self::dedup(service, wait_map, request).await })
+        } else {
+            Box::pin(async move { service.call(request).await })
+        }
     }
 }
