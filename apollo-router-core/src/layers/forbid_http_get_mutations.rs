@@ -168,11 +168,11 @@ mod forbid_http_get_mutations_tests {
         let services = service_stack.ready().await.unwrap();
         let actual_error = services.call(http_post_query_plan_request).await.unwrap();
 
-        assert_eq!(expected_status, actual_error.response.status()); //todo
+        assert_eq!(expected_status, actual_error.response.status());
         assert_eq!(
             expected_allow_header,
             actual_error.response.headers().get("Allow").unwrap()
-        ); //todo
+        );
         assert_error_matches(&expected_error, actual_error);
     }
 
