@@ -1,6 +1,10 @@
 //! wrapper typpes for Request and Response from the http crate to improve their usability
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    cmp::PartialEq,
+    hash::Hash,
+    ops::{Deref, DerefMut},
+};
 
 #[derive(Debug, Default)]
 pub struct Request<T> {
@@ -60,6 +64,52 @@ impl<T> DerefMut for Request<T> {
         &mut self.inner
     }
 }
+
+impl<T: Hash> Hash for Request<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.method().hash(state);
+        self.inner.version().hash(state);
+        self.inner.uri().hash(state);
+        // this assumes headers are in the same order
+        for (name, value) in self.inner.headers() {
+            name.hash(state);
+            value.hash(state);
+        }
+        self.inner.body().hash(state);
+    }
+}
+
+impl<T: PartialEq> PartialEq for Request<T> {
+    fn eq(&self, other: &Self) -> bool {
+        let mut res = self.inner.method().eq(other.inner.method())
+            && self.inner.version().eq(&other.inner.version())
+            && self.inner.uri().eq(other.inner.uri());
+
+        if !res {
+            return false;
+        }
+        if self.inner.headers().len() != other.inner.headers().len() {
+            return false;
+        }
+
+        // this assumes headers are in the same order
+        for ((name, value), (other_name, other_value)) in self
+            .inner
+            .headers()
+            .iter()
+            .zip(other.inner.headers().iter())
+        {
+            res = name.eq(other_name) && value.eq(other_value);
+            if !res {
+                return false;
+            }
+        }
+
+        self.inner.body().eq(other.inner.body())
+    }
+}
+
+impl<T: PartialEq> Eq for Request<T> {}
 
 impl<T> From<http::Request<T>> for Request<T> {
     fn from(inner: http::Request<T>) -> Self {

@@ -234,6 +234,9 @@ mod fetch {
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
+
+        /// The kind of operation (query, mutation or subscription)
+        operationKind: String,
     }
 
     struct Variables {
