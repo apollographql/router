@@ -77,26 +77,26 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             ));
 
             for layer in &subgraph.layers {
-                match layer.get("kind") {
-                    Some(Value::String(kind)) => match apollo_router_core::layers().get(kind) {
-                        None => {
-                            errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
+                match layer.as_object().and_then(|o| o.iter().next()) {
+                    Some(layer) => {
+                        let kind = layer.0;
+                        let config = layer.1;
+                        match apollo_router_core::layers().get(kind) {
+                            None => {
+                                errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
+                            }
+                            Some(factory) => match (factory)(config) {
+                                Ok(layer) => subgraph_service = layer.layer(subgraph_service),
+                                Err(err) => errors.push(ConfigurationError::LayerConfiguration {
+                                    layer: kind.to_string(),
+                                    error: err.to_string(),
+                                }),
+                            },
                         }
-                        Some(factory) => match (factory)(layer) {
-                            Ok(layer) => subgraph_service = layer.layer(subgraph_service),
-                            Err(err) => errors.push(ConfigurationError::LayerConfiguration {
-                                layer: "kind".into(),
-                                error: err.to_string(),
-                            }),
-                        },
-                    },
-                    Some(_) => errors.push(ConfigurationError::LayerConfiguration {
+                    }
+                    None => errors.push(ConfigurationError::LayerConfiguration {
                         layer: "unknown".into(),
-                        error: "'kind' must be a string.".into(),
-                    }),
-                    _ => errors.push(ConfigurationError::LayerConfiguration {
-                        layer: "unknown".into(),
-                        error: "'kind' missing".into(),
+                        error: "layer must be an object".into(),
                     }),
                 }
             }
@@ -153,5 +153,58 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         );
         tokio::spawn(worker.with_subscriber(dispatcher));
         Ok(service)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::router_factory::RouterServiceFactory;
+    use crate::{Configuration, YamlRouterServiceFactory};
+    use apollo_router_core::Schema;
+    use std::sync::Arc;
+    use tower_http::BoxError;
+
+    #[tokio::test]
+    async fn test_yaml_no_extras() {
+        let config = Configuration::builder().build();
+        let service = create_service(config).await;
+        assert!(service.is_ok())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_yaml_layers() {
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            subgraphs:
+                foo:
+                    routing_url: https://foo
+                    layers:
+                        - headers:
+                            - propagate: "a"
+                            - remove: "b"
+                            
+        "#,
+        )
+        .unwrap();
+        let service = create_service(config).await;
+        assert!(service.is_ok())
+    }
+
+    async fn create_service(config: Configuration) -> Result<(), BoxError> {
+        let schema: Schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1"),
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+        query: Query
+        mutation: Mutation
+        }"#
+        .parse()
+        .unwrap();
+
+        let service = YamlRouterServiceFactory::default()
+            .create(Arc::new(config), Arc::new(schema), None)
+            .await;
+        service.map(|_| ())
     }
 }

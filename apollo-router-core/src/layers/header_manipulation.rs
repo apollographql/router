@@ -2,21 +2,39 @@ use crate::layer::ConfigurableLayer;
 use crate::{register_layer, SubgraphRequest};
 use http::header::HeaderName;
 use http::HeaderValue;
+use serde::Deserialize;
+use std::str::FromStr;
 use std::task::Poll;
-use tower::{Layer, Service};
-
-#[derive(Clone)]
+use tower::{BoxError, Layer, Service};
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Operation {
     PropagateAll,
-    Propagate(HeaderName),
-    PropagateOrDefault(HeaderName, HeaderValue),
-    Insert(HeaderName, HeaderValue),
-    Remove(HeaderName),
+    Propagate {
+        name: String,
+        default_value: Option<String>,
+    },
+    Insert {
+        name: String,
+        value: String,
+    },
+    Remove(String),
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct Config {
+    operations: Vec<Operation>,
 }
 
 register_layer!("headers", HeaderManipulationLayer);
 impl ConfigurableLayer for HeaderManipulationLayer {
-    type Config = ();
+    type Config = Config;
+
+    fn configure(&mut self, configuration: Self::Config) -> Result<(), BoxError> {
+        self.operations = configuration.operations;
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -76,22 +94,35 @@ where
                             subgraph_request_headers.insert(header_name, header_value.clone());
                         }
                     }
-                    Operation::Propagate(header_name) => {
-                        if let Some(header) = request.context.request.headers().get(header_name) {
-                            subgraph_request_headers.insert(header_name.to_owned(), header.clone());
+                    Operation::Propagate {
+                        name,
+                        default_value: None,
+                    } => {
+                        if let Some(header) = request.context.request.headers().get(name) {
+                            subgraph_request_headers.insert(
+                                HeaderName::from_str(name.as_str()).unwrap(),
+                                header.clone(),
+                            );
                         }
                     }
-                    Operation::PropagateOrDefault(header_name, default_value) => {
-                        if let Some(header) = request.context.request.headers().get(header_name) {
-                            subgraph_request_headers.insert(header_name.to_owned(), header.clone());
+                    Operation::Propagate {
+                        name,
+                        default_value: Some(default_value),
+                    } => {
+                        let name = HeaderName::from_str(name.as_str()).unwrap();
+                        if let Some(header) = request.context.request.headers().get(&name) {
+                            subgraph_request_headers.insert(name, header.clone());
                         } else {
-                            subgraph_request_headers
-                                .insert(header_name.to_owned(), default_value.clone());
+                            subgraph_request_headers.insert(
+                                name,
+                                HeaderValue::from_str(default_value.as_str()).unwrap(),
+                            );
                         }
                     }
-                    Operation::Insert(header_name, header_value) => {
+                    Operation::Insert { name, value } => {
+                        let name = HeaderName::from_str(name.as_str()).unwrap();
                         subgraph_request_headers
-                            .insert(header_name.to_owned(), header_value.clone());
+                            .insert(name, HeaderValue::from_str(value.as_str()).unwrap());
                     }
                     Operation::Remove(header_name) => {
                         subgraph_request_headers.remove(header_name);
