@@ -12,7 +12,7 @@ where
     S: Service<ExecutionRequest>,
 {
     service: S,
-    forbid_http_get_mutations: ForbidHttpGetMutations,
+    _forbid_http_get_mutations: ForbidHttpGetMutations,
 }
 
 impl<S> ForbidHttpGetMutationsService<S>
@@ -22,14 +22,14 @@ where
     pub fn new(service: S) -> Self {
         Self {
             service,
-            forbid_http_get_mutations: ForbidHttpGetMutations {},
+            _forbid_http_get_mutations: ForbidHttpGetMutations {},
         }
     }
 }
 
 impl<S> Layer<S> for ForbidHttpGetMutations
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse>,
+    S: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>,
 {
     type Service = ForbidHttpGetMutationsService<S>;
 

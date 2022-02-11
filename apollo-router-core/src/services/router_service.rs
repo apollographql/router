@@ -10,8 +10,8 @@ use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Dispatch, Instrument};
@@ -257,20 +257,18 @@ impl PluggableRouterServiceBuilder {
 
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let (execution_service, execution_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
-                self.plugins.iter_mut().fold(
-                    ForbidHttpGetMutations {}
-                        .layer(
-                            ExecutionService::builder()
-                                .schema(self.schema.clone())
-                                .subgraph_services(subgraphs)
-                                .build()
-                                .boxed(),
-                        )
-                        .boxed(),
-                    |acc, e| e.execution_service(acc),
+            ServiceBuilder::new()
+                .layer(BoxLayer::new(ForbidHttpGetMutations::default()))
+                .service(
+                    self.plugins.iter_mut().fold(
+                        ExecutionService::builder()
+                            .schema(self.schema.clone())
+                            .subgraph_services(subgraphs)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.execution_service(acc),
+                    ),
                 ),
-            ),
             self.buffer,
         );
         tokio::spawn(execution_worker.with_subscriber(self.dispatcher.clone()));
