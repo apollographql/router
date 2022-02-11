@@ -835,14 +835,7 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest};
         use tokio::net::UnixStream;
 
-        let protocol_qualified_name = addr.to_string();
-        let mut stream = UnixStream::connect(
-            protocol_qualified_name
-                .strip_prefix("file://")
-                .unwrap_or(&protocol_qualified_name),
-        )
-        .await
-        .unwrap();
+        let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
         stream.ready(Interest::WRITABLE).await.unwrap();
         stream
             .write_all(

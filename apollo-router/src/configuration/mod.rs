@@ -193,7 +193,7 @@ impl fmt::Display for ListenAddr {
         match self {
             Self::SocketAddr(addr) => write!(f, "http://{}", addr),
             #[cfg(unix)]
-            Self::UnixSocket(path) => write!(f, "file://{}", path.display()),
+            Self::UnixSocket(path) => write!(f, "{}", path.display()),
         }
     }
 }
