@@ -60,7 +60,7 @@ where
         if req.context.request.method() == Method::GET && req.query_plan.contains_mutations() {
             let res = plugin_utils::ExecutionResponse::builder()
                 .errors(vec![crate::Error {
-                    message: "Mutations over a GET request are forbidden.".to_string(),
+                    message: "GET supports only query operation".to_string(),
                     locations: Default::default(),
                     path: Default::default(),
                     extensions: Default::default(),
@@ -152,7 +152,7 @@ mod forbid_http_get_mutations_tests {
     #[tokio::test]
     async fn it_doesnt_let_http_get_mutations_pass_through() {
         let expected_error = crate::Error {
-            message: "Mutations over a GET request are forbidden.".to_string(),
+            message: "GET supports only query operation".to_string(),
             locations: Default::default(),
             path: Default::default(),
             extensions: Default::default(),
