@@ -95,6 +95,7 @@ pub struct SubgraphRequest {
 }
 
 assert_impl_all!(SubgraphResponse: Send);
+#[derive(Clone, Debug)]
 pub struct SubgraphResponse {
     pub response: http_compat::Response<Response>,
 

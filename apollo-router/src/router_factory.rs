@@ -1,5 +1,6 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
+use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
@@ -74,9 +75,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
         for (name, subgraph) in &configuration.subgraphs {
-            let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
-                name.to_string(),
-                subgraph.routing_url.clone(),
+            let dedup_layer = QueryDeduplicationLayer;
+            let mut subgraph_service = BoxService::new(dedup_layer.layer(
+                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
             ));
 
             for layer in &subgraph.layers {
