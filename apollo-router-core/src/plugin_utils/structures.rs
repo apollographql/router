@@ -16,17 +16,17 @@ pub struct RouterRequest {
     context: Option<Context<()>>,
 }
 
-impl Into<crate::RouterRequest> for RouterRequest {
-    fn into(self) -> crate::RouterRequest {
+impl From<RouterRequest> for crate::RouterRequest {
+    fn from(request: RouterRequest) -> Self {
         crate::RouterRequest {
             http_request: Request::new(crate::Request {
-                query: self.query,
-                operation_name: self.operation_name,
-                variables: self.variables.unwrap_or_default(),
-                extensions: self.extensions.unwrap_or_default(),
+                query: request.query,
+                operation_name: request.operation_name,
+                variables: request.variables.unwrap_or_default(),
+                extensions: request.extensions.unwrap_or_default(),
             })
             .into(),
-            context: self.context.unwrap_or_default(),
+            context: request.context.unwrap_or_default(),
         }
     }
 }
@@ -47,9 +47,9 @@ pub struct RouterResponse {
     context: Option<Context<CompatRequest>>,
 }
 
-impl Into<crate::RouterResponse> for RouterResponse {
-    fn into(self) -> crate::RouterResponse {
-        self.with_status(StatusCode::OK)
+impl From<RouterResponse> for crate::RouterResponse {
+    fn from(response: RouterResponse) -> Self {
+        response.with_status(StatusCode::OK)
     }
 }
 
