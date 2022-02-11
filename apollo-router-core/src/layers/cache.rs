@@ -233,7 +233,7 @@ mod test {
         mock_service: MockABService,
     ) -> impl Service<A, Response = B, Error = String> {
         let cache = CacheBuilder::new(2).build();
-        let service = ServiceBuilder::new()
+        ServiceBuilder::new()
             .layer(CachingLayer::new(
                 cache,
                 |r: &A| r.key.clone(),
@@ -244,7 +244,6 @@ mod test {
                 },
             ))
             .map_err(|e: BoxError| e.to_string())
-            .service(mock_service.build());
-        service
+            .service(mock_service.build())
     }
 }
