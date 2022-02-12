@@ -16,7 +16,7 @@ prost = "0.9.0"
 prost-types = "0.9.0"
 reqwest = { version = "0.11.9", features = ["json"] }
 serde = { version = "1.0.136", features = ["derive"] }
-serde_json = { version = "1.0.78" }
+serde_json = { version = "1.0.79" }
 sys-info = "0.9.1"
 tonic = "0.6.2"
 tokio = { version = "1.16.1", features = ["macros", "rt-multi-thread"] }
