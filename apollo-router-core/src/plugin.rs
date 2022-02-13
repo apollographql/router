@@ -4,6 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, PluginFactory>> {
 
 #[async_trait]
 pub trait Plugin: Default + Send + Sync + 'static {
-    type Config;
+    type Config: JsonSchema + Default;
 
     fn configure(&mut self, _configuration: Self::Config) -> Result<(), BoxError> {
         Ok(())

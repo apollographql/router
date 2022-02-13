@@ -115,6 +115,7 @@ dependencies = [
  "reqwest",
  "reqwest-middleware",
  "reqwest-tracing",
+ "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",

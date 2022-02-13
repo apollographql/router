@@ -85,7 +85,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                             None => {
                                 errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
                             }
-                            Some(factory) => match (factory)(config) {
+                            Some(factory) => match factory.create_instance(config) {
                                 Ok(layer) => subgraph_service = layer.layer(subgraph_service),
                                 Err(err) => errors.push(ConfigurationError::LayerConfiguration {
                                     layer: kind.to_string(),
@@ -181,7 +181,8 @@ mod test {
                     routing_url: https://foo
                     layers:
                         - headers:
-                            - propagate: "a"
+                            - propagate: 
+                                name: "a"
                             - remove: "b"
                             
         "#,

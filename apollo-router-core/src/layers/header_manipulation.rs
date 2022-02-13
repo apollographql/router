@@ -4,7 +4,7 @@ use http::header::HeaderName;
 use http::HeaderValue;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
-use schemars::{schema_for, JsonSchema};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::str::FromStr;
 use std::task::Poll;
@@ -31,8 +31,8 @@ impl JsonSchema for Operation {
         "Operation".to_string()
     }
 
-    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        schema_for!(OperationDef).schema.into()
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        gen.subschema_for::<OperationDef>()
     }
 }
 
@@ -82,7 +82,7 @@ impl TryFrom<OperationDef> for Operation {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, Default, JsonSchema)]
 #[serde(transparent)]
 pub struct Config {
     operations: Vec<Operation>,
