@@ -11,6 +11,6 @@
     // pub headers: HeaderMap<HeaderValue>,
 
 fn router_service() {
-    request_val = "MYTESTINRHAISCRIPT";
+    // request_val = "MYTESTINRHAISCRIPT";
     headers.coucou = "hello";
 }

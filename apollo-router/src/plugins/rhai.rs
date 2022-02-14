@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, path::PathBuf, str::FromStr, sync::mpsc::sync_channel};
 
+use apollo_router_core::plugin_utils::structures;
 use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::{header::HeaderName, HeaderMap, HeaderValue, Method, Uri};
 use reqwest::Url;
+use rhai::plugin::RhaiResult;
 use rhai::{Engine, Scope, AST};
 use serde::Deserialize;
 use tokio::sync::oneshot;
@@ -87,6 +89,7 @@ impl Plugin for Rhai {
                     )
                 })
                 .collect();
+
             request
         });
 
@@ -95,15 +98,24 @@ impl Plugin for Rhai {
                 let mut engine = Engine::new();
                 engine.register_indexer_set(Headers::set_header);
                 engine.register_indexer_get(Headers::get_header);
-                let req_val = String::new();
                 let mut scope = Scope::new();
-                scope.push("request_val", req_val);
 
                 scope.push("headers", Headers(headers_map.lock().unwrap().clone()));
-                // let service_builder = ServiceBuilder::new();
-                let _: () = engine
-                    .call_fn(&mut scope, this.ast.as_ref().unwrap(), "router_service", ())
-                    .unwrap();
+
+                let func_result: RhaiResult =
+                    engine.call_fn(&mut scope, this.ast.as_ref().unwrap(), "router_service", ());
+                if let Err(func_error) = func_result {
+                    return structures::RouterResponse::builder()
+                        .errors(vec![Error {
+                            message: format!("RHAI plugin error: {}", func_error),
+                            locations: Vec::new(),
+                            path: Option::default(),
+                            extensions: Object::new(),
+                        }])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
                 let headers = scope.get_value::<Headers>("headers").unwrap();
                 for (header_name, header_value) in &headers.0 {
                     response.response.headers_mut().append(
@@ -111,13 +123,6 @@ impl Plugin for Rhai {
                         HeaderValue::from_str(header_value).unwrap(),
                     );
                 }
-                response.response.headers_mut().append(
-                    "XTEST",
-                    HeaderValue::from_str(
-                        scope.get_value::<String>("request_val").as_ref().unwrap(),
-                    )
-                    .unwrap(),
-                );
 
                 response
             })
@@ -135,7 +140,7 @@ mod tests {
             structures::{self, RouterRequestBuilder, RouterResponseBuilder},
             MockRouterService, RouterResponse,
         },
-        Context, DynPlugin, RouterRequest, ServiceBuilderExt,
+        Context, DynPlugin, ResponseBody, RouterRequest, ServiceBuilderExt,
     };
     use http::{HeaderValue, Request};
     use serde_json::Value;
@@ -148,11 +153,7 @@ mod tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |mut req: RouterRequest| {
-                req.http_request.headers_mut().append(
-                    "X-Custom-Header",
-                    HeaderValue::from_str("MY_CUSTOM_VALUE").unwrap(),
-                );
+            .returning(|_req: RouterRequest| {
                 let resp = RouterResponse::builder();
                 // resp.insert_header("XTEST", HeaderValue::from_str("hereisatest"));
 
@@ -163,7 +164,7 @@ mod tests {
             .get("rhai")
             .expect("Plugin not found")();
         dyn_plugin
-            .configure(&Value::from_str(r#"{"filename":"test.rhai"}"#).unwrap())
+            .configure(&Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap())
             .expect("Failed to configure");
         let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
 
@@ -182,16 +183,32 @@ mod tests {
             .call(router_req.build().into())
             .await
             .unwrap();
-        assert_eq!(
-            router_resp.response.headers().get("XTEST").unwrap(),
-            &"MYTESTINRHAISCRIPT"
-        );
-        assert_eq!(
-            router_resp.response.headers().get("coucou").unwrap(),
-            &"hello"
-        );
+        assert_eq!(router_resp.response.status(), 200);
+        let headers = router_resp.response.headers().clone();
+        // Check if it fails
+        let body = router_resp.response.into_body();
+        match body {
+            ResponseBody::GraphQL(resp) => {
+                if !resp.errors.is_empty() {
+                    panic!(
+                        "Contains errors : {}",
+                        resp.errors
+                            .into_iter()
+                            .map(|err| err.to_string())
+                            .collect::<Vec<String>>()
+                            .join("\n")
+                    );
+                }
+            }
+            ResponseBody::RawJSON(_) | ResponseBody::RawString(_) => {
+                panic!("should not be this kind of response")
+            }
+        }
+
+        assert_eq!(headers.get("coucou").unwrap(), &"hello");
     }
 }
 
 // Naming of methods are not relevant
 // BoxService not so easy to use
+// Builder for error too
