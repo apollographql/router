@@ -1,6 +1,6 @@
 ---
 source: apollo-router-core/src/query_planner/mod.rs
-assertion_line: 452
+assertion_line: 467
 expression: query_plan
 
 ---
@@ -12,7 +12,7 @@ Sequence {
                 requires: [],
                 variable_usages: [],
                 operation: "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
-                operation_kind: "query",
+                operation_kind: Query,
             },
         ),
         Parallel {
@@ -61,7 +61,7 @@ Sequence {
                                             "test_variable",
                                         ],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
-                                        operation_kind: "query",
+                                        operation_kind: Query,
                                     },
                                 ),
                             },
@@ -120,7 +120,7 @@ Sequence {
                                         ],
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
-                                        operation_kind: "query",
+                                        operation_kind: Query,
                                     },
                                 ),
                             },
@@ -168,7 +168,7 @@ Sequence {
                                         ],
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
-                                        operation_kind: "query",
+                                        operation_kind: Query,
                                     },
                                 ),
                             },
@@ -226,7 +226,7 @@ Sequence {
                                         ],
                                         variable_usages: [],
                                         operation: "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
-                                        operation_kind: "query",
+                                        operation_kind: Query,
                                     },
                                 ),
                             },

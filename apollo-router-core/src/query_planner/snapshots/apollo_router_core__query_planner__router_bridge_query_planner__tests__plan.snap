@@ -11,7 +11,7 @@ QueryPlan {
             requires: [],
             variable_usages: [],
             operation: "{me{name{first last}}}",
-            operation_kind: "query",
+            operation_kind: Query,
         },
     ),
 }

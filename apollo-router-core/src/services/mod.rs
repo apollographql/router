@@ -95,7 +95,7 @@ pub struct SubgraphRequest {
     pub operation_kind: OperationKind,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OperationKind {
     Query,
     Mutation,

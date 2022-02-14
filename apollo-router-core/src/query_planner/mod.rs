@@ -212,7 +212,7 @@ impl PlanNode {
 mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
-    use serde::Deserialize;
+    use serde::{Deserialize, Deserializer};
     use std::sync::Arc;
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
@@ -236,8 +236,28 @@ mod fetch {
         operation: String,
 
         /// The kind of operation (query, mutation or subscription)
-        #[serde(rename(deserialize = "operationKind"))]
-        operation_kind: String,
+        #[serde(
+            rename(deserialize = "operationKind"),
+            deserialize_with = "parse_operation"
+        )]
+        operation_kind: OperationKind,
+    }
+
+    fn parse_operation<'de, D>(deserializer: D) -> Result<OperationKind, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let buf = String::deserialize(deserializer)?;
+
+        match buf.as_str() {
+            "query" => Ok(OperationKind::Query),
+            "mutation" => Ok(OperationKind::Mutation),
+            "subscription" => Ok(OperationKind::Subscription),
+            s => Err(serde::de::Error::custom(format!(
+                "unknown operation kind: {}",
+                s
+            ))),
+        }
     }
 
     struct Variables {
@@ -345,12 +365,7 @@ mod fetch {
                     .unwrap()
                     .into(),
                 context: context.clone(),
-                operation_kind: match operation_kind.as_str() {
-                    "query" => OperationKind::Query,
-                    "mutation" => OperationKind::Mutation,
-                    "subscription" => OperationKind::Subscription,
-                    _ => unreachable!(),
-                },
+                operation_kind: operation_kind.clone(),
             };
 
             let service = service_registry
