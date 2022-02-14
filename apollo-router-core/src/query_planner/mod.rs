@@ -365,7 +365,7 @@ mod fetch {
                     .unwrap()
                     .into(),
                 context: context.clone(),
-                operation_kind: operation_kind.clone(),
+                operation_kind: *operation_kind,
             };
 
             let service = service_registry
