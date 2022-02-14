@@ -18,15 +18,14 @@ pub struct RouterRequest {
 
 impl From<RouterRequest> for crate::RouterRequest {
     fn from(request: RouterRequest) -> Self {
+        let req = Request::new(crate::Request {
+            query: request.query,
+            operation_name: request.operation_name,
+            variables: request.variables.unwrap_or_default(),
+            extensions: request.extensions.unwrap_or_default(),
+        });
         crate::RouterRequest {
-            http_request: Request::new(crate::Request {
-                query: request.query,
-                operation_name: request.operation_name,
-                variables: request.variables.unwrap_or_default(),
-                extensions: request.extensions.unwrap_or_default(),
-            })
-            .into(),
-            context: request.context.unwrap_or_default(),
+            context: request.context.unwrap_or_default().with_request(req.into()),
         }
     }
 }

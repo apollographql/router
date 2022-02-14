@@ -34,6 +34,15 @@ impl Context<()> {
     }
 }
 
+impl From<Context<http_compat::Request<Request>>> for Context<Arc<http_compat::Request<Request>>> {
+    fn from(ctx: Context<http_compat::Request<Request>>) -> Self {
+        Self {
+            request: Arc::new(ctx.request),
+            extensions: ctx.extensions,
+        }
+    }
+}
+
 impl<T> Context<T> {
     pub fn extensions(&self) -> impl Future<Output = RwLockReadGuard<Object>> {
         self.extensions.read()
