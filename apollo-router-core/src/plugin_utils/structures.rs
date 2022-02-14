@@ -17,16 +17,16 @@ pub struct RouterRequest {
 }
 
 impl From<RouterRequest> for crate::RouterRequest {
-    fn from(rr: RouterRequest) -> Self {
-        Self {
+    fn from(request: RouterRequest) -> Self {
+        crate::RouterRequest {
             http_request: Request::new(crate::Request {
-                query: rr.query,
-                operation_name: rr.operation_name,
-                variables: rr.variables.unwrap_or_default(),
-                extensions: rr.extensions.unwrap_or_default(),
+                query: request.query,
+                operation_name: request.operation_name,
+                variables: request.variables.unwrap_or_default(),
+                extensions: request.extensions.unwrap_or_default(),
             })
             .into(),
-            context: rr.context.unwrap_or_default(),
+            context: request.context.unwrap_or_default(),
         }
     }
 }
@@ -48,8 +48,8 @@ pub struct RouterResponse {
 }
 
 impl From<RouterResponse> for crate::RouterResponse {
-    fn from(rr: RouterResponse) -> Self {
-        rr.with_status(StatusCode::OK)
+    fn from(response: RouterResponse) -> Self {
+        response.with_status(StatusCode::OK)
     }
 }
 
@@ -102,10 +102,10 @@ pub struct ExecutionRequest {
 }
 
 impl From<ExecutionRequest> for crate::ExecutionRequest {
-    fn from(er: ExecutionRequest) -> Self {
+    fn from(execution_request: ExecutionRequest) -> Self {
         Self {
-            query_plan: er.query_plan.unwrap_or_default(),
-            context: er.context.unwrap_or_else(|| {
+            query_plan: execution_request.query_plan.unwrap_or_default(),
+            context: execution_request.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
                     Request::new(crate::Request {
                         query: Default::default(),
@@ -139,27 +139,27 @@ pub struct ExecutionResponse {
 }
 
 impl From<ExecutionResponse> for crate::ExecutionResponse {
-    fn from(er: ExecutionResponse) -> Self {
-        let mut response_builder = Response::builder().status(er.status);
+    fn from(execution_response: ExecutionResponse) -> Self {
+        let mut response_builder = Response::builder().status(execution_response.status);
 
-        for (name, value) in er.headers {
+        for (name, value) in execution_response.headers {
             response_builder = response_builder.header(name, value);
         }
         let response = response_builder
             .body(crate::Response {
-                label: er.label,
-                data: er.data.unwrap_or_default(),
-                path: er.path,
-                has_next: er.has_next,
-                errors: er.errors,
-                extensions: er.extensions.unwrap_or_default(),
+                label: execution_response.label,
+                data: execution_response.data.unwrap_or_default(),
+                path: execution_response.path,
+                has_next: execution_response.has_next,
+                errors: execution_response.errors,
+                extensions: execution_response.extensions.unwrap_or_default(),
             })
             .expect("crate::Response implements Serialize; qed")
             .into();
 
         Self {
             response,
-            context: er.context.unwrap_or_else(|| {
+            context: execution_response.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
                     Request::new(crate::Request {
                         query: Default::default(),
