@@ -3112,7 +3112,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation.git?rev=17b9ca519b54bad773b89c44a9ef033949788edb#17b9ca519b54bad773b89c44a9ef033949788edb"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=6f1a7033d03ff7310644d033508256dcf759a602#6f1a7033d03ff7310644d033508256dcf759a602"
 dependencies = [
  "anyhow",
  "deno_core",

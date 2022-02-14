@@ -7,7 +7,7 @@ use typed_builder::TypedBuilder;
 
 /// A graphql request.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Derivative, Serialize, Deserialize, TypedBuilder)]
+#[derive(Clone, Derivative, Serialize, Deserialize, TypedBuilder, Default)]
 #[serde(rename_all = "camelCase")]
 #[builder(field_defaults(setter(into)))]
 #[derivative(Debug, PartialEq)]

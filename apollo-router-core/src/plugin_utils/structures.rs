@@ -73,15 +73,8 @@ impl RouterResponse {
                 .expect("crate::Response implements Serialize; qed")
                 .into(),
             context: this.context.unwrap_or_else(|| {
-                Context::new().with_request(Arc::new(
-                    Request::new(crate::Request {
-                        query: Default::default(),
-                        operation_name: Default::default(),
-                        variables: Default::default(),
-                        extensions: Default::default(),
-                    })
-                    .into(),
-                ))
+                Context::new()
+                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
             }),
         }
     }
@@ -106,15 +99,8 @@ impl From<ExecutionRequest> for crate::ExecutionRequest {
         Self {
             query_plan: execution_request.query_plan.unwrap_or_default(),
             context: execution_request.context.unwrap_or_else(|| {
-                Context::new().with_request(Arc::new(
-                    Request::new(crate::Request {
-                        query: Default::default(),
-                        operation_name: Default::default(),
-                        variables: Default::default(),
-                        extensions: Default::default(),
-                    })
-                    .into(),
-                ))
+                Context::new()
+                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
             }),
         }
     }
@@ -160,15 +146,8 @@ impl From<ExecutionResponse> for crate::ExecutionResponse {
         Self {
             response,
             context: execution_response.context.unwrap_or_else(|| {
-                Context::new().with_request(Arc::new(
-                    Request::new(crate::Request {
-                        query: Default::default(),
-                        operation_name: Default::default(),
-                        variables: Default::default(),
-                        extensions: Default::default(),
-                    })
-                    .into(),
-                ))
+                Context::new()
+                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
             }),
         }
     }
