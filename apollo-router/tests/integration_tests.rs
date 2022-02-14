@@ -1,9 +1,9 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
-use apollo_router_core::SubgraphRequest;
-use apollo_router_core::ValueExt;
-use apollo_router_core::{PluggableRouterServiceBuilder, ResponseBody};
+use apollo_router_core::{
+    Context, PluggableRouterServiceBuilder, ResponseBody, SubgraphRequest, ValueExt,
+};
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
@@ -32,13 +32,12 @@ macro_rules! assert_federated_response {
         let expected = query_node(&request).await.unwrap();
 
         let http_request = http::Request::builder()
-        .method("GET")
-        .body(request)
-        .unwrap().into();
+            .method("GET")
+            .body(request)
+            .unwrap().into();
 
         let request = graphql::RouterRequest {
-            context: graphql::Context::new(),
-            http_request,
+            context: Context::new().with_request(http_request),
         };
 
         let (actual, registry) = query_rust(request).await;
@@ -185,8 +184,7 @@ async fn missing_variables() {
         .into();
 
     let request = graphql::RouterRequest {
-        context: graphql::Context::new(),
-        http_request,
+        context: Context::new().with_request(http_request),
     };
     let (response, _) = query_rust(request).await;
     let expected = vec![
