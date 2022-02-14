@@ -36,7 +36,7 @@ where
     fn layer(&self, service: S) -> Self::Service {
         ForbidHttpGetMutationsService {
             service,
-            forbid_http_get_mutations: self.clone(),
+            _forbid_http_get_mutations: self.clone(),
         }
     }
 }
