@@ -78,13 +78,21 @@ pub trait ConfigurableLayer: Default + Send + Sync + 'static {
     }
 }
 
-// Register a layer with a name
+/// Register a layer with a group and a name
+/// Grouping prevent name clashes for layers, so choose something unique like your domain name.
+/// Layers will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_layer {
-    ($key: literal, $value: ident) => {
+    ($group: literal, $name: literal, $value: ident) => {
         startup::on_startup! {
-            // Register the plugin factory function
-            $crate::layers_mut().insert($key.to_string(), $crate::LayerFactory::new(|configuration| {
+            let qualified_name = if $group == "" {
+                $name.to_string()
+            }
+            else {
+                format!("{}.{}", $group, $name)
+            };
+
+            $crate::layers_mut().insert(qualified_name, $crate::LayerFactory::new(|configuration| {
                 let mut layer = $value::default();
                 let typed_configuration = serde_json::from_value(configuration.clone())?;
                 layer.configure(typed_configuration)?;

@@ -88,7 +88,7 @@ pub struct Config {
     operations: Vec<Operation>,
 }
 
-register_layer!("headers", HeaderManipulationLayer);
+register_layer!("", "headers", HeaderManipulationLayer);
 impl ConfigurableLayer for HeaderManipulationLayer {
     type Config = Config;
 

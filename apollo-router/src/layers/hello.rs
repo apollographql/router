@@ -30,7 +30,7 @@ impl ConfigurableLayer for Hello {
     }
 }
 
-register_layer!("hello", Hello);
+register_layer!("", "hello", Hello);
 
 #[cfg(test)]
 mod tests {
