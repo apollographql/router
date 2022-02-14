@@ -12,4 +12,5 @@
 
 fn router_service() {
     request_val = "MYTESTINRHAISCRIPT";
+    headers.coucou = "hello";
 }

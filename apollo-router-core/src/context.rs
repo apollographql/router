@@ -21,7 +21,7 @@ impl Context<()> {
         }
     }
 
-    pub(crate) fn with_request<T>(self, request: T) -> Context<T> {
+    pub fn with_request<T>(self, request: T) -> Context<T> {
         // TODO this could be improved with this RFC https://github.com/rust-lang/rust/issues/86555
         let Self {
             request: _,
