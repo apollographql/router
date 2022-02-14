@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     fn it_handles_default_name() {
-        let expected = "# -\nquery ($limit: Int) { products(limit: $limit) { upc, name, price } }";
+        let expected = "# -\nquery ($limit: Int!) { products(limit: $limit) { upc, name, price } }";
         let op_name = Value::String("-".into());
         let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
@@ -654,7 +654,7 @@ mod test {
     #[test]
     fn it_handles_query_specified_name() {
         let expected =
-            "# OneProduct\nquery OneProduct($limit: Int) { products(limit: $limit) { upc, name, price } }";
+            "# OneProduct\nquery OneProduct($limit: Int!) { products(limit: $limit) { upc, name, price } }";
         let op_name = Value::String("-".into());
         let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
@@ -665,7 +665,7 @@ mod test {
     #[test]
     fn it_handles_same_out_of_band_and_query_specified_name() {
         let expected =
-            "# OneProduct\nquery OneProduct($limit: Int) { products(limit: $limit) { upc, name, price } }";
+            "# OneProduct\nquery OneProduct($limit: Int!) { products(limit: $limit) { upc, name, price } }";
         let op_name = Value::String("OneProduct".into());
         let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 

@@ -25,7 +25,7 @@ otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
 anyhow = "1.0.53"
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "ff317c7e85165bb6c380284b63c55d8af877fb7b" }
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "9a14371f3e5352920c74dcae85fa4e71b24f0449" }
 apollo-router-core = { path = "../apollo-router-core" }
 async-trait = "0.1.52"
 atty = "0.2.14"
