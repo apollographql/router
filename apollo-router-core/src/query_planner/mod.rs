@@ -18,6 +18,16 @@ pub struct QueryPlan {
     pub(crate) root: PlanNode,
 }
 
+/// This default impl is useful for plugin_utils users
+/// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
+impl Default for QueryPlan {
+    fn default() -> Self {
+        Self {
+            root: PlanNode::Sequence { nodes: Vec::new() },
+        }
+    }
+}
+
 /// Query plans are composed of a set of nodes.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]

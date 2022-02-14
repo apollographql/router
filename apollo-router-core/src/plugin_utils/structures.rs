@@ -1,6 +1,5 @@
 use crate::{Context, Error, Object, Path, QueryPlan};
 use http::{Request, Response, StatusCode};
-use serde_json::json;
 use serde_json_bytes::{ByteString, Value};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -17,17 +16,17 @@ pub struct RouterRequest {
     context: Option<Context<()>>,
 }
 
-impl Into<crate::RouterRequest> for RouterRequest {
-    fn into(self) -> crate::RouterRequest {
-        crate::RouterRequest {
+impl From<RouterRequest> for crate::RouterRequest {
+    fn from(rr: RouterRequest) -> Self {
+        Self {
             http_request: Request::new(crate::Request {
-                query: self.query,
-                operation_name: self.operation_name,
-                variables: self.variables.unwrap_or_default(),
-                extensions: self.extensions.unwrap_or_default(),
+                query: rr.query,
+                operation_name: rr.operation_name,
+                variables: rr.variables.unwrap_or_default(),
+                extensions: rr.extensions.unwrap_or_default(),
             })
             .into(),
-            context: self.context.unwrap_or_default(),
+            context: rr.context.unwrap_or_default(),
         }
     }
 }
@@ -48,9 +47,9 @@ pub struct RouterResponse {
     context: Option<Context<CompatRequest>>,
 }
 
-impl Into<crate::RouterResponse> for RouterResponse {
-    fn into(self) -> crate::RouterResponse {
-        self.with_status(StatusCode::OK)
+impl From<RouterResponse> for crate::RouterResponse {
+    fn from(rr: RouterResponse) -> Self {
+        rr.with_status(StatusCode::OK)
     }
 }
 
@@ -102,16 +101,11 @@ pub struct ExecutionRequest {
     context: Option<Context<CompatRequest>>,
 }
 
-impl Into<crate::ExecutionRequest> for ExecutionRequest {
-    fn into(self) -> crate::ExecutionRequest {
-        crate::ExecutionRequest {
-            query_plan: self.query_plan.unwrap_or_else(|| {
-                Arc::new(QueryPlan {
-                    root: serde_json::from_value(json!({  "kind": "Sequence", "nodes": []}))
-                        .unwrap(),
-                })
-            }),
-            context: self.context.unwrap_or_else(|| {
+impl From<ExecutionRequest> for crate::ExecutionRequest {
+    fn from(er: ExecutionRequest) -> Self {
+        Self {
+            query_plan: er.query_plan.unwrap_or_default(),
+            context: er.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
                     Request::new(crate::Request {
                         query: Default::default(),
@@ -144,32 +138,28 @@ pub struct ExecutionResponse {
     context: Option<Context<CompatRequest>>,
 }
 
-impl Into<crate::ExecutionResponse> for ExecutionResponse {
-    fn into(self) -> crate::ExecutionResponse {
-        let this = self.clone();
-        let mut response_builder = Response::builder().status(this.status);
+impl From<ExecutionResponse> for crate::ExecutionResponse {
+    fn from(er: ExecutionResponse) -> Self {
+        let mut response_builder = Response::builder().status(er.status);
 
-        for (name, value) in this.headers {
+        for (name, value) in er.headers {
             response_builder = response_builder.header(name, value);
         }
         let response = response_builder
-            .body(
-                crate::Response {
-                    label: this.label,
-                    data: this.data.unwrap_or_default(),
-                    path: this.path,
-                    has_next: this.has_next,
-                    errors: this.errors,
-                    extensions: this.extensions.unwrap_or_default(),
-                }
-                .into(),
-            )
+            .body(crate::Response {
+                label: er.label,
+                data: er.data.unwrap_or_default(),
+                path: er.path,
+                has_next: er.has_next,
+                errors: er.errors,
+                extensions: er.extensions.unwrap_or_default(),
+            })
             .expect("crate::Response implements Serialize; qed")
             .into();
 
-        crate::ExecutionResponse {
+        Self {
             response,
-            context: this.context.unwrap_or_else(|| {
+            context: er.context.unwrap_or_else(|| {
                 Context::new().with_request(Arc::new(
                     Request::new(crate::Request {
                         query: Default::default(),

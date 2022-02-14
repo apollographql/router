@@ -249,7 +249,7 @@ where
         .and(warp::host::optional())
         .and(
             warp::query::raw()
-                .or(warp::any().map(|| String::default()))
+                .or(warp::any().map(String::default))
                 .unify(),
         )
         .and(warp::header::headers_cloned())
