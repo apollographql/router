@@ -2,11 +2,11 @@ use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::header_manipulation::HeaderManipulationLayer;
-use apollo_router_core::prelude::*;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    Context, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
+use apollo_router_core::{prelude::*, Context};
 use http::header::HeaderName;
 use serde_json::Value;
 use std::str::FromStr;
@@ -143,9 +143,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 builder
                     .build()
                     .await
-                    .map_request(|http_request| RouterRequest {
-                        http_request,
-                        context: Context::new(),
+                    .map_request(|http_request: Request<apollo_router_core::Request>| {
+                        RouterRequest {
+                            context: Context::new().with_request(http_request),
+                        }
                     })
                     .map_response(|response| response.response)
                     .boxed_clone(),

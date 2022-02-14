@@ -76,11 +76,11 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        let query = &request.http_request.body().query;
+        let query = &request.context.request.body().query;
 
         if query.is_empty() {
             let res = plugin_utils::RouterResponse::builder()
-                .context(request.context.with_request(Arc::new(request.http_request)))
+                .context(request.context.into())
                 .errors(vec![crate::Error {
                     message: "Must provide query string.".to_string(),
                     ..Default::default()
@@ -92,35 +92,35 @@ where
 
         if let Some(response) = self
             .naive_introspection
-            .get(&request.http_request.body().query)
+            .get(&request.context.request.body().query)
         {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context: Context::new().with_request(Arc::new(request.context.request)),
                 })
             });
         }
 
         let fut = async move {
             let query = query_cache
-                .get_query(&request.http_request.body().query)
+                .get_query(&request.context.request.body().query)
                 .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
             if let Some(err) = query.as_ref().and_then(|q| {
-                q.validate_variables(request.http_request.body(), &schema)
+                q.validate_variables(request.context.request.body(), &schema)
                     .err()
             }) {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: Context::new().with_request(Arc::new(request.http_request)),
+                    context: Context::new().with_request(Arc::new(request.context.request)),
                 })
             } else {
-                let operation_name = request.http_request.body().operation_name.clone();
+                let operation_name = request.context.request.body().operation_name.clone();
                 let planned_query = planning
                     .call(QueryPlannerRequest {
-                        context: request.context.with_request(Arc::new(request.http_request)),
+                        context: request.context.into(),
                     })
                     .await;
                 let mut response = match planned_query {
