@@ -22,8 +22,7 @@ use tower_service::Service;
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
-            http_request,
-            context: Context::new(),
+            context: Context::new().with_request(http_request),
         }
     }
 }
@@ -62,10 +61,8 @@ impl FromStr for ResponseBody {
 assert_impl_all!(RouterRequest: Send);
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
-    pub http_request: http_compat::Request<Request>,
-
     // Context for extension
-    pub context: Context<()>,
+    pub context: Context<http_compat::Request<Request>>,
 }
 
 assert_impl_all!(RouterResponse: Send);
