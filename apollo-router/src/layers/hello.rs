@@ -24,9 +24,9 @@ impl<S> Layer<S> for Hello {
 impl ConfigurableLayer for Hello {
     type Config = Conf;
 
-    fn configure(&mut self, configuration: Self::Config) -> Result<(), BoxError> {
+    fn configure(self, configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
-        Ok(())
+        Ok(self)
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
     #[tokio::test]
     async fn layer_registered() {
         apollo_router_core::layers()
-            .get("hello")
+            .get("example.com_hello")
             .expect("Layer not found")
             .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
             .unwrap();

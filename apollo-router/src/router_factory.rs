@@ -5,7 +5,6 @@ use apollo_router_core::{
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
-use serde_json::Value;
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -180,10 +179,9 @@ mod test {
                 foo:
                     routing_url: https://foo
                     layers:
-                        - headers:
-                            - propagate: 
-                                name: "a"
-                            - remove: "b"
+                        - headers_insert:
+                              name: "foo"
+                              value: "foo"
                             
         "#,
         )

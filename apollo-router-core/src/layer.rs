@@ -14,6 +14,13 @@ pub struct LayerFactory {
     schema_factory: SchemaFactory,
 }
 
+type BoxedSubgraphLayer = BoxLayer<
+    BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    SubgraphRequest,
+    SubgraphResponse,
+    BoxError,
+>;
+
 impl LayerFactory {
     pub fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
         Self {
@@ -25,15 +32,7 @@ impl LayerFactory {
     pub fn create_instance(
         &self,
         configuration: &serde_json::Value,
-    ) -> Result<
-        BoxLayer<
-            BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-            SubgraphRequest,
-            SubgraphResponse,
-            BoxError,
-        >,
-        BoxError,
-    > {
+    ) -> Result<BoxedSubgraphLayer, BoxError> {
         (self.instance_factory)(configuration)
     }
 
@@ -71,10 +70,10 @@ pub fn layers_mut<'a>() -> MutexGuard<'a, HashMap<String, LayerFactory>> {
 
 #[async_trait]
 pub trait ConfigurableLayer: Default + Send + Sync + 'static {
-    type Config: JsonSchema + Default;
+    type Config: JsonSchema;
 
-    fn configure(&mut self, _configuration: Self::Config) -> Result<(), BoxError> {
-        Ok(())
+    fn configure(self, _configuration: Self::Config) -> Result<Self, BoxError> {
+        Ok(self)
     }
 }
 
@@ -89,14 +88,13 @@ macro_rules! register_layer {
                 $name.to_string()
             }
             else {
-                format!("{}.{}", $group, $name)
+                format!("{}_{}", $group, $name)
             };
 
             $crate::layers_mut().insert(qualified_name, $crate::LayerFactory::new(|configuration| {
-                let mut layer = $value::default();
+                let layer = $value::default();
                 let typed_configuration = serde_json::from_value(configuration.clone())?;
-                layer.configure(typed_configuration)?;
-                Ok(tower::util::BoxLayer::new(layer))
+                Ok(tower::util::BoxLayer::new(layer.configure(typed_configuration)?))
             }, |gen| gen.subschema_for::<<$value as $crate::ConfigurableLayer>::Config>()));
         }
     };
