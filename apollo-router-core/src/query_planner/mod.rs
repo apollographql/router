@@ -371,7 +371,7 @@ pub(crate) mod fetch {
                     .method(http::Method::POST)
                     .body(
                         Request::builder()
-                            .query(operation.clone())
+                            .query(operation)
                             .variables(Arc::new(variables))
                             .build(),
                     )

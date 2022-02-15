@@ -7,7 +7,6 @@ use crate::{
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
 };
-
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;

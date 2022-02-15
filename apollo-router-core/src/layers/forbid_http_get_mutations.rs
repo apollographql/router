@@ -214,10 +214,12 @@ mod forbid_http_get_mutations_tests {
         ExecutionRequest::builder()
             .query_plan(Arc::new(QueryPlan { root }))
             .context(
-                Context::new().with_request(Arc::new(Request::builder()
+                Context::new().with_request(Arc::new(
+                    Request::builder()
                         .method(method)
-                        .body(crate::Request::default()).unwrap()
-                        .into()
+                        .body(crate::Request::default())
+                        .unwrap()
+                        .into(),
                 )),
             )
             .build()
