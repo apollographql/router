@@ -317,15 +317,16 @@ impl PluggableRouterServiceBuilder {
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().layer(APQ::default()).service(
                 self.plugins.iter_mut().fold(
-                        RouterService::builder()
-                            .query_planner_service(query_planner_service)
-                            .query_execution_service(execution_service)
-                            .schema(self.schema)
-                            .query_cache(query_cache)
-                            .naive_introspection(naive_introspection)
-                            .build().boxed(),
+                    RouterService::builder()
+                        .query_planner_service(query_planner_service)
+                        .query_execution_service(execution_service)
+                        .schema(self.schema)
+                        .query_cache(query_cache)
+                        .naive_introspection(naive_introspection)
+                        .build()
+                        .boxed(),
                     |acc, e| e.router_service(acc),
-                )
+                ),
             ),
             self.buffer,
         );
