@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.2 (git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449)",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "apollo-parser 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "bytes",
  "clap 3.0.14",
@@ -4387,7 +4387,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "ansi_term",
  "anyhow",
