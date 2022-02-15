@@ -4,9 +4,13 @@ use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tower::util::{BoxLayer, BoxService};
 use tower::BoxError;
+
+type InstanceFactory = fn(&serde_json::Value) -> Result<BoxedSubgraphLayer, BoxError>;
+
+type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
 #[derive(Clone)]
 pub struct LayerFactory {
@@ -41,11 +45,7 @@ impl LayerFactory {
     }
 }
 
-type InstanceFactory = fn(&serde_json::Value) -> Result<BoxedSubgraphLayer, BoxError>;
-
-type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
-
-static LAYER_REGISTRY: Lazy<Mutex<HashMap<String, Arc<LayerFactory>>>> = Lazy::new(|| {
+static LAYER_REGISTRY: Lazy<Mutex<HashMap<String, LayerFactory>>> = Lazy::new(|| {
     let m = HashMap::new();
     Mutex::new(m)
 });
@@ -54,10 +54,10 @@ pub fn register_layer(name: String, layer_factory: LayerFactory) {
     LAYER_REGISTRY
         .lock()
         .expect("Lock poisoned")
-        .insert(name, Arc::new(layer_factory));
+        .insert(name, layer_factory);
 }
 
-pub fn layers() -> HashMap<String, Arc<LayerFactory>> {
+pub fn layers() -> HashMap<String, LayerFactory> {
     LAYER_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
