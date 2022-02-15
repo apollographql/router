@@ -144,13 +144,15 @@ impl ReportHeader {
 
         header.hostname = hostname()?;
         header.agent_version = format!(
-            "{}-{}",
+            "{}@{}",
             std::env!("CARGO_PKG_NAME"),
             std::env!("CARGO_PKG_VERSION")
         );
         header.runtime_version = "rust".to_string();
         header.uname = get_uname()?;
         header.graph_ref = graph.to_string();
+        // TODO: The executable_schema_id field is missing. Fine for
+        // now but will need to be addressed at some point.
         Ok(header)
     }
 }

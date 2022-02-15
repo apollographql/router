@@ -1,16 +1,18 @@
 use crate::apq::APQService;
+use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse, NaiveIntrospection,
-    Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
-    RouterBridgeQueryPlanner, RouterRequest, RouterResponse, RouterResponseBuilder, Schema,
-    SubgraphRequest, SubgraphResponse,
+    plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
+    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    SubgraphResponse,
 };
+
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
+use tower::util::{BoxCloneService, BoxLayer, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -69,7 +71,7 @@ where
         Poll::Pending
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
         //Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
@@ -77,38 +79,39 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        let context = request.context.with_request(Arc::new(request.http_request));
+        let query = &req.context.request.body().query.as_ref();
 
-        let query = context.request.body().query.clone();
-
-        if query.is_none() || query.as_ref().unwrap().is_empty() {
-            let res = RouterResponseBuilder::new()
-                .push_error(crate::Error {
+        if query.is_none() || query.expect("checked before; qed").is_empty() {
+            let res = plugin_utils::RouterResponse::builder()
+                .context(req.context.into())
+                .errors(vec![crate::Error {
                     message: "Must provide query string.".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                })
-                .with_context(context.clone())
-                .build();
+                    ..Default::default()
+                }])
+                .build()
+                .into();
             return Box::pin(async move { Ok(res) });
         };
 
-        let request = Arc::clone(&context.clone().request);
-
-        let query = query.expect("checked just above; qed");
+        let query = req
+            .context
+            .request
+            .body()
+            .query
+            .clone()
+            .expect("checked above; qed");
 
         if let Some(response) = self.naive_introspection.get(query.as_str()) {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context,
+                    context: req.context.into(),
                 })
             });
         }
 
         let fut = async move {
-            let body = request.body();
+            let body = req.context.request.body();
             let query = query_cache
                 .get_query(query.as_str())
                 .instrument(tracing::info_span!("query_parsing"))
@@ -120,11 +123,15 @@ where
             {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context,
+                    context: req.context.into(),
                 })
             } else {
                 let operation_name = body.operation_name.clone();
-                let planned_query = planning.call(QueryPlannerRequest { context }).await;
+                let planned_query = planning
+                    .call(QueryPlannerRequest {
+                        context: req.context.into(),
+                    })
+                    .await;
                 let mut response = match planned_query {
                     Ok(planned_query) => {
                         execution
@@ -258,16 +265,18 @@ impl PluggableRouterServiceBuilder {
 
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let (execution_service, execution_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
-                self.plugins.iter_mut().fold(
-                    ExecutionService::builder()
-                        .schema(self.schema.clone())
-                        .subgraph_services(subgraphs)
-                        .build()
-                        .boxed(),
-                    |acc, e| e.execution_service(acc),
+            ServiceBuilder::new()
+                .layer(BoxLayer::new(ForbidHttpGetMutations::default()))
+                .service(
+                    self.plugins.iter_mut().fold(
+                        ExecutionService::builder()
+                            .schema(self.schema.clone())
+                            .subgraph_services(subgraphs)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.execution_service(acc),
+                    ),
                 ),
-            ),
             self.buffer,
         );
         tokio::spawn(execution_worker.with_subscriber(self.dispatcher.clone()));

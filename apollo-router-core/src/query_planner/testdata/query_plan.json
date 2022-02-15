@@ -5,7 +5,8 @@
       "kind": "Fetch",
       "serviceName": "product",
       "variableUsages": [],
-      "operation": "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}"
+      "operation": "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
+      "operationKind": "query"
     },
     {
       "kind": "Parallel",
@@ -30,7 +31,8 @@
                   }
                 ],
                 "variableUsages": ["test_variable"],
-                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}"
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
+                "operationKind": "query"
               }
             },
             {
@@ -52,7 +54,8 @@
                   }
                 ],
                 "variableUsages": [],
-                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}"
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
+                "operationKind": "query"
               }
             }
           ]
@@ -77,7 +80,8 @@
                   }
                 ],
                 "variableUsages": [],
-                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}"
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename isbn title year}}}",
+                "operationKind": "query"
               }
             },
             {
@@ -99,7 +103,8 @@
                   }
                 ],
                 "variableUsages": [],
-                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}"
+                "operation": "query($representations:[_Any!]!){_entities(representations:$representations){...on Book{name}}}",
+                "operationKind": "query"
               }
             }
           ]

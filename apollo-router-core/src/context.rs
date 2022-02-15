@@ -21,7 +21,7 @@ impl Context<()> {
         }
     }
 
-    pub(crate) fn with_request<T>(self, request: T) -> Context<T> {
+    pub fn with_request<T>(self, request: T) -> Context<T> {
         // TODO this could be improved with this RFC https://github.com/rust-lang/rust/issues/86555
         let Self {
             request: _,
@@ -30,6 +30,15 @@ impl Context<()> {
         Context {
             request,
             extensions,
+        }
+    }
+}
+
+impl From<Context<http_compat::Request<Request>>> for Context<Arc<http_compat::Request<Request>>> {
+    fn from(ctx: Context<http_compat::Request<Request>>) -> Self {
+        Self {
+            request: Arc::new(ctx.request),
+            extensions: ctx.extensions,
         }
     }
 }

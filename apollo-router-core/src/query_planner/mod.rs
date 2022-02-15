@@ -3,6 +3,7 @@ mod router_bridge_query_planner;
 mod selection;
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
+use fetch::OperationKind;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
@@ -14,7 +15,17 @@ pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
-    root: PlanNode,
+    pub(crate) root: PlanNode,
+}
+
+/// This default impl is useful for plugin_utils users
+/// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
+impl Default for QueryPlan {
+    fn default() -> Self {
+        Self {
+            root: PlanNode::Sequence { nodes: Vec::new() },
+        }
+    }
 }
 
 /// Query plans are composed of a set of nodes.
@@ -38,6 +49,17 @@ pub(crate) enum PlanNode {
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
+}
+
+impl PlanNode {
+    pub fn contains_mutations(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::Flatten(_) => false,
+        }
+    }
 }
 
 impl QueryPlan {
@@ -71,6 +93,10 @@ impl QueryPlan {
             .await;
 
         Response::builder().data(value).errors(errors).build()
+    }
+
+    pub fn contains_mutations(&self) -> bool {
+        self.root.contains_mutations()
     }
 }
 
@@ -209,7 +235,7 @@ impl PlanNode {
     }
 }
 
-mod fetch {
+pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
     use serde::Deserialize;
@@ -234,6 +260,17 @@ mod fetch {
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
+
+        /// The GraphQL operation kind that is used for the fetch.
+        operation_kind: OperationKind,
+    }
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum OperationKind {
+        Query,
+        Mutation,
+        Subscription,
     }
 
     struct Variables {
@@ -263,24 +300,25 @@ mod fetch {
 
                 let mut paths = Vec::new();
                 let mut values = Vec::new();
-                data.select_values_and_paths(current_dir, |_path, value| {
-                    paths.push(_path);
-                    values.push(value)
-                })?;
-
-                let representations = Value::Array(
-                    values
-                        .into_iter()
-                        .flat_map(|value| match value {
-                            Value::Object(content) => {
-                                select_object(content, requires, schema).transpose()
+                data.select_values_and_paths(current_dir, |path, value| {
+                    match value {
+                        Value::Object(content) => {
+                            let object = select_object(content, requires, schema)?;
+                            if let Some(value) = object {
+                                paths.push(path);
+                                values.push(value)
                             }
-                            _ => Some(Err(FetchError::ExecutionInvalidContent {
+                        }
+                        _ => {
+                            return Err(FetchError::ExecutionInvalidContent {
                                 reason: "not an object".to_string(),
-                            })),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                            })
+                        }
+                    }
+                    Ok(())
+                })?;
+                let representations = Value::Array(values);
+
                 variables.insert("representations", representations);
 
                 Ok(Variables { variables, paths })
@@ -333,7 +371,7 @@ mod fetch {
                     .method(http::Method::POST)
                     .body(
                         Request::builder()
-                            .query(Some(operation.clone()))
+                            .query(operation.clone())
                             .variables(Arc::new(variables))
                             .build(),
                     )
@@ -410,6 +448,10 @@ mod fetch {
 
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
+        }
+
+        pub(crate) fn operation_kind(&self) -> &OperationKind {
+            &self.operation_kind
         }
     }
 }

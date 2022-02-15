@@ -13,7 +13,6 @@ use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 use std::convert::Infallible;
-use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::layer::util::Stack;
@@ -23,8 +22,7 @@ use tower_service::Service;
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
-            http_request,
-            context: Context::new(),
+            context: Context::new().with_request(http_request),
         }
     }
 }
@@ -63,10 +61,8 @@ impl FromStr for ResponseBody {
 assert_impl_all!(RouterRequest: Send);
 // the parsed graphql Request, HTTP headers and contextual data for extensions
 pub struct RouterRequest {
-    pub http_request: http_compat::Request<Request>,
-
     // Context for extension
-    pub context: Context<()>,
+    pub context: Context<http_compat::Request<Request>>,
 }
 
 assert_impl_all!(RouterResponse: Send);
@@ -146,9 +142,11 @@ pub trait ServiceBuilderExt<L> {
         value: HeaderValue,
     ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
     fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
+
+    #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,
-        cache: Cache<Key, Value>,
+        cache: Cache<Key, Result<Value, S::Error>>,
         key_fn: KeyFn,
         value_fn: ValueFn,
         response_fn: ResponseFn,
@@ -156,12 +154,7 @@ pub trait ServiceBuilderExt<L> {
     where
         Request: Send,
         S: Service<Request> + Send,
-        Key: Send + Sync + Eq + Hash + Clone + 'static,
-        Value: Send + Sync + Clone + 'static,
-        KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
-        ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
-        ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
-        <S as Service<Request>>::Error: Send + Sync,
+        <S as Service<Request>>::Error: Send + Sync + Clone,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send;
 }
@@ -218,9 +211,10 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.layer(HeaderManipulationLayer::propagate(COOKIE))
     }
 
+    #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,
-        cache: Cache<Key, Value>,
+        cache: Cache<Key, Result<Value, S::Error>>,
         key_fn: KeyFn,
         value_fn: ValueFn,
         response_fn: ResponseFn,
@@ -228,12 +222,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     where
         Request: Send,
         S: Service<Request> + Send,
-        Key: Send + Sync + Eq + Hash + Clone + 'static,
-        Value: Send + Sync + Clone + 'static,
-        KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
-        ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
-        ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
-        <S as Service<Request>>::Error: Send + Sync,
+        <S as Service<Request>>::Error: Send + Sync + Clone,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send,
     {
