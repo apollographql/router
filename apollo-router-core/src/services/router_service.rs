@@ -1,4 +1,4 @@
-use crate::apq::APQService;
+use crate::apq::APQ;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
 use crate::services::execution_service::ExecutionService;
 use crate::{
@@ -315,22 +315,17 @@ impl PluggableRouterServiceBuilder {
 
         //Router service takes a graphql::Request and outputs a graphql::Response
         let (router_service, router_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
+            ServiceBuilder::new().layer(APQ::default()).service(
                 self.plugins.iter_mut().fold(
-                    // TODO: maybe make it optional although enabled by default?
-                    APQService::new(
                         RouterService::builder()
                             .query_planner_service(query_planner_service)
                             .query_execution_service(execution_service)
                             .schema(self.schema)
                             .query_cache(query_cache)
                             .naive_introspection(naive_introspection)
-                            .build(),
-                        512, // TODO: this is totally arbitrary, what does the team think?
-                    )
-                    .boxed(),
+                            .build().boxed(),
                     |acc, e| e.router_service(acc),
-                ),
+                )
             ),
             self.buffer,
         );

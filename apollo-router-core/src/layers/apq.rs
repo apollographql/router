@@ -26,6 +26,13 @@ impl APQ {
         }
     }
 }
+
+impl Default for APQ {
+    fn default() -> Self {
+        Self::with_capacity(512)
+    }
+}
+
 pub struct APQService<S>
 where
     S: Service<RouterRequest>,
