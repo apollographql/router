@@ -4,10 +4,8 @@ mod selection;
 
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
-use futures::lock::Mutex;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
-use selection::Selection;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -39,7 +37,7 @@ pub(crate) enum PlanNode {
     },
 
     /// Fetch some data from a subgraph.
-    Fetch(FetchNode),
+    Fetch(fetch::FetchNode),
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
@@ -47,21 +45,13 @@ pub(crate) enum PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(name = "validation", level = "debug")]
-    pub fn validate_request(
-        &self,
-        request: &Request,
-        service_registry: Arc<dyn ServiceRegistry>,
-    ) -> Result<(), Response> {
+    #[tracing::instrument(skip_all, name = "validate", level = "debug")]
+    pub fn validate(&self, service_registry: Arc<dyn ServiceRegistry>) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self
             .root
             .validate_services_against_plan(Arc::clone(&service_registry))
         {
-            early_errors.push(err.to_graphql_error(None));
-        }
-
-        for err in self.root.validate_request_variables_against_plan(request) {
             early_errors.push(err.to_graphql_error(None));
         }
 
@@ -73,123 +63,115 @@ impl QueryPlan {
     }
 
     /// Execute the plan and return a [`Response`].
-    pub async fn execute(
-        &self,
-        request: Arc<Request>,
-        service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
+    pub async fn execute<'a>(
+        &'a self,
+        request: &'a Request,
+        service_registry: &'a dyn ServiceRegistry,
+        schema: &'a Schema,
     ) -> Response {
-        let response = Arc::new(Mutex::new(Response::builder().build()));
         let root = Path::empty();
 
-        self.root
-            .execute_recursively(
-                Arc::clone(&response),
-                &root,
-                Arc::clone(&request),
-                Arc::clone(&service_registry),
-                Arc::clone(&schema),
-            )
+        let (value, errors) = self
+            .root
+            .execute_recursively(&root, request, service_registry, schema, &Value::default())
             .await;
 
-        // TODO: this is not great but there is no other way
-        Arc::try_unwrap(response)
-            .expect("todo: how to prove?")
-            .into_inner()
+        Response::builder().data(value).errors(errors).build()
     }
 }
 
 impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
-        response: Arc<Mutex<Response>>,
         current_dir: &'a Path,
-        request: Arc<Request>,
-        service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
-    ) -> future::BoxFuture<()> {
+        request: &'a Request,
+        service_registry: &'a dyn ServiceRegistry,
+        schema: &'a Schema,
+        parent_value: &'a Value,
+    ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("Executing plan:\n{:#?}", self);
+            let mut value;
+            let mut errors = Vec::new();
 
             match self {
                 PlanNode::Sequence { nodes } => {
+                    value = parent_value.clone();
                     for node in nodes {
-                        node.execute_recursively(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                        .instrument(tracing::info_span!("sequence"))
-                        .await;
+                        let (v, err) = node
+                            .execute_recursively(
+                                current_dir,
+                                request,
+                                service_registry,
+                                schema,
+                                &value,
+                            )
+                            .instrument(tracing::info_span!("sequence"))
+                            .await;
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
                     }
                 }
                 PlanNode::Parallel { nodes } => {
-                    future::join_all(nodes.iter().map(|plan| {
-                        plan.execute_recursively(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                    }))
+                    value = Value::default();
+                    async {
+                        {
+                            let mut stream: stream::FuturesUnordered<_> = nodes
+                                .iter()
+                                .map(|plan| {
+                                    plan.execute_recursively(
+                                        current_dir,
+                                        request,
+                                        service_registry,
+                                        schema,
+                                        parent_value,
+                                    )
+                                })
+                                .collect();
+
+                            while let Some((v, err)) = stream.next().await {
+                                value.deep_merge(v);
+                                errors.extend(err.into_iter());
+                            }
+                        }
+                    }
                     .instrument(tracing::info_span!("parallel"))
                     .await;
                 }
+                PlanNode::Flatten(FlattenNode { path, node }) => {
+                    let (v, err) = node
+                        .execute_recursively(
+                            // this is the only command that actually changes the "current dir"
+                            &current_dir.join(path),
+                            request,
+                            service_registry,
+                            schema,
+                            parent_value,
+                        )
+                        .instrument(tracing::trace_span!("flatten"))
+                        .await;
+
+                    value = v;
+                    errors.extend(err.into_iter());
+                }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(
-                            Arc::clone(&response),
-                            current_dir,
-                            Arc::clone(&request),
-                            Arc::clone(&service_registry),
-                            Arc::clone(&schema),
-                        )
-                        .instrument(tracing::info_span!("fetch"))
+                        .fetch_node(parent_value, current_dir, request, service_registry, schema)
+                        .instrument(tracing::trace_span!("fetch"))
                         .await
                     {
-                        Ok(()) => {}
+                        Ok(v) => value = v,
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
-                            response
-                                .lock()
-                                .await
-                                .errors
-                                .push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            value = Value::default();
                         }
                     }
                 }
-                PlanNode::Flatten(FlattenNode { path, node }) => {
-                    // this is the only command that actually changes the "current dir"
-                    let current_dir = current_dir.join(path);
-                    node.execute_recursively(
-                        Arc::clone(&response),
-                        // a path can go over multiple json node!
-                        &current_dir,
-                        Arc::clone(&request),
-                        Arc::clone(&service_registry),
-                        Arc::clone(&schema),
-                    )
-                    .instrument(tracing::trace_span!("flatten"))
-                    .await;
-                }
             }
-        })
-    }
 
-    /// Retrieves all the variables used across all plan nodes.
-    ///
-    /// Note that duplicates are not filtered.
-    fn variable_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-        match self {
-            Self::Sequence { nodes } | Self::Parallel { nodes } => {
-                Box::new(nodes.iter().flat_map(|x| x.variable_usage()))
-            }
-            Self::Fetch(fetch) => Box::new(fetch.variable_usages.iter().map(|x| x.as_str())),
-            Self::Flatten(flatten) => Box::new(flatten.node.variable_usage()),
-        }
+            (value, errors)
+        })
     }
 
     /// Retrieves all the services used across all plan nodes.
@@ -200,8 +182,8 @@ impl PlanNode {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
-            Self::Fetch(fetch) => Box::new(vec![fetch.service_name.as_str()].into_iter()),
-            Self::Flatten(flatten) => Box::new(flatten.node.service_usage()),
+            Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+            Self::Flatten(flatten) => flatten.node.service_usage(),
         }
     }
 
@@ -227,214 +209,195 @@ impl PlanNode {
             })
             .collect::<Vec<_>>()
     }
+}
 
-    /// Recursively validate a query plan node making sure that all variable usages are known before we
-    /// go for execution.
-    ///
-    /// This simplifies processing later as we can always guarantee that the variable usages are
-    /// available for the plan.
-    ///
-    /// # Arguments
-    ///
-    ///  *   `plan`: The root query plan node to validate.
-    fn validate_request_variables_against_plan(&self, request: &Request) -> Vec<FetchError> {
-        let required = self.variable_usage().collect::<HashSet<_>>();
-        let provided = request
-            .variables
-            .keys()
-            .map(|x| x.as_str())
-            .collect::<HashSet<_>>();
-        required
-            .difference(&provided)
-            .map(|x| FetchError::ValidationMissingVariable {
-                name: x.to_string(),
-            })
-            .collect::<Vec<_>>()
+mod fetch {
+    use std::sync::Arc;
+
+    use super::selection::{select_object, Selection};
+    use serde::Deserialize;
+    use tracing::{instrument, Instrument};
+
+    use crate::prelude::graphql::*;
+
+    /// A fetch node.
+    #[derive(Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct FetchNode {
+        /// The name of the service or subgraph that the fetch is querying.
+        service_name: String,
+
+        /// The data that is required for the subgraph fetch.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default)]
+        requires: Vec<Selection>,
+
+        /// The variables that are used for the subgraph fetch.
+        variable_usages: Vec<String>,
+
+        /// The GraphQL subquery that is used for the fetch.
+        operation: String,
     }
-}
 
-/// A fetch node.
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct FetchNode {
-    /// The name of the service or subgraph that the fetch is querying.
-    service_name: String,
+    struct Variables {
+        variables: Object,
+        paths: Vec<Path>,
+    }
 
-    /// The data that is required for the subgraph fetch.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    requires: Option<Vec<Selection>>,
+    impl Variables {
+        #[instrument(skip_all, level = "debug", name = "make_variables")]
+        fn new(
+            requires: &[Selection],
+            variable_usages: &[String],
+            data: &Value,
+            current_dir: &Path,
+            request: &Request,
+            schema: &Schema,
+        ) -> Result<Variables, FetchError> {
+            if !requires.is_empty() {
+                let mut variables = Object::with_capacity(1 + variable_usages.len());
+                variables.extend(variable_usages.iter().filter_map(|key| {
+                    request
+                        .variables
+                        .get_key_value(key.as_str())
+                        .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+                }));
 
-    /// The variables that are used for the subgraph fetch.
-    variable_usages: Vec<String>,
+                let mut paths = Vec::new();
+                let mut values = Vec::new();
+                data.select_values_and_paths(current_dir, |path, value| {
+                    match value {
+                        Value::Object(content) => {
+                            let object = select_object(content, requires, schema)?;
+                            if let Some(value) = object {
+                                paths.push(path);
+                                values.push(value)
+                            }
+                        }
+                        _ => {
+                            return Err(FetchError::ExecutionInvalidContent {
+                                reason: "not an object".to_string(),
+                            })
+                        }
+                    }
+                    Ok(())
+                })?;
+                let representations = Value::Array(values);
 
-    /// The GraphQL subquery that is used for the fetch.
-    operation: String,
-}
+                variables.insert("representations", representations);
 
-impl FetchNode {
-    async fn fetch_node<'a>(
-        &'a self,
-        response: Arc<Mutex<Response>>,
-        current_dir: &'a Path,
-        request: Arc<Request>,
-        service_registry: Arc<dyn ServiceRegistry>,
-        schema: Arc<Schema>,
-    ) -> Result<(), FetchError> {
-        let FetchNode {
-            variable_usages,
-            requires,
-            operation,
-            service_name,
-        } = self;
-
-        let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
-
-        if let Some(requires) = requires {
-            // We already checked that the service exists during planning
-            let fetcher = service_registry.get(service_name).unwrap();
-
-            let mut variables = Object::with_capacity(1 + variable_usages.len());
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                request
-                    .variables
-                    .get(key)
-                    .map(|value| (key.clone(), value.clone()))
-            }));
-
-            {
-                let response = response.lock().await;
-                tracing::trace!(
-                    "Creating representations at path '{}' for selections={:?} using data={}",
-                    current_dir,
-                    requires,
-                    serde_json::to_string(&response.data).unwrap(),
-                );
-                let representations = selection::select(&response, current_dir, requires, &schema)?;
-                variables.insert("representations".into(), representations);
+                Ok(Variables { variables, paths })
+            } else {
+                Ok(Variables {
+                    variables: variable_usages
+                        .iter()
+                        .filter_map(|key| {
+                            request
+                                .variables
+                                .get_key_value(key.as_str())
+                                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+                        })
+                        .collect::<Object>(),
+                    paths: Vec::new(),
+                })
             }
+        }
+    }
 
-            let (res, _tail) = fetcher
+    impl FetchNode {
+        pub(crate) async fn fetch_node<'a>(
+            &'a self,
+            data: &'a Value,
+            current_dir: &'a Path,
+            request: &'a Request,
+            service_registry: &'a dyn ServiceRegistry,
+            schema: &'a Schema,
+        ) -> Result<Value, FetchError> {
+            let FetchNode {
+                operation,
+                service_name,
+                ..
+            } = self;
+
+            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
+
+            let Variables { variables, paths } = query_span.in_scope(|| {
+                Variables::new(
+                    &self.requires,
+                    self.variable_usages.as_ref(),
+                    data,
+                    current_dir,
+                    request,
+                    schema,
+                )
+            })?;
+
+            let fetcher = service_registry
+                .get(service_name)
+                .expect("we already checked that the service exists during planning; qed");
+
+            let response = fetcher
                 .stream(
                     Request::builder()
                         .query(operation)
                         .variables(Arc::new(variables))
                         .build(),
                 )
-                .await
-                .into_future()
-                .instrument(query_span)
-                .await;
+                .instrument(tracing::trace_span!(parent: &query_span, "subfetch_stream"))
+                .await?;
 
-            match res {
-                Some(response) if !response.is_primary() => {
-                    Err(FetchError::SubrequestUnexpectedPatchResponse {
+            query_span.in_scope(|| {
+                if !response.is_primary() {
+                    return Err(FetchError::SubrequestUnexpectedPatchResponse {
                         service: service_name.to_owned(),
-                    })
+                    });
                 }
-                Some(Response {
-                    data, mut errors, ..
-                }) => {
-                    // we have to nest conditions and do early returns here
-                    // because we need to take ownership of the inner value
-                    if let Value::Object(mut map) = data {
-                        if let Some(entities) = map.remove("_entities") {
-                            tracing::trace!(
-                                "Received entities: {}",
-                                serde_json::to_string(&entities).unwrap(),
-                            );
 
-                            if let Value::Array(array) = entities {
-                                let mut response = response
-                                    .lock()
-                                    .instrument(tracing::trace_span!("response_lock_wait"))
-                                    .await;
+                self.response_at_path(current_dir, paths, response)
+            })
+        }
 
-                                let span = tracing::trace_span!("response_insert");
-                                let _guard = span.enter();
-                                for (i, entity) in array.into_iter().enumerate() {
-                                    response.insert_data(
-                                        &current_dir.join(Path::from(i.to_string())),
-                                        entity,
-                                    )?;
-                                }
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
+        fn response_at_path<'a>(
+            &'a self,
+            current_dir: &'a Path,
+            paths: Vec<Path>,
+            subgraph_response: Response,
+        ) -> Result<Value, FetchError> {
+            let Response { data, .. } = subgraph_response;
 
-                                return Ok(());
-                            } else {
-                                return Err(FetchError::ExecutionInvalidContent {
-                                    reason: "Received invalid type for key `_entities`!"
-                                        .to_string(),
-                                });
+            if !self.requires.is_empty() {
+                // we have to nest conditions and do early returns here
+                // because we need to take ownership of the inner value
+                if let Value::Object(mut map) = data {
+                    if let Some(entities) = map.remove("_entities") {
+                        tracing::trace!("Received entities: {:?}", &entities);
+
+                        if let Value::Array(array) = entities {
+                            let mut value = Value::default();
+
+                            for (entity, path) in array.into_iter().zip(paths.into_iter()) {
+                                value.insert(&path, entity)?;
                             }
+                            return Ok(value);
+                        } else {
+                            return Err(FetchError::ExecutionInvalidContent {
+                                reason: "Received invalid type for key `_entities`!".to_string(),
+                            });
                         }
                     }
-
-                    let mut response = response
-                        .lock()
-                        .instrument(tracing::trace_span!("response_lock_wait"))
-                        .await;
-
-                    response.append_errors(&mut errors);
-                    Err(FetchError::ExecutionInvalidContent {
-                        reason: "Missing key `_entities`!".to_string(),
-                    })
                 }
-                None => Err(FetchError::SubrequestNoResponse {
-                    service: service_name.to_string(),
-                }),
+
+                Err(FetchError::ExecutionInvalidContent {
+                    reason: "Missing key `_entities`!".to_string(),
+                })
+            } else {
+                Ok(Value::from_path(current_dir, data))
             }
-        } else {
-            let variables = Arc::new(
-                variable_usages
-                    .iter()
-                    .filter_map(|key| {
-                        request
-                            .variables
-                            .get(key)
-                            .map(|value| (key.clone(), value.clone()))
-                    })
-                    .collect::<Object>(),
-            );
+        }
 
-            // We already validated that the service exists during planning
-            let fetcher = service_registry.get(service_name).unwrap();
-
-            let (res, _tail) = fetcher
-                .stream(
-                    Request::builder()
-                        .query(operation.clone())
-                        .variables(Arc::clone(&variables))
-                        .build(),
-                )
-                .await
-                .into_future()
-                .instrument(query_span)
-                .await;
-
-            match res {
-                Some(response) if !response.is_primary() => {
-                    Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    })
-                }
-                Some(Response {
-                    data, mut errors, ..
-                }) => {
-                    let mut response = response
-                        .lock()
-                        .instrument(tracing::trace_span!("response_lock_wait"))
-                        .await;
-
-                    let span = tracing::trace_span!("response_insert");
-                    let _guard = span.enter();
-                    response.append_errors(&mut errors);
-                    response.insert_data(current_dir, data)?;
-
-                    Ok(())
-                }
-                None => Err(FetchError::SubrequestNoResponse {
-                    service: service_name.to_string(),
-                }),
-            }
+        pub(crate) fn service_name(&self) -> &str {
+            &self.service_name
         }
     }
 }
@@ -474,17 +437,6 @@ mod tests {
                 .service_usage()
                 .collect::<Vec<_>>(),
             vec!["product", "books", "product", "books", "product"]
-        );
-    }
-
-    #[test]
-    fn variable_usage() {
-        assert_eq!(
-            serde_json::from_str::<PlanNode>(test_query_plan!())
-                .unwrap()
-                .variable_usage()
-                .collect::<Vec<_>>(),
-            vec!["test_variable"]
         );
     }
 }

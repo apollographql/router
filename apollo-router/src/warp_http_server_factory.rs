@@ -1,18 +1,22 @@
-use crate::configuration::{Configuration, Cors};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle};
+use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
+use apollo_router_core::{prelude::*, Request};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
+use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::Notify;
+use tower::ServiceBuilder;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::instrument::WithSubscriber;
-use tracing::{Instrument, Span};
+use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::host::Authority;
 use warp::{
@@ -39,7 +43,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         &self,
         router: Arc<Router>,
         configuration: Arc<Configuration>,
-        listener: Option<TcpListener>,
+        listener: Option<Listener>,
     ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
     where
         Router: graphql::Router<PreparedQuery> + 'static,
@@ -47,7 +51,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-            let listen_address = configuration.server.listen;
+            let listen_address = configuration.server.listen.clone();
 
             let cors = configuration
                 .server
@@ -70,15 +74,38 @@ impl HttpServerFactory for WarpHttpServerFactory {
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
 
+            let svc = ServiceBuilder::new()
+                // generate a tracing span that covers request parsing and response serializing
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                )
+                .service(svc);
+
             // if we received a TCP listener, reuse it, otherwise create a new one
-            let tcp_listener = if let Some(listener) = listener {
+            #[cfg_attr(not(unix), allow(unused_mut))]
+            let mut listener = if let Some(listener) = listener {
                 listener
             } else {
-                TcpListener::bind(listen_address)
-                    .await
-                    .map_err(FederatedServerError::ServerCreationError)?
+                match listen_address {
+                    #[cfg(unix)]
+                    ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
+                        TcpListener::bind(addr)
+                            .await
+                            .map_err(FederatedServerError::ServerCreationError)?,
+                    ),
+                    #[cfg(not(unix))]
+                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
+                        .await
+                        .map_err(FederatedServerError::ServerCreationError)?,
+                    #[cfg(unix)]
+                    ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
+                        UnixListener::bind(path)
+                            .map_err(FederatedServerError::ServerCreationError)?,
+                    ),
+                }
             };
-            let actual_listen_address = tcp_listener
+            let actual_listen_address = listener
                 .local_addr()
                 .map_err(FederatedServerError::ServerCreationError)?;
 
@@ -97,11 +124,46 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         _ = &mut shutdown_receiver => {
                             break;
                         }
-                        res = tcp_listener.accept() => {
+                        res = listener.accept() => {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
                             tokio::task::spawn(async move {
+                                macro_rules! serve_connection {
+                                    ($stream:expr) => {{
+                                        let connection = Http::new()
+                                            .http1_keep_alive(true)
+                                            .serve_connection($stream, svc);
+
+                                        tokio::pin!(connection);
+                                        tokio::select! {
+                                            // the connection finished first
+                                            _res = &mut connection => {
+                                                /*if let Err(http_err) = res {
+                                                    tracing::error!(
+                                                        "Error while serving HTTP connection: {}",
+                                                        http_err
+                                                    );
+                                                }*/
+                                            }
+                                            // the shutdown receiver was triggered first,
+                                            // so we tell the connection to do a graceful shutdown
+                                            // on the next request, then we wait for it to finish
+                                            _ = connection_shutdown.notified() => {
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
+
+                                                if let Err(_http_err) = connection.await {
+                                                    /*tracing::error!(
+                                                        "Error while serving HTTP connection: {}",
+                                                        http_err
+                                                    );*/
+                                                }
+                                            }
+                                        }
+                                    }};
+                                }
+
                                 // we unwrap the result of accept() here to avoid stopping
                                 // the entire server on an issue with that socket
                                 // Unfortunately, the error here could also be linked
@@ -109,39 +171,32 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 // more file descriptors, network interface is down...)
                                 // ideally we'd want to handle the errors in the server task
                                 // with varying behaviours
-                                let (tcp_stream, _) = res.unwrap();
-                                tcp_stream.set_nodelay(true).expect("this should not fail unless the socket is invalid");
-
-                                let connection = Http::new()
-                                    .http1_keep_alive(true)
-                                    .serve_connection(tcp_stream, svc);
-
-                                tokio::pin!(connection);
-                                tokio::select! {
-                                    // the connection finished first
-                                    _res = &mut connection => {
-                                        /*if let Err(http_err) = res {
-                                            tracing::error!(
-                                                "Error while serving HTTP connection: {}",
-                                                http_err
+                                #[cfg(unix)]
+                                match res.unwrap() {
+                                    tokio_util::either::Either::Left((stream, _addr)) => {
+                                        stream
+                                            .set_nodelay(true)
+                                            .expect(
+                                                "this should not fail unless the socket is invalid",
                                             );
-                                        }*/
+                                        serve_connection!(stream);
                                     }
-                                    // the shutdown receiver was triggered first,
-                                    // so we tell the connection to do a graceful shutdown
-                                    // on the next request, then we wait for it to finish
-                                    _ = connection_shutdown.notified() => {
-                                        let c = connection.as_mut();
-                                        c.graceful_shutdown();
+                                    tokio_util::either::Either::Right((stream, _addr)) => {
+                                        serve_connection!(stream);
+                                    }
+                                };
+                                #[cfg(not(unix))]
+                                {
+                                    let (stream, _addr) = res.unwrap();
+                                    stream
+                                        .set_nodelay(true)
+                                        .expect(
+                                            "this should not fail unless the socket is invalid",
+                                        );
+                                    serve_connection!(stream);
+                                };
 
-                                        if let Err(_http_err) = connection.await {
-                                            /*tracing::error!(
-                                                "Error while serving HTTP connection: {}",
-                                                http_err
-                                            );*/
-                                        }
-                                    }
-                                }
+
                             }.with_subscriber(dispatcher.clone()));
                         }
                     }
@@ -151,7 +206,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 // the server loop, tell the currently active connections to stop
                 // then return the TCP listen socket
                 connection_shutdown.notify_waiters();
-                tcp_listener
+                listener
             };
 
             // Spawn the server into a runtime
@@ -162,7 +217,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address,
+                actual_listen_address.into(),
             ))
         })
     }
@@ -190,7 +245,7 @@ where
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         redirect_to_studio(host)
-                    } else if let Ok(request) = serde_json::from_slice(&body) {
+                    } else if let Ok(request) = Request::from_bytes(body) {
                         run_graphql_request(router, request, header_map).await
                     } else {
                         Box::new(warp::reply::with_status(
@@ -237,9 +292,10 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
         .and(warp::path("apollo"))
         .and(warp::path("server-health"))
         .and_then(move || async {
-            let mut result = HashMap::new();
-            result.insert("status", "pass");
-            let reply = Box::new(warp::reply::json(&result)) as Box<dyn Reply>;
+            static RESULT: Lazy<serde_json::Value> =
+                Lazy::new(|| serde_json::json!({"status": "pass"}));
+
+            let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
             Ok::<_, Rejection>(reply)
         })
 }
@@ -265,6 +321,16 @@ where
         })
 }
 
+#[tracing::instrument(skip_all,
+    name = "graphql_request",
+    fields(
+        query = %request.query,
+        operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
+        client_name,
+        client_version
+    ),
+    level = "info"
+)]
 fn run_graphql_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
@@ -274,49 +340,47 @@ where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery + 'static,
 {
+    if let Some(client_name) = header_map.get("apollographql-client-name") {
+        // Record the client name as part of the current span
+        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
+    }
+    if let Some(client_version) = header_map.get("apollographql-client-version") {
+        // Record the client version as part of the current span
+        Span::current().record(
+            "client_version",
+            &client_version.to_str().unwrap_or_default(),
+        );
+    }
+
     // retrieve and reuse the potential trace id from the caller
     opentelemetry::global::get_text_map_propagator(|injector| {
         injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
     });
 
     async move {
-        let response_stream = stream_request(router, request)
-            .instrument(tracing::info_span!("graphql_request"))
-            .await;
+        let response = stream_request(router, request).await;
 
-        Box::new(Response::new(Body::wrap_stream(response_stream))) as Box<dyn Reply>
+        Box::new(Response::new(Body::from(response))) as Box<dyn Reply>
     }
 }
 
 async fn stream_request<Router, PreparedQuery>(
     router: Arc<Router>,
     request: graphql::Request,
-) -> impl Stream<Item = Result<Bytes, serde_json::Error>>
+) -> String
 where
     Router: graphql::Router<PreparedQuery> + 'static,
     PreparedQuery: graphql::PreparedQuery,
 {
-    let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
-        Err(stream) => stream,
+    let response = match router.prepare_query(&request).await {
+        Ok(route) => route.execute(request).await,
+        Err(response) => response,
     };
 
-    stream
-        .enumerate()
-        .map(|(index, res)| match serde_json::to_string(&res) {
-            Ok(bytes) => Ok(Bytes::from(bytes)),
-            Err(err) => {
-                // We didn't manage to serialise the response!
-                // Do our best to send some sort of error back.
-                serde_json::to_string(
-                    &graphql::FetchError::MalformedResponse {
-                        reason: err.to_string(),
-                    }
-                    .to_response(index == 0),
-                )
-                .map(Bytes::from)
-            }
-        })
+    let span = Span::current();
+    tracing::debug_span!(parent: &span, "serialize_response").in_scope(|| {
+        serde_json::to_string(&response).expect("serde_json::Value serialization will not fail")
+    })
 }
 
 fn prefers_html(accept_header: String) -> bool {
@@ -352,7 +416,6 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
-    use insta::{assert_json_snapshot, assert_snapshot};
     use mockall::{mock, predicate::*};
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -409,8 +472,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
         }
     }
 
@@ -423,7 +487,7 @@ mod tests {
             async fn prepare_query(
                 &self,
                 request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+            ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
 
@@ -433,15 +497,15 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 
     macro_rules! init {
-        ($listen_address:expr, $fetcher:ident => $expect_prepare_query:block) => {{
+        ($fetcher:ident => $expect_stream:block) => {{
             #[allow(unused_mut)]
             let mut $fetcher = MockMyRouter::new();
-            $expect_prepare_query;
+            $expect_stream;
             let server_factory = WarpHttpServerFactory::new();
             let fetcher = Arc::new($fetcher);
             let server = server_factory
@@ -451,7 +515,7 @@ mod tests {
                         Configuration::builder()
                             .server(
                                 crate::configuration::Server::builder()
-                                    .listen(SocketAddr::from_str($listen_address).unwrap())
+                                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
                                     .cors(Some(
                                         Cors::builder()
                                             .origins(vec!["http://studio".to_string()])
@@ -475,11 +539,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn redirect_to_studio() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address()),
-            format!("http://{}/graphql", server.listen_address()),
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
         ] {
             // Regular studio redirect
             let response = client
@@ -498,7 +562,7 @@ mod tests {
                 &response,
                 LOCATION,
                 vec![format!(
-                    "https://studio.apollographql.com/sandbox?endpoint=http://{}",
+                    "https://studio.apollographql.com/sandbox?endpoint={}",
                     server.listen_address()
                 )],
                 "Incorrect redirect url"
@@ -524,10 +588,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn malformed_request() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address()))
+            .post(format!("{}/graphql", server.listen_address()))
             .body("Garbage")
             .send()
             .await
@@ -542,7 +606,7 @@ mod tests {
             .data(json!({"response": "yay"}))
             .build();
         let example_response = expected_response.clone();
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
+        let (server, client) = init!(fetcher => {
             fetcher
                 .expect_prepare_query()
                 .times(2)
@@ -552,12 +616,12 @@ mod tests {
                     route.expect_execute()
                         .times(1)
                         .return_once(move |_| {
-                            example_response.into()
+                            example_response
                         });
                     Ok(route)
                 })
         });
-        let url = format!("http://{}/graphql", server.listen_address());
+        let url = format!("{}/graphql", server.listen_address());
         // Post query
         let response = client
             .post(url.as_str())
@@ -593,7 +657,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn response_failure() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {
+        let (server, client) = init!(fetcher => {
             fetcher
                 .expect_prepare_query()
                 .times(1)
@@ -606,13 +670,13 @@ mod tests {
                                 service: "Mock service".to_string(),
                                 reason: "Mock error".to_string(),
                             }
-                            .to_response(true).into()
+                            .to_response(true)
                         });
                     Ok(route)
                 })
         });
         let response = client
-            .post(format!("http://{}/graphql", server.listen_address()))
+            .post(format!("{}/graphql", server.listen_address()))
             .body(
                 json!(
                 {
@@ -640,11 +704,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn cors_preflight() -> Result<(), FederatedServerError> {
-        let (server, client) = init!("127.0.0.1:0", fetcher => {});
+        let (server, client) = init!(fetcher => {});
 
         for url in vec![
-            format!("http://{}/", server.listen_address()),
-            format!("http://{}/graphql", server.listen_address()),
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
         ] {
             let response = client
                 .request(Method::OPTIONS, &url)
@@ -694,7 +758,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn it_provides_health_status_body() -> Result<(), FederatedServerError> {
+    async fn test_health_check() {
         let filter = get_health_request();
 
         let res = warp::test::request()
@@ -702,26 +766,112 @@ mod tests {
             .reply(&filter)
             .await;
 
-        assert_eq!(res.status(), 200);
-        assert_json_snapshot!(String::from_utf8_lossy(res.body()));
-
-        Ok(())
+        insta::assert_debug_snapshot!("health_check", res);
     }
 
     #[test(tokio::test)]
-    async fn it_provides_health_status_header() -> Result<(), FederatedServerError> {
-        let filter = get_health_request();
+    #[cfg(unix)]
+    async fn listening_to_unix_socket() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
 
-        let res = warp::test::request()
-            .path("/.well-known/apollo/server-health")
-            .reply(&filter)
-            .await;
+        #[allow(unused_mut)]
+        let mut fetcher = MockMyRouter::new();
+        fetcher.expect_prepare_query().times(2).returning(move |_| {
+            let actual_response = example_response.clone();
+            Err(actual_response)
+        });
 
-        let hdrs = res.headers();
+        let server_factory = WarpHttpServerFactory::new();
+        let fetcher = Arc::new(fetcher);
+        let server = server_factory
+            .create(
+                fetcher.to_owned(),
+                Arc::new(
+                    Configuration::builder()
+                        .server(
+                            crate::configuration::Server::builder()
+                                .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
+                                .cors(Some(
+                                    Cors::builder()
+                                        .origins(vec!["http://studio".to_string()])
+                                        .build(),
+                                ))
+                                .build(),
+                        )
+                        .subgraphs(Default::default())
+                        .build(),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(res.status(), 200);
-        assert_snapshot!(hdrs["content-type"].to_str().unwrap());
+        let output =
+            send_to_unix_socket(server.listen_address(), "POST", r#"{"query":"query"}"#).await;
 
-        Ok(())
+        assert_eq!(
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let output =
+            send_to_unix_socket(server.listen_address(), "GET", r#"{"query":"query"}"#).await;
+
+        assert_eq!(
+            serde_json::from_slice::<graphql::Response>(&output).unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    async fn send_to_unix_socket(addr: &ListenAddr, method: &str, body: &str) -> Vec<u8> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest};
+        use tokio::net::UnixStream;
+
+        let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
+        stream.ready(Interest::WRITABLE).await.unwrap();
+        stream
+            .write_all(
+                format!(
+                    "{} / HTTP/1.1\r
+Host: localhost:4100\r
+Content-Length: {}\r
+
+{}\n",
+                    method,
+                    body.len(),
+                    body
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+        let stream = BufReader::new(stream);
+        let mut lines = stream.lines();
+        let header_first_line = lines
+            .next_line()
+            .await
+            .unwrap()
+            .expect("no header received");
+        // skip the rest of the headers
+        let mut headers = String::new();
+        let mut stream = lines.into_inner();
+        loop {
+            if stream.read_line(&mut headers).await.unwrap() == 2 {
+                break;
+            }
+        }
+        // get rest of the buffer as body
+        let body = stream.buffer().to_vec();
+        assert!(header_first_line.contains(" 200 "), "");
+        body
     }
 }

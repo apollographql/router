@@ -1,8 +1,7 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
-use futures::prelude::*;
+use std::fmt::Debug;
 use std::sync::Arc;
-use std::{fmt::Debug, pin::Pin};
 
 /// A cache resolution trait.
 ///
@@ -32,10 +31,11 @@ pub trait ServiceRegistry: Send + Sync + Debug {
 ///
 /// The goal of this trait is to hide the implementation details of fetching a stream of graphql responses.
 /// We can then create multiple implementations that can be plugged into federation.
+#[async_trait]
 pub trait Fetcher: Send + Sync + Debug {
     /// Constructs a stream of responses.
     #[must_use = "streams do nothing unless polled"]
-    fn stream(&self, request: Request) -> Pin<Box<dyn Future<Output = ResponseStream> + Send>>;
+    async fn stream(&self, request: Request) -> Result<Response, FetchError>;
 }
 
 /// QueryPlanner can be used to plan queries.
@@ -70,20 +70,20 @@ where
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 
-/// An object that accepts a [`Request`] and allow creating [`PreparedQuery`]'s.
+/// An object that accepts a [`Request`] and allows for creating [`PreparedQuery`]'s.
 ///
-/// The call to the function will either succeeds and return a [`PreparedQuery`] or it will fail and return
-/// a [`ResponseStream`] that can be returned immediately to the user. This is because GraphQL does
-/// not use the HTTP error codes, therefore it always return a response even if it fails.
+/// The call to the function will either succeed and return a [`PreparedQuery`] or it will fail
+/// and return a [`Response`] that can be returned immediately to the user. This is because GraphQL
+/// does not use the HTTP error codes, therefore it always return a response even if it fails.
 #[async_trait::async_trait]
 pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
-    async fn prepare_query(&self, request: &Request) -> Result<T, ResponseStream>;
+    async fn prepare_query(&self, request: &Request) -> Result<T, Response>;
 }
 
-/// An object that can be executed to return a [`ResponseStream`].
+/// An object that can be executed to return a [`Response`].
 #[async_trait::async_trait]
 pub trait PreparedQuery: Send + Debug {
-    async fn execute(self, request: Arc<Request>) -> ResponseStream;
+    async fn execute(self, request: Request) -> Response;
 }
 
 #[cfg(test)]

@@ -1,12 +1,12 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
-use futures::prelude::*;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
 pub use router_bridge::plan::PlanningErrors;
 use serde::{Deserialize, Serialize};
-use std::{slice::Iter, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tracing::level_filters::LevelFilter;
 
 /// Error types for execution.
 ///
@@ -22,8 +22,8 @@ pub enum FetchError {
         service: String,
     },
 
-    /// Query requires variable '{name}', but it was not provided.
-    ValidationMissingVariable {
+    /// Invalid type for variable: '{name}'
+    ValidationInvalidTypeVariable {
         /// Name of the variable.
         name: String,
     },
@@ -88,15 +88,12 @@ pub enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        let value: Value = serde_json::to_value(self).unwrap().into();
         Error {
             message: self.to_string(),
             locations: Default::default(),
             path,
-            extensions: serde_json::to_value(self)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .to_owned(),
+            extensions: value.as_object().unwrap().to_owned(),
         }
     }
 
@@ -130,6 +127,53 @@ pub struct Error {
     /// The optional graphql extensions.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+}
+
+impl Error {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let locations = extract_key_value_from_object!(object, "locations")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .unwrap_or_default();
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        Ok(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
 }
 
 /// A location in the request that triggered a graphql error.
@@ -185,8 +229,14 @@ pub enum QueryPlannerError {
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
+    /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    EmptyPlan,
+
     /// Unhandled planner result.
     UnhandledPlannerResult,
+
+    /// Router Bridge error: {0}
+    RouterBridgeError(router_bridge::error::Error),
 }
 
 impl From<PlanningErrors> for QueryPlannerError {
@@ -207,9 +257,9 @@ impl From<CacheResolverError> for QueryPlannerError {
     }
 }
 
-impl From<QueryPlannerError> for ResponseStream {
+impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
-        stream::once(future::ready(FetchError::from(err).to_response(true))).boxed()
+        FetchError::from(err).to_response(true)
     }
 }
 
@@ -224,8 +274,8 @@ pub enum SchemaError {
 
 #[derive(Debug)]
 pub struct ParseErrors {
-    raw_schema: String,
-    errors: Vec<apollo_parser::Error>,
+    pub(crate) raw_schema: String,
+    pub(crate) errors: Vec<apollo_parser::Error>,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -240,15 +290,11 @@ struct ParserError {
 }
 
 impl ParseErrors {
-    pub(crate) fn new(raw_schema: String, errors: Iter<'_, apollo_parser::Error>) -> Self {
-        Self {
-            raw_schema,
-            errors: errors.cloned().collect(),
-        }
-    }
-
+    #[allow(clippy::needless_return)]
     pub fn print(&self) {
-        if atty::is(atty::Stream::Stdout) {
+        if LevelFilter::current() == LevelFilter::OFF {
+            return;
+        } else if atty::is(atty::Stream::Stdout) {
             // Fancy Miette reports for TTYs
             self.errors.iter().for_each(|err| {
                 let report = Report::new(ParserError {

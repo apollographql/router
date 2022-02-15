@@ -4,13 +4,13 @@ use apollo_router::http_subgraph::HttpSubgraphFetcher;
 use apollo_router::ApolloRouter;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ValueExt;
-use futures::prelude::*;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use test_log::test;
+use test_span::prelude::*;
+use url::Url;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -18,26 +18,23 @@ macro_rules! assert_federated_response {
             .query($query)
             .variables(Arc::new(
                 vec![
-                    ("topProductsFirst".to_string(), 2.into()),
-                    ("reviewsForAuthorAuthorId".to_string(), 1.into()),
+                    ("topProductsFirst".into(), 2.into()),
+                    ("reviewsForAuthorAuthorId".into(), 1.into()),
                 ]
                 .into_iter()
                 .collect(),
             ))
             .build();
-        let (mut actual, registry) = query_rust(request.clone()).await;
-        let mut expected = query_node(request.clone()).await;
+        let (actual, registry) = query_rust(request.clone()).await;
+        let expected = query_node(request.clone()).await.unwrap();
 
         tracing::debug!("query:\n{}\n", request.query.as_str());
-
-        let expected = expected.next().await.unwrap();
 
         assert!(
             expected.data.is_object(),
             "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
-        let actual = actual.next().await.unwrap();
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
@@ -46,7 +43,7 @@ macro_rules! assert_federated_response {
     };
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -56,7 +53,7 @@ async fn basic_request() {
     );
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -68,7 +65,35 @@ async fn basic_composition() {
     );
 }
 
-#[test(tokio::test)]
+#[test_span(tokio::test)]
+#[target(apollo_router=tracing::Level::DEBUG)]
+#[target(apollo_router_core=tracing::Level::DEBUG)]
+async fn traced_basic_request() {
+    assert_federated_response!(
+        r#"{ topProducts { name name2:name } }"#,
+        hashmap! {
+            "products".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!("traced_basic_request", get_spans());
+}
+
+#[test_span(tokio::test)]
+#[target(apollo_router=tracing::Level::DEBUG)]
+#[target(apollo_router_core=tracing::Level::DEBUG)]
+async fn traced_basic_composition() {
+    assert_federated_response!(
+        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
+        hashmap! {
+            "products".to_string()=>2,
+            "reviews".to_string()=>1,
+            "accounts".to_string()=>1,
+        },
+    );
+    insta::assert_json_snapshot!("traced_basic_composition", get_spans());
+}
+
+#[tokio::test]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -91,7 +116,7 @@ async fn basic_mutation() {
     );
 }
 
-#[test(tokio::test)]
+#[test_span(tokio::test)]
 async fn variables() {
     assert_federated_response!(
         r#"
@@ -116,49 +141,55 @@ async fn variables() {
     );
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(
             r#"
-                query ExampleQuery($missingVariable: Int, $yetAnotherMissingVariable: ID!) {
-                    topProducts(first: $missingVariable) {
-                        name
-                        reviewsForAuthor(authorID: $yetAnotherMissingVariable) {
-                            body
-                        }
+            query ExampleQuery(
+                $missingVariable: Int!,
+                $yetAnotherMissingVariable: ID!,
+                $notRequiredVariable: Int,
+            ) {
+                topProducts(first: $missingVariable) {
+                    name
+                    reviewsForAuthor(authorID: $yetAnotherMissingVariable) {
+                        body
                     }
                 }
-                "#,
+            }
+            "#,
         )
         .build();
     let (response, _) = query_rust(request.clone()).await;
-    let data = response
-        .flat_map(|x| stream::iter(x.errors))
-        .collect::<Vec<_>>()
-        .await;
     let expected = vec![
-        graphql::FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
         }
         .to_graphql_error(None),
-        graphql::FetchError::ValidationMissingVariable {
+        graphql::FetchError::ValidationInvalidTypeVariable {
             name: "missingVariable".to_string(),
         }
         .to_graphql_error(None),
     ];
-    assert!(data.iter().all(|x| expected.contains(x)));
+    assert!(
+        response.errors.iter().all(|x| expected.contains(x)),
+        "{:?}",
+        response.errors
+    );
 }
 
-async fn query_node(request: graphql::Request) -> graphql::ResponseStream {
-    let nodejs_impl =
-        HttpSubgraphFetcher::new("federated".into(), "http://localhost:4100/graphql".into());
+async fn query_node(request: graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
+    let nodejs_impl = HttpSubgraphFetcher::new(
+        "federated",
+        Url::parse("http://localhost:4100/graphql").unwrap(),
+    );
     nodejs_impl.stream(request).await
 }
 
 async fn query_rust(
     request: graphql::Request,
-) -> (graphql::ResponseStream, Arc<CountingServiceRegistry>) {
+) -> (graphql::Response, Arc<CountingServiceRegistry>) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
@@ -170,7 +201,7 @@ async fn query_rust(
     let router = ApolloRouter::new(registry.clone(), schema, None).await;
 
     let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(Arc::new(request)).await,
+        Ok(route) => route.execute(request).await,
         Err(stream) => stream,
     };
 

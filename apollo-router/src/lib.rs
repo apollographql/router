@@ -1,6 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
 mod apollo_router;
+mod apollo_telemetry;
 pub mod configuration;
 mod files;
 mod http_server_factory;
@@ -12,12 +13,13 @@ mod trace;
 mod warp_http_server_factory;
 
 pub use self::apollo_router::*;
+use crate::configuration::SpaceportConfig;
 use crate::router_factory::ApolloRouterFactory;
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use configuration::Configuration;
+use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -26,7 +28,6 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -66,6 +67,9 @@ pub enum FederatedServerError {
 
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// Could not configure spaceport: {0}
+    ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -74,7 +78,7 @@ pub enum FederatedServerError {
 pub enum SchemaKind {
     /// A static schema.
     #[display(fmt = "Instance")]
-    Instance(graphql::Schema),
+    Instance(Box<graphql::Schema>),
 
     /// A stream of schema.
     #[display(fmt = "Stream")]
@@ -104,12 +108,20 @@ pub enum SchemaKind {
     },
 }
 
+impl From<graphql::Schema> for SchemaKind {
+    fn from(schema: graphql::Schema) -> Self {
+        Self::Instance(Box::new(schema))
+    }
+}
+
 impl SchemaKind {
     /// Convert this schema into a stream regardless of if is static or not. Allows for unified handling later.
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             SchemaKind::Instance(instance) => stream::iter(vec![UpdateSchema(instance)]).boxed(),
-            SchemaKind::Stream(stream) => stream.map(UpdateSchema).boxed(),
+            SchemaKind::Stream(stream) => {
+                stream.map(|schema| UpdateSchema(Box::new(schema))).boxed()
+            }
             SchemaKind::File { path, watch, delay } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -127,10 +139,10 @@ impl SchemaKind {
                                     .filter_map(move |_| {
                                         future::ready(ConfigurationKind::read_schema(&path).ok())
                                     })
-                                    .map(UpdateSchema)
+                                    .map(|schema| UpdateSchema(Box::new(schema)))
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateSchema(schema))).boxed()
+                                stream::once(future::ready(UpdateSchema(Box::new(schema)))).boxed()
                             }
                         }
                         Err(err) => {
@@ -228,7 +240,7 @@ impl ConfigurationKind {
                         config.subscriber = Some(subscriber);
                     }
                     Err(err) => {
-                        tracing::error!("Could not initialize tracing subscriber: {}", err,)
+                        tracing::error!("Could not initialize tracing subscriber: {}", err,);
                     }
                 };
                 UpdateConfiguration(config)
@@ -355,7 +367,7 @@ enum Event {
     NoMoreConfiguration,
 
     /// The schema was updated.
-    UpdateSchema(graphql::Schema),
+    UpdateSchema(Box<graphql::Schema>),
 
     /// There are no more updates to the schema
     NoMoreSchema,
@@ -372,7 +384,7 @@ pub enum State {
     Startup,
 
     /// The server is running on a particular address.
-    Running { address: SocketAddr, schema: String },
+    Running { address: ListenAddr, schema: String },
 
     /// The server has stopped.
     Stopped,
@@ -397,7 +409,7 @@ impl FederatedServerHandle {
     /// scenarios.
     ///
     /// returns: Option<SocketAddr>
-    pub async fn ready(&mut self) -> Option<SocketAddr> {
+    pub async fn ready(&mut self) -> Option<ListenAddr> {
         self.state_receiver()
             .map(|state| {
                 if let State::Running { address, .. } = state {
@@ -517,6 +529,7 @@ mod tests {
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
+    use url::Url;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =
@@ -525,7 +538,7 @@ mod tests {
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
         FederatedServer::builder()
             .configuration(configuration)
-            .schema(schema)
+            .schema(Box::new(schema))
             .build()
             .serve()
     }
@@ -533,24 +546,29 @@ mod tests {
     #[test(tokio::test)]
     async fn basic_request() {
         let mut server_handle = init_with_server();
-        let socket = server_handle.ready().await.expect("Server never ready");
-        assert_federated_response(&socket, r#"{ topProducts { name } }"#).await;
+        let listen_addr = server_handle.ready().await.expect("Server never ready");
+        assert_federated_response(&listen_addr, r#"{ topProducts { name } }"#).await;
         server_handle.shutdown().await.expect("Could not shutdown");
     }
 
-    async fn assert_federated_response(socket: &SocketAddr, request: &str) {
+    async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = graphql::Request::builder().query(request).build();
-        let mut expected = query(socket, request.clone()).await;
+        let expected = query(listen_addr, request.clone()).await.unwrap();
 
-        let expected = expected.next().await.unwrap();
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
-    async fn query(socket: &SocketAddr, request: graphql::Request) -> graphql::ResponseStream {
-        HttpSubgraphFetcher::new("federated".into(), format!("http://{}/graphql", socket))
-            .stream(request)
-            .await
+    async fn query(
+        listen_addr: &ListenAddr,
+        request: graphql::Request,
+    ) -> Result<graphql::Response, graphql::FetchError> {
+        HttpSubgraphFetcher::new(
+            "federated",
+            Url::parse(&format!("{}/graphql", listen_addr)).unwrap(),
+        )
+        .stream(request)
+        .await
     }
 
     #[test(tokio::test)]

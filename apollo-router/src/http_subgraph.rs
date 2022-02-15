@@ -1,13 +1,8 @@
 use apollo_router_core::prelude::*;
-use bytes::BytesMut;
+use async_trait::async_trait;
 use derivative::Derivative;
-use futures::prelude::*;
-use std::pin::Pin;
 use tracing::Instrument;
-
-type BytesStream = Pin<
-    Box<dyn futures::Stream<Item = Result<bytes::Bytes, graphql::FetchError>> + std::marker::Send>,
->;
+use url::Url;
 
 /// A fetcher for subgraph data that uses http.
 /// Streaming via chunking is supported.
@@ -15,14 +10,16 @@ type BytesStream = Pin<
 #[derivative(Debug)]
 pub struct HttpSubgraphFetcher {
     service: String,
-    url: String,
+    url: Url,
     #[derivative(Debug = "ignore")]
     http_client: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl HttpSubgraphFetcher {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: String, url: String) -> Self {
+    pub fn new(service: impl Into<String>, url: Url) -> Self {
+        let service = service.into();
+
         HttpSubgraphFetcher {
             http_client: reqwest_middleware::ClientBuilder::new(
                 reqwest::Client::builder()
@@ -38,81 +35,67 @@ impl HttpSubgraphFetcher {
         }
     }
 
-    fn request_stream(&self, request: graphql::Request) -> BytesStream {
+    async fn request_stream(
+        &self,
+        request: graphql::Request,
+    ) -> Result<bytes::Bytes, graphql::FetchError> {
         // Perform the actual request and start streaming.
-        // Reqwest doesn't care if there is only one response, in this case it'll be a stream of
-        // one element.
-        let service = self.service.clone();
-        self.http_client
+        // assume for now that there will be only one response
+        let response = self
+            .http_client
             .post(self.url.clone())
             .json(&request)
             .send()
             .instrument(tracing::trace_span!("http-subgraph-request"))
-            // We have a future for the response, convert it to a future of the stream.
-            .map_ok(|r| r.bytes_stream().boxed())
-            // Convert the entire future to a stream, at this point we have a stream of a result of
-            // a single stream
-            .into_stream()
-            // Flatten the stream
-            .flat_map(|result| match result {
-                Ok(s) => s.map_err(Into::into).boxed(),
-                Err(err) => stream::iter(vec![Err(err)]).boxed(),
-            })
-            .map_err(move |err: reqwest_middleware::Error| {
+            .await
+            .map_err(|err| {
+                tracing::error!(fetch_error = err.to_string().as_str());
+
+                graphql::FetchError::SubrequestHttpError {
+                    service: self.service.to_owned(),
+                    reason: err.to_string(),
+                }
+            })?;
+
+        response
+            .bytes()
+            .instrument(tracing::debug_span!("aggregate_response_data"))
+            .await
+            .map_err(|err| {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
                 graphql::FetchError::SubrequestHttpError {
-                    service: service.to_owned(),
+                    service: self.service.to_owned(),
                     reason: err.to_string(),
                 }
             })
-            .boxed()
     }
 
     fn map_to_graphql(
         service_name: String,
-        mut bytes_stream: BytesStream,
-    ) -> graphql::ResponseStream {
-        Box::pin(
-            async move {
-                let mut current_payload_bytes = BytesMut::new();
-                let is_primary = true;
-
-                while let Some(next_chunk) = bytes_stream.next().await {
-                    match next_chunk {
-                        Ok(bytes) => {
-                            current_payload_bytes.extend(&bytes);
-                        }
-                        Err(fetch_error) => {
-                            return fetch_error.to_response(is_primary);
-                        }
-                    }
+        response: bytes::Bytes,
+    ) -> Result<graphql::Response, graphql::FetchError> {
+        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+            graphql::Response::from_bytes(&service_name, response).map_err(|error| {
+                graphql::FetchError::SubrequestMalformedResponse {
+                    service: service_name.clone(),
+                    reason: error.to_string(),
                 }
-
-                serde_json::from_slice::<graphql::Response>(&current_payload_bytes).unwrap_or_else(
-                    |error| {
-                        graphql::FetchError::SubrequestMalformedResponse {
-                            service: service_name.clone(),
-                            reason: error.to_string(),
-                        }
-                        .to_response(is_primary)
-                    },
-                )
-            }
-            .into_stream(),
-        )
+            })
+        })
     }
 }
 
+#[async_trait]
 impl graphql::Fetcher for HttpSubgraphFetcher {
-    /// Using reqwest fetch a stream of graphql results.
-    fn stream(
+    /// Using reqwest to fetch a graphql response
+    async fn stream(
         &self,
         request: graphql::Request,
-    ) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>> {
+    ) -> Result<graphql::Response, graphql::FetchError> {
         let service_name = self.service.to_string();
-        let bytes_stream = self.request_stream(request);
-        Box::pin(async { Self::map_to_graphql(service_name, bytes_stream) })
+        let response = self.request_stream(request).await?;
+        Self::map_to_graphql(service_name, response)
     }
 }
 
@@ -153,7 +136,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_non_chunked() -> Result<(), Box<dyn std::error::Error>> {
-        let response = graphql::Response::builder()
+        let expected_response = graphql::Response::builder()
             .data(json!({
               "allProducts": [
                 {
@@ -179,20 +162,20 @@ mod tests {
                 .body_matches(Regex::new(".*").unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&response);
+                .json_body_obj(&expected_response);
         });
-        let fetcher = HttpSubgraphFetcher::new("products".into(), server.url("/graphql"));
-        let collect = fetcher
+        let fetcher =
+            HttpSubgraphFetcher::new("products", Url::parse(&server.url("/graphql")).unwrap());
+        let response = fetcher
             .stream(
                 graphql::Request::builder()
                     .query(r#"{allProducts{variation {id}id}}"#)
                     .build(),
             )
             .await
-            .collect::<Vec<_>>()
-            .await;
+            .unwrap();
 
-        assert_eq!(collect[0], response);
+        assert_eq!(response, expected_response);
         mock.assert();
         Ok(())
     }

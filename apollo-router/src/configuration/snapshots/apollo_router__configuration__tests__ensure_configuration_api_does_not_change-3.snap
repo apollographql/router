@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 427
 expression: config
 
 ---
@@ -8,7 +9,9 @@ server:
   cors: ~
 subgraphs:
   example:
-    routing_url: foo
+    routing_url: "http://foo/"
 opentelemetry:
   jaeger: ~
+spaceport: ~
+graph: ~
 

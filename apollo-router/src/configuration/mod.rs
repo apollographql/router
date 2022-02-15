@@ -3,6 +3,7 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 
+use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -11,6 +12,7 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -36,6 +38,8 @@ pub enum ConfigurationError {
     MissingFeature(&'static str),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
+    /// Invalid URL for subgraph {subgraph}: {url}
+    InvalidSubgraphUrl { subgraph: String, url: String },
 }
 
 /// The configuration for the router.
@@ -62,10 +66,20 @@ pub struct Configuration {
     #[builder(default)]
     #[derivative(Debug = "ignore")]
     pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
+
+    /// Spaceport configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub spaceport: Option<SpaceportConfig>,
+
+    /// Studio Graph configuration.
+    #[serde(default)]
+    #[builder(default)]
+    pub graph: Option<StudioGraph>,
 }
 
-fn default_listen() -> SocketAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap()
+fn default_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
 impl Configuration {
@@ -82,15 +96,21 @@ impl Configuration {
                         errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
                         continue;
                     }
-                    self.subgraphs.insert(
-                        name.to_owned(),
-                        Subgraph {
-                            routing_url: schema_url.to_owned(),
-                        },
-                    );
+                    match Url::parse(schema_url) {
+                        Err(_e) => {
+                            errors.push(ConfigurationError::InvalidSubgraphUrl {
+                                subgraph: name.to_owned(),
+                                url: schema_url.to_owned(),
+                            });
+                        }
+                        Ok(routing_url) => {
+                            self.subgraphs
+                                .insert(name.to_owned(), Subgraph { routing_url });
+                        }
+                    }
                 }
                 Some(subgraph) => {
-                    if !schema_url.is_empty() && schema_url != &subgraph.routing_url {
+                    if !schema_url.is_empty() && schema_url != subgraph.routing_url.as_str() {
                         tracing::warn!("overriding URL from subgraph {} at {} with URL from the configuration file: {}",
                 name, schema_url, subgraph.routing_url);
                     }
@@ -114,7 +134,7 @@ impl Configuration {
 #[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 pub struct Subgraph {
     /// The url for the subgraph.
-    pub routing_url: String,
+    pub routing_url: Url,
 }
 
 /// Configuration options pertaining to the http server component.
@@ -124,13 +144,58 @@ pub struct Server {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     #[serde(default = "default_listen")]
-    #[builder(default_code = "default_listen()")]
-    pub listen: SocketAddr,
+    #[builder(default_code = "default_listen()", setter(into))]
+    pub listen: ListenAddr,
 
     /// Cross origin request headers.
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+}
+
+/// Listening address.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ListenAddr {
+    /// Socket address.
+    SocketAddr(SocketAddr),
+    /// Unix socket.
+    #[cfg(unix)]
+    UnixSocket(PathBuf),
+}
+
+impl From<SocketAddr> for ListenAddr {
+    fn from(addr: SocketAddr) -> Self {
+        Self::SocketAddr(addr)
+    }
+}
+
+#[cfg(unix)]
+impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>>
+    for ListenAddr
+{
+    fn from(
+        addr: tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>,
+    ) -> Self {
+        match addr {
+            tokio_util::either::Either::Left(addr) => Self::SocketAddr(addr),
+            tokio_util::either::Either::Right(addr) => Self::UnixSocket(
+                addr.as_pathname()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+}
+
+impl fmt::Display for ListenAddr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::SocketAddr(addr) => write!(f, "http://{}", addr),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 /// Cross origin request configuration.
@@ -200,6 +265,46 @@ impl Cors {
             cors.allow_any_origin()
         } else {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
+        }
+    }
+}
+
+fn default_collector() -> String {
+    DEFAULT_SERVER_URL.to_string()
+}
+
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
+
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+#[derive(Clone, Derivative, Deserialize, Serialize)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct StudioGraph {
+    pub(crate) reference: String,
+
+    #[derivative(Debug = "ignore")]
+    pub(crate) key: String,
+}
+
+impl Default for SpaceportConfig {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external: false,
         }
     }
 }
@@ -418,13 +523,13 @@ mod tests {
                     (
                         "inventory".to_string(),
                         Subgraph {
-                            routing_url: "http://inventory/graphql".to_string(),
+                            routing_url: Url::parse("http://inventory/graphql").unwrap(),
                         },
                     ),
                     (
                         "products".to_string(),
                         Subgraph {
-                            routing_url: "http://products/graphql".to_string(),
+                            routing_url: Url::parse("http://products/graphql").unwrap(),
                         },
                     ),
                 ]
@@ -448,7 +553,12 @@ mod tests {
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            configuration.subgraphs.get("accounts").unwrap().routing_url,
+            configuration
+                .subgraphs
+                .get("accounts")
+                .unwrap()
+                .routing_url
+                .as_str(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
@@ -458,13 +568,19 @@ mod tests {
                 .subgraphs
                 .get("inventory")
                 .unwrap()
-                .routing_url,
+                .routing_url
+                .as_str(),
             "http://inventory/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            configuration.subgraphs.get("products").unwrap().routing_url,
+            configuration
+                .subgraphs
+                .get("products")
+                .unwrap()
+                .routing_url
+                .as_str(),
             "http://products/graphql"
         );
         // if the configuration has a no routing URL, and the supergraph
@@ -487,5 +603,13 @@ mod tests {
             }
             Ok(()) => panic!("expected missing subgraph URL for 'reviews'"),
         }
+    }
+
+    #[test]
+    fn invalid_subgraph_url() {
+        let err = serde_yaml::from_str::<Configuration>(include_str!("testdata/invalid_url.yaml"))
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "subgraphs.accounts.routing_url: invalid value: string \"abcd\", expected relative URL without a base at line 5 column 18");
     }
 }

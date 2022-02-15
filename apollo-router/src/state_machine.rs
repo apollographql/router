@@ -4,11 +4,13 @@ use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, SpaceportConfig};
 use apollo_router_core::prelude::*;
+use apollo_spaceport::server::ReportSpaceport;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -40,7 +42,7 @@ where
 /// If config and schema are not supplied then the machine ends with an error.
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
-/// At any point a shutdown event will case the machine to try to get to stopped state.  
+/// At any point a shutdown event will cause the machine to try to get to stopped state.  
 pub(crate) struct StateMachine<S, Router, PreparedQuery, FA>
 where
     S: HttpServerFactory,
@@ -67,13 +69,44 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address(),
+                address: server_handle.listen_address().to_owned(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
             Errored { .. } => State::Errored,
         }
     }
+}
+
+// For use when we have an external collector. Makes selecting over
+// events simpler
+async fn do_nothing(_addr_str: String) -> bool {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+// For use when we have an internal collector.
+async fn do_listen(addr_str: String) -> bool {
+    tracing::info!("spawning an internal spaceport");
+    // Spawn a spaceport server to handle statistics
+    let addr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("could not parse spaceport address: {}", e);
+            return false;
+        }
+    };
+
+    let spaceport = ReportSpaceport::new(addr);
+
+    if let Err(e) = spaceport.serve().await {
+        tracing::error!("spaceport did not terminate normally: {}", e);
+        return false;
+    }
+    true
 }
 
 impl<S, Router, PreparedQuery, FA> StateMachine<S, Router, PreparedQuery, FA>
@@ -101,6 +134,49 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
+        // Studio Agent Spaceport listener
+        // TODO: This code will be moving when we add support for Tower
+        // to the router. Leaving here until that time.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
+
+        tokio::spawn(async move {
+            let mut current_listener = "".to_string();
+            let mut current_operation: fn(
+                msg: String,
+            )
+                -> Pin<Box<dyn Future<Output = bool> + Send>> = |msg| Box::pin(do_nothing(msg));
+
+            loop {
+                tokio::select! {
+                    biased;
+                    mopt = rx.recv() => {
+                        match mopt {
+                            Some(msg) => {
+                                tracing::info!(?msg);
+                                // Save our target listener for later use
+                                current_listener = msg.listener.clone();
+                                // Configure which function to call
+                                if msg.external {
+                                    current_operation = |msg| Box::pin(do_nothing(msg));
+                                } else {
+                                    current_operation = |msg| Box::pin(do_listen(msg));
+                                }
+                            },
+                            None => break
+                        }
+                    },
+                    x = current_operation(current_listener.clone()) => {
+                        // The only time a current_operation will return is failure
+                        // from the server. If this happens, wait for a while
+                        // then try again.
+                        tracing::info!(%x, "current_operation");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                };
+            }
+            tracing::info!("terminating spaceport loop");
+        });
+
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -120,13 +196,28 @@ where
                 (Startup { configuration, .. }, UpdateSchema(new_schema)) => {
                     self.maybe_transition_to_running(Startup {
                         configuration,
-                        schema: Some(new_schema),
+                        schema: Some(*new_schema),
                         phantom: PhantomData,
                     })
                     .await
                 }
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.spaceport {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                        }
+                    }
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
                         schema,
@@ -190,7 +281,7 @@ where
                             tracing::info!("Reloading schema");
                             let derived_configuration = Arc::new(derived_configuration);
 
-                            let schema = Arc::new(new_schema);
+                            let schema = Arc::new(*new_schema);
                             let router = Arc::new(
                                 self.router_factory
                                     .create(
@@ -249,6 +340,21 @@ where
                             }
                         }
                         Ok(()) => {
+                            // Only check for notify if we have graph configuration
+                            if new_configuration.graph.is_some() {
+                                match &new_configuration.spaceport {
+                                    Some(v) => {
+                                        tx.send(v.clone())
+                                            .await
+                                            .map_err(FederatedServerError::ServerSpaceportError)?;
+                                    }
+                                    None => {
+                                        tx.send(Default::default())
+                                            .await
+                                            .map_err(FederatedServerError::ServerSpaceportError)?;
+                                    }
+                                }
+                            }
                             let derived_configuration = Arc::new(derived_configuration);
                             let router = Arc::new(
                                 self.router_factory
@@ -390,16 +496,15 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::http_server_factory::MockHttpServerFactory;
+    use crate::http_server_factory::{Listener, MockHttpServerFactory};
     use crate::router_factory::RouterFactory;
     use futures::channel::oneshot;
     use mockall::{mock, predicate::*};
     use std::net::SocketAddr;
-    use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
     use test_log::test;
-    use tokio::net::TcpListener;
+    use url::Url;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -465,13 +570,13 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -500,18 +605,18 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
-                    UpdateSchema(schema.parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(schema.parse().unwrap())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: schema.to_string(),
                     },
                     State::Stopped
@@ -539,7 +644,7 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema("".parse().unwrap()),
+                    UpdateSchema(Box::new("".parse().unwrap())),
                     UpdateConfiguration(
                         Configuration::builder()
                             .server(
@@ -556,11 +661,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -589,13 +694,13 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     )
                                 ]
@@ -606,18 +711,18 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
                             PRODUCTS @join__graph(name: "products" url: "")
                             INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -641,7 +746,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://accounts/graphql"
             })
             .times(1)
@@ -650,7 +760,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://localhost:4001/graphql"
             })
             .times(1)
@@ -669,7 +784,7 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: "http://accounts/graphql".to_string()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
                                         }
                                     ),
                                 ]
@@ -680,10 +795,10 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     UpdateConfiguration(
                             Configuration::builder()
                                 .build()
@@ -694,7 +809,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -716,7 +831,12 @@ mod tests {
         router_factory
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://accounts/graphql"
             })
             .times(1)
@@ -726,7 +846,12 @@ mod tests {
             .expect_create()
             .withf(|configuration, _schema, _previous_router| {
                 println!("got configuration: {:#?}", configuration);
-                configuration.subgraphs.get("accounts").unwrap().routing_url
+                configuration
+                    .subgraphs
+                    .get("accounts")
+                    .unwrap()
+                    .routing_url
+                    .as_str()
                     == "http://localhost:4001/graphql"
             })
             .times(1)
@@ -743,27 +868,27 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(r#"
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
-                        }"#.parse().unwrap()),
-                    UpdateSchema(r#"
+                        }"#.parse().unwrap())),
+                    UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap()),
+                        }"#.parse().unwrap())),
                     Shutdown,
                 ],
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
                         }"#.to_string()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -797,8 +922,9 @@ mod tests {
         #[derive(Debug)]
         MyFetcher {}
 
+        #[async_trait::async_trait]
         impl graphql::Fetcher for MyFetcher {
-            fn stream(&self, request: graphql::Request) -> Pin<Box<dyn Future<Output = graphql::ResponseStream> + Send>>;
+            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
         }
     }
 
@@ -811,7 +937,7 @@ mod tests {
             async fn prepare_query(
                 &self,
                 request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::ResponseStream>;
+            ) -> Result<MockMyRoute, graphql::Response>;
         }
     }
 
@@ -821,7 +947,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: Arc<graphql::Request>) -> graphql::ResponseStream;
+            async fn execute(self, request: graphql::Request) -> graphql::Response;
         }
     }
 
@@ -856,7 +982,7 @@ mod tests {
             .returning(
                 move |_: Arc<MockMyRouter>,
                       configuration: Arc<Configuration>,
-                      listener: Option<TcpListener>| {
+                      listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -867,7 +993,16 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            #[cfg(unix)]
+                            {
+                                tokio_util::either::Either::Left(
+                                    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                                )
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            }
                         })
                     };
 
@@ -875,7 +1010,7 @@ mod tests {
                         Ok(HttpServerHandle::new(
                             shutdown_sender,
                             Box::pin(server),
-                            configuration.server.listen,
+                            configuration.server.listen.clone(),
                         ))
                     })
                 },

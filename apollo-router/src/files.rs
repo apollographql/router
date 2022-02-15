@@ -88,8 +88,8 @@ pub(crate) mod tests {
 
     #[cfg(test)]
     pub(crate) async fn write_and_flush(file: &mut File, contents: &str) {
-        file.set_len(0).unwrap();
         file.seek(SeekFrom::Start(0)).unwrap();
+        file.set_len(0).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
     }

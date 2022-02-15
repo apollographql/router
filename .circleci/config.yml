@@ -7,7 +7,7 @@ orbs:
   # defined in this orb. For reference, the orb can be found here:
   # https://github.com/CircleCI-Public/rust-orb
   rust: circleci/rust@1.6.0
-  gh: circleci/github-cli@1.0.5
+  gh: circleci/github-cli@2.0.0
 
 executors:
   rust_linux: &rust_linux_executor
@@ -22,6 +22,12 @@ executors:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
+
+parameters:
+  cache_version:
+    type: string
+    # increment that one to invalidate all the caches
+    default: v4
 
 commands:
   initialize_submodules:
@@ -176,7 +182,7 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-v2-extra-tools-<< parameters.os >>
+            - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
       - run:
           name: Install cargo deny if not present
           command: |
@@ -188,7 +194,7 @@ commands:
             set -e -o pipefail
             cargo about --version || cargo install cargo-about
       - save_cache:
-          key: rust-v2-extra-tools-<< parameters.os >>
+          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
           paths:
             - ~/.cargo/bin/cargo-deny
             - ~/.cargo/bin/cargo-about
@@ -200,8 +206,8 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
       - run: cargo xtask lint
 
   xtask_check_compliance:
@@ -211,8 +217,8 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -221,10 +227,12 @@ commands:
       - run: cargo sweep -s
       - install_extra_tools:
           os: << parameters.os >>
+      # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
+      - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
+          key: rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - ~/.cargo
@@ -250,9 +258,9 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -262,7 +270,7 @@ commands:
       - build_all_permutations
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+          key: rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - ~/.cargo
@@ -270,9 +278,9 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-build-windows-{{ checksum "Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -286,7 +294,7 @@ commands:
       - build_common_permutations
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+          key: rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - C:\\Users\\circleci\.cargo
@@ -295,9 +303,9 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -311,7 +319,7 @@ commands:
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+          key: rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
           paths:
             - target/
             - C:\\Users\\circleci\.cargo
@@ -322,11 +330,11 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
-            - rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}
+            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}
       - run:
           name: Install cargo sweep
           command: |
@@ -336,7 +344,7 @@ commands:
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
-          key: rust-target-v2-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          key: rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.toml" }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - target/
             - ~/.cargo

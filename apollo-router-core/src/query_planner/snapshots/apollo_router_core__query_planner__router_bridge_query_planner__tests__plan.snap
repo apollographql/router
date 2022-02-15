@@ -1,5 +1,6 @@
 ---
 source: apollo-router-core/src/query_planner/router_bridge_query_planner.rs
+assertion_line: 97
 expression: result
 
 ---
@@ -7,7 +8,7 @@ QueryPlan {
     root: Fetch(
         FetchNode {
             service_name: "accounts",
-            requires: None,
+            requires: [],
             variable_usages: [],
             operation: "{me{name{first last}}}",
         },
