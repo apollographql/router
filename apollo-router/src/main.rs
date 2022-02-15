@@ -185,7 +185,7 @@ async fn rt_main() -> Result<()> {
                     )
                 }
                 State::Running { address, .. } => {
-                    tracing::info!("Listening on http://{} 🚀", address)
+                    tracing::info!("Listening on {} 🚀", address)
                 }
                 State::Stopped => {
                     tracing::info!("Stopped")
