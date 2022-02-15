@@ -100,7 +100,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
         {
             let plugin_registry = apollo_router_core::plugins();
-            for (name, configuration) in &configuration.plugins {
+            for (name, configuration) in &configuration.plugins.plugins {
                 let name = name.as_str().to_string();
                 match plugin_registry.get(name.as_str()) {
                     Some(factory) => match factory.create_instance(configuration) {
