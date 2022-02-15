@@ -72,10 +72,9 @@ impl RouterResponse {
                 )
                 .expect("crate::Response implements Serialize; qed")
                 .into(),
-            context: this.context.unwrap_or_else(|| {
-                Context::new()
-                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
-            }),
+            context: this
+                .context
+                .unwrap_or_else(|| Context::new().with_request(Arc::new(Default::default()))),
         }
     }
 }
@@ -98,10 +97,9 @@ impl From<ExecutionRequest> for crate::ExecutionRequest {
     fn from(execution_request: ExecutionRequest) -> Self {
         Self {
             query_plan: execution_request.query_plan.unwrap_or_default(),
-            context: execution_request.context.unwrap_or_else(|| {
-                Context::new()
-                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
-            }),
+            context: execution_request
+                .context
+                .unwrap_or_else(|| Context::new().with_request(Arc::new(Default::default()))),
         }
     }
 }
@@ -145,10 +143,9 @@ impl From<ExecutionResponse> for crate::ExecutionResponse {
 
         Self {
             response,
-            context: execution_response.context.unwrap_or_else(|| {
-                Context::new()
-                    .with_request(Arc::new(Request::new(crate::Request::default()).into()))
-            }),
+            context: execution_response
+                .context
+                .unwrap_or_else(|| Context::new().with_request(Arc::new(Default::default()))),
         }
     }
 }
