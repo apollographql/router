@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tower::util::{BoxLayer, BoxService};
 use tower::BoxError;
 
@@ -41,26 +41,21 @@ impl LayerFactory {
     }
 }
 
-type InstanceFactory = fn(
-    &serde_json::Value,
-) -> Result<
-    BoxedSubgraphLayer,
-    BoxError,
->;
+type InstanceFactory = fn(&serde_json::Value) -> Result<BoxedSubgraphLayer, BoxError>;
 
 type SchemaFactory = fn(gen: &mut SchemaGenerator) -> schemars::schema::Schema;
 
-static LAYER_REGISTRY: Lazy<Mutex<HashMap<String, LayerFactory>>> = Lazy::new(|| {
+static LAYER_REGISTRY: Lazy<RwLock<HashMap<String, LayerFactory>>> = Lazy::new(|| {
     let m = HashMap::new();
-    Mutex::new(m)
+    RwLock::new(m)
 });
 
-pub fn layers() -> Arc<HashMap<String, LayerFactory>> {
-    Arc::new(LAYER_REGISTRY.lock().expect("Lock poisoned").clone())
+pub fn layers<'a>() -> RwLockReadGuard<'a, HashMap<String, LayerFactory>> {
+    LAYER_REGISTRY.read().expect("Lock poisoned")
 }
 
-pub fn layers_mut<'a>() -> MutexGuard<'a, HashMap<String, LayerFactory>> {
-    LAYER_REGISTRY.lock().expect("Lock poisoned")
+pub fn layers_mut<'a>() -> RwLockWriteGuard<'a, HashMap<String, LayerFactory>> {
+    LAYER_REGISTRY.write().expect("Lock poisoned")
 }
 
 #[async_trait]
