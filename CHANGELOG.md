@@ -52,12 +52,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   [specified rules]: https://github.com/graphql/graphql-js/blob/95dac43fd4bff037e06adaa7cfb44f497bca94a7/src/validation/specifiedRules.ts#L76-L103
 
-- **Operations can now be made via `GET` requests** ([PR #429](https://github.com/apollographql/router/pull/429))
-
-  Previously, the Apollo Router only supported making requests via `POST` requests.  We've always intended on supporting `GET` support, but needed some additional support in place to make sure we could prevent allowing `mutation`s to happen over `GET` requests.
-
-  The Router now supports `GET` requests for `query` operations, and this is also the foundation for supporting [automated persisted queries] (APQ) in an upcoming release.  APQs pair really well with `GET` requests since they allow read operations (e.g., `GET` requests) to be more easily cached by intermediary proxies and CDNs, which typically forbid caching `POST` requests by specification (even if they often are just reads in GraphQL).
-
 ## :bug: Fixes
 
 - **No more double `http://http://` in logs** ([PR #448](https://github.com/apollographql/router/pulls/448))
