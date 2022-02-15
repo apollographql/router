@@ -77,9 +77,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {
-                    Some(layer) => {
-                        let kind = layer.0;
-                        let config = layer.1;
+                    Some((kind, config)) => {
                         match apollo_router_core::layers().get(kind) {
                             None => {
                                 errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));

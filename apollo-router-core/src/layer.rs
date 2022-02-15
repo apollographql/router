@@ -44,12 +44,7 @@ impl LayerFactory {
 type InstanceFactory = fn(
     &serde_json::Value,
 ) -> Result<
-    BoxLayer<
-        BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-        SubgraphRequest,
-        SubgraphResponse,
-        BoxError,
-    >,
+    BoxedSubgraphLayer,
     BoxError,
 >;
 
