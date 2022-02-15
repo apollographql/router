@@ -1,13 +1,15 @@
-use crate::layer::ConfigurableLayer;
-use crate::{register_layer, SubgraphRequest};
+use std::str::FromStr;
+use std::task::{Context, Poll};
+
 use http::header::HeaderName;
 use http::HeaderValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::str::FromStr;
-use std::task::{Context, Poll};
 use tower::{BoxError, Layer, Service};
+
+use crate::layer::ConfigurableLayer;
+use crate::{register_layer, SubgraphRequest};
 
 register_layer!("headers", "insert", InsertLayer);
 register_layer!("headers", "remove", RemoveLayer);
@@ -17,7 +19,10 @@ register_layer!("headers", "propagate", PropagateLayer);
 #[serde(rename_all = "snake_case")]
 enum RemoveConfig {
     Name(String),
-    Regex(String),
+    Matching {
+        #[serde(default = "default_regex")]
+        regex: String,
+    },
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -35,6 +40,7 @@ enum PropagateConfig {
     },
     Named {
         name: String,
+        rename: Option<String>,
         default_value: Option<String>,
     },
 }
@@ -119,7 +125,7 @@ impl ConfigurableLayer for RemoveLayer {
             RemoveConfig::Name(name) => {
                 self.name = Some(name.try_into()?);
             }
-            RemoveConfig::Regex(regex) => self.regex = Some(Regex::new(regex.as_str())?),
+            RemoveConfig::Matching { regex } => self.regex = Some(Regex::new(regex.as_str())?),
         }
         Ok(self)
     }
@@ -176,6 +182,7 @@ where
 #[derive(Default)]
 struct PropagateLayer {
     name: Option<HeaderName>,
+    rename: Option<HeaderName>,
     regex: Option<Regex>,
     default_value: Option<HeaderValue>,
 }
@@ -187,9 +194,13 @@ impl ConfigurableLayer for PropagateLayer {
         match configuration {
             PropagateConfig::Named {
                 name,
+                rename,
                 default_value,
             } => {
                 self.name = Some(name.try_into()?);
+                if let Some(rename) = &rename {
+                    self.rename = Some(rename.try_into()?);
+                }
                 if let Some(default_value) = &default_value {
                     self.default_value = Some(default_value.try_into()?);
                 }
@@ -202,13 +213,15 @@ impl ConfigurableLayer for PropagateLayer {
 }
 
 impl<S> Layer<S> for PropagateLayer {
-    type Service = RemoveService<S>;
+    type Service = PropagateService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RemoveService {
+        PropagateService {
             inner,
             name: self.name.clone(),
+            rename: self.rename.clone(),
             regex: self.regex.clone(),
+            default_value: self.default_value.clone(),
         }
     }
 }
@@ -216,6 +229,7 @@ impl<S> Layer<S> for PropagateLayer {
 struct PropagateService<S> {
     inner: S,
     name: Option<HeaderName>,
+    rename: Option<HeaderName>,
     regex: Option<Regex>,
     default_value: Option<HeaderValue>,
 }
@@ -234,14 +248,12 @@ where
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
         if let Some(name) = &self.name {
-            if let Some(value) = req
-                .context
-                .request
-                .headers()
-                .get(name)
-                .or_else(|| self.default_value.as_ref())
-            {
-                req.http_request.headers_mut().insert(name, value.clone());
+            let value = req.context.request.headers().get(name);
+
+            if let Some(value) = value.or_else(|| self.default_value.as_ref()) {
+                req.http_request
+                    .headers_mut()
+                    .insert(self.rename.as_ref().unwrap_or(name), value.clone());
             }
         } else if let Some(regex) = &self.regex {
             req.context
@@ -263,44 +275,234 @@ where
 
 #[cfg(test)]
 mod test {
-    // TODO This is currently not possible because of the way that context is structured.
-    // use crate::headers::{InsertConfig, InsertLayer};
-    // use crate::layer::ConfigurableLayer;
-    // use crate::plugin_utils::MockSubgraphService;
-    // use crate::{http_compat, Context, Query, Request, SubgraphRequest};
-    // use mockall::predicate::eq;
-    // use std::sync::Arc;
-    // use tower::Layer;
-    // use tower_service::Service;
-    //
-    // #[tokio::test]
-    // async fn test_insert() {
-    //     let context_request = http::Request::builder()
-    //         .method("GET")
-    //         .header("A", "B")
-    //         .body(Request::builder().query("query").build())
-    //         .unwrap()
-    //         .into();
-    //     let expected = SubgraphRequest {
-    //         http_request: http::Request::builder()
-    //             .method("GET")
-    //             .header("A", "B")
-    //             .body(Request::builder().query("query").build())
-    //             .unwrap()
-    //             .into(),
-    //         context: Context::new().with_request(Arc::new(context_request)),
-    //     };
-    //
-    //     let mut mock = MockSubgraphService::new();
-    //     mock.expect_call().times(1).with(eq(expected));
-    //
-    //     let mut service = InsertLayer::default()
-    //         .configure(InsertConfig {
-    //             name: "A".to_string(),
-    //             value: "B".to_string(),
-    //         })?
-    //         .layer(mock);
-    //
-    //     service.call(expected).await;
-    // }
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use tower::{BoxError, Layer};
+    use tower::{Service, ServiceExt};
+
+    use crate::headers::{
+        InsertConfig, InsertLayer, PropagateConfig, PropagateLayer, RemoveConfig, RemoveLayer,
+    };
+    use crate::layer::ConfigurableLayer;
+    use crate::plugin_utils::MockSubgraphService;
+    use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
+
+    #[tokio::test]
+    async fn test_insert() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("c", "d"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = InsertLayer::default()
+            .configure(InsertConfig {
+                name: "c".to_string(),
+                value: "d".to_string(),
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_exact() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
+            .returning(example_response);
+
+        let mut service = RemoveLayer::default()
+            .configure(RemoveConfig::Name("aa".to_string()))?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_matching() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| request.assert_headers(vec![("ac", "vac")]))
+            .returning(example_response);
+
+        let mut service = RemoveLayer::default()
+            .configure(RemoveConfig::Matching {
+                regex: "a[ab]".to_string(),
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_matching() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("da", "vda"),
+                    ("db", "vdb"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = PropagateLayer::default()
+            .configure(PropagateConfig::Matching {
+                regex: "d[ab]".to_string(),
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_exact() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("da", "vda"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = PropagateLayer::default()
+            .configure(PropagateConfig::Named {
+                name: "da".to_string(),
+                rename: None,
+                default_value: None,
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_exact_rename() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ea", "vda"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = PropagateLayer::default()
+            .configure(PropagateConfig::Named {
+                name: "da".to_string(),
+                rename: Some("ea".to_string()),
+                default_value: None,
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_exact_default() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ea", "defaulted"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = PropagateLayer::default()
+            .configure(PropagateConfig::Named {
+                name: "ea".to_string(),
+                rename: None,
+                default_value: Some("defaulted".to_string()),
+            })?
+            .layer(mock.build());
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
+        Ok(SubgraphResponse {
+            response: http::Response::builder()
+                .body(Response::builder().build())
+                .unwrap()
+                .into(),
+            context: example_originating_request(),
+        })
+    }
+
+    fn example_originating_request() -> Context {
+        Context::new().with_request(Arc::new(
+            http::Request::builder()
+                .method("GET")
+                .header("da", "vda")
+                .header("db", "vdb")
+                .header("dc", "vdc")
+                .body(Request::builder().query("query").build())
+                .unwrap()
+                .into(),
+        ))
+    }
+
+    fn example_request() -> SubgraphRequest {
+        SubgraphRequest {
+            http_request: http::Request::builder()
+                .method("GET")
+                .header("aa", "vaa")
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .body(Request::builder().query("query").build())
+                .unwrap()
+                .into(),
+            context: example_originating_request(),
+        }
+    }
+
+    impl SubgraphRequest {
+        fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+            let actual_headers = self
+                .http_request
+                .headers()
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+                .collect::<HashSet<_>>();
+            assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
+
+            true
+        }
+    }
 }
