@@ -172,11 +172,11 @@ pub struct Subgraph {
 
 impl JsonSchema for Subgraph {
     fn schema_name() -> String {
-        "Subgraph".to_string()
+        stringify!(Subgraph).to_string()
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        // This is a manual implementation of Subgraph to allow layers that have been registered at
+        // This is a manual implementation of Subgraph schema to allow layers that have been registered at
         // compile time to be picked up.
         let mut subgraph = SchemaObject::default();
 
@@ -415,7 +415,7 @@ pub enum OpenTelemetry {
 // When Otel is moved to a plugin this will be removed.
 impl JsonSchema for OpenTelemetry {
     fn schema_name() -> String {
-        "OpenTelemetry".to_string()
+        stringify!(OpenTelemetry).to_string()
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
@@ -570,6 +570,7 @@ impl TraceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_yaml_snapshot;
     use schemars::gen::SchemaSettings;
 
     macro_rules! assert_config_snapshot {
@@ -589,9 +590,7 @@ mod tests {
         });
         let gen = settings.into_generator();
         let schema = gen.into_root_schema_for::<Configuration>();
-        let schema_json = serde_json::to_string_pretty(&schema).unwrap();
-        //println!("{}", schema_json);
-        assert!(!schema_json.is_empty());
+        assert_yaml_snapshot!(&schema)
     }
 
     #[test]

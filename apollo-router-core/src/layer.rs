@@ -43,7 +43,7 @@ impl LayerFactory {
 
 type InstanceFactory = fn(&serde_json::Value) -> Result<BoxedSubgraphLayer, BoxError>;
 
-type SchemaFactory = fn(gen: &mut SchemaGenerator) -> schemars::schema::Schema;
+type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
 static LAYER_REGISTRY: Lazy<RwLock<HashMap<String, LayerFactory>>> = Lazy::new(|| {
     let m = HashMap::new();
