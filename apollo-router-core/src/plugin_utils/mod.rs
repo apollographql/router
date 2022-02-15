@@ -4,4 +4,4 @@ pub mod structures;
 pub use service::{
     MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
 };
-pub use structures::{RouterRequest, RouterResponse};
+pub use structures::{ExecutionRequest, ExecutionResponse, RouterRequest, RouterResponse};
