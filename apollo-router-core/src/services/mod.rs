@@ -4,6 +4,7 @@ mod router_service;
 
 pub use self::execution_service::*;
 pub use self::router_service::*;
+use crate::fetch::OperationKind;
 use crate::header_manipulation::HeaderManipulationLayer;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
@@ -90,13 +91,6 @@ pub struct SubgraphRequest {
     pub context: Context,
 
     pub operation_kind: OperationKind,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum OperationKind {
-    Query,
-    Mutation,
-    Subscription,
 }
 
 assert_impl_all!(SubgraphResponse: Send);

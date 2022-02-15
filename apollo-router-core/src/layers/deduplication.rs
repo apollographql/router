@@ -1,4 +1,4 @@
-use crate::{http_compat, OperationKind, Request, SubgraphRequest, SubgraphResponse};
+use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tokio::sync::broadcast::{self, Sender};
