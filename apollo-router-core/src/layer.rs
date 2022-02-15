@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use std::collections::HashMap;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex};
 use tower::util::{BoxLayer, BoxService};
 use tower::BoxError;
 
@@ -45,17 +45,20 @@ type InstanceFactory = fn(&serde_json::Value) -> Result<BoxedSubgraphLayer, BoxE
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
-static LAYER_REGISTRY: Lazy<RwLock<HashMap<String, LayerFactory>>> = Lazy::new(|| {
+static LAYER_REGISTRY: Lazy<Mutex<HashMap<String, Arc<LayerFactory>>>> = Lazy::new(|| {
     let m = HashMap::new();
-    RwLock::new(m)
+    Mutex::new(m)
 });
 
-pub fn layers<'a>() -> RwLockReadGuard<'a, HashMap<String, LayerFactory>> {
-    LAYER_REGISTRY.read().expect("Lock poisoned")
+pub fn register_layer(name: String, layer_factory: LayerFactory) {
+    LAYER_REGISTRY
+        .lock()
+        .expect("Lock poisoned")
+        .insert(name, Arc::new(layer_factory));
 }
 
-pub fn layers_mut<'a>() -> RwLockWriteGuard<'a, HashMap<String, LayerFactory>> {
-    LAYER_REGISTRY.write().expect("Lock poisoned")
+pub fn layers() -> HashMap<String, Arc<LayerFactory>> {
+    LAYER_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
 #[async_trait]
@@ -78,7 +81,7 @@ macro_rules! register_layer {
                 format!("{}_{}", $group, $name)
             };
 
-            $crate::layers_mut().insert(qualified_name, $crate::LayerFactory::new(|configuration| {
+            $crate::register_layer(qualified_name, $crate::LayerFactory::new(|configuration| {
                 let layer = $value::new(serde_json::from_value(configuration.clone())?)?;
                 Ok(tower::util::BoxLayer::new(layer))
             }, |gen| gen.subschema_for::<<$value as $crate::ConfigurableLayer>::Config>()));
