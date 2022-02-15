@@ -300,24 +300,25 @@ pub(crate) mod fetch {
 
                 let mut paths = Vec::new();
                 let mut values = Vec::new();
-                data.select_values_and_paths(current_dir, |_path, value| {
-                    paths.push(_path);
-                    values.push(value)
-                })?;
-
-                let representations = Value::Array(
-                    values
-                        .into_iter()
-                        .flat_map(|value| match value {
-                            Value::Object(content) => {
-                                select_object(content, requires, schema).transpose()
+                data.select_values_and_paths(current_dir, |path, value| {
+                    match value {
+                        Value::Object(content) => {
+                            let object = select_object(content, requires, schema)?;
+                            if let Some(value) = object {
+                                paths.push(path);
+                                values.push(value)
                             }
-                            _ => Some(Err(FetchError::ExecutionInvalidContent {
+                        }
+                        _ => {
+                            return Err(FetchError::ExecutionInvalidContent {
                                 reason: "not an object".to_string(),
-                            })),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                            })
+                        }
+                    }
+                    Ok(())
+                })?;
+                let representations = Value::Array(values);
+
                 variables.insert("representations", representations);
 
                 Ok(Variables { variables, paths })

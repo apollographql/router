@@ -69,9 +69,9 @@ checksum = "94a45b455c14666b85fc40a019e8ab9eb75e3a124e05494f5397122bc9eb06e0"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b22f151e7fd55b164af009ae0e62893a40cf159ce73d23c11a6d708749030865"
+checksum = "9cec1d9128dcafbc909a781357c6645cccc6b276fdafb83142552a3fed1d42ff"
 dependencies = [
  "rowan",
 ]
@@ -86,10 +86,10 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.2",
+ "apollo-parser 0.2.2 (git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449)",
  "apollo-router-core",
  "apollo-spaceport",
  "async-trait",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -162,9 +162,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
- "apollo-parser 0.2.1",
+ "apollo-parser 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
  "atty",
  "bytes",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "bytes",
  "clap 3.0.14",
@@ -1605,9 +1605,9 @@ checksum = "0bfe8eed0a9285ef776bb792479ea3834e8b94e13d615c2f66d03dd50a435a29"
 
 [[package]]
 name = "httparse"
-version = "1.5.1"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acd94fdbe1d4ff688b67b04eee2e17bd50995534a61539e45adfefb45e5e5503"
+checksum = "9100414882e15fb7feccb4897e5f0ff0ff1ca7d1a86a23208ada4d7a18e6c6c4"
 
 [[package]]
 name = "httpdate"
@@ -1645,9 +1645,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.16"
+version = "0.14.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7ec3e62bdc98a2f0393a5048e4c30ef659440ea6e0e572965103e72bd836f55"
+checksum = "043f0e083e9901b6cc658a77d1eb86f4fc650bbb977a4337dd63192826aa85dd"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1658,7 +1658,7 @@ dependencies = [
  "http-body",
  "httparse",
  "httpdate",
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -3112,7 +3112,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=6f1a7033d03ff7310644d033508256dcf759a602#6f1a7033d03ff7310644d033508256dcf759a602"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=135a2c506c87e2b9eea47e2905383268e8d8d757#135a2c506c87e2b9eea47e2905383268e8d8d757"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -4612,7 +4612,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "ansi_term",
  "anyhow",

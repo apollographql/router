@@ -127,7 +127,10 @@ mod tests {
         let mut values = Vec::new();
         response
             .data
-            .select_values_and_paths(path, |_path, value| values.push(value))?;
+            .select_values_and_paths(path, |_path, value| {
+                values.push(value);
+                Ok(())
+            })?;
 
         Ok(Value::Array(
             values
