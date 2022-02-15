@@ -75,7 +75,7 @@ pub trait ValueExt {
     #[track_caller]
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F) -> Result<(), FetchError>
     where
-        F: FnMut(Path, &'a Value);
+        F: FnMut(Path, &'a Value) -> Result<(), FetchError>;
 }
 
 impl ValueExt for Value {
@@ -314,7 +314,7 @@ impl ValueExt for Value {
     #[track_caller]
     fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F) -> Result<(), FetchError>
     where
-        F: FnMut(Path, &'a Value),
+        F: FnMut(Path, &'a Value) -> Result<(), FetchError>,
     {
         iterate_path(&Path::default(), &path.0, self, &mut f)
     }
@@ -327,13 +327,10 @@ fn iterate_path<'a, F>(
     f: &mut F,
 ) -> Result<(), FetchError>
 where
-    F: FnMut(Path, &'a Value),
+    F: FnMut(Path, &'a Value) -> Result<(), FetchError>,
 {
     match path.get(0) {
-        None => {
-            f(parent.clone(), data);
-            Ok(())
-        }
+        None => f(parent.clone(), data),
         Some(PathElement::Flatten) => match data.as_array() {
             None => Err(FetchError::ExecutionInvalidContent {
                 reason: "not an array".to_string(),
@@ -566,7 +563,10 @@ mod tests {
 
     fn select_values<'a>(path: &'a Path, data: &'a Value) -> Result<Vec<&'a Value>, FetchError> {
         let mut v = Vec::new();
-        data.select_values_and_paths(path, |_path, value| v.push(value))?;
+        data.select_values_and_paths(path, |_path, value| {
+            v.push(value);
+            Ok(())
+        })?;
         Ok(v)
     }
 
