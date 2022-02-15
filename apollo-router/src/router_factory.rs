@@ -77,20 +77,18 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {
-                    Some((kind, config)) => {
-                        match apollo_router_core::layers().get(kind) {
-                            None => {
-                                errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
-                            }
-                            Some(factory) => match factory.create_instance(config) {
-                                Ok(layer) => subgraph_service = layer.layer(subgraph_service),
-                                Err(err) => errors.push(ConfigurationError::LayerConfiguration {
-                                    layer: kind.to_string(),
-                                    error: err.to_string(),
-                                }),
-                            },
+                    Some((kind, config)) => match apollo_router_core::layers().get(kind) {
+                        None => {
+                            errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
                         }
-                    }
+                        Some(factory) => match factory.create_instance(config) {
+                            Ok(layer) => subgraph_service = layer.layer(subgraph_service),
+                            Err(err) => errors.push(ConfigurationError::LayerConfiguration {
+                                layer: kind.to_string(),
+                                error: err.to_string(),
+                            }),
+                        },
+                    },
                     None => errors.push(ConfigurationError::LayerConfiguration {
                         layer: "unknown".into(),
                         error: "layer must be an object".into(),
