@@ -168,8 +168,7 @@ where
         } else if let Some(regex) = &self.regex {
             let matching_headers = headers
                 .iter()
-                .filter(|(name, _)| regex.is_match(name.as_str()))
-                .map(|(name, _)| name.clone())
+                .filter_map(|(name, _)| regex.is_match(name.as_str()).then(|| name.clone()))
                 .collect::<Vec<_>>();
             for name in matching_headers {
                 headers.remove(name);
