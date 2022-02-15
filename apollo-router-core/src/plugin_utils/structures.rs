@@ -1,4 +1,4 @@
-use crate::{Context, Error, Object, Path};
+use crate::{http_compat, Context, Error, Object, Path};
 use http::{Request, Response, StatusCode};
 use serde_json_bytes::{ByteString, Value};
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub struct RouterRequest {
     variables: Option<Arc<Object>>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
     extensions: Option<Object>,
-    context: Option<Context<()>>,
+    context: Option<Context<http_compat::Request<crate::Request>>>,
 }
 
 impl From<RouterRequest> for crate::RouterRequest {
@@ -25,7 +25,9 @@ impl From<RouterRequest> for crate::RouterRequest {
             extensions: request.extensions.unwrap_or_default(),
         });
         crate::RouterRequest {
-            context: request.context.unwrap_or_default().with_request(req.into()),
+            context: request
+                .context
+                .unwrap_or_else(|| Context::new().with_request(req.into())),
         }
     }
 }

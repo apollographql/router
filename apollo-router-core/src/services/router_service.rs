@@ -97,7 +97,7 @@ where
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: Context::new().with_request(Arc::new(request.context.request)),
+                    context: request.context.into(),
                 })
             });
         }
@@ -114,7 +114,7 @@ where
             }) {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: Context::new().with_request(Arc::new(request.context.request)),
+                    context: request.context.into(),
                 })
             } else {
                 let operation_name = request.context.request.body().operation_name.clone();

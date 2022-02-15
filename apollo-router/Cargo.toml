@@ -53,6 +53,7 @@ reqwest-middleware = "0.1.4"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = "1.0.79"
+serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_yaml = "0.8.23"
 startup = "0.1.1"
 static_assertions = "1.1.0"
@@ -77,7 +78,7 @@ apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
-rhai = { version = "1.4.1", features = ["sync"] }
+rhai = { version = "1.4.1", features = ["sync", "serde"] }
 
 [dev-dependencies]
 httpmock = "0.6.6"
@@ -85,7 +86,6 @@ insta = "1.12.0"
 maplit = "1.0.2"
 mockall = "0.11.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
-serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 tempfile = "3.3.0"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 test-span = "0.3"
