@@ -349,6 +349,7 @@ pub enum OpenTelemetry {
 #[serde(deny_unknown_fields)]
 #[derivative(Default)]
 pub struct Jaeger {
+    pub agent_endpoint: Option<SocketAddr>,
     pub collector_endpoint: Option<Url>,
     #[serde(default = "default_service_name")]
     #[derivative(Default(value = "default_service_name()"))]

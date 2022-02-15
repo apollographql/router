@@ -165,6 +165,10 @@ server:
   listen: 127.0.0.1:4000
 opentelemetry:
   jaeger:
+    # optional address of the jaeger UDP agent
+    # if agent_endpoint and collector_endpoint are not specified, it will send traces
+    # to the default Jaeger UDP agent address
+    agent_endpoint: "127.0.0.1:6831"
     # optional url of the jaeger collector
     collector_endpoint: "http://example.org"
     # name of the service used in traces

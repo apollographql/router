@@ -39,6 +39,9 @@ pub(crate) fn try_initialize_subscriber(
             let config = config.as_ref().unwrap_or(&default_config);
             let mut pipeline =
                 opentelemetry_jaeger::new_pipeline().with_service_name(&config.service_name);
+            if let Some(address) = config.agent_endpoint.as_ref() {
+                pipeline = pipeline.with_agent_endpoint(address);
+            }
             if let Some(url) = config.collector_endpoint.as_ref() {
                 pipeline = pipeline.with_collector_endpoint(url.as_str());
             }
