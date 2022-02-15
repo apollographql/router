@@ -103,20 +103,17 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             for (name, configuration) in &configuration.plugins {
                 let name = name.as_str().to_string();
                 match plugin_registry.get(name.as_str()) {
-                    Some(factory) => {
-                        let mut plugin = (*factory)();
-                        match plugin.configure(configuration) {
-                            Ok(_) => {
-                                builder = builder.with_dyn_plugin(plugin);
-                            }
-                            Err(err) => {
-                                errors.push(ConfigurationError::PluginConfiguration {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
+                    Some(factory) => match factory.create_instance(configuration) {
+                        Ok(plugin) => {
+                            builder = builder.with_dyn_plugin(plugin);
                         }
-                    }
+                        Err(err) => {
+                            errors.push(ConfigurationError::PluginConfiguration {
+                                plugin: name,
+                                error: err.to_string(),
+                            });
+                        }
+                    },
                     None => {
                         errors.push(ConfigurationError::PluginUnknown(name));
                     }

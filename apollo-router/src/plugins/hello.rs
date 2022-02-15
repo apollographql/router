@@ -3,7 +3,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-#[derive(Default)]
 struct Hello {}
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -14,27 +13,25 @@ struct Conf {
 impl Plugin for Hello {
     type Config = Conf;
 
-    fn configure(&mut self, configuration: Self::Config) -> Result<(), BoxError> {
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
-        Ok(())
+        Ok(Hello {})
     }
 }
 
-register_plugin!("hello", Hello);
+register_plugin!("example.com", "hello", Hello);
 
 #[cfg(test)]
 mod tests {
-    use apollo_router_core::DynPlugin;
     use serde_json::Value;
     use std::str::FromStr;
 
     #[tokio::test]
     async fn plugin_registered() {
-        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("hello")
-            .expect("Plugin not found")();
-        dyn_plugin
-            .configure(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
-            .expect("Failed to configure");
+        apollo_router_core::plugins()
+            .get("example.com_hello")
+            .expect("Plugin not found")
+            .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
+            .unwrap();
     }
 }
