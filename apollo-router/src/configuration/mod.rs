@@ -618,7 +618,7 @@ impl TraceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use insta::{assert_json_snapshot, assert_yaml_snapshot};
+    use insta::assert_json_snapshot;
     use schemars::gen::SchemaSettings;
 
     macro_rules! assert_config_snapshot {
@@ -633,7 +633,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn schema_generation() {
-        let settings = SchemaSettings::draft07().with(|s| {
+        let settings = SchemaSettings::draft2019_09().with(|s| {
             s.option_nullable = true;
             s.option_add_null_type = false;
         });
