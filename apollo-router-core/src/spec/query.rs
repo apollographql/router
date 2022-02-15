@@ -193,16 +193,35 @@ impl Query {
                         failfast_debug!("Missing field: {}", name);
                     }
                 }
-                Selection::InlineFragment { selection_set } => {
-                    self.apply_selection_set(selection_set, input, output, schema);
+                Selection::InlineFragment {
+                    fragment:
+                        Fragment {
+                            type_condition,
+                            selection_set,
+                        },
+                } => {
+                    if let Some(typename) = input.get("__typename") {
+                        if typename.as_str() == Some(type_condition.as_str()) {
+                            self.apply_selection_set(selection_set, input, output, schema);
+                        }
+                    }
                 }
                 Selection::FragmentSpread { name } => {
-                    if let Some(selection_set) = self
+                    if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
-                        self.apply_selection_set(selection_set, input, output, schema);
+                        if let Some(typename) = input.get("__typename") {
+                            if typename.as_str() == Some(fragment.type_condition.as_str()) {
+                                self.apply_selection_set(
+                                    &fragment.selection_set,
+                                    input,
+                                    output,
+                                    schema,
+                                );
+                            }
+                        }
                     } else {
                         failfast_debug!("Missing fragment named: {}", name);
                     }
