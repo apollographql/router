@@ -5,7 +5,6 @@ use serde::Deserialize;
 use tower::layer::layer_fn;
 use tower::{BoxError, Layer};
 
-#[derive(Default)]
 struct Hello {}
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -24,9 +23,9 @@ impl<S> Layer<S> for Hello {
 impl ConfigurableLayer for Hello {
     type Config = Conf;
 
-    fn configure(self, configuration: Self::Config) -> Result<Self, BoxError> {
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
-        Ok(self)
+        Ok(Self {})
     }
 }
 

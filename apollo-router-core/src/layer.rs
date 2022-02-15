@@ -69,12 +69,9 @@ pub fn layers_mut<'a>() -> MutexGuard<'a, HashMap<String, LayerFactory>> {
 }
 
 #[async_trait]
-pub trait ConfigurableLayer: Default + Send + Sync + 'static {
+pub trait ConfigurableLayer: Send + Sync + 'static + Sized {
     type Config: JsonSchema;
-
-    fn configure(self, _configuration: Self::Config) -> Result<Self, BoxError> {
-        Ok(self)
-    }
+    fn new(configuration: Self::Config) -> Result<Self, BoxError>;
 }
 
 /// Register a layer with a group and a name
@@ -92,9 +89,8 @@ macro_rules! register_layer {
             };
 
             $crate::layers_mut().insert(qualified_name, $crate::LayerFactory::new(|configuration| {
-                let layer = $value::default();
-                let typed_configuration = serde_json::from_value(configuration.clone())?;
-                Ok(tower::util::BoxLayer::new(layer.configure(typed_configuration)?))
+                let layer = $value::new(serde_json::from_value(configuration.clone())?)?;
+                Ok(tower::util::BoxLayer::new(layer))
             }, |gen| gen.subschema_for::<<$value as $crate::ConfigurableLayer>::Config>()));
         }
     };

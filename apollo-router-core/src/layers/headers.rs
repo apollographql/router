@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::task::{Context, Poll};
 
 use http::header::HeaderName;
@@ -54,22 +53,13 @@ struct InsertLayer {
     value: HeaderValue,
 }
 
-impl Default for InsertLayer {
-    fn default() -> Self {
-        Self {
-            name: HeaderName::from_static("name"),
-            value: HeaderValue::from_static("value"),
-        }
-    }
-}
-
 impl ConfigurableLayer for InsertLayer {
     type Config = InsertConfig;
-
-    fn configure(mut self, configuration: Self::Config) -> Result<Self, BoxError> {
-        self.name = HeaderName::from_str(configuration.name.as_str())?;
-        self.value = HeaderValue::from_str(configuration.value.as_str())?;
-        Ok(self)
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        Ok(Self {
+            name: configuration.name.try_into()?,
+            value: configuration.value.try_into()?,
+        })
     }
 }
 
@@ -111,7 +101,6 @@ where
     }
 }
 
-#[derive(Default)]
 struct RemoveLayer {
     name: Option<HeaderName>,
     regex: Option<Regex>,
@@ -120,14 +109,17 @@ struct RemoveLayer {
 impl ConfigurableLayer for RemoveLayer {
     type Config = RemoveConfig;
 
-    fn configure(mut self, configuration: Self::Config) -> Result<Self, BoxError> {
-        match configuration {
-            RemoveConfig::Name(name) => {
-                self.name = Some(name.try_into()?);
-            }
-            RemoveConfig::Matching { regex } => self.regex = Some(Regex::new(regex.as_str())?),
-        }
-        Ok(self)
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        Ok(match configuration {
+            RemoveConfig::Name(name) => Self {
+                name: Some(name.try_into()?),
+                regex: None,
+            },
+            RemoveConfig::Matching { regex } => Self {
+                name: None,
+                regex: Some(Regex::new(regex.as_str())?),
+            },
+        })
     }
 }
 
@@ -178,7 +170,6 @@ where
     }
 }
 
-#[derive(Default)]
 struct PropagateLayer {
     name: Option<HeaderName>,
     rename: Option<HeaderName>,
@@ -189,25 +180,25 @@ struct PropagateLayer {
 impl ConfigurableLayer for PropagateLayer {
     type Config = PropagateConfig;
 
-    fn configure(mut self, configuration: Self::Config) -> Result<Self, BoxError> {
-        match configuration {
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        Ok(match configuration {
             PropagateConfig::Named {
                 name,
                 rename,
                 default_value,
-            } => {
-                self.name = Some(name.try_into()?);
-                if let Some(rename) = &rename {
-                    self.rename = Some(rename.try_into()?);
-                }
-                if let Some(default_value) = &default_value {
-                    self.default_value = Some(default_value.try_into()?);
-                }
-            }
-            PropagateConfig::Matching { regex } => self.regex = Some(Regex::new(regex.as_str())?),
-        }
-
-        Ok(self)
+            } => Self {
+                name: Some(name.try_into()?),
+                rename: rename.map(|a| a.as_str().try_into()).transpose()?,
+                regex: None,
+                default_value: default_value.map(|a| a.as_str().try_into()).transpose()?,
+            },
+            PropagateConfig::Matching { regex } => Self {
+                name: None,
+                rename: None,
+                regex: Some(Regex::new(regex.as_str())?),
+                default_value: None,
+            },
+        })
     }
 }
 
@@ -302,12 +293,11 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = InsertLayer::default()
-            .configure(InsertConfig {
-                name: "c".to_string(),
-                value: "d".to_string(),
-            })?
-            .layer(mock.build());
+        let mut service = InsertLayer::new(InsertConfig {
+            name: "c".to_string(),
+            value: "d".to_string(),
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -321,9 +311,8 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac"), ("ab", "vab")]))
             .returning(example_response);
 
-        let mut service = RemoveLayer::default()
-            .configure(RemoveConfig::Name("aa".to_string()))?
-            .layer(mock.build());
+        let mut service =
+            RemoveLayer::new(RemoveConfig::Name("aa".to_string()))?.layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -337,11 +326,10 @@ mod test {
             .withf(|request| request.assert_headers(vec![("ac", "vac")]))
             .returning(example_response);
 
-        let mut service = RemoveLayer::default()
-            .configure(RemoveConfig::Matching {
-                regex: "a[ab]".to_string(),
-            })?
-            .layer(mock.build());
+        let mut service = RemoveLayer::new(RemoveConfig::Matching {
+            regex: "a[ab]".to_string(),
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -363,11 +351,10 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = PropagateLayer::default()
-            .configure(PropagateConfig::Matching {
-                regex: "d[ab]".to_string(),
-            })?
-            .layer(mock.build());
+        let mut service = PropagateLayer::new(PropagateConfig::Matching {
+            regex: "d[ab]".to_string(),
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -388,13 +375,12 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = PropagateLayer::default()
-            .configure(PropagateConfig::Named {
-                name: "da".to_string(),
-                rename: None,
-                default_value: None,
-            })?
-            .layer(mock.build());
+        let mut service = PropagateLayer::new(PropagateConfig::Named {
+            name: "da".to_string(),
+            rename: None,
+            default_value: None,
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -415,13 +401,12 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = PropagateLayer::default()
-            .configure(PropagateConfig::Named {
-                name: "da".to_string(),
-                rename: Some("ea".to_string()),
-                default_value: None,
-            })?
-            .layer(mock.build());
+        let mut service = PropagateLayer::new(PropagateConfig::Named {
+            name: "da".to_string(),
+            rename: Some("ea".to_string()),
+            default_value: None,
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
@@ -442,13 +427,12 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = PropagateLayer::default()
-            .configure(PropagateConfig::Named {
-                name: "ea".to_string(),
-                rename: None,
-                default_value: Some("defaulted".to_string()),
-            })?
-            .layer(mock.build());
+        let mut service = PropagateLayer::new(PropagateConfig::Named {
+            name: "ea".to_string(),
+            rename: None,
+            default_value: Some("defaulted".to_string()),
+        })?
+        .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
         Ok(())
