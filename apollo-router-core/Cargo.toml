@@ -4,6 +4,7 @@ version = "0.1.0-alpha.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
+publish = false
 
 [features]
 # Prevents the query execution to continue if any error occurs while fetching
@@ -18,7 +19,7 @@ atty = "0.2.14"
 bytes = "1.1.0"
 derivative = "2.2.0"
 displaydoc = "0.2"
-futures = "0.3.19"
+futures = "0.3.21"
 http = "0.2.6"
 include_dir = "0.7.2"
 lru = "0.7.2"
@@ -30,9 +31,9 @@ paste = "1.0.6"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 reqwest-middleware = "0.1.3"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
-router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "950eb931e38746bb7cfed05382d6970a22e43cc4" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "6f1a7033d03ff7310644d033508256dcf759a602" }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
-serde_json = { version = "1.0.78", features = ["preserve_order"] }
+serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 static_assertions = "1.1.0"
 thiserror = "1.0.30"
@@ -46,7 +47,7 @@ typed-builder = "0.9.1"
 url = "2.2.2"
 
 [dev-dependencies]
-insta = "1.11.0"
+insta = "1.12.0"
 mockall = "0.11.0"
 static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
