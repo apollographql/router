@@ -270,8 +270,7 @@ pub(crate) mod fetch {
     pub(crate) enum OperationKind {
         Query,
         Mutation,
-        #[serde(other)]
-        Unknown,
+        Subscription,
     }
 
     struct Variables {
