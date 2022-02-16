@@ -97,12 +97,18 @@ where
                 // resolve the key (retrieve a value) for us
                 // No cache locks are held here
                 let value = self.resolver.retrieve(key.clone()).await;
-                // Update our cache
-                let mut locked_cache = self.cached.lock().await;
-                locked_cache.put(key.clone(), value.clone());
-                // Update our wait list
-                let mut locked_wait_map = self.wait_map.lock().await;
-                locked_wait_map.remove(&key);
+
+                // this is a separate block used to release the locks after editing the cache and wait map,
+                // but before broadcasting the value
+                {
+                    // Update our cache
+                    let mut locked_cache = self.cached.lock().await;
+                    locked_cache.put(key.clone(), value.clone());
+                    // Update our wait list
+                    let mut locked_wait_map = self.wait_map.lock().await;
+                    locked_wait_map.remove(&key);
+                }
+
                 // Let our waiters know
                 let broadcast_value = value.clone();
                 // Our use case is very specific, so we are sure that
