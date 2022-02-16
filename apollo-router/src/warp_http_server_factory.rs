@@ -344,7 +344,7 @@ where
 #[tracing::instrument(skip_all,
     name = "graphql_request",
     fields(
-        query = %request.query.clone().unwrap_or_else(|| "-".to_string()),
+        query = %request.query.clone().unwrap_or_default(),
         operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
         client_name,
         client_version
