@@ -274,7 +274,7 @@ expression: "&schema"
       ],
       "properties": {
         "collector": {
-          "default": "https://127.0.0.0:50051",
+          "default": "https://127.0.0.1:50051",
           "type": "string"
         },
         "external": {
