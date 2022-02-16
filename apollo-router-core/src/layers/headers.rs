@@ -271,6 +271,7 @@ mod test {
     use tower::{BoxError, Layer};
     use tower::{Service, ServiceExt};
 
+    use crate::fetch::OperationKind;
     use crate::headers::{
         InsertConfig, InsertLayer, PropagateConfig, PropagateLayer, RemoveConfig, RemoveLayer,
     };
@@ -471,6 +472,7 @@ mod test {
                 .body(Request::builder().query("query").build())
                 .unwrap()
                 .into(),
+            operation_kind: OperationKind::Query,
             context: example_originating_request(),
         }
     }

@@ -10,7 +10,7 @@ use typed_builder::TypedBuilder;
 #[derive(Clone, Derivative, Serialize, Deserialize, TypedBuilder, Default)]
 #[serde(rename_all = "camelCase")]
 #[builder(field_defaults(setter(into)))]
-#[derivative(Debug, PartialEq)]
+#[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Request {
     /// The graphql query.
     #[builder(setter(strip_option))]

@@ -265,9 +265,9 @@ pub(crate) mod fetch {
         operation_kind: OperationKind,
     }
 
-    #[derive(Debug, PartialEq, Deserialize)]
+    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
     #[serde(rename_all = "camelCase")]
-    pub(crate) enum OperationKind {
+    pub enum OperationKind {
         Query,
         Mutation,
         Subscription,
@@ -349,6 +349,7 @@ pub(crate) mod fetch {
         ) -> Result<Value, FetchError> {
             let FetchNode {
                 operation,
+                operation_kind,
                 service_name,
                 ..
             } = self;
@@ -375,6 +376,7 @@ pub(crate) mod fetch {
                     .unwrap()
                     .into(),
                 context: context.clone(),
+                operation_kind: *operation_kind,
             };
 
             let service = service_registry

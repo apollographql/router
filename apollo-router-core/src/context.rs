@@ -4,7 +4,7 @@ use futures::Future;
 use std::sync::Arc;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Context<T = Arc<http_compat::Request<Request>>> {
     /// Original request to the Router.
     pub request: T,

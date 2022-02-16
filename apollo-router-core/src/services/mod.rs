@@ -1,5 +1,6 @@
 pub use self::execution_service::*;
 pub use self::router_service::*;
+use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use moka::sync::Cache;
@@ -84,9 +85,12 @@ pub struct SubgraphRequest {
     pub http_request: http_compat::Request<Request>,
 
     pub context: Context,
+
+    pub operation_kind: OperationKind,
 }
 
 assert_impl_all!(SubgraphResponse: Send);
+#[derive(Clone, Debug)]
 pub struct SubgraphResponse {
     pub response: http_compat::Response<Response>,
 
