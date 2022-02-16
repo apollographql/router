@@ -349,8 +349,7 @@ pub enum OpenTelemetry {
 #[serde(deny_unknown_fields)]
 #[derivative(Default)]
 pub struct Jaeger {
-    pub agent_endpoint: Option<SocketAddr>,
-    pub collector_endpoint: Option<Url>,
+    pub endpoint: Option<JaegerEndpoint>,
     #[serde(default = "default_service_name")]
     #[derivative(Default(value = "default_service_name()"))]
     pub service_name: String,
@@ -361,6 +360,13 @@ pub struct Jaeger {
     #[derivative(Default(value = "default_jaeger_password()"))]
     pub password: Option<String>,
     pub trace_config: Option<TraceConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum JaegerEndpoint {
+    Agent(SocketAddr),
+    Collector(Url),
 }
 
 fn default_service_name() -> String {
