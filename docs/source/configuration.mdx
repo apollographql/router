@@ -165,17 +165,21 @@ server:
   listen: 127.0.0.1:4000
 opentelemetry:
   jaeger:
-    # optional address of the jaeger UDP agent
-    # if agent_endpoint and collector_endpoint are not specified, it will send traces
-    # to the default Jaeger UDP agent address
-    agent_endpoint: "127.0.0.1:6831"
-    # optional url of the jaeger collector
-    collector_endpoint: "http://example.org"
+    # optional: if not present, jaeger will use the default UDP agent address
+    #endpoint:
+      # address for the UDP agent mode
+      # incomptable with collector
+      # agent: "127.0.0.1:1234"
+
+      # URL of the HTTP collector
+      # collector:" http://example.org"
+      # the username and password are obtained from the environment variables
+      # JAEGER_USERNAME and JAEGER_PASSWORD
+
     # name of the service used in traces
     # defaults to router
     service_name: "router"
-    # the username and password are obtained from the environment variables
-    # JAEGER_USERNAME and JAEGER_PASSWORD
+    
     trace_config:
       # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
       # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
