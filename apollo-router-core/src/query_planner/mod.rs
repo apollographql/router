@@ -181,7 +181,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
                         .fetch_node(parent_value, current_dir, context, service_registry, schema)
-                        .instrument(tracing::trace_span!("fetch"))
+                        .instrument(tracing::info_span!("fetch"))
                         .await
                     {
                         Ok(v) => value = v,
@@ -353,8 +353,6 @@ pub(crate) mod fetch {
                 ..
             } = self;
 
-            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
-
             let Variables { variables, paths } = Variables::new(
                 &self.requires,
                 self.variable_usages.as_ref(),
@@ -363,7 +361,6 @@ pub(crate) mod fetch {
                 context,
                 schema,
             )
-            .instrument(query_span.clone())
             .await?;
 
             let subgraph_request = SubgraphRequest {
@@ -387,7 +384,7 @@ pub(crate) mod fetch {
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service
                 .oneshot(subgraph_request)
-                .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
+                .instrument(tracing::trace_span!("subfetch_stream"))
                 .await
                 .map_err(|e| FetchError::SubrequestHttpError {
                     service: service_name.to_string(),
@@ -396,15 +393,13 @@ pub(crate) mod fetch {
                 .response
                 .into_parts();
 
-            query_span.in_scope(|| {
-                if !response.is_primary() {
-                    return Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    });
-                }
+            if !response.is_primary() {
+                return Err(FetchError::SubrequestUnexpectedPatchResponse {
+                    service: service_name.to_owned(),
+                });
+            }
 
-                self.response_at_path(current_dir, paths, response)
-            })
+            self.response_at_path(current_dir, paths, response)
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]

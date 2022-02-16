@@ -4,6 +4,7 @@ mod apollo_telemetry;
 pub mod configuration;
 mod files;
 mod http_server_factory;
+mod layers;
 mod plugins;
 pub mod reqwest_subgraph_service;
 pub mod router_factory;

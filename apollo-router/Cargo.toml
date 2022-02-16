@@ -51,6 +51,7 @@ prost-types = "0.9.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 reqwest-middleware = "0.1.4"
 reqwest-tracing = { version = "0.2", features = ["opentelemetry_0_16"] }
+schemars = { version="0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = "1.0.79"
 serde_yaml = "0.8.23"
@@ -68,7 +69,6 @@ tower = { version="0.4.11", features = ["util"] }
 tower-http = { version = "0.2.2", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.30"
-tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.16.0"
 tracing-subscriber = { version = "0.3.8", features = ["env-filter", "json"] }
 typed-builder = "0.9.1"

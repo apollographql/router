@@ -4,35 +4,65 @@ use crate::{
 };
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Mutex;
 use tower::util::BoxService;
 use tower::BoxError;
 
-type PluginFactory = fn() -> Box<dyn DynPlugin>;
+type InstanceFactory = fn(&serde_json::Value) -> Result<Box<dyn DynPlugin>, BoxError>;
+
+type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+#[derive(Clone)]
+pub struct PluginFactory {
+    instance_factory: InstanceFactory,
+    schema_factory: SchemaFactory,
+}
+
+impl PluginFactory {
+    pub fn new(instance_factory: InstanceFactory, schema_factory: SchemaFactory) -> Self {
+        Self {
+            instance_factory,
+            schema_factory,
+        }
+    }
+
+    pub fn create_instance(
+        &self,
+        configuration: &serde_json::Value,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(configuration)
+    }
+
+    pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
+        (self.schema_factory)(gen)
+    }
+}
 
 static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
     let m = HashMap::new();
     Mutex::new(m)
 });
 
-pub fn plugins() -> Arc<HashMap<String, PluginFactory>> {
-    Arc::new(PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone())
+pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
+    PLUGIN_REGISTRY
+        .lock()
+        .expect("Lock poisoned")
+        .insert(name, plugin_factory);
 }
 
-pub fn plugins_mut<'a>() -> MutexGuard<'a, HashMap<String, PluginFactory>> {
-    PLUGIN_REGISTRY.lock().expect("Lock poisoned")
+pub fn plugins() -> HashMap<String, PluginFactory> {
+    PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
 #[async_trait]
-pub trait Plugin: Default + Send + Sync + 'static {
-    type Config;
+pub trait Plugin: Send + Sync + 'static + Sized {
+    type Config: JsonSchema;
 
-    fn configure(&mut self, _configuration: Self::Config) -> Result<(), BoxError> {
-        Ok(())
-    }
+    fn new(configuration: Self::Config) -> Result<Self, BoxError>;
 
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError> {
@@ -74,10 +104,6 @@ pub trait Plugin: Default + Send + Sync + 'static {
 
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
-    fn configure(&mut self, _configuration: &Value) -> Result<(), BoxError>;
-
-    fn configure_from_json(&mut self, configuration: &serde_json::Value) -> Result<(), BoxError>;
-
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
@@ -111,15 +137,6 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    fn configure(&mut self, configuration: &Value) -> Result<(), BoxError> {
-        self.configure_from_json(configuration)
-    }
-
-    fn configure_from_json(&mut self, configuration: &serde_json::Value) -> Result<(), BoxError> {
-        let conf = serde_json::from_value(configuration.clone())?;
-        self.configure(conf)
-    }
-
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError> {
         self.startup().await
@@ -159,15 +176,24 @@ where
     }
 }
 
-// For use when creating plugins
-
-// Register a plugin with a name
+/// Register a plugin with a group and a name
+/// Grouping prevent name clashes for plugins, so choose something unique, like your domain name.
+/// Plugins will appear in the configuration as a layer property called: {group}_{name}
 #[macro_export]
 macro_rules! register_plugin {
-    ($key: literal, $value: ident) => {
+    ($group: literal, $name: literal, $value: ident) => {
         startup::on_startup! {
-            // Register the plugin factory function
-            apollo_router_core::plugins_mut().insert($key.to_string(), || Box::new($value::default()));
+            let qualified_name = if $group == "" {
+                $name.to_string()
+            }
+            else {
+                format!("{}_{}", $group, $name)
+            };
+
+            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {
+                let plugin = $value::new(serde_json::from_value(configuration.clone())?)?;
+                Ok(Box::new(plugin))
+            }, |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
         }
     };
 }
