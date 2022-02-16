@@ -170,7 +170,7 @@ impl JsonSchema for Plugins {
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        // This is a manual implementation of Subgraph schema to allow layers that have been registered at
+        // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
         let plugins = plugins()
