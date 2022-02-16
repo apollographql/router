@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v4
+    default: v5
 
 commands:
   initialize_submodules:
