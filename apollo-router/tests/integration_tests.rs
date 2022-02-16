@@ -16,7 +16,7 @@ use tower::ServiceExt;
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = graphql::Request::builder()
-            .query($query)
+            .query($query.to_string())
             .variables(Arc::new(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
@@ -256,7 +256,8 @@ async fn missing_variables() {
                     }
                 }
             }
-            "#,
+            "#
+            .to_string(),
         )
         .build();
 

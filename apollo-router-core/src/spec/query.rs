@@ -568,7 +568,13 @@ mod tests {
                 .variables(variables)
                 .query($query)
                 .build();
-            let query = Query::parse(&request.query).expect("could not parse query");
+            let query = Query::parse(
+                request
+                    .query
+                    .as_ref()
+                    .expect("query has been added right above; qed"),
+            )
+            .expect("could not parse query");
             query.validate_variables(&request, &schema)
         }};
     }

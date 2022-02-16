@@ -217,7 +217,7 @@ mod forbid_http_get_mutations_tests {
                 Context::new().with_request(Arc::new(
                     Request::builder()
                         .method(method)
-                        .body(crate::Request::builder().query("").build())
+                        .body(crate::Request::default())
                         .unwrap()
                         .into(),
                 )),

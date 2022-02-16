@@ -1,7 +1,8 @@
+use crate::apq::APQ;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, CachingQueryPlanner, Context, DynPlugin, ExecutionRequest, ExecutionResponse,
+    plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
@@ -69,7 +70,7 @@ where
         Poll::Pending
     }
 
-    fn call(&mut self, request: RouterRequest) -> Self::Future {
+    fn call(&mut self, req: RouterRequest) -> Self::Future {
         //Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
@@ -77,11 +78,11 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        let query = &request.context.request.body().query;
+        let query = &req.context.request.body().query.as_ref();
 
-        if query.is_empty() {
+        if query.is_none() || query.expect("checked before; qed").is_empty() {
             let res = plugin_utils::RouterResponse::builder()
-                .context(request.context.into())
+                .context(req.context.into())
                 .errors(vec![crate::Error {
                     message: "Must provide query string.".to_string(),
                     ..Default::default()
@@ -91,37 +92,43 @@ where
             return Box::pin(async move { Ok(res) });
         };
 
-        if let Some(response) = self
-            .naive_introspection
-            .get(&request.context.request.body().query)
-        {
+        let query = req
+            .context
+            .request
+            .body()
+            .query
+            .clone()
+            .expect("checked above; qed");
+
+        if let Some(response) = self.naive_introspection.get(query.as_str()) {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: Context::new().with_request(Arc::new(request.context.request)),
+                    context: req.context.into(),
                 })
             });
         }
 
         let fut = async move {
+            let body = req.context.request.body();
             let query = query_cache
-                .get_query(&request.context.request.body().query)
+                .get_query(query.as_str())
                 .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
-            if let Some(err) = query.as_ref().and_then(|q| {
-                q.validate_variables(request.context.request.body(), &schema)
-                    .err()
-            }) {
+            if let Some(err) = query
+                .as_ref()
+                .and_then(|q| q.validate_variables(body, &schema).err())
+            {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: Context::new().with_request(Arc::new(request.context.request)),
+                    context: req.context.into(),
                 })
             } else {
-                let operation_name = request.context.request.body().operation_name.clone();
+                let operation_name = body.operation_name.clone();
                 let planned_query = planning
                     .call(QueryPlannerRequest {
-                        context: request.context.into(),
+                        context: req.context.into(),
                     })
                     .await;
                 let mut response = match planned_query {
@@ -308,7 +315,7 @@ impl PluggableRouterServiceBuilder {
 
         //Router service takes a graphql::Request and outputs a graphql::Response
         let (router_service, router_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
+            ServiceBuilder::new().layer(APQ::default()).service(
                 self.plugins.iter_mut().fold(
                     RouterService::builder()
                         .query_planner_service(query_planner_service)

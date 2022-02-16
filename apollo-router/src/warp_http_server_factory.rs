@@ -340,10 +340,11 @@ where
         })
 }
 
+// graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
 #[tracing::instrument(skip_all,
     name = "graphql_request",
     fields(
-        query = %request.query,
+        query = %request.query.clone().unwrap_or_default(),
         operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
         client_name,
         client_version
