@@ -5,12 +5,18 @@ pub mod otlp;
 
 use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
+use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
 use opentelemetry::sdk::trace::Sampler;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use reqwest::Url;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{
+    ArrayValidation, ObjectValidation, Schema, SchemaObject, SingleOrVec, SubschemaValidation,
+};
+use schemars::{JsonSchema, Set};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
@@ -56,7 +62,7 @@ pub enum ConfigurationError {
 
 /// The configuration for the router.
 /// Currently maintains a mapping of subgraphs.
-#[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder)]
+#[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[derivative(Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
@@ -82,7 +88,7 @@ pub struct Configuration {
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: Map<String, Value>,
+    pub plugins: Plugins,
 
     /// Spaceport configuration.
     #[serde(default)]
@@ -152,6 +158,54 @@ impl Configuration {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
+#[serde(transparent)]
+pub struct Plugins {
+    pub plugins: Map<String, Value>,
+}
+
+impl JsonSchema for Plugins {
+    fn schema_name() -> String {
+        stringify!(Plugins).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // This is a manual implementation of Plugins schema to allow plugins that have been registered at
+        // compile time to be picked up.
+
+        let plugins = plugins()
+            .iter()
+            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
+            .collect::<schemars::Map<String, Schema>>();
+        let plugins_refs = plugins
+            .keys()
+            .map(|name| {
+                Schema::Object(SchemaObject {
+                    object: Some(Box::new(ObjectValidation {
+                        required: Set::from([name.to_string()]),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let plugins_object = SchemaObject {
+            object: Some(Box::new(ObjectValidation {
+                properties: plugins,
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(SubschemaValidation {
+                any_of: Some(plugins_refs),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        Schema::Object(plugins_object)
+    }
+}
+
 /// Configuration for a subgraph.
 #[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
 pub struct Subgraph {
@@ -164,8 +218,68 @@ pub struct Subgraph {
     pub layers: Vec<Value>,
 }
 
+impl JsonSchema for Subgraph {
+    fn schema_name() -> String {
+        stringify!(Subgraph).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // This is a manual implementation of Subgraph schema to allow layers that have been registered at
+        // compile time to be picked up.
+        let mut subgraph = SchemaObject::default();
+
+        let layers = layers()
+            .iter()
+            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
+            .collect::<schemars::Map<String, Schema>>();
+        let layer_refs = layers
+            .keys()
+            .map(|name| {
+                Schema::Object(SchemaObject {
+                    object: Some(Box::new(ObjectValidation {
+                        required: Set::from([name.to_string()]),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let layer_object = SchemaObject {
+            object: Some(Box::new(ObjectValidation {
+                properties: layers,
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(SubschemaValidation {
+                one_of: Some(layer_refs),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        let layer_array = ArrayValidation {
+            items: Some(SingleOrVec::Single(Box::new(Schema::Object(layer_object)))),
+            ..Default::default()
+        };
+
+        let layers_property = SchemaObject {
+            array: Some(Box::new(layer_array)),
+            ..SchemaObject::default()
+        };
+
+        subgraph.object = Some(Box::new(ObjectValidation {
+            properties: schemars::Map::from([(
+                "layers".to_string(),
+                Schema::Object(layers_property),
+            )]),
+            ..Default::default()
+        }));
+        Schema::Object(subgraph)
+    }
+}
+
 /// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Server {
     /// The socket address and port to listen on
@@ -181,7 +295,7 @@ pub struct Server {
 }
 
 /// Listening address.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ListenAddr {
     /// Socket address.
@@ -226,7 +340,7 @@ impl fmt::Display for ListenAddr {
 }
 
 /// Cross origin request configuration.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Cors {
     #[serde(default)]
@@ -304,7 +418,7 @@ fn default_listener() -> String {
     DEFAULT_LISTEN.to_string()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct SpaceportConfig {
     pub(crate) external: bool,
@@ -316,7 +430,7 @@ pub struct SpaceportConfig {
     pub(crate) listener: String,
 }
 
-#[derive(Clone, Derivative, Deserialize, Serialize)]
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioGraph {
@@ -343,6 +457,18 @@ pub enum OpenTelemetry {
     Jaeger(Option<Jaeger>),
     #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     Otlp(otlp::Otlp),
+}
+
+// This short circuits the Opentelemetry schema generation.
+// When Otel is moved to a plugin this will be removed.
+impl JsonSchema for OpenTelemetry {
+    fn schema_name() -> String {
+        stringify!(OpenTelemetry).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        gen.subschema_for::<OpenTelemetry>()
+    }
 }
 
 #[derive(Debug, Clone, Derivative, Deserialize, Serialize)]
@@ -453,6 +579,7 @@ impl TraceConfig {
     pub fn trace_config(&self) -> opentelemetry::sdk::trace::Config {
         let mut trace_config = opentelemetry::sdk::trace::config();
         if let Some(sampler) = self.sampler.clone() {
+            let sampler: opentelemetry::sdk::trace::Sampler = sampler;
             trace_config = trace_config.with_sampler(sampler);
         }
         if let Some(n) = self.max_events_per_span {
@@ -471,12 +598,23 @@ impl TraceConfig {
             trace_config = trace_config.with_max_attributes_per_link(n);
         }
 
-        let resource = self.resource.clone().unwrap_or_else(|| {
-            Resource::new(vec![
-                KeyValue::new("service.name", default_service_name()),
-                KeyValue::new("service.namespace", default_service_namespace()),
-            ])
-        });
+        let resource = self
+            .resource
+            .as_ref()
+            .map(|r| {
+                Resource::new(
+                    r.clone()
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v))
+                        .collect::<Vec<KeyValue>>(),
+                )
+            })
+            .unwrap_or_else(|| {
+                Resource::new(vec![
+                    KeyValue::new("service.name", default_service_name()),
+                    KeyValue::new("service.namespace", default_service_namespace()),
+                ])
+            });
 
         trace_config = trace_config.with_resource(resource);
 
@@ -487,6 +625,8 @@ impl TraceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_json_snapshot;
+    use schemars::gen::SchemaSettings;
 
     macro_rules! assert_config_snapshot {
         ($file:expr) => {{
@@ -495,6 +635,18 @@ mod tests {
                 insta::assert_yaml_snapshot!(config);
             });
         }};
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn schema_generation() {
+        let settings = SchemaSettings::draft2019_09().with(|s| {
+            s.option_nullable = true;
+            s.option_add_null_type = false;
+        });
+        let gen = settings.into_generator();
+        let schema = gen.into_root_schema_for::<Configuration>();
+        assert_json_snapshot!(&schema)
     }
 
     #[test]
