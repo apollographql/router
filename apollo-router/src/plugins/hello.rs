@@ -1,11 +1,12 @@
 use apollo_router_core::{register_plugin, Plugin};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
 #[derive(Default)]
 struct Hello {}
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, JsonSchema)]
 struct Conf {
     name: String,
 }
