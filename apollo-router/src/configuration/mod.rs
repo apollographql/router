@@ -582,6 +582,7 @@ mod tests {
         }};
     }
 
+    #[cfg(unix)]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft07().with(|s| {
