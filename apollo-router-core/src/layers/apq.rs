@@ -20,16 +20,16 @@ pub struct APQ {
 }
 
 impl APQ {
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
         Self {
-            cache: Cache::new(capacity),
+            cache,
         }
     }
 }
 
 impl Default for APQ {
     fn default() -> Self {
-        Self::with_capacity(512)
+        Self::with_cache(Cache::new(512))
     }
 }
 
@@ -45,10 +45,10 @@ impl<S> APQService<S>
 where
     S: Service<RouterRequest>,
 {
-    pub fn new(service: S, capacity: usize) -> Self {
+    pub fn new(service: S, cache: Cache<Vec<u8>, String>) -> Self {
         Self {
             service,
-            apq: APQ::with_capacity(capacity),
+            apq: APQ::with_cache(cache),
         }
     }
 }
@@ -247,7 +247,7 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = APQ::with_capacity(1).layer(mock);
+        let mut service_stack = APQ::default().layer(mock);
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
@@ -347,7 +347,7 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let mut service_stack = APQ::with_capacity(1).layer(mock_service);
+        let mut service_stack = APQ::default().layer(mock_service);
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
@@ -390,7 +390,7 @@ mod apq_tests {
 
         let mock_service = MockRouterService::new().build();
 
-        let mut service_stack = APQ::with_capacity(1).layer(mock_service);
+        let mut service_stack = APQ::default().layer(mock_service);
 
         let empty_request = RouterRequest::builder().build();
 
