@@ -1,11 +1,11 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 641
+assertion_line: 642
 expression: "&schema"
 
 ---
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
   "title": "Configuration",
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
@@ -13,30 +13,18 @@ expression: "&schema"
     "graph": {
       "description": "Studio Graph configuration.",
       "default": null,
-      "allOf": [
-        {
-          "$ref": "#/definitions/StudioGraph"
-        }
-      ],
+      "$ref": "#/definitions/StudioGraph",
       "nullable": true
     },
     "opentelemetry": {
       "description": "OpenTelemetry configuration.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/OpenTelemetry"
-        }
-      ],
+      "$ref": "#/definitions/OpenTelemetry",
       "nullable": true
     },
     "plugins": {
       "description": "Plugin configuration",
       "default": {},
-      "allOf": [
-        {
-          "$ref": "#/definitions/Plugins"
-        }
-      ]
+      "$ref": "#/definitions/Plugins"
     },
     "server": {
       "description": "Configuration options pertaining to the http server component.",
@@ -44,20 +32,12 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "cors": null
       },
-      "allOf": [
-        {
-          "$ref": "#/definitions/Server"
-        }
-      ]
+      "$ref": "#/definitions/Server"
     },
     "spaceport": {
       "description": "Spaceport configuration.",
       "default": null,
-      "allOf": [
-        {
-          "$ref": "#/definitions/SpaceportConfig"
-        }
-      ],
+      "$ref": "#/definitions/SpaceportConfig",
       "nullable": true
     },
     "subgraphs": {
@@ -276,21 +256,13 @@ expression: "&schema"
         "cors": {
           "description": "Cross origin request headers.",
           "default": null,
-          "allOf": [
-            {
-              "$ref": "#/definitions/Cors"
-            }
-          ],
+          "$ref": "#/definitions/Cors",
           "nullable": true
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
           "default": "127.0.0.1:4000",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ListenAddr"
-            }
-          ]
+          "$ref": "#/definitions/ListenAddr"
         }
       },
       "additionalProperties": false
