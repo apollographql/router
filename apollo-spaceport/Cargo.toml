@@ -21,7 +21,7 @@ sys-info = "0.9.1"
 tonic = "0.6.2"
 tokio = { version = "1.16.1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.30"
-tracing-subscriber = { version = "0.3.8", features = ["json"] }
+tracing-subscriber = { version = "0.3.8", features = ["env-filter", "json"] }
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
