@@ -21,9 +21,7 @@ pub struct APQ {
 
 impl APQ {
     pub fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
-        Self {
-            cache,
-        }
+        Self { cache }
     }
 }
 
