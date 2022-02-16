@@ -414,26 +414,21 @@ where
     match service.oneshot(request).await {
         Err(_) => Body::from(String::new()),
         Ok(response) => {
-            let span = Span::current();
+            let span = tracing::trace_span!("serialize_response");
             // TODO headers
             match response.into_body() {
                 ResponseBody::GraphQL(graphql) => {
                     crate::json_serializer::make_body(graphql.to_value())
-                        .instrument(tracing::trace_span!(parent: &span, "serialize_response"))
+                        .instrument(span)
                         .await
                 }
-                ResponseBody::RawJSON(json) => {
-                    tracing::trace_span!(parent: &span, "serialize_response").in_scope(|| {
-                        hyper::Body::from(
-                            serde_json::to_string(&json)
-                                .expect("serde_json::Value serialization will not fail"),
-                        )
-                    })
-                }
-                ResponseBody::RawString(string) => {
-                    tracing::trace_span!(parent: &span, "serialize_response")
-                        .in_scope(|| hyper::Body::from(string))
-                }
+                ResponseBody::RawJSON(json) => span.in_scope(|| {
+                    hyper::Body::from(
+                        serde_json::to_string(&json)
+                            .expect("serde_json::Value serialization will not fail"),
+                    )
+                }),
+                ResponseBody::RawString(string) => span.in_scope(|| hyper::Body::from(string)),
             }
         }
     }
