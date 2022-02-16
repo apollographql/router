@@ -4,8 +4,8 @@
 pub mod otlp;
 
 use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
-use apollo_router_core::layers;
 use apollo_router_core::prelude::*;
+use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
 use opentelemetry::sdk::trace::Sampler;
@@ -88,7 +88,7 @@ pub struct Configuration {
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: Map<String, Value>,
+    pub plugins: Plugins,
 
     /// Spaceport configuration.
     #[serde(default)]
@@ -155,6 +155,54 @@ impl Configuration {
 
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
+#[serde(transparent)]
+pub struct Plugins {
+    pub plugins: Map<String, Value>,
+}
+
+impl JsonSchema for Plugins {
+    fn schema_name() -> String {
+        stringify!(Plugins).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // This is a manual implementation of Plugins schema to allow plugins that have been registered at
+        // compile time to be picked up.
+
+        let plugins = plugins()
+            .iter()
+            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
+            .collect::<schemars::Map<String, Schema>>();
+        let plugins_refs = plugins
+            .keys()
+            .map(|name| {
+                Schema::Object(SchemaObject {
+                    object: Some(Box::new(ObjectValidation {
+                        required: Set::from([name.to_string()]),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let plugins_object = SchemaObject {
+            object: Some(Box::new(ObjectValidation {
+                properties: plugins,
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(SubschemaValidation {
+                any_of: Some(plugins_refs),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        Schema::Object(plugins_object)
     }
 }
 
@@ -570,7 +618,7 @@ impl TraceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use insta::assert_yaml_snapshot;
+    use insta::assert_json_snapshot;
     use schemars::gen::SchemaSettings;
 
     macro_rules! assert_config_snapshot {
@@ -585,13 +633,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn schema_generation() {
-        let settings = SchemaSettings::draft07().with(|s| {
+        let settings = SchemaSettings::draft2019_09().with(|s| {
             s.option_nullable = true;
             s.option_add_null_type = false;
         });
         let gen = settings.into_generator();
         let schema = gen.into_root_schema_for::<Configuration>();
-        assert_yaml_snapshot!(&schema)
+        assert_json_snapshot!(&schema)
     }
 
     #[test]

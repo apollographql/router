@@ -68,8 +68,8 @@ pub trait ConfigurableLayer: Send + Sync + 'static + Sized {
 }
 
 /// Register a layer with a group and a name
-/// Grouping prevent name clashes for layers, so choose something unique like your domain name.
-/// Layers will appear in the configuration as a layer property called: {group}.{name}
+/// Grouping prevent name clashes for layers, so choose something unique, like your domain name.
+/// Layers will appear in the configuration as a layer property called: {group}_{name}
 #[macro_export]
 macro_rules! register_layer {
     ($group: literal, $name: literal, $value: ident) => {
