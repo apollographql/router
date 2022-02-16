@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 499
+assertion_line: 504
 expression: config
 
 ---
@@ -13,6 +13,7 @@ subgraphs:
     layers: []
 opentelemetry:
   jaeger:
+    agent_endpoint: ~
     collector_endpoint: "http://example.org/"
     service_name: bar
     trace_config: ~
