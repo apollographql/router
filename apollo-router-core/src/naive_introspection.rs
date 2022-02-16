@@ -24,7 +24,7 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 });
 
 /// A cache containing our well known introspection queries.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NaiveIntrospection {
     cache: HashMap<String, Response>,
 }
@@ -40,7 +40,7 @@ impl NaiveIntrospection {
     /// This function will populate a cache in a blocking manner.
     /// This is why `NaiveIntrospection` instanciation happens in a spawn_blocking task on the state_machine side.
     pub fn from_schema(schema: &Schema) -> Self {
-        let span = tracing::info_span!("naive_introspection_population");
+        let span = tracing::trace_span!("naive_introspection_population");
         let _guard = span.enter();
 
         let cache = introspect::batch_introspect(

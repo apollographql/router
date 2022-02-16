@@ -1,8 +1,10 @@
 use crate::prelude::graphql::*;
 use crate::CacheResolver;
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::task;
 
 type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 
@@ -11,7 +13,7 @@ type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 /// The query planner performs LRU caching.
 #[derive(Debug)]
 pub struct CachingQueryPlanner<T: QueryPlanner> {
-    cm: CachingMap<QueryKey, Arc<QueryPlan>>,
+    cm: Arc<CachingMap<QueryKey, Arc<QueryPlan>>>,
     phantom: PhantomData<T>,
 }
 
@@ -24,7 +26,7 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
         let resolver = CachingQueryPlannerResolver { delegate };
-        let cm = CachingMap::new(Box::new(resolver), plan_cache_limit);
+        let cm = Arc::new(CachingMap::new(Box::new(resolver), plan_cache_limit));
         Self {
             cm,
             phantom: PhantomData,
@@ -56,6 +58,46 @@ impl<T: QueryPlanner> QueryPlanner for CachingQueryPlanner<T> {
     ) -> PlanResult {
         let key = (query, operation, options);
         self.cm.get(key).await.map_err(|err| err.into())
+    }
+}
+
+impl<T: QueryPlanner> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
+where
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = tower::BoxError,
+    >,
+{
+    type Response = QueryPlannerResponse;
+    // TODO I don't think we can serialize this error back to the router response's payload
+    type Error = tower::BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
+        let body = request.context.request.body();
+
+        let key = (
+            body.query
+                .clone()
+                .expect("presence of a query has been checked by the RouterService before; qed"),
+            body.operation_name.to_owned(),
+            QueryPlanOptions::default(),
+        );
+        let cm = self.cm.clone();
+        Box::pin(async move {
+            cm.get(key)
+                .await
+                .map_err(|err| err.into())
+                .map(|query_plan| QueryPlannerResponse {
+                    query_plan,
+                    context: request.context,
+                })
+        })
     }
 }
 

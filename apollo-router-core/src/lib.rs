@@ -23,24 +23,37 @@ macro_rules! failfast_error {
 }
 
 mod cache;
+mod context;
 mod error;
 mod json_ext;
+mod layer;
+mod layers;
 mod naive_introspection;
+mod plugin;
+pub mod plugin_utils;
 mod query_cache;
 mod query_planner;
 mod request;
 mod response;
+mod service_registry;
+mod services;
 mod spec;
 mod traits;
 
 pub use cache::*;
+pub use context::*;
 pub use error::*;
 pub use json_ext::*;
+pub use layer::*;
+pub use layers::*;
 pub use naive_introspection::*;
+pub use plugin::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
 pub use response::*;
+pub use service_registry::*;
+pub use services::*;
 pub use spec::*;
 pub use traits::*;
 

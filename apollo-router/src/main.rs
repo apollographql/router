@@ -2,10 +2,11 @@
 
 use anyhow::{ensure, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::GLOBAL_ENV_FILTER;
-use apollo_router::{ConfigurationKind, FederatedServer, SchemaKind, ShutdownKind, State};
+use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
+use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
+use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
@@ -31,6 +32,10 @@ struct Opt {
     /// Schema location relative to the project directory.
     #[structopt(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
+
+    /// Prints the configuration schema.
+    #[structopt(long)]
+    schema: bool,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -85,6 +90,17 @@ fn main() -> Result<()> {
 
 async fn rt_main() -> Result<()> {
     let opt = Opt::from_args();
+
+    if opt.schema {
+        let settings = SchemaSettings::draft2019_09().with(|s| {
+            s.option_nullable = true;
+            s.option_add_null_type = false;
+        });
+        let gen = settings.into_generator();
+        let schema = gen.into_root_schema_for::<Configuration>();
+        println!("{}", serde_json::to_string_pretty(&schema)?);
+        return Ok(());
+    }
 
     let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
 
@@ -166,7 +182,7 @@ async fn rt_main() -> Result<()> {
     let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
     opentelemetry::global::set_text_map_propagator(propagator);
 
-    let server = FederatedServer::builder()
+    let server = ApolloRouterBuilder::default()
         .configuration(configuration)
         .schema(schema)
         .shutdown(ShutdownKind::CtrlC)
@@ -185,7 +201,7 @@ async fn rt_main() -> Result<()> {
                     )
                 }
                 State::Running { address, .. } => {
-                    tracing::info!("Listening on http://{} 🚀", address)
+                    tracing::info!("Listening on {} 🚀", address)
                 }
                 State::Stopped => {
                     tracing::info!("Stopped")

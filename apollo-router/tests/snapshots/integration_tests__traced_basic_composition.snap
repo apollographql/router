@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 93
+assertion_line: 108
 expression: get_spans()
 
 ---
@@ -19,100 +19,62 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::apollo_router::prepare_query": {
-      "name": "apollo_router::apollo_router::prepare_query",
+    "apollo_router_core::services::router_service::query_parsing": {
+      "name": "apollo_router_core::services::router_service::query_parsing",
       "record": {
-        "entries": [
-          [
-            "message",
-            "query plan\nQueryPlan {\n    root: Sequence {\n        nodes: [\n            Fetch(\n                FetchNode {\n                    service_name: \"products\",\n                    requires: [],\n                    variable_usages: [],\n                    operation: \"{topProducts{__typename upc name}}\",\n                },\n            ),\n            Flatten(\n                FlattenNode {\n                    path: Path(\n                        [\n                            Key(\n                                \"topProducts\",\n                            ),\n                            Flatten,\n                        ],\n                    ),\n                    node: Fetch(\n                        FetchNode {\n                            service_name: \"reviews\",\n                            requires: [\n                                InlineFragment(\n                                    InlineFragment {\n                                        type_condition: Some(\n                                            \"Product\",\n                                        ),\n                                        selections: [\n                                            Field(\n                                                Field {\n                                                    alias: None,\n                                                    name: \"__typename\",\n                                                    selections: None,\n                                                },\n                                            ),\n                                            Field(\n                                                Field {\n                                                    alias: None,\n                                                    name: \"upc\",\n                                                    selections: None,\n                                                },\n                                            ),\n                                        ],\n                                    },\n                                ),\n                            ],\n                            variable_usages: [],\n                            operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}\",\n                        },\n                    ),\n                },\n            ),\n            Parallel {\n                nodes: [\n                    Flatten(\n                        FlattenNode {\n                            path: Path(\n                                [\n                                    Key(\n                                        \"topProducts\",\n                                    ),\n                                    Flatten,\n                                    Key(\n                                        \"reviews\",\n                                    ),\n                                    Flatten,\n                                    Key(\n                                        \"product\",\n                                    ),\n                                ],\n                            ),\n                            node: Fetch(\n                                FetchNode {\n                                    service_name: \"products\",\n                                    requires: [\n                                        InlineFragment(\n                                            InlineFragment {\n                                                type_condition: Some(\n                                                    \"Product\",\n                                                ),\n                                                selections: [\n                                                    Field(\n                                                        Field {\n                                                            alias: None,\n                                                            name: \"__typename\",\n                                                            selections: None,\n                                                        },\n                                                    ),\n                                                    Field(\n                                                        Field {\n                                                            alias: None,\n                                                            name: \"upc\",\n                                                            selections: None,\n                                                        },\n                                                    ),\n                                                ],\n                                            },\n                                        ),\n                                    ],\n                                    variable_usages: [],\n                                    operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\",\n                                },\n                            ),\n                        },\n                    ),\n                    Flatten(\n                        FlattenNode {\n                            path: Path(\n                                [\n                                    Key(\n                                        \"topProducts\",\n                                    ),\n                                    Flatten,\n                                    Key(\n                                        \"reviews\",\n                                    ),\n                                    Flatten,\n                                    Key(\n                                        \"author\",\n                                    ),\n                                ],\n                            ),\n                            node: Fetch(\n                                FetchNode {\n                                    service_name: \"accounts\",\n                                    requires: [\n                                        InlineFragment(\n                                            InlineFragment {\n                                                type_condition: Some(\n                                                    \"User\",\n                                                ),\n                                                selections: [\n                                                    Field(\n                                                        Field {\n                                                            alias: None,\n                                                            name: \"__typename\",\n                                                            selections: None,\n                                                        },\n                                                    ),\n                                                    Field(\n                                                        Field {\n                                                            alias: None,\n                                                            name: \"id\",\n                                                            selections: None,\n                                                        },\n                                                    ),\n                                                ],\n                                            },\n                                        ),\n                                    ],\n                                    variable_usages: [],\n                                    operation: \"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\",\n                                },\n                            ),\n                        },\n                    ),\n                ],\n            },\n        ],\n    },\n}"
-          ]
-        ],
+        "entries": [],
         "metadata": {
-          "name": "prepare_query",
-          "target": "apollo_router::apollo_router",
-          "level": "DEBUG",
-          "module_path": "apollo_router::apollo_router",
+          "name": "query_parsing",
+          "target": "apollo_router_core::services::router_service",
+          "level": "INFO",
+          "module_path": "apollo_router_core::services::router_service",
           "fields": {
             "names": []
           }
         }
       },
-      "children": {
-        "apollo_router::apollo_router::query_parsing": {
-          "name": "apollo_router::apollo_router::query_parsing",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "query_parsing",
-              "target": "apollo_router::apollo_router",
-              "level": "INFO",
-              "module_path": "apollo_router::apollo_router",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
-        },
-        "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
-          "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "plan",
-              "target": "apollo_router_core::query_planner::router_bridge_query_planner",
-              "level": "DEBUG",
-              "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
-        },
-        "apollo_router_core::query_planner::validate": {
-          "name": "apollo_router_core::query_planner::validate",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "validate",
-              "target": "apollo_router_core::query_planner",
-              "level": "DEBUG",
-              "module_path": "apollo_router_core::query_planner",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
-        }
-      }
+      "children": {}
     },
-    "apollo_router::apollo_router::execute": {
-      "name": "apollo_router::apollo_router::execute",
+    "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
+      "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
+      "record": {
+        "entries": [],
+        "metadata": {
+          "name": "plan",
+          "target": "apollo_router_core::query_planner::router_bridge_query_planner",
+          "level": "DEBUG",
+          "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
+          "fields": {
+            "names": []
+          }
+        }
+      },
+      "children": {}
+    },
+    "apollo_router_core::services::execution_service::execute": {
+      "name": "apollo_router_core::services::execution_service::execute",
       "record": {
         "entries": [],
         "metadata": {
           "name": "execute",
-          "target": "apollo_router::apollo_router",
+          "target": "apollo_router_core::services::execution_service",
           "level": "DEBUG",
-          "module_path": "apollo_router::apollo_router",
+          "module_path": "apollo_router_core::services::execution_service",
           "fields": {
             "names": []
           }
         }
       },
       "children": {
-        "apollo_router::apollo_router::execution": {
-          "name": "apollo_router::apollo_router::execution",
+        "apollo_router_core::services::execution_service::execution": {
+          "name": "apollo_router_core::services::execution_service::execution",
           "record": {
             "entries": [],
             "metadata": {
               "name": "execution",
-              "target": "apollo_router::apollo_router",
+              "target": "apollo_router_core::services::execution_service",
               "level": "INFO",
-              "module_path": "apollo_router::apollo_router",
+              "module_path": "apollo_router_core::services::execution_service",
               "fields": {
                 "names": []
               }
@@ -149,146 +111,40 @@ expression: get_spans()
                     }
                   },
                   "children": {
-                    "apollo_router_core::query_planner::fetch::subfetch": {
-                      "name": "apollo_router_core::query_planner::fetch::subfetch",
+                    "apollo_router_core::query_planner::fetch::make_variables": {
+                      "name": "apollo_router_core::query_planner::fetch::make_variables",
                       "record": {
-                        "entries": [
-                          [
-                            "service",
-                            "products"
-                          ]
-                        ],
+                        "entries": [],
                         "metadata": {
-                          "name": "subfetch",
+                          "name": "make_variables",
                           "target": "apollo_router_core::query_planner::fetch",
-                          "level": "INFO",
+                          "level": "DEBUG",
                           "module_path": "apollo_router_core::query_planner::fetch",
                           "fields": {
-                            "names": [
-                              "service"
-                            ]
+                            "names": []
                           }
                         }
                       },
-                      "children": {
-                        "apollo_router_core::query_planner::fetch::make_variables": {
-                          "name": "apollo_router_core::query_planner::fetch::make_variables",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "make_variables",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router_core::query_planner::fetch::subfetch_stream": {
-                          "name": "apollo_router_core::query_planner::fetch::subfetch_stream",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "subfetch_stream",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "INFO",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {
-                            "apollo_router::http_subgraph::aggregate_response_data": {
-                              "name": "apollo_router::http_subgraph::aggregate_response_data",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "aggregate_response_data",
-                                  "target": "apollo_router::http_subgraph",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::http_subgraph",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::http_subgraph::parse_subgraph_response": {
-                              "name": "apollo_router::http_subgraph::parse_subgraph_response",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "parse_subgraph_response",
-                                  "target": "apollo_router::http_subgraph",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::http_subgraph",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            }
+                      "children": {}
+                    },
+                    "apollo_router_core::query_planner::fetch::response_insert": {
+                      "name": "apollo_router_core::query_planner::fetch::response_insert",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "response_insert",
+                          "target": "apollo_router_core::query_planner::fetch",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router_core::query_planner::fetch",
+                          "fields": {
+                            "names": []
                           }
-                        },
-                        "apollo_router_core::query_planner::fetch::response_insert": {
-                          "name": "apollo_router_core::query_planner::fetch::response_insert",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "response_insert",
-                              "target": "apollo_router_core::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router_core::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
                         }
-                      }
+                      },
+                      "children": {}
                     }
                   }
-                }
-              }
-            },
-            "apollo_router_core::query_planner::sequence": {
-              "name": "apollo_router_core::query_planner::sequence",
-              "record": {
-                "entries": [],
-                "metadata": {
-                  "name": "sequence",
-                  "target": "apollo_router_core::query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
-                  "fields": {
-                    "names": []
-                  }
-                }
-              },
-              "children": {}
-            },
-            "apollo_router_core::query_planner::sequence": {
-              "name": "apollo_router_core::query_planner::sequence",
-              "record": {
-                "entries": [],
-                "metadata": {
-                  "name": "sequence",
-                  "target": "apollo_router_core::query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
-                  "fields": {
-                    "names": []
-                  }
-                }
-              },
-              "children": {
+                },
                 "apollo_router_core::query_planner::parallel": {
                   "name": "apollo_router_core::query_planner::parallel",
                   "record": {
@@ -308,50 +164,18 @@ expression: get_spans()
               }
             }
           }
-        },
-        "apollo_router::apollo_router::format_response": {
-          "name": "apollo_router::apollo_router::format_response",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "format_response",
-              "target": "apollo_router::apollo_router",
-              "level": "DEBUG",
-              "module_path": "apollo_router::apollo_router",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
         }
       }
     },
-    "apollo_router::http_subgraph::aggregate_response_data": {
-      "name": "apollo_router::http_subgraph::aggregate_response_data",
+    "apollo_router_core::services::router_service::format_response": {
+      "name": "apollo_router_core::services::router_service::format_response",
       "record": {
         "entries": [],
         "metadata": {
-          "name": "aggregate_response_data",
-          "target": "apollo_router::http_subgraph",
+          "name": "format_response",
+          "target": "apollo_router_core::services::router_service",
           "level": "DEBUG",
-          "module_path": "apollo_router::http_subgraph",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {}
-    },
-    "apollo_router::http_subgraph::parse_subgraph_response": {
-      "name": "apollo_router::http_subgraph::parse_subgraph_response",
-      "record": {
-        "entries": [],
-        "metadata": {
-          "name": "parse_subgraph_response",
-          "target": "apollo_router::http_subgraph",
-          "level": "DEBUG",
-          "module_path": "apollo_router::http_subgraph",
+          "module_path": "apollo_router_core::services::router_service",
           "fields": {
             "names": []
           }

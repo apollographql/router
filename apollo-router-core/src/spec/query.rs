@@ -193,16 +193,35 @@ impl Query {
                         failfast_debug!("Missing field: {}", name);
                     }
                 }
-                Selection::InlineFragment { selection_set } => {
-                    self.apply_selection_set(selection_set, input, output, schema);
+                Selection::InlineFragment {
+                    fragment:
+                        Fragment {
+                            type_condition,
+                            selection_set,
+                        },
+                } => {
+                    if let Some(typename) = input.get("__typename") {
+                        if typename.as_str() == Some(type_condition.as_str()) {
+                            self.apply_selection_set(selection_set, input, output, schema);
+                        }
+                    }
                 }
                 Selection::FragmentSpread { name } => {
-                    if let Some(selection_set) = self
+                    if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
-                        self.apply_selection_set(selection_set, input, output, schema);
+                        if let Some(typename) = input.get("__typename") {
+                            if typename.as_str() == Some(fragment.type_condition.as_str()) {
+                                self.apply_selection_set(
+                                    &fragment.selection_set,
+                                    input,
+                                    output,
+                                    schema,
+                                );
+                            }
+                        }
                     } else {
                         failfast_debug!("Missing fragment named: {}", name);
                     }
@@ -415,13 +434,28 @@ mod tests {
     fn reformat_response_data_inline_fragment() {
         assert_format_response!(
             "",
-            "{... on Stuff { stuff{bar}}}",
-            json! {{"stuff": {"bar": "2"}}},
+            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            json! {
+                {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}
+            },
             None,
             json! {{
                 "stuff": {
                     "bar": "2",
                 },
+            }},
+        );
+
+        assert_format_response!(
+            "",
+            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            json! {
+                {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}
+            },
+            None,
+            json! {{
+                "id": "1",
+
             }},
         );
     }
@@ -431,13 +465,35 @@ mod tests {
         assert_format_response!(
             "fragment baz on Baz {baz}",
             "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
-            json! {{"foo": "1", "bar": "2", "baz": "3"}},
+            json! {
+            {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}
+            },
             None,
-            json! {{
-                "foo": "1",
-                "bar": "2",
-                "baz": "3",
-            }},
+            json! {
+                {"foo": "1"}
+            },
+        );
+        assert_format_response!(
+            "fragment baz on Baz {baz}",
+            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            json! {
+            {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}
+            },
+            None,
+            json! {
+                {"bar": "2"}
+            },
+        );
+        assert_format_response!(
+            "fragment baz on Baz {baz}",
+            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            json! {
+            {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}
+            },
+            None,
+            json! {
+                {"baz": "3"}
+            },
         );
     }
 
@@ -512,7 +568,13 @@ mod tests {
                 .variables(variables)
                 .query($query)
                 .build();
-            let query = Query::parse(&request.query).expect("could not parse query");
+            let query = Query::parse(
+                request
+                    .query
+                    .as_ref()
+                    .expect("query has been added right above; qed"),
+            )
+            .expect("could not parse query");
             query.validate_variables(&request, &schema)
         }};
     }

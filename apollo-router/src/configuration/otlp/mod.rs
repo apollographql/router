@@ -11,9 +11,9 @@ use super::TraceConfig;
 use crate::configuration::ConfigurationError;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
+use reqwest::Url;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
-use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]

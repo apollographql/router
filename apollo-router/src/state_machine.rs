@@ -1,34 +1,33 @@
 use super::http_server_factory::{HttpServerFactory, HttpServerHandle};
-use super::router_factory::RouterFactory;
+use super::router_factory::RouterServiceFactory;
 use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::Configuration;
+use crate::configuration::{Configuration, SpaceportConfig};
 use apollo_router_core::prelude::*;
+use apollo_router_core::Schema;
+use apollo_spaceport::server::ReportSpaceport;
 use futures::channel::mpsc;
 use futures::prelude::*;
-use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(Debug)]
+#[derive(derivative::Derivative)]
+#[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum PrivateState<Router, PreparedQuery>
-where
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
-{
+enum PrivateState<RS> {
     Startup {
         configuration: Option<Configuration>,
         schema: Option<graphql::Schema>,
-        phantom: PhantomData<(Router, PreparedQuery)>,
     },
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
-        router: Arc<Router>,
+        #[derivative(Debug = "ignore")]
+        router_service: RS,
         server_handle: HttpServerHandle,
     },
     Stopped,
@@ -40,26 +39,19 @@ where
 /// If config and schema are not supplied then the machine ends with an error.
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
-/// At any point a shutdown event will case the machine to try to get to stopped state.  
-pub(crate) struct StateMachine<S, Router, PreparedQuery, FA>
+/// At any point a shutdown event will cause the machine to try to get to stopped state.  
+pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
-    FA: RouterFactory<Router, PreparedQuery>,
+    FA: RouterServiceFactory,
 {
     http_server_factory: S,
     state_listener: Option<mpsc::Sender<State>>,
     router_factory: FA,
-    phantom: PhantomData<(Router, PreparedQuery)>,
 }
 
-impl<Router, PreparedQuery> From<&PrivateState<Router, PreparedQuery>> for State
-where
-    Router: graphql::Router<PreparedQuery>,
-    PreparedQuery: graphql::PreparedQuery,
-{
-    fn from(private_state: &PrivateState<Router, PreparedQuery>) -> Self {
+impl<RS> From<&PrivateState<RS>> for State {
+    fn from(private_state: &PrivateState<RS>) -> Self {
         match private_state {
             Startup { .. } => State::Startup,
             Running {
@@ -67,7 +59,7 @@ where
                 schema,
                 ..
             } => State::Running {
-                address: server_handle.listen_address(),
+                address: server_handle.listen_address().to_owned(),
                 schema: schema.as_str().to_string(),
             },
             Stopped => State::Stopped,
@@ -76,12 +68,41 @@ where
     }
 }
 
-impl<S, Router, PreparedQuery, FA> StateMachine<S, Router, PreparedQuery, FA>
+// For use when we have an external collector. Makes selecting over
+// events simpler
+async fn do_nothing(_addr_str: String) -> bool {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+// For use when we have an internal collector.
+async fn do_listen(addr_str: String) -> bool {
+    tracing::info!("spawning an internal spaceport");
+    // Spawn a spaceport server to handle statistics
+    let addr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("could not parse spaceport address: {}", e);
+            return false;
+        }
+    };
+
+    let spaceport = ReportSpaceport::new(addr);
+
+    if let Err(e) = spaceport.serve().await {
+        tracing::error!("spaceport did not terminate normally: {}", e);
+        return false;
+    }
+    true
+}
+
+impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    Router: graphql::Router<PreparedQuery> + 'static,
-    PreparedQuery: graphql::PreparedQuery + 'static,
-    FA: RouterFactory<Router, PreparedQuery>,
+    FA: RouterServiceFactory + Send,
 {
     pub(crate) fn new(
         http_server_factory: S,
@@ -92,7 +113,6 @@ where
             http_server_factory,
             state_listener,
             router_factory,
-            phantom: Default::default(),
         }
     }
 
@@ -101,38 +121,91 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
         tracing::debug!("Starting");
+        // Studio Agent Spaceport listener
+        // TODO: This code will be moving when we add support for Tower
+        // to the router. Leaving here until that time.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
+
+        tokio::spawn(async move {
+            let mut current_listener = "".to_string();
+            let mut current_operation: fn(
+                msg: String,
+            )
+                -> Pin<Box<dyn Future<Output = bool> + Send>> = |msg| Box::pin(do_nothing(msg));
+
+            loop {
+                tokio::select! {
+                    biased;
+                    mopt = rx.recv() => {
+                        match mopt {
+                            Some(msg) => {
+                                tracing::info!(?msg);
+                                // Save our target listener for later use
+                                current_listener = msg.listener.clone();
+                                // Configure which function to call
+                                if msg.external {
+                                    current_operation = |msg| Box::pin(do_nothing(msg));
+                                } else {
+                                    current_operation = |msg| Box::pin(do_listen(msg));
+                                }
+                            },
+                            None => break
+                        }
+                    },
+                    x = current_operation(current_listener.clone()) => {
+                        // The only time a current_operation will return is failure
+                        // from the server. If this happens, wait for a while
+                        // then try again.
+                        tracing::info!(%x, "current_operation");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                };
+            }
+            tracing::info!("terminating spaceport loop");
+        });
+
         let mut state = Startup {
             configuration: None,
             schema: None,
-            phantom: PhantomData,
         };
         let mut state_listener = self.state_listener.take();
         let initial_state = State::from(&state);
-        <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
-            &mut state_listener,
-            initial_state,
-        )
-        .await;
+        <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, initial_state).await;
         while let Some(message) = messages.next().await {
             let last_public_state = State::from(&state);
             let new_state = match (state, message) {
                 // Startup: Handle configuration updates, maybe transition to running.
-                (Startup { configuration, .. }, UpdateSchema(new_schema)) => {
-                    self.maybe_transition_to_running(Startup {
+                (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
+                    .maybe_transition_to_running(Startup {
                         configuration,
                         schema: Some(*new_schema),
-                        phantom: PhantomData,
                     })
                     .await
-                }
+                    .into_ok_or_err2(),
+
                 // Startup: Handle schema updates, maybe transition to running.
                 (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => {
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.spaceport {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
+                            }
+                        }
+                    }
                     self.maybe_transition_to_running(Startup {
                         configuration: Some(*new_configuration),
                         schema,
-                        phantom: PhantomData,
                     })
                     .await
+                    .into_ok_or_err2()
                 }
 
                 // Startup: Missing configuration.
@@ -164,61 +237,22 @@ where
                     Running {
                         configuration,
                         schema,
-                        router,
+                        router_service,
                         server_handle,
                     },
                     UpdateSchema(new_schema),
                 ) => {
-                    tracing::debug!("Reloading schema");
-                    let mut derived_configuration: Configuration =
-                        configuration.as_ref().to_owned();
-                    match derived_configuration.load_subgraphs(&new_schema) {
-                        Err(e) => {
-                            let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
-                            tracing::error!(
-                                "The new configuration is invalid, keeping the previous one: {}",
-                                strings.join(", ")
-                            );
-                            Running {
-                                configuration,
-                                schema,
-                                router,
-                                server_handle,
-                            }
-                        }
-                        Ok(()) => {
-                            tracing::info!("Reloading schema");
-                            let derived_configuration = Arc::new(derived_configuration);
-
-                            let schema = Arc::new(*new_schema);
-                            let router = Arc::new(
-                                self.router_factory
-                                    .create(
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        Some(router),
-                                    )
-                                    .await,
-                            );
-
-                            match server_handle
-                                .restart(
-                                    &self.http_server_factory,
-                                    Arc::clone(&router),
-                                    derived_configuration,
-                                )
-                                .await
-                            {
-                                Ok(server_handle) => Running {
-                                    configuration,
-                                    schema,
-                                    router,
-                                    server_handle,
-                                },
-                                Err(err) => Errored(err),
-                            }
-                        }
-                    }
+                    tracing::info!("Reloading schema");
+                    self.reload_server(
+                        configuration,
+                        schema,
+                        router_service,
+                        server_handle,
+                        None,
+                        Some(Arc::new(*new_schema)),
+                    )
+                    .await
+                    .into_ok_or_err2()
                 }
 
                 // Running: Handle configuration updates
@@ -226,58 +260,38 @@ where
                     Running {
                         configuration,
                         schema,
-                        router,
+                        router_service,
                         server_handle,
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
                     tracing::info!("Reloading configuration");
-
-                    let mut derived_configuration = (*new_configuration).clone();
-                    match derived_configuration.load_subgraphs(&schema) {
-                        Err(e) => {
-                            let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
-                            tracing::error!(
-                                "The new configuration is invalid, keeping the previous one: {}",
-                                strings.join(", ")
-                            );
-                            Running {
-                                configuration,
-                                schema,
-                                router,
-                                server_handle,
+                    // Only check for notify if we have graph configuration
+                    if new_configuration.graph.is_some() {
+                        match &new_configuration.spaceport {
+                            Some(v) => {
+                                tx.send(v.clone())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
                             }
-                        }
-                        Ok(()) => {
-                            let derived_configuration = Arc::new(derived_configuration);
-                            let router = Arc::new(
-                                self.router_factory
-                                    .create(
-                                        &derived_configuration,
-                                        Arc::clone(&schema),
-                                        Some(router),
-                                    )
-                                    .await,
-                            );
-
-                            match server_handle
-                                .restart(
-                                    &self.http_server_factory,
-                                    Arc::clone(&router),
-                                    Arc::clone(&derived_configuration),
-                                )
-                                .await
-                            {
-                                Ok(server_handle) => Running {
-                                    configuration: Arc::new(*new_configuration),
-                                    schema,
-                                    router,
-                                    server_handle,
-                                },
-                                Err(err) => Errored(err),
+                            None => {
+                                tx.send(Default::default())
+                                    .await
+                                    .map_err(FederatedServerError::ServerSpaceportError)?;
                             }
                         }
                     }
+
+                    self.reload_server(
+                        configuration,
+                        schema,
+                        router_service,
+                        server_handle,
+                        Some(Arc::new(*new_configuration)),
+                        None,
+                    )
+                    .await
+                    .into_ok_or_err2()
                 }
 
                 // Anything else we don't care about
@@ -289,11 +303,8 @@ where
 
             let new_public_state = State::from(&new_state);
             if last_public_state != new_public_state {
-                <StateMachine<S, Router, PreparedQuery, FA>>::notify_state_listener(
-                    &mut state_listener,
-                    new_public_state,
-                )
-                .await;
+                <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
+                    .await;
             }
             tracing::debug!("Transitioned to state {:?}", &new_state);
             state = new_state;
@@ -325,63 +336,114 @@ where
 
     async fn maybe_transition_to_running(
         &self,
-        state: PrivateState<Router, PreparedQuery>,
-    ) -> PrivateState<Router, PreparedQuery> {
+        state: PrivateState<<FA as RouterServiceFactory>::RouterService>,
+    ) -> Result<
+        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+    > {
         if let Startup {
             configuration: Some(configuration),
             schema: Some(schema),
-            phantom: _,
         } = state
         {
             tracing::debug!("Starting http");
+            let configuration = Arc::new(configuration);
+            let schema = Arc::new(schema);
+            let router = self
+                .router_factory
+                .create(configuration.clone(), schema.clone(), None)
+                .await
+                .map_err(|err| {
+                    tracing::error!("Cannot create the router: {}", err);
+                    Errored(FederatedServerError::ServiceCreationError(err))
+                })?;
 
-            let mut derived_configuration = configuration.clone();
-            match derived_configuration.load_subgraphs(&schema) {
-                Err(e) => {
-                    let strings = e.iter().map(ToString::to_string).collect::<Vec<_>>();
-                    tracing::error!(
-                        "The new configuration is invalid, keeping the previous one: {}",
-                        strings.join(", ")
-                    );
-                    Startup {
-                        configuration: Some(configuration),
-                        schema: Some(schema),
-                        phantom: PhantomData,
-                    }
-                }
-                Ok(()) => {
-                    let schema = Arc::new(schema);
-                    let router = Arc::new(
-                        self.router_factory
-                            .create(&derived_configuration, Arc::clone(&schema), None)
-                            .await,
-                    );
+            let server_handle = self
+                .http_server_factory
+                .create(router.clone(), configuration.clone(), None)
+                .await
+                .map_err(|err| {
+                    tracing::error!("Cannot start the router: {}", err);
+                    Errored(err)
+                })?;
 
-                    match self
-                        .http_server_factory
-                        .create(Arc::clone(&router), Arc::new(derived_configuration), None)
-                        .await
-                    {
-                        Ok(server_handle) => {
-                            tracing::debug!("Started on {}", server_handle.listen_address());
-
-                            Running {
-                                configuration: Arc::new(configuration),
-                                schema,
-                                router,
-                                server_handle,
-                            }
-                        }
-
-                        Err(err) => {
-                            tracing::error!("Cannot start the router: {}", err);
-                            Errored(err)
-                        }
-                    }
-                }
-            }
+            Ok(Running {
+                configuration,
+                schema,
+                router_service: router,
+                server_handle,
+            })
         } else {
-            state
+            Ok(state)
+        }
+    }
+    async fn reload_server(
+        &self,
+        configuration: Arc<Configuration>,
+        schema: Arc<Schema>,
+        router_service: <FA as RouterServiceFactory>::RouterService,
+        server_handle: HttpServerHandle,
+        new_configuration: Option<Arc<Configuration>>,
+        new_schema: Option<Arc<Schema>>,
+    ) -> Result<
+        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+        PrivateState<<FA as RouterServiceFactory>::RouterService>,
+    > {
+        let new_schema = new_schema.unwrap_or_else(|| schema.clone());
+        let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
+        match self
+            .router_factory
+            .create(
+                new_configuration.clone(),
+                new_schema.clone(),
+                Some(&router_service),
+            )
+            .await
+        {
+            Ok(new_router_service) => {
+                let server_handle = server_handle
+                    .restart(
+                        &self.http_server_factory,
+                        new_router_service.clone(),
+                        new_configuration.clone(),
+                    )
+                    .await
+                    .map_err(|err| {
+                        tracing::error!("Cannot start the router: {}", err);
+                        Errored(err)
+                    })?;
+                Ok(Running {
+                    configuration: new_configuration,
+                    schema: new_schema,
+                    router_service: new_router_service,
+                    server_handle,
+                })
+            }
+            Err(err) => {
+                tracing::error!(
+                    "Cannot create new router, keeping previous configuration: {}",
+                    err
+                );
+                Err(Running {
+                    configuration,
+                    schema,
+                    router_service,
+                    server_handle,
+                })
+            }
+        }
+    }
+}
+trait ResultExt<T> {
+    // Unstable method can be deleted in future
+    fn into_ok_or_err2(self) -> T;
+}
+
+impl<T> ResultExt<T> for Result<T, T> {
+    fn into_ok_or_err2(self) -> T {
+        match self {
+            Ok(v) => v,
+            Err(v) => v,
         }
     }
 }
@@ -390,15 +452,20 @@ where
 mod tests {
     use super::*;
     use crate::configuration::Subgraph;
-    use crate::http_server_factory::MockHttpServerFactory;
-    use crate::router_factory::RouterFactory;
+    use crate::http_server_factory::Listener;
+    use crate::router_factory::RouterServiceFactory;
+    use apollo_router_core::http_compat::{Request, Response};
+    use apollo_router_core::ResponseBody;
     use futures::channel::oneshot;
-    use mockall::{mock, predicate::*};
+    use futures::future::BoxFuture;
+    use mockall::{mock, predicate::*, Sequence};
     use std::net::SocketAddr;
+    use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
+    use std::task::{Context, Poll};
     use test_log::test;
-    use tokio::net::TcpListener;
+    use tower::{BoxError, Service};
     use url::Url;
 
     #[test(tokio::test)]
@@ -471,7 +538,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -507,11 +574,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: schema.to_string(),
                     },
                     State::Stopped
@@ -556,11 +623,11 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: String::new()
                     },
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
                         schema: String::new()
                     },
                     State::Stopped
@@ -590,12 +657,14 @@ mod tests {
                                         "accounts".to_string(),
                                         Subgraph {
                                             routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                            layers: Vec::new(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
+                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                            layers: Vec::new(),
                                         }
                                     )
                                 ]
@@ -617,7 +686,7 @@ mod tests {
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
@@ -635,37 +704,13 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn extract_routing_urls_when_updating_configuration() {
+    async fn router_factory_error_startup() {
         let mut router_factory = MockMyRouterFactory::new();
-        // first call, we take the URL from the configuration
         router_factory
             .expect_create()
-            .withf(|configuration, _schema, _previous_router| {
-                configuration
-                    .subgraphs
-                    .get("accounts")
-                    .unwrap()
-                    .routing_url
-                    .as_str()
-                    == "http://accounts/graphql"
-            })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
-        // second call, configuration is empty, we should take the URL from the graph
-        router_factory
-            .expect_create()
-            .withf(|configuration, _schema, _previous_router| {
-                configuration
-                    .subgraphs
-                    .get("accounts")
-                    .unwrap()
-                    .routing_url
-                    .as_str()
-                    == "http://localhost:4001/graphql"
-            })
-            .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+            .returning(|_, _, _| Err(BoxError::from("Error")));
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
             execute(
@@ -674,84 +719,39 @@ mod tests {
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
-                            .subgraphs(
-                                [
-                                    (
-                                        "accounts".to_string(),
-                                        Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap()
-                                        }
-                                    ),
-                                ]
-                                .iter()
-                                .cloned()
-                                .collect()
-                            )
+                            .subgraphs(Default::default())
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new(r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap())),
-                    UpdateConfiguration(
-                            Configuration::builder()
-                                .build()
-                                .boxed()
-                        ),
-                    Shutdown,
+                    UpdateSchema(Box::new("".parse().unwrap())),
                 ],
-                vec![
-                    State::Startup,
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
-                        schema: r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.to_string()
-                    },
-                    State::Stopped
-                ]
+                vec![State::Startup, State::Errored,]
             )
             .await,
-            Ok(()),
+            Err(FederatedServerError::ServiceCreationError(_)),
         ));
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
-    async fn extract_routing_urls_when_updating_schema() {
+    async fn router_factory_error_restart() {
+        let mut seq = Sequence::new();
         let mut router_factory = MockMyRouterFactory::new();
-        // first call, we take the URL from the first supergraph
         router_factory
             .expect_create()
-            .withf(|configuration, _schema, _previous_router| {
-                configuration
-                    .subgraphs
-                    .get("accounts")
-                    .unwrap()
-                    .routing_url
-                    .as_str()
-                    == "http://accounts/graphql"
-            })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
-        // second call, configuration is still empty, we should take the URL from the new supergraph
+            .in_sequence(&mut seq)
+            .returning(|_, _, _| {
+                let mut router = MockMyRouter::new();
+                router.expect_clone().return_once(MockMyRouter::new);
+                Ok(router)
+            });
         router_factory
             .expect_create()
-            .withf(|configuration, _schema, _previous_router| {
-                println!("got configuration: {:#?}", configuration);
-                configuration
-                    .subgraphs
-                    .get("accounts")
-                    .unwrap()
-                    .routing_url
-                    .as_str()
-                    == "http://localhost:4001/graphql"
-            })
             .times(1)
-            .returning(|_, _, _| MockMyRouter::new());
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+            .in_sequence(&mut seq)
+            .returning(|_, _, _| Err(BoxError::from("Error")));
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
             execute(
@@ -760,34 +760,19 @@ mod tests {
                 vec![
                     UpdateConfiguration(
                         Configuration::builder()
+                            .subgraphs(Default::default())
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new(r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
-                        }"#.parse().unwrap())),
-                    UpdateSchema(Box::new(r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.parse().unwrap())),
-                    Shutdown,
+                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new("".parse().unwrap())),
+                    Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
-                        schema: r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://accounts/graphql")
-                        }"#.to_string()
-                    },
-                    State::Running {
-                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap(),
-                        schema: r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                        }"#.to_string()
+                        address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
+                        schema: String::new()
                     },
                     State::Stopped
                 ]
@@ -795,7 +780,7 @@ mod tests {
             .await,
             Ok(()),
         ));
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
     mock! {
@@ -803,51 +788,82 @@ mod tests {
         MyRouterFactory {}
 
         #[async_trait::async_trait]
-        impl RouterFactory<MockMyRouter, MockMyRoute> for MyRouterFactory {
-            async fn create(
-                &self,
-                configuration: &Configuration,
+        impl RouterServiceFactory for MyRouterFactory {
+            type RouterService = MockMyRouter;
+            type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
+
+            async fn create<'a>(
+                &'a self,
+                configuration: Arc<Configuration>,
                 schema: Arc<graphql::Schema>,
-                previous_router: Option<Arc<MockMyRouter>>,
-            ) -> MockMyRouter;
+                previous_router: Option<&'a MockMyRouter>,
+            ) -> Result<MockMyRouter, BoxError>;
         }
     }
 
     mock! {
         #[derive(Debug)]
-        MyFetcher {}
+        MyRouter {
+            fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> <MockMyRouter as Service<Request<graphql::Request>>>::Future;
+        }
 
-        #[async_trait::async_trait]
-        impl graphql::Fetcher for MyFetcher {
-            async fn stream(&self, request: graphql::Request) -> Result<graphql::Response, graphql::FetchError>;
+        impl Clone for MyRouter {
+            fn clone(&self) -> MockMyRouter;
+        }
+    }
+
+    //mockall does not handle well the lifetime on Context
+    impl Service<Request<graphql::Request>> for MockMyRouter {
+        type Response = Response<ResponseBody>;
+        type Error = BoxError;
+        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+            self.poll_ready()
+        }
+        fn call(&mut self, req: Request<graphql::Request>) -> Self::Future {
+            self.service_call(req)
         }
     }
 
     mock! {
         #[derive(Debug)]
-        MyRouter {}
-
-        #[async_trait::async_trait]
-        impl graphql::Router<MockMyRoute> for MyRouter {
-            async fn prepare_query(
-                &self,
-                request: &graphql::Request,
-            ) -> Result<MockMyRoute, graphql::Response>;
+        MyHttpServerFactory{
+            fn create_server(&self,
+                configuration: Arc<Configuration>,
+                listener: Option<Listener>,) -> Result<HttpServerHandle, FederatedServerError>;
         }
     }
 
-    mock! {
-        #[derive(Debug)]
-        MyRoute {}
+    impl HttpServerFactory for MockMyHttpServerFactory {
+        type Future =
+            Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
 
-        #[async_trait::async_trait]
-        impl graphql::PreparedQuery for MyRoute {
-            async fn execute(self, request: graphql::Request) -> graphql::Response;
+        fn create<RS>(
+            &self,
+            _service: RS,
+            configuration: Arc<Configuration>,
+            listener: Option<Listener>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
+        where
+            RS: Service<
+                    Request<graphql::Request>,
+                    Response = Response<ResponseBody>,
+                    Error = BoxError,
+                > + Send
+                + Sync
+                + Clone
+                + 'static,
+            <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+        {
+            let res = self.create_server(configuration, listener);
+            Box::pin(async move { res })
         }
     }
 
     async fn execute(
-        server_factory: MockHttpServerFactory,
+        server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterFactory,
         events: Vec<Event>,
         expected_states: Vec<State>,
@@ -865,19 +881,17 @@ mod tests {
     fn create_mock_server_factory(
         expect_times_called: usize,
     ) -> (
-        MockHttpServerFactory,
+        MockMyHttpServerFactory,
         Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
     ) {
-        let mut server_factory = MockHttpServerFactory::new();
+        let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
         server_factory
-            .expect_create()
+            .expect_create_server()
             .times(expect_times_called)
             .returning(
-                move |_: Arc<MockMyRouter>,
-                      configuration: Arc<Configuration>,
-                      listener: Option<TcpListener>| {
+                move |configuration: Arc<Configuration>, listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
@@ -888,17 +902,24 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            #[cfg(unix)]
+                            {
+                                tokio_util::either::Either::Left(
+                                    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                                )
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+                            }
                         })
                     };
 
-                    Box::pin(async move {
-                        Ok(HttpServerHandle::new(
-                            shutdown_sender,
-                            Box::pin(server),
-                            configuration.server.listen,
-                        ))
-                    })
+                    Ok(HttpServerHandle::new(
+                        shutdown_sender,
+                        Box::pin(server),
+                        configuration.server.listen.clone(),
+                    ))
                 },
             );
         (server_factory, shutdown_receivers)
@@ -906,10 +927,15 @@ mod tests {
 
     fn create_mock_router_factory(expect_times_called: usize) -> MockMyRouterFactory {
         let mut router_factory = MockMyRouterFactory::new();
+
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(|_, _, _| MockMyRouter::new());
+            .returning(move |_, _, _| {
+                let mut router = MockMyRouter::new();
+                router.expect_clone().return_once(MockMyRouter::new);
+                Ok(router)
+            });
         router_factory
     }
 }

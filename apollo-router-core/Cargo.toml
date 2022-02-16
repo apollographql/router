@@ -1,9 +1,10 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.5"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
+publish = false
 
 [features]
 # Prevents the query execution to continue if any error occurs while fetching
@@ -12,29 +13,44 @@ license-file = "./LICENSE"
 failfast = []
 
 [dependencies]
-apollo-parser = "0.2.0"
+apollo-parser = "0.2.2"
 async-trait = "0.1.52"
 atty = "0.2.14"
 bytes = "1.1.0"
 derivative = "2.2.0"
 displaydoc = "0.2"
-futures = "0.3.19"
+futures = "0.3.21"
+hex = "0.4.3"
+http = "0.2.6"
 include_dir = "0.7.2"
 lru = "0.7.2"
 miette = { version = "3.3.0", features = ["fancy"] }
+mockall = "0.11.0"
+moka = { version = "0.6.4", features = ["future", "futures-util"] }
 once_cell = "1.9.0"
-router-bridge = { git = "https://github.com/apollographql/federation.git", rev = "950eb931e38746bb7cfed05382d6970a22e43cc4" }
+paste = "1.0.6"
+regex = "1.5.4"
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "135a2c506c87e2b9eea47e2905383268e8d8d757" }
+schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
-serde_json = { version = "1.0.78", features = ["preserve_order"] }
-serde_json_bytes = { version = "0.2.0", features = ["preserve_order"]}
+serde_json = { version = "1.0.79", features = ["preserve_order"] }
+serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
+serde_urlencoded = "0.7.1"
+sha2 = "0.10.1"
+startup = "0.1.1"
+static_assertions = "1.1.0"
 thiserror = "1.0.30"
-tokio = { version = "1.15.0", features = ["rt"] }
-tracing = "0.1.29"
-tracing-futures = "0.2.5"
+tokio = { version = "1.16.1", features = ["rt", "sync"] }
+tower = { version = "0.4.11", features = ["util", "buffer"] }
+tower-service = "0.3.1"
+tower-test = "0.4.0"
+tracing = "0.1.30"
 typed-builder = "0.9.1"
+url = "2.2.2"
+urlencoding = "2.1.0"
 
 [dev-dependencies]
-insta = "1.11.0"
+insta = "1.12.0"
 mockall = "0.11.0"
 static_assertions = "1"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }

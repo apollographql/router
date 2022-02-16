@@ -1,24 +1,25 @@
 //! Starts a server that will handle http graphql requests.
 
-mod apollo_router;
+mod apollo_telemetry;
 pub mod configuration;
 mod files;
 mod http_server_factory;
-pub mod http_service_registry;
-pub mod http_subgraph;
 mod json_serializer;
-mod router_factory;
+mod layers;
+mod plugins;
+pub mod reqwest_subgraph_service;
+pub mod router_factory;
 mod state_machine;
 mod trace;
 mod warp_http_server_factory;
 
-pub use self::apollo_router::*;
-use crate::router_factory::ApolloRouterFactory;
+use crate::configuration::SpaceportConfig;
+use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
-use configuration::Configuration;
+use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -27,14 +28,12 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use typed_builder::TypedBuilder;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -65,8 +64,14 @@ pub enum FederatedServerError {
     /// Could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
 
+    /// Could not create the HTTP pipeline: {0}
+    ServiceCreationError(tower::BoxError),
+
     /// Could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
+
+    /// Could not configure spaceport: {0}
+    ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -237,7 +242,7 @@ impl ConfigurationKind {
                         config.subscriber = Some(subscriber);
                     }
                     Err(err) => {
-                        tracing::error!("Could not initialize tracing subscriber: {}", err,)
+                        tracing::error!("Could not initialize tracing subscriber: {}", err,);
                     }
                 };
                 UpdateConfiguration(config)
@@ -304,16 +309,16 @@ impl ShutdownKind {
 ///
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::FederatedServer;
-/// use apollo_router::ShutdownKind;
+/// use apollo_router::ApolloRouterBuilder;
+/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = FederatedServer::builder()
-///             .configuration(configuration)
-///             .schema(schema)
+///     let server = ApolloRouterBuilder::default()
+///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+///             .schema(SchemaKind::Instance(Box::new(schema)))
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     server.serve().await;
@@ -323,16 +328,16 @@ impl ShutdownKind {
 /// Shutdown via handle.
 /// ```
 /// use apollo_router_core::prelude::*;
-/// use apollo_router::FederatedServer;
-/// use apollo_router::ShutdownKind;
+/// use apollo_router::ApolloRouterBuilder;
+/// use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 /// use apollo_router::configuration::Configuration;
 ///
 /// async {
 ///     let configuration = serde_yaml::from_str::<Configuration>("Config").unwrap();
 ///     let schema: graphql::Schema = "schema".parse().unwrap();
-///     let server = FederatedServer::builder()
-///             .configuration(configuration)
-///             .schema(schema)
+///     let server = ApolloRouterBuilder::default()
+///             .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+///             .schema(SchemaKind::Instance(Box::new(schema)))
 ///             .shutdown(ShutdownKind::CtrlC)
 ///             .build();
 ///     let handle = server.serve();
@@ -340,9 +345,10 @@ impl ShutdownKind {
 /// };
 /// ```
 ///
-#[derive(TypedBuilder, Debug)]
-#[builder(field_defaults(setter(into)))]
-pub struct FederatedServer {
+pub struct ApolloRouter<RF>
+where
+    RF: RouterServiceFactory,
+{
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.
     configuration: ConfigurationKind,
 
@@ -350,8 +356,77 @@ pub struct FederatedServer {
     schema: SchemaKind,
 
     /// A future that when resolved will shut down the server.
-    #[builder(default = ShutdownKind::None)]
     shutdown: ShutdownKind,
+
+    router_factory: RF,
+}
+
+#[derive(Default)]
+pub struct ApolloRouterBuilder<Factory = ()> {
+    /// The Configuration that the server will use. This can be static or a stream for hot reloading.
+    configuration: Option<ConfigurationKind>,
+
+    /// The Schema that the server will use. This can be static or a stream for hot reloading.
+    schema: Option<SchemaKind>,
+
+    /// A future that when resolved will shut down the server.
+    shutdown: Option<ShutdownKind>,
+
+    router_factory: Factory,
+}
+
+impl ApolloRouterBuilder {
+    pub fn configuration(mut self, configuration: ConfigurationKind) -> Self {
+        self.configuration = Some(configuration);
+        self
+    }
+
+    pub fn schema(mut self, schema: SchemaKind) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
+    pub fn shutdown(mut self, shutdown: ShutdownKind) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    /// Use a custom RouterServiceFactory
+    pub fn with_factory<RF>(self, router_factory: RF) -> ApolloRouterBuilder<RF>
+    where
+        RF: RouterServiceFactory,
+    {
+        ApolloRouterBuilder {
+            configuration: self.configuration,
+            schema: self.schema,
+            shutdown: self.shutdown,
+            router_factory,
+        }
+    }
+
+    pub fn build(self) -> ApolloRouter<YamlRouterServiceFactory> {
+        ApolloRouter {
+            configuration: self
+                .configuration
+                .expect("Configuration must be set on builder"),
+            schema: self.schema.expect("Schema must be set on builder"),
+            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            router_factory: YamlRouterServiceFactory::default(),
+        }
+    }
+}
+
+impl<RF: RouterServiceFactory> ApolloRouterBuilder<RF> {
+    pub fn build(self) -> ApolloRouter<RF> {
+        ApolloRouter {
+            configuration: self
+                .configuration
+                .expect("Configuration must be set on builder"),
+            schema: self.schema.expect("Schema must be set on builder"),
+            shutdown: self.shutdown.unwrap_or(ShutdownKind::CtrlC),
+            router_factory: self.router_factory,
+        }
+    }
 }
 
 /// Messages that are broadcast across the app.
@@ -381,7 +456,7 @@ pub enum State {
     Startup,
 
     /// The server is running on a particular address.
-    Running { address: SocketAddr, schema: String },
+    Running { address: ListenAddr, schema: String },
 
     /// The server has stopped.
     Stopped,
@@ -406,7 +481,7 @@ impl FederatedServerHandle {
     /// scenarios.
     ///
     /// returns: Option<SocketAddr>
-    pub async fn ready(&mut self) -> Option<SocketAddr> {
+    pub async fn ready(&mut self) -> Option<ListenAddr> {
         self.state_receiver()
             .map(|state| {
                 if let State::Running { address, .. } = state {
@@ -460,7 +535,10 @@ impl Future for FederatedServerHandle {
     }
 }
 
-impl FederatedServer {
+impl<RF> ApolloRouter<RF>
+where
+    RF: RouterServiceFactory,
+{
     /// Start the federated server on a separate thread.
     ///
     /// The returned handle allows the user to await until the server is ready and shutdown.
@@ -472,23 +550,23 @@ impl FederatedServer {
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
         let server_factory = WarpHttpServerFactory::new();
-        let state_machine = StateMachine::new(
-            server_factory,
-            Some(state_listener),
-            ApolloRouterFactory::default(),
-        );
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let result = spawn(async {
-            state_machine
-                .process_events(self.generate_event_stream(shutdown_receiver))
-                .await
-        })
-        .map(|r| match r {
-            Ok(Ok(ok)) => Ok(ok),
-            Ok(Err(err)) => Err(err),
-            Err(_err) => Err(FederatedServerError::StartupError),
-        })
-        .boxed();
+        let event_stream = Self::generate_event_stream(
+            self.shutdown,
+            self.configuration,
+            self.schema,
+            shutdown_receiver,
+        );
+
+        let state_machine =
+            StateMachine::new(server_factory, Some(state_listener), self.router_factory);
+        let result = spawn(async move { state_machine.process_events(event_stream).await })
+            .map(|r| match r {
+                Ok(Ok(ok)) => Ok(ok),
+                Ok(Err(err)) => Err(err),
+                Err(_err) => Err(FederatedServerError::StartupError),
+            })
+            .boxed();
 
         FederatedServerHandle {
             result,
@@ -501,14 +579,16 @@ impl FederatedServer {
     /// This merges all contributing streams and sets up shutdown handling.
     /// When a shutdown message is received no more events are emitted.
     fn generate_event_stream(
-        self,
+        shutdown: ShutdownKind,
+        configuration: ConfigurationKind,
+        schema: SchemaKind,
         shutdown_receiver: oneshot::Receiver<()>,
     ) -> impl Stream<Item = Event> {
         // Chain is required so that the final shutdown message is sent.
         let messages = stream::select_all(vec![
-            self.shutdown.into_stream().boxed(),
-            self.configuration.into_stream().boxed(),
-            self.schema.into_stream().boxed(),
+            shutdown.into_stream().boxed(),
+            configuration.into_stream().boxed(),
+            schema.into_stream().boxed(),
             shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
         ])
         .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
@@ -522,20 +602,18 @@ impl FederatedServer {
 mod tests {
     use super::*;
     use crate::files::tests::{create_temp_file, write_and_flush};
-    use crate::http_subgraph::HttpSubgraphFetcher;
     use serde_json::to_string_pretty;
     use std::env::temp_dir;
     use test_log::test;
-    use url::Url;
 
     fn init_with_server() -> FederatedServerHandle {
         let configuration =
             serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
                 .unwrap();
         let schema: graphql::Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
-        FederatedServer::builder()
-            .configuration(configuration)
-            .schema(Box::new(schema))
+        ApolloRouterBuilder::default()
+            .configuration(ConfigurationKind::Instance(Box::new(configuration)))
+            .schema(SchemaKind::Instance(Box::new(schema)))
             .build()
             .serve()
     }
@@ -543,29 +621,32 @@ mod tests {
     #[test(tokio::test)]
     async fn basic_request() {
         let mut server_handle = init_with_server();
-        let socket = server_handle.ready().await.expect("Server never ready");
-        assert_federated_response(&socket, r#"{ topProducts { name } }"#).await;
+        let listen_addr = server_handle.ready().await.expect("Server never ready");
+        assert_federated_response(&listen_addr, r#"{ topProducts { name } }"#).await;
         server_handle.shutdown().await.expect("Could not shutdown");
     }
 
-    async fn assert_federated_response(socket: &SocketAddr, request: &str) {
+    async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
         let request = graphql::Request::builder().query(request).build();
-        let expected = query(socket, request.clone()).await.unwrap();
+        let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
         assert!(!response.is_empty());
     }
 
     async fn query(
-        socket: &SocketAddr,
-        request: graphql::Request,
+        listen_addr: &ListenAddr,
+        request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
-        HttpSubgraphFetcher::new(
-            "federated",
-            Url::parse(&format!("http://{}/graphql", socket)).unwrap(),
-        )
-        .stream(request)
-        .await
+        Ok(reqwest::Client::new()
+            .post(format!("{}/graphql", listen_addr))
+            .json(request)
+            .send()
+            .await
+            .expect("couldn't send request")
+            .json()
+            .await
+            .expect("couldn't deserialize into json"))
     }
 
     #[test(tokio::test)]

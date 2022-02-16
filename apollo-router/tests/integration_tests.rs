@@ -1,21 +1,22 @@
 use apollo_router::configuration::Configuration;
-use apollo_router::http_service_registry::HttpServiceRegistry;
-use apollo_router::http_subgraph::HttpSubgraphFetcher;
-use apollo_router::ApolloRouter;
+use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
-use apollo_router_core::ValueExt;
+use apollo_router_core::{
+    Context, PluggableRouterServiceBuilder, ResponseBody, SubgraphRequest, ValueExt,
+};
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use url::Url;
+use tower::Service;
+use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = graphql::Request::builder()
-            .query($query)
+            .query($query.to_string())
             .variables(Arc::new(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
@@ -25,10 +26,24 @@ macro_rules! assert_federated_response {
                 .collect(),
             ))
             .build();
-        let (actual, registry) = query_rust(request.clone()).await;
-        let expected = query_node(request.clone()).await.unwrap();
 
-        tracing::debug!("query:\n{}\n", request.query.as_str());
+
+
+        let expected = query_node(&request).await.unwrap();
+
+        let http_request = http::Request::builder()
+            .method("POST")
+            .body(request)
+            .unwrap().into();
+
+        let request = graphql::RouterRequest {
+            context: Context::new().with_request(http_request),
+        };
+
+        let (actual, registry) = query_rust(request).await;
+
+
+        tracing::debug!("query:\n{}\n", $query);
 
         assert!(
             expected.data.is_object(),
@@ -75,7 +90,7 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!("traced_basic_request", get_spans());
 }
 
 #[test_span(tokio::test)]
@@ -90,7 +105,7 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!(get_spans());
+    insta::assert_json_snapshot!("traced_basic_composition", get_spans());
 }
 
 #[tokio::test]
@@ -114,6 +129,89 @@ async fn basic_mutation() {
             "reviews".to_string()=>2,
         },
     );
+}
+
+#[tokio::test]
+async fn queries_should_work_over_get() {
+    let request = graphql::Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
+async fn mutation_should_not_work_over_get() {
+    let request = graphql::Request::builder()
+        .query(
+            r#"mutation {
+                createProduct(upc:"8", name:"Bob") {
+                  upc
+                  name
+                  reviews {
+                    body
+                  }
+                }
+                createReview(upc: "8", id:"100", body: "Bif"){
+                  id
+                  body
+                }
+              }"#,
+        )
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    // No services should be queried
+    let expected_service_hits = hashmap! {};
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
 }
 
 #[test_span(tokio::test)]
@@ -158,10 +256,21 @@ async fn missing_variables() {
                     }
                 }
             }
-            "#,
+            "#
+            .to_string(),
         )
         .build();
-    let (response, _) = query_rust(request.clone()).await;
+
+    let http_request = http::Request::builder()
+        .method("POST")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: Context::new().with_request(http_request),
+    };
+    let (response, _) = query_rust(request).await;
     let expected = vec![
         graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
@@ -179,56 +288,73 @@ async fn missing_variables() {
     );
 }
 
-async fn query_node(request: graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    let nodejs_impl = HttpSubgraphFetcher::new(
-        "federated",
-        Url::parse("http://localhost:4100/graphql").unwrap(),
-    );
-    nodejs_impl.stream(request).await
+async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
+    Ok(reqwest::Client::new()
+        .post("http://localhost:4100/graphql")
+        .json(request)
+        .send()
+        .await
+        .expect("couldn't send request")
+        .json()
+        .await
+        .expect("couldn't deserialize response"))
 }
 
 async fn query_rust(
-    request: graphql::Request,
-) -> (graphql::Response, Arc<CountingServiceRegistry>) {
+    request: graphql::RouterRequest,
+) -> (graphql::Response, CountingServiceRegistry) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
-    let registry = Arc::new(CountingServiceRegistry::new(HttpServiceRegistry::new(
-        &config,
-    )));
+    let counting_registry = CountingServiceRegistry::new();
+    let dispatcher = config
+        .subscriber
+        .clone()
+        .map(tracing::Dispatch::new)
+        .unwrap_or_default();
 
-    let router = ApolloRouter::new(registry.clone(), schema, None).await;
+    let mut builder = PluggableRouterServiceBuilder::new(schema, 10, dispatcher);
+    for (name, subgraph) in &config.subgraphs {
+        let cloned_counter = counting_registry.clone();
+        let cloned_name = name.clone();
 
-    let stream = match router.prepare_query(&request).await {
-        Ok(route) => route.execute(request).await,
-        Err(stream) => stream,
-    };
+        let service = ReqwestSubgraphService::new(name.to_owned(), subgraph.routing_url.to_owned())
+            .map_request(move |request: SubgraphRequest| {
+                let cloned_counter = cloned_counter.clone();
+                cloned_counter.increment(cloned_name.as_str());
 
-    (stream, registry)
+                request
+            });
+        builder = builder.with_subgraph_service(name, service);
+    }
+
+    let mut router = builder.build().await;
+
+    let stream = router.ready().await.unwrap().call(request).await.unwrap();
+    let (_, response) = stream.response.into_parts();
+
+    match response {
+        ResponseBody::GraphQL(response) => (response, counting_registry),
+        _ => {
+            panic!("Expected graphql response")
+        }
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CountingServiceRegistry {
     counts: Arc<Mutex<HashMap<String, usize>>>,
-    delegate: HttpServiceRegistry,
 }
 
 impl CountingServiceRegistry {
-    fn new(delegate: HttpServiceRegistry) -> CountingServiceRegistry {
+    fn new() -> CountingServiceRegistry {
         CountingServiceRegistry {
             counts: Arc::new(Mutex::new(HashMap::new())),
-            delegate,
         }
     }
 
-    fn totals(&self) -> HashMap<String, usize> {
-        self.counts.lock().unwrap().clone()
-    }
-}
-
-impl ServiceRegistry for CountingServiceRegistry {
-    fn get(&self, service: &str) -> Option<&dyn graphql::Fetcher> {
+    fn increment(&self, service: &str) {
         let mut counts = self.counts.lock().unwrap();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {
@@ -237,11 +363,10 @@ impl ServiceRegistry for CountingServiceRegistry {
             Entry::Vacant(e) => {
                 e.insert(1);
             }
-        }
-        self.delegate.get(service)
+        };
     }
 
-    fn has(&self, service: &str) -> bool {
-        self.delegate.has(service)
+    fn totals(&self) -> HashMap<String, usize> {
+        self.counts.lock().unwrap().clone()
     }
 }

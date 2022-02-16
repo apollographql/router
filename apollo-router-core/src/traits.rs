@@ -18,26 +18,6 @@ pub trait CacheResolver<K, V> {
 /// [`QueryPlanOptions`].
 pub(crate) type QueryKey = (String, Option<String>, QueryPlanOptions);
 
-/// Maintains a map of services to fetchers.
-pub trait ServiceRegistry: Send + Sync + Debug {
-    /// Get a fetcher for a service.
-    fn get(&self, service: &str) -> Option<&(dyn Fetcher)>;
-
-    /// Get a fetcher for a service.
-    fn has(&self, service: &str) -> bool;
-}
-
-/// A fetcher is responsible for turning a graphql request into a stream of responses.
-///
-/// The goal of this trait is to hide the implementation details of fetching a stream of graphql responses.
-/// We can then create multiple implementations that can be plugged into federation.
-#[async_trait]
-pub trait Fetcher: Send + Sync + Debug {
-    /// Constructs a stream of responses.
-    #[must_use = "streams do nothing unless polled"]
-    async fn stream(&self, request: Request) -> Result<Response, FetchError>;
-}
-
 /// QueryPlanner can be used to plan queries.
 ///
 /// Implementations may cache query plans.
@@ -70,28 +50,10 @@ where
 
 impl<T: ?Sized> WithCaching for T where T: QueryPlanner + Sized + 'static {}
 
-/// An object that accepts a [`Request`] and allows for creating [`PreparedQuery`]'s.
-///
-/// The call to the function will either succeed and return a [`PreparedQuery`] or it will fail
-/// and return a [`Response`] that can be returned immediately to the user. This is because GraphQL
-/// does not use the HTTP error codes, therefore it always return a response even if it fails.
-#[async_trait::async_trait]
-pub trait Router<T: PreparedQuery>: Send + Sync + Debug {
-    async fn prepare_query(&self, request: &Request) -> Result<T, Response>;
-}
-
-/// An object that can be executed to return a [`Response`].
-#[async_trait::async_trait]
-pub trait PreparedQuery: Send + Debug {
-    async fn execute(self, request: Request) -> Response;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use static_assertions::*;
 
-    assert_obj_safe!(ServiceRegistry);
-    assert_obj_safe!(Fetcher);
     assert_obj_safe!(QueryPlanner);
 }

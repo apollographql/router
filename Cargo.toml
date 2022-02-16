@@ -1,6 +1,7 @@
 [workspace]
 default-members = ["apollo-router", "apollo-router-core"]
 members = [
+    "apollo-spaceport",
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
@@ -10,3 +11,5 @@ members = [
 [patch.crates-io]
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6b3aa02aa" }
 opentelemetry-otlp = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6b3aa02aa" }
+# TODO wait for tokio-util > 0.6.9 to release
+tokio = { git = "https://github.com/tokio-rs/tokio.git", rev = "91b9850" }

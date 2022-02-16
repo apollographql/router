@@ -1,23 +1,31 @@
 mod caching_query_planner;
 mod router_bridge_query_planner;
 mod selection;
-
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
+use fetch::OperationKind;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::Instrument;
-
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
-    root: PlanNode,
+    pub(crate) root: PlanNode,
+}
+
+/// This default impl is useful for plugin_utils users
+/// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
+impl Default for QueryPlan {
+    fn default() -> Self {
+        Self {
+            root: PlanNode::Sequence { nodes: Vec::new() },
+        }
+    }
 }
 
 /// Query plans are composed of a set of nodes.
@@ -43,15 +51,23 @@ pub(crate) enum PlanNode {
     Flatten(FlattenNode),
 }
 
+impl PlanNode {
+    pub fn contains_mutations(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::Flatten(_) => false,
+        }
+    }
+}
+
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, name = "validate", level = "debug")]
-    pub fn validate(&self, service_registry: Arc<dyn ServiceRegistry>) -> Result<(), Response> {
+    pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
         let mut early_errors = Vec::new();
-        for err in self
-            .root
-            .validate_services_against_plan(Arc::clone(&service_registry))
-        {
+        for err in self.root.validate_services_against_plan(service_registry) {
             early_errors.push(err.to_graphql_error(None));
         }
 
@@ -65,18 +81,22 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
-        request: &'a Request,
-        service_registry: &'a dyn ServiceRegistry,
+        context: &'a Context,
+        service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
 
         let (value, errors) = self
             .root
-            .execute_recursively(&root, request, service_registry, schema, &Value::default())
+            .execute_recursively(&root, context, service_registry, schema, &Value::default())
             .await;
 
         Response::builder().data(value).errors(errors).build()
+    }
+
+    pub fn contains_mutations(&self) -> bool {
+        self.root.contains_mutations()
     }
 }
 
@@ -84,8 +104,8 @@ impl PlanNode {
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
-        request: &'a Request,
-        service_registry: &'a dyn ServiceRegistry,
+        context: &'a Context,
+        service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
@@ -97,16 +117,18 @@ impl PlanNode {
             match self {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
+                    let span = tracing::info_span!("sequence");
                     for node in nodes {
                         let (v, err) = node
                             .execute_recursively(
                                 current_dir,
-                                request,
+                                context,
                                 service_registry,
                                 schema,
                                 &value,
                             )
-                            .instrument(tracing::info_span!("sequence"))
+                            .instrument(span.clone())
+                            .in_current_span()
                             .await;
                         value.deep_merge(v);
                         errors.extend(err.into_iter());
@@ -114,36 +136,38 @@ impl PlanNode {
                 }
                 PlanNode::Parallel { nodes } => {
                     value = Value::default();
-                    async {
-                        {
-                            let mut stream: stream::FuturesUnordered<_> = nodes
-                                .iter()
-                                .map(|plan| {
-                                    plan.execute_recursively(
-                                        current_dir,
-                                        request,
-                                        service_registry,
-                                        schema,
-                                        parent_value,
-                                    )
-                                })
-                                .collect();
 
-                            while let Some((v, err)) = stream.next().await {
-                                value.deep_merge(v);
-                                errors.extend(err.into_iter());
-                            }
-                        }
+                    let span = tracing::info_span!("parallel");
+                    let mut stream: stream::FuturesUnordered<_> = nodes
+                        .iter()
+                        .map(|plan| {
+                            plan.execute_recursively(
+                                current_dir,
+                                context,
+                                service_registry,
+                                schema,
+                                parent_value,
+                            )
+                            .instrument(span.clone())
+                        })
+                        .collect();
+
+                    while let Some((v, err)) = stream
+                        .next()
+                        .instrument(span.clone())
+                        .in_current_span()
+                        .await
+                    {
+                        value.deep_merge(v);
+                        errors.extend(err.into_iter());
                     }
-                    .instrument(tracing::info_span!("parallel"))
-                    .await;
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     let (v, err) = node
                         .execute_recursively(
                             // this is the only command that actually changes the "current dir"
                             &current_dir.join(path),
-                            request,
+                            context,
                             service_registry,
                             schema,
                             parent_value,
@@ -156,7 +180,7 @@ impl PlanNode {
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(parent_value, current_dir, request, service_registry, schema)
+                        .fetch_node(parent_value, current_dir, context, service_registry, schema)
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
@@ -198,10 +222,10 @@ impl PlanNode {
     ///  *   `plan`: The root query plan node to validate.
     fn validate_services_against_plan(
         &self,
-        service_registry: Arc<dyn ServiceRegistry>,
+        service_registry: &ServiceRegistry,
     ) -> Vec<FetchError> {
         self.service_usage()
-            .filter(|service| !service_registry.has(service))
+            .filter(|service| !service_registry.contains(service))
             .collect::<HashSet<_>>()
             .into_iter()
             .map(|service| FetchError::ValidationUnknownServiceError {
@@ -211,14 +235,13 @@ impl PlanNode {
     }
 }
 
-mod fetch {
-    use std::sync::Arc;
-
+pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
-    use serde::Deserialize;
-    use tracing::{instrument, Instrument};
-
     use crate::prelude::graphql::*;
+    use serde::Deserialize;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+    use tracing::{instrument, Instrument};
 
     /// A fetch node.
     #[derive(Debug, PartialEq, Deserialize)]
@@ -237,6 +260,17 @@ mod fetch {
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
+
+        /// The GraphQL operation kind that is used for the fetch.
+        operation_kind: OperationKind,
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum OperationKind {
+        Query,
+        Mutation,
+        Subscription,
     }
 
     struct Variables {
@@ -245,44 +279,46 @@ mod fetch {
     }
 
     impl Variables {
-        #[instrument(level = "debug", name = "make_variables", skip_all)]
-        fn new(
+        #[instrument(skip_all, level = "debug", name = "make_variables")]
+        async fn new(
             requires: &[Selection],
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: &Request,
+            context: &Context,
             schema: &Schema,
         ) -> Result<Variables, FetchError> {
+            let body = context.request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
+
                 variables.extend(variable_usages.iter().filter_map(|key| {
-                    request
-                        .variables
+                    body.variables
                         .get_key_value(key.as_str())
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
                 let mut paths = Vec::new();
                 let mut values = Vec::new();
-                data.select_values_and_paths(current_dir, |_path, value| {
-                    paths.push(_path);
-                    values.push(value)
-                })?;
-
-                let representations = Value::Array(
-                    values
-                        .into_iter()
-                        .flat_map(|value| match value {
-                            Value::Object(content) => {
-                                select_object(content, requires, schema).transpose()
+                data.select_values_and_paths(current_dir, |path, value| {
+                    match value {
+                        Value::Object(content) => {
+                            let object = select_object(content, requires, schema)?;
+                            if let Some(value) = object {
+                                paths.push(path);
+                                values.push(value)
                             }
-                            _ => Some(Err(FetchError::ExecutionInvalidContent {
+                        }
+                        _ => {
+                            return Err(FetchError::ExecutionInvalidContent {
                                 reason: "not an object".to_string(),
-                            })),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                            })
+                        }
+                    }
+                    Ok(())
+                })?;
+                let representations = Value::Array(values);
+
                 variables.insert("representations", representations);
 
                 Ok(Variables { variables, paths })
@@ -291,8 +327,7 @@ mod fetch {
                     variables: variable_usages
                         .iter()
                         .filter_map(|key| {
-                            request
-                                .variables
+                            body.variables
                                 .get_key_value(key.as_str())
                                 .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                         })
@@ -308,55 +343,68 @@ mod fetch {
             &'a self,
             data: &'a Value,
             current_dir: &'a Path,
-            request: &'a Request,
-            service_registry: &'a dyn ServiceRegistry,
+            context: &'a Context,
+            service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
         ) -> Result<Value, FetchError> {
             let FetchNode {
                 operation,
+                operation_kind,
                 service_name,
                 ..
             } = self;
 
-            let query_span = tracing::info_span!("subfetch", service = service_name.as_str());
+            let Variables { variables, paths } = Variables::new(
+                &self.requires,
+                self.variable_usages.as_ref(),
+                data,
+                current_dir,
+                context,
+                schema,
+            )
+            .await?;
 
-            let Variables { variables, paths } = query_span.in_scope(|| {
-                Variables::new(
-                    &self.requires,
-                    self.variable_usages.as_ref(),
-                    data,
-                    current_dir,
-                    request,
-                    schema,
-                )
-            })?;
+            let subgraph_request = SubgraphRequest {
+                http_request: http::Request::builder()
+                    .method(http::Method::POST)
+                    .body(
+                        Request::builder()
+                            .query(operation)
+                            .variables(Arc::new(variables))
+                            .build(),
+                    )
+                    .unwrap()
+                    .into(),
+                context: context.clone(),
+                operation_kind: *operation_kind,
+            };
 
-            let fetcher = service_registry
+            let service = service_registry
                 .get(service_name)
                 .expect("we already checked that the service exists during planning; qed");
 
-            let response = fetcher
-                .stream(
-                    Request::builder()
-                        .query(operation)
-                        .variables(Arc::new(variables))
-                        .build(),
-                )
-                .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
-                .await?;
+            // TODO not sure if we need a RouterReponse here as we don't do anything with it
+            let (_parts, response) = service
+                .oneshot(subgraph_request)
+                .instrument(tracing::trace_span!("subfetch_stream"))
+                .await
+                .map_err(|e| FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                })?
+                .response
+                .into_parts();
 
-            query_span.in_scope(|| {
-                if !response.is_primary() {
-                    return Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    });
-                }
+            if !response.is_primary() {
+                return Err(FetchError::SubrequestUnexpectedPatchResponse {
+                    service: service_name.to_owned(),
+                });
+            }
 
-                self.response_at_path(current_dir, paths, response)
-            })
+            self.response_at_path(current_dir, paths, response)
         }
 
-        #[instrument(level = "debug", name = "response_insert", skip_all)]
+        #[instrument(skip_all, level = "debug", name = "response_insert")]
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
@@ -397,6 +445,10 @@ mod fetch {
 
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
+        }
+
+        pub(crate) fn operation_kind(&self) -> &OperationKind {
+            &self.operation_kind
         }
     }
 }

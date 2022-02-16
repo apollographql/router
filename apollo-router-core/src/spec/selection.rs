@@ -1,3 +1,4 @@
+use crate::Fragment;
 use apollo_parser::ast;
 
 #[derive(Debug, Clone)]
@@ -7,7 +8,7 @@ pub(crate) enum Selection {
         selection_set: Option<Vec<Selection>>,
     },
     InlineFragment {
-        selection_set: Vec<Selection>,
+        fragment: Fragment,
     },
     FragmentSpread {
         name: String,
@@ -45,7 +46,22 @@ impl From<ast::Selection> for Selection {
                     .map(Into::into)
                     .collect();
 
-                Self::InlineFragment { selection_set }
+                let type_condition = inline_fragment
+                    .type_condition()
+                    .expect("Fragments must specify the type they apply to; qed")
+                    .named_type()
+                    .expect("Fragments must specify the type they apply to; qed")
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+
+                Self::InlineFragment {
+                    fragment: Fragment {
+                        type_condition,
+                        selection_set,
+                    },
+                }
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             ast::Selection::FragmentSpread(fragment_spread) => {
