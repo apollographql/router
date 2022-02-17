@@ -52,6 +52,10 @@ pub enum ConfigurationError {
     PluginUnknown(String),
     /// Plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
+    /// Plugin {plugin} could not be started: {error}
+    PluginStartup { plugin: String, error: String },
+    /// Plugin {plugin} could not be stopped: {error}
+    PluginShutdown { plugin: String, error: String },
     /// Unknown payer {0}
     LayerUnknown(String),
     /// Layer {layer} could not be configured: {error}

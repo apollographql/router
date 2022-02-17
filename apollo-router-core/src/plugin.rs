@@ -3,11 +3,12 @@ use crate::{
     RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use async_trait::async_trait;
+use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Mutex;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -42,8 +43,8 @@ impl PluginFactory {
     }
 }
 
-static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
-    let m = HashMap::new();
+static PLUGIN_REGISTRY: Lazy<Mutex<IndexMap<String, PluginFactory>>> = Lazy::new(|| {
+    let m = IndexMap::new();
     Mutex::new(m)
 });
 
@@ -54,7 +55,7 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
         .insert(name, plugin_factory);
 }
 
-pub fn plugins() -> HashMap<String, PluginFactory> {
+pub fn plugins() -> IndexMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
@@ -103,7 +104,7 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 }
 
 #[async_trait]
-pub trait DynPlugin: Send + Sync + 'static {
+pub trait DynPlugin: Display + Send + Sync + 'static {
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
@@ -134,7 +135,7 @@ pub trait DynPlugin: Send + Sync + 'static {
 #[async_trait]
 impl<T> DynPlugin for T
 where
-    T: Plugin,
+    T: Display + Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
     // Plugins will receive a notification that they should start up and shut down.

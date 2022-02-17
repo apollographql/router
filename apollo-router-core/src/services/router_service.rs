@@ -201,6 +201,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    // Consume the builder and retrieve its plugins
+    pub fn plugins(self) -> Vec<Box<dyn DynPlugin>> {
+        self.plugins
+    }
+
     pub fn with_subgraph_service<
         S: Service<
                 SubgraphRequest,
@@ -220,9 +225,16 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub async fn build(mut self) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    pub async fn build(
+        mut self,
+    ) -> (
+        BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        Vec<Box<dyn DynPlugin>>,
+    ) {
         //Reverse the order of the plugins for usability
-        self.plugins.reverse();
+        // XXX NEED CLARIFICATION ON WHY. THIS BREAKS LIFECYCLE ASSUMPTIONS
+        // SO COMMENTING OUT FOR NOW
+        // self.plugins.reverse();
 
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
@@ -332,6 +344,6 @@ impl PluggableRouterServiceBuilder {
         );
         tokio::spawn(router_worker.with_subscriber(self.dispatcher.clone()));
 
-        router_service.boxed_clone()
+        (router_service.boxed_clone(), self.plugins)
     }
 }

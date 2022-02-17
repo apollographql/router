@@ -1,17 +1,48 @@
 use apollo_router_core::{register_plugin, Plugin};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::error::Error;
+use std::fmt;
 use tower::BoxError;
 
+#[derive(Debug)]
+struct HelloError;
+
+impl fmt::Display for HelloError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "HelloError")
+    }
+}
+
+impl Error for HelloError {}
+
+#[derive(Debug)]
 struct Hello {}
 
-#[derive(Default, Deserialize, JsonSchema)]
+impl fmt::Display for Hello {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Hello")
+    }
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     name: String,
 }
 
+#[async_trait::async_trait]
 impl Plugin for Hello {
     type Config = Conf;
+
+    async fn startup(&mut self) -> Result<(), BoxError> {
+        tracing::info!("starting: {}", stringify!(Hello));
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> Result<(), BoxError> {
+        tracing::info!("shutting down: {}", stringify!(Hello));
+        Ok(())
+    }
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
@@ -20,6 +51,8 @@ impl Plugin for Hello {
 }
 
 register_plugin!("example.com", "hello", Hello);
+register_plugin!("example.com", "hello_1", Hello);
+register_plugin!("example.com", "hello_2", Hello);
 
 #[cfg(test)]
 mod tests {
