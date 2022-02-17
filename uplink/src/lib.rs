@@ -7,8 +7,8 @@ use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 
-const GCP_URL: &'static str = "https://uplink.api.apollographql.com/graphql";
-const AWS_URL: &'static str = "https://aws.uplink.api.apollographql.com/graphql";
+const GCP_URL: &str = "https://uplink.api.apollographql.com/graphql";
+const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -66,12 +66,13 @@ pub fn stream_supergraph(
                         schema_config,
                     ) => {
                         composition_id = Some(schema_config.id.clone());
-                        if let Err(_) = sender
+                        if sender
                             .send(Ok(Schema {
                                 id: schema_config.id,
                                 schema: schema_config.supergraph_sdl,
                             }))
                             .await
+                            .is_err()
                         {
                             break;
                         }
@@ -80,12 +81,13 @@ pub fn stream_supergraph(
                         tracing::trace!("schema did not change");
                     }
                     supergraph_sdl::SupergraphSdlRouterConfig::FetchError(e) => {
-                        if let Err(_) = sender
+                        if sender
                             .send(Err(Error::UpLink {
                                 code: e.code,
                                 message: e.message,
                             }))
                             .await
+                            .is_err()
                         {
                             break;
                         }
@@ -93,7 +95,7 @@ pub fn stream_supergraph(
                 },
                 Err(err) => {
                     tracing::error!("error fetching supergraph from Uplink: {:?}", err);
-                    if let Err(_) = sender.send(Err(err)).await {
+                    if sender.send(Err(err)).await.is_err() {
                         break;
                     }
                 }
