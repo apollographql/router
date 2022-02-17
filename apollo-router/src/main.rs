@@ -138,8 +138,16 @@ async fn rt_main() -> Result<()> {
         let apollo_graph_ref = match std::env::var("APOLLO_GRAPH_REF") {
             Ok(graph_ref) => graph_ref,
             Err(_) => {
-                tracing::info!("No graph variant provided. Defaulting to `current`");
-                "current".to_string()
+                let graph_id = std::env::var("APOLLO_GRAPH_ID")
+                    .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
+                let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
+                    Ok(variant) => variant,
+                    Err(_) => {
+                        tracing::info!("No graph variant provided. Defaulting to `current`");
+                        "current".to_string()
+                    }
+                };
+                format!("{}@{}", graph_id, variant)
             }
         };
         SchemaKind::Registry {
