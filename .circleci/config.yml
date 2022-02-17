@@ -41,18 +41,12 @@ commands:
           command: |
             sudo apt-get update
             sudo apt-get install -y libssl-dev cmake
-            npm i -g @apollo/rover
   macos_install_baseline:
     steps:
       - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
       - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
       - run: test -e "$OPENSSL_ROOT_DIR"
       - run: brew install cmake
-      - run: npm i -g @apollo/rover
-  windows_install_baseline:
-    steps:
-      - run: npm i -g @apollo/rover
-
 
   # This job sets up our nodejs dependencies,
   # and makes sure everything is ready to run integration tests
@@ -73,6 +67,9 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          name: Install rover
+          command:  npm i -g @apollo/rover
   linux_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
@@ -93,6 +90,9 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          name: Install rover
+          command:  npm i -g @apollo/rover
 
   windows_prepare_node_env:
     #TODO[igni]: check for node version before we try to install it
@@ -127,6 +127,9 @@ commands:
           name: Assert npm version
           command: |
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+      - run:
+          name: Install rover
+          command:  npm i -g @apollo/rover
   windows_prepare_test_env:
     steps:
       - restore_cache:
@@ -416,7 +419,6 @@ jobs:
           steps:
             - windows_prepare_node_env
             - windows_prepare_rust_env
-            - windows_install_baseline
             - windows_build_workspace
       - when:
           condition:
