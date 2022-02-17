@@ -178,10 +178,7 @@ impl SchemaKind {
                     }
                 })
             })
-            .map(|schema| {
-                tracing::info!("will send update schema: {:?}", schema);
-                UpdateSchema(Box::new(schema))
-            })
+            .map(|schema| UpdateSchema(Box::new(schema)))
             .boxed(),
         }
         .chain(stream::iter(vec![NoMoreSchema]))
