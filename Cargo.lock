@@ -2447,6 +2447,7 @@ dependencies = [
  "futures-util",
  "http",
  "opentelemetry",
+ "reqwest",
 ]
 
 [[package]]
@@ -2468,11 +2469,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db22f492873ea037bc267b35a0e8e4fb846340058cb7c864efe3d0bf23684593"
 dependencies = [
  "async-trait",
+ "headers",
  "http",
  "lazy_static",
  "opentelemetry",
  "opentelemetry-http 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "opentelemetry-semantic-conventions",
+ "reqwest",
  "thiserror",
  "thrift",
  "tokio",
