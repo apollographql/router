@@ -41,17 +41,17 @@ commands:
           command: |
             sudo apt-get update
             sudo apt-get install -y libssl-dev cmake
-            curl -sSL https://rover.apollo.dev/nix/latest | sh
+            npm i -g @apollo/rover
   macos_install_baseline:
     steps:
       - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
       - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
       - run: test -e "$OPENSSL_ROOT_DIR"
       - run: brew install cmake
-      - run: curl -sSL https://rover.apollo.dev/nix/latest | sh
+      - run: npm i -g @apollo/rover
   windows_install_baseline:
     steps:
-      - run: iwr 'https://rover.apollo.dev/win/latest' | iex
+      - run: npm i -g @apollo/rover
 
 
   # This job sets up our nodejs dependencies,
