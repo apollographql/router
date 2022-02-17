@@ -129,7 +129,13 @@ commands:
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
       - run:
           name: Install rover
-          command:  npm i -g @apollo/rover && which rover && echo $PATH
+          command: npm i -g @apollo/rover
+      - run:
+          name: check rover path
+          command: which rover
+      - run:
+          name: check PATH
+          command: echo $PATH
   windows_prepare_test_env:
     steps:
       - restore_cache:
