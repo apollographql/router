@@ -66,7 +66,7 @@ tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = { git = "https://github.com/tokio-rs/tokio.git", rev = "91b9850", features = ["net", "codec"] }
 # don't bump it to 0.6 until opentelemetry-otlp does
 tonic = { version = "0.5.2", optional = true }
-tower = { version="0.4.11", features = ["util"] }
+tower = { version="0.4.12", features = ["util"] }
 tower-http = { version = "0.2.2", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.30"
