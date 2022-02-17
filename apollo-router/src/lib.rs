@@ -153,9 +153,36 @@ impl SchemaKind {
                     }
                 }
             }
-            SchemaKind::Registry { .. } => {
-                todo!("Registry is not supported yet")
-            }
+            SchemaKind::Registry {
+                apollo_key,
+                apollo_graph_ref,
+            } => apollo_uplink::stream_supergraph(
+                apollo_key,
+                apollo_graph_ref,
+                //FIXME: make it configurable
+                Duration::from_secs(10),
+            )
+            .filter_map(|res| {
+                future::ready(match res {
+                    Ok(schema_result) => schema_result
+                        .schema
+                        .parse()
+                        .map_err(|e| {
+                            tracing::error!("could not parse schema: {:?}", e);
+                        })
+                        .ok(),
+
+                    Err(e) => {
+                        tracing::error!("error downloading the schema from Uplink: {:?}", e);
+                        None
+                    }
+                })
+            })
+            .map(|schema| {
+                tracing::info!("will send update schema: {:?}", schema);
+                UpdateSchema(Box::new(schema))
+            })
+            .boxed(),
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }
