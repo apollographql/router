@@ -129,7 +129,7 @@ commands:
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
       - run:
           name: Install rover
-          command: npm i -g @apollo/rover
+          command: iwr 'https://rover.apollo.dev/win/latest' | iex
       - run:
           name: check rover path
           command: which rover
