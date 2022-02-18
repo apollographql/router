@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Mutex;
@@ -61,7 +61,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
-    type Config: JsonSchema;
+    type Config: JsonSchema + DeserializeOwned;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError>;
 
