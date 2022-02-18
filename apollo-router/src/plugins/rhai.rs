@@ -6,9 +6,10 @@ use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
 use futures::executor::block_on;
+use http::HeaderMap;
 use http::{header::HeaderName, HeaderValue};
 use rhai::serde::{from_dynamic, to_dynamic};
-use rhai::{Dynamic, Engine, Scope, AST};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
 
@@ -72,13 +73,24 @@ impl RhaiObjectSetterGetter for Object {
 }
 
 #[derive(Clone)]
-struct Headers(HashMap<String, String>);
+struct Headers(HeaderMap);
 impl Headers {
-    fn set_header(&mut self, name: String, value: String) {
-        self.0.insert(name, value);
+    fn set_header(&mut self, name: String, value: String) -> Result<(), Box<EvalAltResult>> {
+        self.0.append(
+            HeaderName::from_str(&name)
+                .map_err(|err| format!("invalid header name '{name}': {err}"))?,
+            HeaderValue::from_str(&value)
+                .map_err(|err| format!("invalid header value '{value}': {err}"))?,
+        );
+        Ok(())
     }
     fn get_header(&mut self, name: String) -> String {
-        self.0.get(&name).cloned().unwrap_or_default()
+        self.0
+            .get(&name)
+            .cloned()
+            .map(|h| Some(h.to_str().ok()?.to_string()))
+            .flatten()
+            .unwrap_or_default()
     }
 }
 
@@ -97,24 +109,11 @@ impl Plugin for Rhai {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let this = self.clone();
-        let headers_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        let headers_map = Arc::new(Mutex::new(HeaderMap::new()));
         let headers_cloned = headers_map.clone();
         let service = service.map_request(move |request: RouterRequest| {
             let mut headers = headers_cloned.lock().expect("headers lock poisoned");
-            *headers = request
-                .context
-                .request
-                .headers()
-                .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k.to_string(),
-                        v.to_str()
-                            .expect("headers are already well formatted")
-                            .to_string(),
-                    )
-                })
-                .collect();
+            *headers = request.context.request.headers().clone();
 
             request
         });
@@ -122,7 +121,7 @@ impl Plugin for Rhai {
         service
             .map_response(move |mut response: RouterResponse| {
                 let mut engine = Engine::new();
-                engine.register_indexer_set(Headers::set_header);
+                engine.register_indexer_set_result(Headers::set_header);
                 engine.register_indexer_get(Headers::get_header);
                 engine.register_indexer_set(Object::set);
                 engine.register_indexer_get(Object::get_cloned);
@@ -165,18 +164,10 @@ impl Plugin for Rhai {
                 );
 
                 for (header_name, header_value) in &headers.0 {
-                    response.response.headers_mut().append(
-                        handle_error!(
-                            HeaderName::from_str(header_name.as_str()),
-                            format!("cannot convert '{}' to header name", header_name),
-                            response.context
-                        ),
-                        handle_error!(
-                            HeaderValue::from_str(header_value),
-                            format!("cannot convert '{}' to header value", header_value),
-                            response.context
-                        ),
-                    );
+                    response
+                        .response
+                        .headers_mut()
+                        .append(header_name, header_value.clone());
                 }
 
                 response
@@ -275,10 +266,5 @@ mod tests {
         );
     }
 }
-
-// Naming of methods are not really relevant or at least should be well documented (router_service, ...)
-// BoxService not so easy to use, need to document .map_response and .map_request
-// I found it weird to need to put HashMap for headers in a Mutex without being in an async function and not seeing any spanw function.
-// Need a builder for error too
 
 // TODO: Add other hook function (other than only router_service)
