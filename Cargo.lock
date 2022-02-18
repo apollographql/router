@@ -70,16 +70,16 @@ checksum = "94a45b455c14666b85fc40a019e8ab9eb75e3a124e05494f5397122bc9eb06e0"
 [[package]]
 name = "apollo-parser"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cec1d9128dcafbc909a781357c6645cccc6b276fdafb83142552a3fed1d42ff"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449#9a14371f3e5352920c74dcae85fa4e71b24f0449"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449#9a14371f3e5352920c74dcae85fa4e71b24f0449"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b735c4f88c6c86bab0e4b122e2c9eb306c54cb1d1d4c8b8d2460d1df572e5b9a"
 dependencies = [
  "rowan",
 ]
@@ -89,7 +89,7 @@ name = "apollo-router"
 version = "0.1.0-alpha.5"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.2 (git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449)",
+ "apollo-parser 0.2.2",
  "apollo-router-core",
  "apollo-spaceport",
  "apollo-uplink",
@@ -130,7 +130,7 @@ dependencies = [
  "test-span",
  "thiserror",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.0 (git+https://github.com/tokio-rs/tokio.git?rev=91b9850)",
  "tonic 0.5.2",
  "tower",
  "tower-http",
@@ -165,7 +165,7 @@ dependencies = [
 name = "apollo-router-core"
 version = "0.1.0-alpha.5"
 dependencies = [
- "apollo-parser 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.3",
  "async-trait",
  "atty",
  "bytes",
@@ -940,11 +940,12 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "crypto-common"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d6b536309245c849479fba3da410962a43ed8e51c26b729208ec0ac2798d0"
+checksum = "57952ca27b5e3606ff4dd79b0020231aaf9d6aa76dc05fd30137538c50bd3ce8"
 dependencies = [
  "generic-array",
+ "typenum",
 ]
 
 [[package]]
@@ -1088,13 +1089,12 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b697d66081d42af4fba142d56918a3cb21dc8eb63372c6b85d14f44fb9c5979b"
+checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
  "block-buffer 0.10.0",
  "crypto-common",
- "generic-array",
 ]
 
 [[package]]
@@ -2561,6 +2561,7 @@ dependencies = [
  "futures-util",
  "http",
  "opentelemetry",
+ "reqwest",
 ]
 
 [[package]]
@@ -2582,11 +2583,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db22f492873ea037bc267b35a0e8e4fb846340058cb7c864efe3d0bf23684593"
 dependencies = [
  "async-trait",
+ "headers",
  "http",
  "lazy_static",
  "opentelemetry",
  "opentelemetry-http 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "opentelemetry-semantic-conventions",
+ "reqwest",
  "thiserror",
  "thrift",
  "tokio",
@@ -3564,13 +3567,13 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99c3bd8169c58782adad9290a9af5939994036b76187f7b4f0e6de91dbbfc0ec"
+checksum = "55deaec60f81eefe3cce0dc50bda92d6d8e88f2a27df7c5033b42afeb1ed2676"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
- "digest 0.10.1",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -4119,6 +4122,20 @@ dependencies = [
 [[package]]
 name = "tokio-util"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64910e1b9c1901aaf5375561e35b9c057d95ff41a44ede043a03e09279eabaf1"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "log",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.7.0"
 source = "git+https://github.com/tokio-rs/tokio.git?rev=91b9850#91b98505059017808221aa6432aa7437b7100497"
 dependencies = [
  "bytes",
@@ -4218,9 +4235,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5651b5f6860a99bd1adb59dbfe1db8beb433e73709d9032b413a77e2fb7c066a"
+checksum = "9a89fd63ad6adf737582df5db40d286574513c69a11dac5214dc3b5603d6713e"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -4230,8 +4247,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-stream",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4284,9 +4300,9 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.30"
+version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d8d93354fe2a8e50d5953f5ae2e47a3fc2ef03292e7ea46e3cc38f549525fb9"
+checksum = "f6c650a8ef0cd2dd93736f033d21cbd1224c5a967aa0c258d00fcf7dafef9b9f"
 dependencies = [
  "cfg-if 1.0.0",
  "log",
@@ -4362,9 +4378,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74786ce43333fcf51efe947aed9718fbe46d5c7328ec3f1029e818083966d9aa"
+checksum = "9e0ab7bdc962035a87fba73f3acca9b8a8d0034c2e6f60b84aeaaddddc155dce"
 dependencies = [
  "ansi_term",
  "lazy_static",

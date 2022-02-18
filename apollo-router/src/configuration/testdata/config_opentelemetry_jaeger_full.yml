@@ -5,5 +5,6 @@ subgraphs:
     routing_url: http://foo
 opentelemetry:
   jaeger:
-    collector_endpoint: http://example.org
+    endpoint:
+      collector: http://example.org
     service_name: bar

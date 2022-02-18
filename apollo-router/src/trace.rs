@@ -1,4 +1,5 @@
 use crate::apollo_telemetry::new_pipeline;
+use crate::configuration::JaegerEndpoint;
 use std::sync::Arc;
 
 use opentelemetry::{sdk::trace::BatchSpanProcessor, trace::TracerProvider};
@@ -39,14 +40,21 @@ pub(crate) fn try_initialize_subscriber(
             let config = config.as_ref().unwrap_or(&default_config);
             let mut pipeline =
                 opentelemetry_jaeger::new_pipeline().with_service_name(&config.service_name);
-            if let Some(url) = config.collector_endpoint.as_ref() {
-                pipeline = pipeline.with_collector_endpoint(url.as_str());
-            }
-            if let Some(username) = config.username.as_ref() {
-                pipeline = pipeline.with_collector_username(username);
-            }
-            if let Some(password) = config.password.as_ref() {
-                pipeline = pipeline.with_collector_password(password);
+            match config.endpoint.as_ref() {
+                Some(JaegerEndpoint::Agent(address)) => {
+                    pipeline = pipeline.with_agent_endpoint(address)
+                }
+                Some(JaegerEndpoint::Collector(url)) => {
+                    pipeline = pipeline.with_collector_endpoint(url.as_str());
+
+                    if let Some(username) = config.username.as_ref() {
+                        pipeline = pipeline.with_collector_username(username);
+                    }
+                    if let Some(password) = config.password.as_ref() {
+                        pipeline = pipeline.with_collector_password(password);
+                    }
+                }
+                _ => {}
             }
 
             let batch_size = std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
