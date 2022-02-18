@@ -134,42 +134,51 @@ async fn rt_main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
-    ensure!(
-        opt.supergraph_path.is_some(),
-        r#"
-💫 Apollo Router requires a supergraph to be set using '--supergraph':
+    let schema = if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
+        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
+            .expect("cannot set up Uplink schema download if  the APOLLO_GRAPH_REF environment variable is not set");
 
-    $ ./router --supergraph <file>`
-  
-🪐 The supergraph can be built or downloaded from the Apollo Registry
-   using the Rover CLI. To find out how, see:
-    
-    https://www.apollographql.com/docs/rover/supergraphs/.
-
-🧪 If you're just experimenting, you can download and use an example
-   supergraph with pre-deployed subgraphs:
-
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
-
-   Then run the Apollo Router with that supergraph:
-
-    $ ./router --supergraph starstuff.graphql
-
-"#
-    );
-
-    let supergraph_path = opt.supergraph_path.unwrap();
-
-    let supergraph_path = if supergraph_path.is_relative() {
-        current_directory.join(supergraph_path)
+        SchemaKind::Registry {
+            apollo_key,
+            apollo_graph_ref,
+        }
     } else {
-        supergraph_path
-    };
+        ensure!(
+            opt.supergraph_path.is_some(),
+            r#"
+    💫 Apollo Router requires a supergraph to be set using '--supergraph':
 
-    let schema = SchemaKind::File {
-        path: supergraph_path,
-        watch: opt.watch,
-        delay: None,
+        $ ./router --supergraph <file>`
+
+    🪐 The supergraph can be built or downloaded from the Apollo Registry
+       using the Rover CLI. To find out how, see:
+
+        https://www.apollographql.com/docs/rover/supergraphs/.
+
+    🧪 If you're just experimenting, you can download and use an example
+       supergraph with pre-deployed subgraphs:
+
+        $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+       Then run the Apollo Router with that supergraph:
+
+        $ ./router --supergraph starstuff.graphql
+
+    "#
+        );
+
+        let supergraph_path = opt.supergraph_path.unwrap();
+
+        let supergraph_path = if supergraph_path.is_relative() {
+            current_directory.join(supergraph_path)
+        } else {
+            supergraph_path
+        };
+        SchemaKind::File {
+            path: supergraph_path,
+            watch: opt.watch,
+            delay: None,
+        }
     };
 
     // Create your text map propagator & assign it as the global propagator.
