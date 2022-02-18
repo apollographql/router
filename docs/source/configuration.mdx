@@ -270,6 +270,7 @@ There are a few specific layers which offer different header functionality:
 
   The `headers_remove` layer allows removing a header that was client-originated and not sending it to a specific subgraph.  In the same way as `headers_propagate` can match either exactly or based on a regular expression using [`regex`].
 
+> **Note:** The Router will _never_ remove so-called [hop-by-hop headers].
   ```yaml
       # Do not send this service the "Cookie" header.
       - headers_remove:
