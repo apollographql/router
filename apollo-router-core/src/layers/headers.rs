@@ -1,14 +1,14 @@
 use std::task::{Context, Poll};
 
-use http::header::HeaderName;
+use crate::layer::ConfigurableLayer;
+use crate::{register_layer, SubgraphRequest};
+use http::header::{HeaderName, CONTENT_LENGTH, CONTENT_TYPE, HOST};
 use http::HeaderValue;
+use mockall::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::{BoxError, Layer, Service};
-
-use crate::layer::ConfigurableLayer;
-use crate::{register_layer, SubgraphRequest};
 
 register_layer!("headers", "insert", InsertLayer);
 register_layer!("headers", "remove", RemoveLayer);
@@ -224,6 +224,11 @@ struct PropagateService<S> {
     default_value: Option<HeaderValue>,
 }
 
+lazy_static! {
+    static ref PROPAGATION_EXCLUSIONS: Vec<HeaderName> =
+        [CONTENT_LENGTH, CONTENT_TYPE, HOST].into();
+}
+
 impl<S> Service<SubgraphRequest> for PropagateService<S>
 where
     S: Service<SubgraphRequest>,
@@ -237,13 +242,11 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+        let headers = req.http_request.headers_mut();
         if let Some(name) = &self.name {
             let value = req.context.request.headers().get(name);
-
             if let Some(value) = value.or_else(|| self.default_value.as_ref()) {
-                req.http_request
-                    .headers_mut()
-                    .insert(self.rename.as_ref().unwrap_or(name), value.clone());
+                headers.insert(self.rename.as_ref().unwrap_or(name), value.clone());
             }
         } else if let Some(regex) = &self.regex {
             req.context
@@ -252,11 +255,13 @@ where
                 .iter()
                 .filter(|(name, _)| regex.is_match(name.as_str()))
                 .for_each(|(name, value)| {
-                    req.http_request.headers_mut().insert(name, value.clone());
+                    if !PROPAGATION_EXCLUSIONS.contains(name) {
+                        headers.insert(name, value.clone());
+                    }
                 });
         } else {
             for (name, value) in req.context.request.headers() {
-                req.http_request.headers_mut().insert(name, value.clone());
+                headers.insert(name, value.clone());
             }
         }
         self.inner.call(req)
@@ -265,6 +270,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST};
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -456,6 +462,9 @@ mod test {
                 .header("da", "vda")
                 .header("db", "vdb")
                 .header("dc", "vdc")
+                .header(HOST, "host")
+                .header(CONTENT_LENGTH, "2")
+                .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
                 .into(),
