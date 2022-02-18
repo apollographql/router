@@ -51,7 +51,7 @@ impl Drop for YamlRouterServiceFactory {
         // If we fail to shutdown a plugin, just log it and move on...
         for mut plugin in self.plugins.drain(..).rev() {
             if let Err(err) = futures::executor::block_on(plugin.shutdown()) {
-                tracing::error!("could not stop plugin: {}, error: {}", plugin, err);
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
             }
         }
     }
@@ -125,7 +125,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                                 builder = builder.with_dyn_plugin(plugin);
                             }
                             Err(err) => {
-                                tracing::error!("starting plugin: {}, failed: {}", name, err);
+                                tracing::error!("starting plugin: {}, error: {}", name, err);
                                 errors.push(ConfigurationError::PluginStartup {
                                     plugin: name,
                                     error: err.to_string(),
@@ -149,7 +149,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             // Shutdown all the plugins we started
             for plugin in builder.plugins().iter_mut().rev() {
                 if let Err(err) = plugin.shutdown().await {
-                    tracing::error!("could not stop plugin: {}, error: {}", plugin, err);
+                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
                     tracing::error!("terminating router...");
                     std::process::exit(1);
                 }
@@ -179,7 +179,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // If we get here, everything is good so shutdown our previous plugins
         for mut plugin in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
-                tracing::error!("could not stop plugin: {}, error: {}", plugin, err);
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
                 tracing::error!("terminating router...");
                 std::process::exit(1);
             }

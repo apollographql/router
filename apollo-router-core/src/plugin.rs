@@ -8,7 +8,6 @@ use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::sync::Mutex;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -101,10 +100,18 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
     }
+
+    fn name(&self) -> &'static str {
+        get_type_of(self)
+    }
+}
+
+fn get_type_of<T>(_: &T) -> &'static str {
+    std::any::type_name::<T>()
 }
 
 #[async_trait]
-pub trait DynPlugin: Display + Send + Sync + 'static {
+pub trait DynPlugin: Send + Sync + 'static {
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
@@ -130,12 +137,14 @@ pub trait DynPlugin: Display + Send + Sync + 'static {
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+
+    fn name(&self) -> &'static str;
 }
 
 #[async_trait]
 impl<T> DynPlugin for T
 where
-    T: Display + Plugin,
+    T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
     // Plugins will receive a notification that they should start up and shut down.
@@ -174,6 +183,10 @@ where
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
+    }
+
+    fn name(&self) -> &'static str {
+        self.name()
     }
 }
 
