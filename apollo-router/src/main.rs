@@ -135,21 +135,9 @@ async fn rt_main() -> Result<()> {
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
     let schema = if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
-        let apollo_graph_ref = match std::env::var("APOLLO_GRAPH_REF") {
-            Ok(graph_ref) => graph_ref,
-            Err(_) => {
-                let graph_id = std::env::var("APOLLO_GRAPH_ID")
-                    .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
-                let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
-                    Ok(variant) => variant,
-                    Err(_) => {
-                        tracing::info!("No graph variant provided. Defaulting to `current`");
-                        "current".to_string()
-                    }
-                };
-                format!("{}@{}", graph_id, variant)
-            }
-        };
+        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
+            .expect("cannot set up Uplink schema download if  the APOLLO_GRAPH_REF environment variable is not set");
+
         SchemaKind::Registry {
             apollo_key,
             apollo_graph_ref,

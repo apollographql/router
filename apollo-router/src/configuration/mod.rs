@@ -443,21 +443,10 @@ pub struct StudioGraph {
 
 fn studio_graph() -> Option<StudioGraph> {
     if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
-        let apollo_graph_ref = match std::env::var("APOLLO_GRAPH_REF") {
-            Ok(graph_ref) => graph_ref,
-            Err(_) => {
-                let graph_id = std::env::var("APOLLO_GRAPH_ID")
-                    .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
-                let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
-                    Ok(variant) => variant,
-                    Err(_) => {
-                        tracing::info!("No graph variant provided. Defaulting to `current`");
-                        "current".to_string()
-                    }
-                };
-                format!("{}@{}", graph_id, variant)
-            }
-        };
+        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF").expect(
+            "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+        );
+
         Some(StudioGraph {
             reference: apollo_graph_ref,
             key: apollo_key,
@@ -473,21 +462,9 @@ fn apollo_key() -> String {
 }
 
 fn apollo_graph_reference() -> String {
-    match std::env::var("APOLLO_GRAPH_REF") {
-        Ok(graph_ref) => graph_ref,
-        Err(_) => {
-            let graph_id = std::env::var("APOLLO_GRAPH_ID")
-                .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
-            let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
-                Ok(variant) => variant,
-                Err(_) => {
-                    tracing::info!("No graph variant provided. Defaulting to `current`");
-                    "current".to_string()
-                }
-            };
-            format!("{}@{}", graph_id, variant)
-        }
-    }
+    std::env::var("APOLLO_GRAPH_REF").expect(
+        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+    )
 }
 
 impl Default for SpaceportConfig {

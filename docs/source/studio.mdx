@@ -6,13 +6,8 @@ sidebar_title: Managed federation
 ## Connecting to Apollo Uplink
 
 Uplink is the Apollo-hosted endpoint that your gateway polls to fetch its latest supergraph schema.
-To set up the schema download, create an API key at Te "Contributor" level and put it in the `APOLLO_KEY`
-environment variable, your graph id in `APOllO_GRAPH_ID` and the variant in `APOLLO_GRAPH_VARIANT`,
-or the full graph reference in `APOLLO_GRAPH_REF`.
-
-Example: if your graph is named `MyGraph@current`, you can set `APOLLO_GRAPH_REF=MyGraph@current` or
-`APOLLO_GRAPH_ID=MyGraph` and `APOLLO_GRAPH_VARIANT=current` (if using only the graph id, the
-"current" variant will be set automatically).
+To set up the schema download, create an API key at the "Contributor" level and put it in the `APOLLO_KEY`
+environment variable, and the graph reference in `APOLLO_GRAPH_REF`.
 
 ## Spaceport
 
