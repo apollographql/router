@@ -68,6 +68,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   [documentation]: https://www.apollographql.com/docs/router/configuration/#using-jaeger
 
+- **Apollo Studio managed federation Uplink support** ([PR #498](https://github.com/apollographql/router/pull/498))
+
+  The Router can now automatically download and check for updates on its schema from Studio (via [Uplink]).  This is configured in the same way as Apollo Gateway via the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables, in the same way as was true in Apollo Gateway ([seen here](https://www.apollographql.com/docs/federation/managed-federation/setup/#4-connect-the-gateway-to-studio)). This will also enable operation usage reporting.
+  
+  > **Note:** It is not yet possible to configure the Router with [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`].  If you need this behavior, please open a feature request with your use case.
+  
+  [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`]: https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable
+  [Uplink]: https://www.apollographql.com/docs/federation/managed-federation/uplink/
+  [operation usage reporting]: https://www.apollographql.com/docs/studio/metrics/usage-reporting/#pushing-metrics-from-apollo-server
 ## :bug: Fixes
 
 - **Studio agent collector now binds to localhost** [PR #486](https://github.com/apollographql/router/pulls/486)
