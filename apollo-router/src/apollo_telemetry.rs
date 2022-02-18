@@ -50,7 +50,7 @@ use tokio::task::JoinError;
 use crate::configuration::{SpaceportConfig, StudioGraph};
 
 pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
-pub(crate) const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
+pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
 
 /// Pipeline builder
 #[derive(Debug)]
