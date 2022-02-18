@@ -22,6 +22,59 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+# [v0.1.0-alpha.6] 2022-02-18
+
+## :sparkles: Features
+
+- **Subgraph header configuration** ([PR #453](https://github.com/apollographql/router/pull/453))
+
+  The Router now supports passing both client-originated and router-originated headers to specific subgraphs using YAML configuration.  Each subgraph which needs to receive headers can specify which headers (or header patterns) should be forwarded to which subgraph.
+
+  More information can be found in our documentation on [subgraph header configuration].
+
+  At the moment, when using using YAML configuration alone, router-originated headers can only be static strings (e.g., `sent-from-apollo-router: true`).  If you have use cases for deriving headers in the router dynamically, please open or find a feature request issue on the repository which explains the use case.
+
+  [subgraph header configuration]: https://www.apollographql.com/docs/router/configuration/#configuring-headers-received-by-subgraphs
+
+- **In-flight subgraph `query` de-duplication** ([PR #285](https://github.com/apollographql/router/pull/285))
+
+  As a performance booster to both the Router and the subgraphs it communicates with, the Router will now _de-duplicate_ multiple _identical_ requests to subgraphs when there are multiple in-flight requests to the same subgraph with the same `query` (**never** `mutation`s), headers, and GraphQL `variables`.  Instead, a single request will be made to the subgraph and the many client requests will be served via that single response.
+
+  There may be a substantial drop in number of requests observed by subgraphs with this release.
+
+- **Operations can now be made via `GET` requests** ([PR #429](https://github.com/apollographql/router/pull/429))
+
+  The Router now supports `GET` requests for `query` operations.  Previously, the Apollo Router only supported making requests via `POST` requests.  We've always intended on supporting `GET` support, but needed some additional support in place to make sure we could prevent allowing `mutation`s to happen over `GET` requests.
+
+- **Automatic persisted queries (APQ) support** ([PR #433](https://github.com/apollographql/router/pull/433))
+
+  The Router now handles [automatic persisted queries (APQ)] by default, as was previously the case in Apollo Gateway.  APQ support pairs really well with `GET` requests (which also landed in this release) since they allow read operations (e.g., `GET` requests) to be more easily cached by intermediary proxies and CDNs, which typically forbid caching `POST` requests by specification (even if they often are just reads in GraphQL).  Follow the link above to the documentation to test them out.
+
+  [automatic persisted queries (APQ)]: https://www.apollographql.com/docs/apollo-server/performance/apq/
+
+- **New internal Tower architecture and preparation for extensibility** ([PR #319](https://github.com/apollographql/router/pull/319))
+
+  We've introduced new foundational primitives to the Router's request pipeline which facilitate the creation of composable _onion layers_.  For now, this is largely leveraged through a series of internal refactors and we'll need to document and expand on more of the details that facilitate developers building their own custom extensions.  To leverage existing art &mdash; and hopefully maximize compatibility and facilitate familiarity &mdash; we've leveraged the [Tokio Tower `Service`] pattern.
+
+  This should facilitate a number of interesting extension opportunities and we're excited for what's in-store next.  We intend on improving and iterating on the API's ergonomics for common Graph Router behaviors over time, and we'd encourage you to open issues on the repository with use-cases you might think need consideration.
+
+  [Tokio Tower `Service`]: https://docs.rs/tower/latest/tower/trait.Service.html
+
+- **Support for Jaeger HTTP collector in OpenTelemetry** ([PR #479](https://github.com/apollographql/router/pull/479))
+
+  It is now possible to configure Jaeger HTTP collector endpoints within the `opentelemetry` configuration.  Previously, Router only supported the UDP method.
+
+  The [documentation] has also been updated to demonstrate how this can be configured.
+
+  [documentation]: https://www.apollographql.com/docs/router/configuration/#using-jaeger
+
+## :bug: Fixes
+
+- **Studio agent collector now binds to localhost** [PR #486](https://github.com/apollographql/router/pulls/486)
+
+  The Studio agent collector will bind to `127.0.0.1`.  It can be configured to bind to `0.0.0.0` if desired (e.g., if you're using the collector to collect centrally) by using the [`spaceport.listener` property] in the documentation.
+
+  [`spaceport.listener` property]: https://www.apollographql.com/docs/router/configuration/#spaceport-configuration
 # [v0.1.0-alpha.5] 2022-02-15
 
 ## :sparkles: Features
