@@ -6,5 +6,6 @@ pub use service::{
 };
 pub use structures::{
     execution_request::ExecutionRequest, execution_response::ExecutionResponse,
-    router_request::RouterRequest, router_response::RouterResponse,
+    queryplanner_response::QueryPlannerResponse, router_request::RouterRequest,
+    router_response::RouterResponse, subgraph_response::SubgraphResponse,
 };

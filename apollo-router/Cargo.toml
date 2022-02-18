@@ -79,7 +79,7 @@ apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
-rhai = { version = "1.4.1", features = ["sync", "serde"] }
+rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 
 [dev-dependencies]
 httpmock = "0.6.6"

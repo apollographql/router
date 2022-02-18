@@ -1,7 +1,10 @@
 use std::sync::{Arc, Mutex};
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use std::{path::PathBuf, str::FromStr};
 
-use apollo_router_core::plugin_utils;
+use apollo_router_core::{
+    plugin_utils, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
+    SubgraphRequest, SubgraphResponse,
+};
 use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
@@ -16,40 +19,12 @@ use serde_json_bytes::ByteString;
 
 use tower::{util::BoxService, BoxError, ServiceExt};
 
-macro_rules! handle_error {
-    ($result: expr, $message: expr, $context: expr) => {
-        match $result {
-            Ok(res) => res,
-            Err(err) => {
-                return plugin_utils::RouterResponse::builder()
-                    .errors(vec![Error::builder()
-                        .message(format!("RHAI plugin error. {}: {}", $message, err))
-                        .build()])
-                    .context($context)
-                    .build()
-                    .into();
-            }
-        }
-    };
-    ($result: expr, $context: expr) => {
-        match $result {
-            Ok(res) => res,
-            Err(err) => {
-                return plugin_utils::RouterResponse::builder()
-                    .errors(vec![Error::builder()
-                        .message(format!("RHAI plugin error: {}", err))
-                        .build()])
-                    .context($context)
-                    .build()
-                    .into();
-            }
-        }
-    };
-}
+const HEADERS_VAR_NAME: &str = "headers";
+const CONTEXT_VAR_NAME: &str = "context";
 
 #[derive(Default, Clone)]
 struct Rhai {
-    ast: Option<AST>,
+    ast: AST,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -101,7 +76,7 @@ impl Plugin for Rhai {
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("RHAI {:#?}!", configuration.filename);
         let engine = Engine::new();
-        let ast = Some(engine.compile_file(configuration.filename)?);
+        let ast = engine.compile_file(configuration.filename)?;
         Ok(Self { ast })
     }
 
@@ -109,6 +84,15 @@ impl Plugin for Rhai {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        const FUNCTION_NAME: &str = "router_service";
+        if !self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME)
+        {
+            tracing::debug!("RHAI plugin: no router_service function found");
+            return service;
+        }
         let this = self.clone();
         let headers_map = Arc::new(Mutex::new(HeaderMap::new()));
         let headers_cloned = headers_map.clone();
@@ -121,50 +105,193 @@ impl Plugin for Rhai {
 
         service
             .map_response(move |mut response: RouterResponse| {
-                let mut engine = Engine::new();
-                engine.register_indexer_set_result(Headers::set_header);
-                engine.register_indexer_get(Headers::get_header);
-                engine.register_indexer_set(Object::set);
-                engine.register_indexer_get(Object::get_cloned);
-                let mut scope = Scope::new();
+                let extensions = block_on(async { response.context.extensions().await.clone() });
+                let (headers, context) =
+                    match this.run_rhai_script(FUNCTION_NAME, headers_map, extensions) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            return plugin_utils::RouterResponse::builder()
+                                .errors(vec![Error::builder()
+                                    .message(format!("RHAI plugin error: {}", err))
+                                    .build()])
+                                .context(response.context)
+                                .build()
+                                .into();
+                        }
+                    };
+                *(block_on(async { response.context.extensions_mut().await })) = context;
+
+                for (header_name, header_value) in &headers {
+                    response
+                        .response
+                        .headers_mut()
+                        .append(header_name, header_value.clone());
+                }
+
+                response
+            })
+            .boxed()
+    }
+
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        const FUNCTION_NAME: &str = "query_planning_service";
+        if !self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME)
+        {
+            tracing::debug!("RHAI plugin: no query_planning_service function found");
+            return service;
+        }
+
+        let this = self.clone();
+        let headers_map = Arc::new(Mutex::new(HeaderMap::new()));
+        let headers_cloned = headers_map.clone();
+        let service = service.map_request(move |request: QueryPlannerRequest| {
+            let mut headers = headers_cloned.lock().expect("headers lock poisoned");
+            *headers = request.context.request.headers().clone();
+
+            request
+        });
+
+        let mut error: Option<Error> = None;
+        service
+            .map_response(move |mut response: QueryPlannerResponse| {
+                let extensions = block_on(async { response.context.extensions().await.clone() });
+                let (_headers, context) =
+                    match this.run_rhai_script(FUNCTION_NAME, headers_map, extensions) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            // FIXME: there is no way to return an error properly
+                            (block_on(async { response.context.extensions_mut().await }))
+                                .insert("query_plan_error", err.into());
+                            return plugin_utils::QueryPlannerResponse::builder()
+                                // .errors(vec![Error::builder()
+                                //     .message(format!("RHAI plugin error: {}", err))
+                                //     .build()])
+                                .context(response.context)
+                                .build()
+                                .into();
+                        }
+                    };
+                *(block_on(async { response.context.extensions_mut().await })) = context;
+
+                response
+            })
+            .boxed()
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        const FUNCTION_NAME: &str = "execution_service";
+        if !self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME)
+        {
+            tracing::debug!("RHAI plugin: no execution_service function found");
+            return service;
+        }
+        let this = self.clone();
+        let headers_map = Arc::new(Mutex::new(HeaderMap::new()));
+        let headers_cloned = headers_map.clone();
+        let service = service.map_request(move |request: ExecutionRequest| {
+            let mut headers = headers_cloned.lock().expect("headers lock poisoned");
+            *headers = request.context.request.headers().clone();
+
+            request
+        });
+
+        service
+            .map_response(move |mut response: ExecutionResponse| {
+                if let Some(err) = (block_on(async { response.context.extensions().await }))
+                    .get("query_plan_error")
+                {
+                    return plugin_utils::ExecutionResponse::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!("RHAI plugin error: {:?}", err))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
 
                 let extensions = block_on(async { response.context.extensions().await.clone() });
-                scope.push(
-                    "headers",
-                    Headers(headers_map.lock().expect("headers lock poisoned").clone()),
-                );
-                let ext_dynamic = handle_error!(
-                    to_dynamic(extensions),
-                    "Cannot convert extensions to dynamic",
-                    response.context
-                );
-                scope.push("context", ext_dynamic);
+                let (headers, context) =
+                    match this.run_rhai_script(FUNCTION_NAME, headers_map, extensions) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            return plugin_utils::ExecutionResponse::builder()
+                                .errors(vec![Error::builder()
+                                    .message(format!("RHAI plugin error: {}", err))
+                                    .build()])
+                                .context(response.context)
+                                .build()
+                                .into();
+                        }
+                    };
+                *(block_on(async { response.context.extensions_mut().await })) = context;
 
-                handle_error!(
-                    engine.call_fn(&mut scope, this.ast.as_ref().unwrap(), "router_service", ()),
-                    response.context
-                );
+                for (header_name, header_value) in &headers {
+                    response
+                        .response
+                        .headers_mut()
+                        .append(header_name, header_value.clone());
+                }
 
-                // Restore headers and context from the rhai execution script
-                let headers = handle_error!(
-                    scope
-                        .get_value::<Headers>("headers")
-                        .ok_or("cannot get back headers from RHAI scope"),
-                    response.context
-                );
+                response
+            })
+            .boxed()
+    }
 
-                *(block_on(async { response.context.extensions_mut().await })) = handle_error!(
-                    from_dynamic(handle_error!(
-                        &scope
-                            .get_value::<Dynamic>("context")
-                            .ok_or("cannot get back context from RHAI scope"),
-                        response.context
-                    )),
-                    "cannot convert context from dynamic",
-                    response.context
-                );
+    fn subgraph_service(
+        &mut self,
+        _name: &str,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        const FUNCTION_NAME: &str = "subgraph_service";
+        if !self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME)
+        {
+            tracing::debug!("RHAI plugin: no subgraph_service function found");
+            return service;
+        }
+        let this = self.clone();
+        let headers_map = Arc::new(Mutex::new(HeaderMap::new()));
+        let headers_cloned = headers_map.clone();
+        let service = service.map_request(move |request: SubgraphRequest| {
+            let mut headers = headers_cloned.lock().expect("headers lock poisoned");
+            *headers = request.context.request.headers().clone();
 
-                for (header_name, header_value) in &headers.0 {
+            request
+        });
+
+        service
+            .map_response(move |mut response: SubgraphResponse| {
+                let extensions = block_on(async { response.context.extensions().await.clone() });
+                let (headers, context) =
+                    match this.run_rhai_script(FUNCTION_NAME, headers_map, extensions) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            return plugin_utils::SubgraphResponse::builder()
+                                .errors(vec![Error::builder()
+                                    .message(format!("RHAI plugin error: {}", err))
+                                    .build()])
+                                .context(response.context)
+                                .build()
+                                .into();
+                        }
+                    };
+                *(block_on(async { response.context.extensions_mut().await })) = context;
+
+                for (header_name, header_value) in &headers {
                     response
                         .response
                         .headers_mut()
@@ -177,6 +304,51 @@ impl Plugin for Rhai {
     }
 }
 
+impl Rhai {
+    fn run_rhai_script(
+        &self,
+        function_name: &str,
+        headers_map: Arc<Mutex<HeaderMap>>,
+        extensions: Object,
+    ) -> Result<(HeaderMap, Object), String> {
+        let mut engine = Engine::new();
+        engine.register_indexer_set_result(Headers::set_header);
+        engine.register_indexer_get(Headers::get_header);
+        engine.register_indexer_set(Object::set);
+        engine.register_indexer_get(Object::get_cloned);
+        let mut scope = Scope::new();
+        scope.push(
+            HEADERS_VAR_NAME,
+            Headers(headers_map.lock().expect("headers lock poisoned").clone()),
+        );
+        let ext_dynamic = to_dynamic(extensions)
+            .map_err(|err| format!("Cannot convert extensions to dynamic: {:?}", err))?;
+        scope.push(CONTEXT_VAR_NAME, ext_dynamic);
+
+        engine
+            .call_fn(&mut scope, &self.ast, function_name, ())
+            .map_err(|err| format!("RHAI plugin error: {:?}", err))?;
+
+        // Restore headers and context from the rhai execution script
+        let headers = scope
+            .get_value::<Headers>(HEADERS_VAR_NAME)
+            .ok_or("cannot get back headers from RHAI scope".to_string())?;
+        let context: Object = from_dynamic(
+            &scope
+                .get_value::<Dynamic>(CONTEXT_VAR_NAME)
+                .ok_or("cannot get back context from RHAI scope".to_string())?,
+        )
+        .map_err(|err| {
+            format!(
+                "cannot convert context coming from RHAI scope into an Object: {:?}",
+                err
+            )
+        })?;
+
+        Ok((headers.0, context))
+    }
+}
+
 register_plugin!("apollographql.com", "rhai", Rhai);
 
 #[cfg(test)]
@@ -186,7 +358,7 @@ mod tests {
 
     use apollo_router_core::{
         http_compat,
-        plugin_utils::{structures, MockRouterService, RouterResponse},
+        plugin_utils::{MockRouterService, RouterResponse},
         Context, DynPlugin, ResponseBody, RouterRequest,
     };
     use http::Request;

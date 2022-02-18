@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 pub mod execution_request;
 pub mod execution_response;
+pub mod queryplanner_response;
 pub mod router_request;
 pub mod router_response;
+pub mod subgraph_response;
 
 type CompatRequest = Arc<crate::http_compat::Request<crate::Request>>;
 
