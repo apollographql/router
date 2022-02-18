@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 642
+assertion_line: 674
 expression: "&schema"
 
 ---
@@ -289,18 +289,6 @@ expression: "&schema"
     },
     "StudioGraph": {
       "type": "object",
-      "required": [
-        "key",
-        "reference"
-      ],
-      "properties": {
-        "key": {
-          "type": "string"
-        },
-        "reference": {
-          "type": "string"
-        }
-      },
       "additionalProperties": false
     },
     "Subgraph": {

@@ -32,18 +32,14 @@ If you don't wish to take advantage of usage reporting, then no configuration is
 # processing, since there is no point collecting statistics unless we have
 # somewhere to send them.
 graph:
-  # Which graph should our Spaceport be sending data about?
-  reference: Benchmarking@current
-  # Key used to send data
-  key: service:<redacted>
 ```
 
-To enable usage reporting, configure the `graph` section.  Within the `graph` section, both the `reference` and the `key` must be specified. The `reference` must refer to a valid graph/variant combination against which statistics are reported. The `key` must be a valid, [Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
+To enable usage reporting, configure the `graph` section, and set up the `APOLLo_KEY` and `APOLLO_GRAPH_REF`
+environment variables as with Apollo Uplink.  The graph reference must refer to a valid graph/variant combination
+against which statistics are reported. The `key` must be a valid,
+[Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
 For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
-The `key` value fulfills the same function as the `APOLLO_KEY` environment variable in Apollo Server, Apollo Gateway and the Rover CLI.
-Similarly, the `reference` fulfills the same function as the `APOLLO_GRAPH_REF` environment variable.
 
-> **Note:** These environment variables are *not* currently recognised by spaceport. This is being tracked by [issue #425](https://github.com/apollographql/router/issues/425).  Please follow and enage on that issue if you're interested in this functionality!
 
 ### Spaceport configuration
 

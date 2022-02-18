@@ -434,10 +434,35 @@ pub struct SpaceportConfig {
 #[derivative(Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioGraph {
+    #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) reference: String,
 
+    #[serde(skip, default = "apollo_key")]
     #[derivative(Debug = "ignore")]
     pub(crate) key: String,
+}
+
+fn apollo_key() -> String {
+    std::env::var("APOLLO_KEY")
+        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
+}
+
+fn apollo_graph_reference() -> String {
+    match std::env::var("APOLLO_GRAPH_REF") {
+        Ok(graph_ref) => graph_ref,
+        Err(_) => {
+            let graph_id = std::env::var("APOLLO_GRAPH_ID")
+                .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
+            let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
+                Ok(variant) => variant,
+                Err(_) => {
+                    tracing::info!("No graph variant provided. Defaulting to `current`");
+                    "current".to_string()
+                }
+            };
+            format!("{}@{}", graph_id, variant)
+        }
+    }
 }
 
 impl Default for SpaceportConfig {
