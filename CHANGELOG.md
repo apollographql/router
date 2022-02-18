@@ -26,6 +26,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :sparkles: Features
 
+- **Apollo Studio Managed Federation support** ([PR #498](https://github.com/apollographql/router/pull/498))
+
+  The Router can now automatically download and check for updates on its schema from Studio (via [Uplink])'s free, [Managed Federation] service.  This is configured in the same way as Apollo Gateway via the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables, in the same way as was true in Apollo Gateway ([seen here](https://www.apollographql.com/docs/federation/managed-federation/setup/#4-connect-the-gateway-to-studio)). This will also enable operation usage reporting.
+
+  > **Note:** It is not yet possible to configure the Router with [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`].  If you need this behavior, please open a feature request with your use case.
+
+  [Managed Federation]: https://www.apollographql.com/docs/federation/managed-federation/overview/
+  [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`]: https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable
+  [Uplink]: https://www.apollographql.com/docs/federation/managed-federation/uplink/
+  [operation usage reporting]: https://www.apollographql.com/docs/studio/metrics/usage-reporting/#pushing-metrics-from-apollo-server
+
 - **Subgraph header configuration** ([PR #453](https://github.com/apollographql/router/pull/453))
 
   The Router now supports passing both client-originated and router-originated headers to specific subgraphs using YAML configuration.  Each subgraph which needs to receive headers can specify which headers (or header patterns) should be forwarded to which subgraph.
@@ -68,15 +79,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   [documentation]: https://www.apollographql.com/docs/router/configuration/#using-jaeger
 
-- **Apollo Studio managed federation Uplink support** ([PR #498](https://github.com/apollographql/router/pull/498))
-
-  The Router can now automatically download and check for updates on its schema from Studio (via [Uplink]).  This is configured in the same way as Apollo Gateway via the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables, in the same way as was true in Apollo Gateway ([seen here](https://www.apollographql.com/docs/federation/managed-federation/setup/#4-connect-the-gateway-to-studio)). This will also enable operation usage reporting.
-  
-  > **Note:** It is not yet possible to configure the Router with [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`].  If you need this behavior, please open a feature request with your use case.
-  
-  [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`]: https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable
-  [Uplink]: https://www.apollographql.com/docs/federation/managed-federation/uplink/
-  [operation usage reporting]: https://www.apollographql.com/docs/studio/metrics/usage-reporting/#pushing-metrics-from-apollo-server
 ## :bug: Fixes
 
 - **Studio agent collector now binds to localhost** [PR #486](https://github.com/apollographql/router/pulls/486)
@@ -84,6 +86,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   The Studio agent collector will bind to `127.0.0.1`.  It can be configured to bind to `0.0.0.0` if desired (e.g., if you're using the collector to collect centrally) by using the [`spaceport.listener` property] in the documentation.
 
   [`spaceport.listener` property]: https://www.apollographql.com/docs/router/configuration/#spaceport-configuration
+
 # [v0.1.0-alpha.5] 2022-02-15
 
 ## :sparkles: Features
