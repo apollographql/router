@@ -17,7 +17,7 @@ use schemars::schema::{
     ArrayValidation, ObjectValidation, Schema, SchemaObject, SingleOrVec, SubschemaValidation,
 };
 use schemars::{JsonSchema, Set};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -96,8 +96,7 @@ pub struct Configuration {
     pub spaceport: Option<SpaceportConfig>,
 
     /// Studio Graph configuration.
-    #[serde(default)]
-    //#[serde(deserialize_with = "parse_studio_graph")]
+    #[serde(skip, default = "studio_graph")]
     #[builder(default)]
     pub graph: Option<StudioGraph>,
 }
@@ -433,8 +432,6 @@ pub struct SpaceportConfig {
 
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
-//#[serde(deny_unknown_fields, rename_all = "snake_case")]
-//#[serde(deserialize_with("parse_studio_graph"))]
 pub struct StudioGraph {
     #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) reference: String,
@@ -442,6 +439,32 @@ pub struct StudioGraph {
     #[serde(skip, default = "apollo_key")]
     #[derivative(Debug = "ignore")]
     pub(crate) key: String,
+}
+
+fn studio_graph() -> Option<StudioGraph> {
+    if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
+        let apollo_graph_ref = match std::env::var("APOLLO_GRAPH_REF") {
+            Ok(graph_ref) => graph_ref,
+            Err(_) => {
+                let graph_id = std::env::var("APOLLO_GRAPH_ID")
+                    .expect("no APOLLO_GRAPH_REF or APOLLO_GRAPH_ID environment variables");
+                let variant = match std::env::var("APOLLO_GRAPH_VARIANT") {
+                    Ok(variant) => variant,
+                    Err(_) => {
+                        tracing::info!("No graph variant provided. Defaulting to `current`");
+                        "current".to_string()
+                    }
+                };
+                format!("{}@{}", graph_id, variant)
+            }
+        };
+        Some(StudioGraph {
+            reference: apollo_graph_ref,
+            key: apollo_key,
+        })
+    } else {
+        None
+    }
 }
 
 fn apollo_key() -> String {
@@ -463,33 +486,6 @@ fn apollo_graph_reference() -> String {
                 }
             };
             format!("{}@{}", graph_id, variant)
-        }
-    }
-}
-
-// this is necessary to parse a StudioGRaph from an empty `graph:` because
-// we get the fields from environment variables. By default, if it is empty,
-// it will deserialize to None
-fn parse_studio_graph<'de, D>(deserializer: D) -> Result<Option<StudioGraph>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let field_name = String::deserialize(deserializer)?;
-    println!("deserialized field_name: {}", field_name);
-    // the grpah field is empty, so we tell the deserializer we expect a unit//
-    //<()>::deserialize(deserializer)?;
-    Ok(Some(StudioGraph {
-        reference: apollo_graph_reference(),
-        key: apollo_key(),
-    }))
-}
-
-impl Default for SpaceportConfig {
-    fn default() -> Self {
-        Self {
-            collector: default_collector(),
-            listener: default_listener(),
-            external: false,
         }
     }
 }
