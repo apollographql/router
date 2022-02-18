@@ -5,7 +5,7 @@ use apollo_spaceport::server::ReportSpaceport;
 use clap::Parser;
 use tracing_subscriber::filter::EnvFilter;
 
-const DEFAULT_LISTEN: &str = "0.0.0.0:50051";
+const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

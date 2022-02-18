@@ -313,7 +313,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "listener": {
-          "default": "0.0.0.0:50051",
+          "default": "127.0.0.1:50051",
           "type": "string"
         }
       },
