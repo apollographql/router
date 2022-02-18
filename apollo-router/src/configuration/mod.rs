@@ -17,7 +17,7 @@ use schemars::schema::{
     ArrayValidation, ObjectValidation, Schema, SchemaObject, SingleOrVec, SubschemaValidation,
 };
 use schemars::{JsonSchema, Set};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Map;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -97,6 +97,7 @@ pub struct Configuration {
 
     /// Studio Graph configuration.
     #[serde(default)]
+    //#[serde(deserialize_with = "parse_studio_graph")]
     #[builder(default)]
     pub graph: Option<StudioGraph>,
 }
@@ -432,7 +433,8 @@ pub struct SpaceportConfig {
 
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+//#[serde(deny_unknown_fields, rename_all = "snake_case")]
+//#[serde(deserialize_with("parse_studio_graph"))]
 pub struct StudioGraph {
     #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) reference: String,
@@ -463,6 +465,23 @@ fn apollo_graph_reference() -> String {
             format!("{}@{}", graph_id, variant)
         }
     }
+}
+
+// this is necessary to parse a StudioGRaph from an empty `graph:` because
+// we get the fields from environment variables. By default, if it is empty,
+// it will deserialize to None
+fn parse_studio_graph<'de, D>(deserializer: D) -> Result<Option<StudioGraph>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let field_name = String::deserialize(deserializer)?;
+    println!("deserialized field_name: {}", field_name);
+    // the grpah field is empty, so we tell the deserializer we expect a unit//
+    //<()>::deserialize(deserializer)?;
+    Ok(Some(StudioGraph {
+        reference: apollo_graph_reference(),
+        key: apollo_key(),
+    }))
 }
 
 impl Default for SpaceportConfig {

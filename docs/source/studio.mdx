@@ -65,7 +65,7 @@ spaceport:
 
 #### Internal spaceport
 
-This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration, so long as the `graph` configuration is set with a `reference` and `key`.
+This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration, so long as the `graph` configuration is set.
 
 In this mode it is possible to further configure the address at which the internal spaceport is listening via the `listener` property.  Configuring a `listener` should only be necessary if there is a clash on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), of if it's desirable to change the bind address.
 
