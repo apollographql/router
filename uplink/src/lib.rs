@@ -53,6 +53,8 @@ pub fn stream_supergraph(
     let _ = tokio::task::spawn(async move {
         let mut composition_id = None;
 
+        let mut interval = tokio::time::interval(interval);
+
         loop {
             match fetch_supergraph(
                 api_key.to_string(),
@@ -101,7 +103,7 @@ pub fn stream_supergraph(
                 }
             }
 
-            tokio::time::sleep(interval).await
+            interval.tick().await;
         }
     })
     .with_current_subscriber();
