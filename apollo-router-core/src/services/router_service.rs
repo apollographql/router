@@ -234,7 +234,7 @@ impl PluggableRouterServiceBuilder {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
-        // order at the end of this function. Insetead, we reverse the
+        // order at the end of this function. Instead, we reverse the
         // various iterators that we create for folding and leave
         // the plugins in their original order.
 
