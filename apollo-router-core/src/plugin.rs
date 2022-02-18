@@ -3,11 +3,11 @@ use crate::{
     RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use async_trait::async_trait;
-use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Mutex;
 use tower::util::BoxService;
@@ -43,8 +43,8 @@ impl PluginFactory {
     }
 }
 
-static PLUGIN_REGISTRY: Lazy<Mutex<IndexMap<String, PluginFactory>>> = Lazy::new(|| {
-    let m = IndexMap::new();
+static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
+    let m = HashMap::new();
     Mutex::new(m)
 });
 
@@ -55,7 +55,7 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
         .insert(name, plugin_factory);
 }
 
-pub fn plugins() -> IndexMap<String, PluginFactory> {
+pub fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 

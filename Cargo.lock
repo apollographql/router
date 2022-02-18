@@ -174,7 +174,6 @@ dependencies = [
  "hex",
  "http",
  "include_dir",
- "indexmap",
  "insta",
  "lru",
  "miette",
