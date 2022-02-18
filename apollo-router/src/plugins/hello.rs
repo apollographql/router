@@ -17,7 +17,9 @@ impl fmt::Display for HelloError {
 impl Error for HelloError {}
 
 #[derive(Debug)]
-struct Hello {}
+struct Hello {
+    name: String,
+}
 
 impl fmt::Display for Hello {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -35,18 +37,20 @@ impl Plugin for Hello {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::info!("starting: {}", stringify!(Hello));
+        tracing::info!("starting: {}: {}", stringify!(Hello), self.name);
         Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        tracing::info!("shutting down: {}", stringify!(Hello));
+        tracing::info!("shutting down: {}: {}", stringify!(Hello), self.name);
         Ok(())
     }
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
-        Ok(Hello {})
+        Ok(Hello {
+            name: configuration.name,
+        })
     }
 }
 
