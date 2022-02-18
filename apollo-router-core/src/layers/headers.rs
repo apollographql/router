@@ -2,7 +2,10 @@ use std::task::{Context, Poll};
 
 use crate::layer::ConfigurableLayer;
 use crate::{register_layer, SubgraphRequest};
-use http::header::{HeaderName, CONTENT_LENGTH, CONTENT_TYPE, HOST};
+use http::header::{
+    HeaderName, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
+};
 use http::HeaderValue;
 use mockall::lazy_static;
 use regex::Regex;
@@ -226,7 +229,23 @@ struct PropagateService<S> {
 }
 
 lazy_static! {
-    static ref RESERVED_HEADERS: Vec<HeaderName> = [CONTENT_LENGTH, CONTENT_TYPE, HOST].into();
+    static ref RESERVED_HEADERS: Vec<HeaderName> = [
+        CONNECTION,
+        CONTENT_LENGTH,
+        CONTENT_TYPE,
+        HOST,
+        PROXY_AUTHENTICATE,
+        PROXY_AUTHORIZATION,
+        TE,
+        TRAILER,
+        TRANSFER_ENCODING,
+        UPGRADE,
+        CONTENT_LENGTH,
+        CONTENT_TYPE,
+        HOST,
+        HeaderName::from_static("keep-alive")
+    ]
+    .into();
 }
 
 impl<S> Service<SubgraphRequest> for PropagateService<S>
