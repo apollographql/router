@@ -5,6 +5,7 @@ use std::{
 };
 use which::which;
 
+#[cfg(not(windows))]
 fn main() {
     if let Ok("debug") = std::env::var("PROFILE").as_deref() {
         //~/.rover/bin/rover graph introspect https://uplink.api.apollographql.com/
@@ -38,3 +39,8 @@ fn main() {
             .expect("could not write downloaded uplink schema");
     }
 }
+
+// the uplink schema check will fail on Windows due to different line endings
+// this is already tested on other platforms and in CI
+#[cfg(windows)]
+fn main() {}
