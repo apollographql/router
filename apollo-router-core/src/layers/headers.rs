@@ -1,14 +1,17 @@
 use std::task::{Context, Poll};
 
-use http::header::HeaderName;
+use crate::layer::ConfigurableLayer;
+use crate::{register_layer, SubgraphRequest};
+use http::header::{
+    HeaderName, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, HOST, PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
+};
 use http::HeaderValue;
+use mockall::lazy_static;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::{BoxError, Layer, Service};
-
-use crate::layer::ConfigurableLayer;
-use crate::{register_layer, SubgraphRequest};
 
 register_layer!("headers", "insert", InsertLayer);
 register_layer!("headers", "remove", RemoveLayer);
@@ -161,6 +164,7 @@ where
             let matching_headers = headers
                 .iter()
                 .filter_map(|(name, _)| regex.is_match(name.as_str()).then(|| name.clone()))
+                .filter(|name| !RESERVED_HEADERS.contains(name))
                 .collect::<Vec<_>>();
             for name in matching_headers {
                 headers.remove(name);
@@ -224,6 +228,28 @@ struct PropagateService<S> {
     default_value: Option<HeaderValue>,
 }
 
+lazy_static! {
+    // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+    // These are not propagated by default using a regex match as they will not make sense for the
+    // second hop.
+    // In addition because our requests are not regular proxy requests content-type, content-length
+    // and host are also in the exclude list.
+    static ref RESERVED_HEADERS: Vec<HeaderName> = [
+        CONNECTION,
+        PROXY_AUTHENTICATE,
+        PROXY_AUTHORIZATION,
+        TE,
+        TRAILER,
+        TRANSFER_ENCODING,
+        UPGRADE,
+        CONTENT_LENGTH,
+        CONTENT_TYPE,
+        HOST,
+        HeaderName::from_static("keep-alive")
+    ]
+    .into();
+}
+
 impl<S> Service<SubgraphRequest> for PropagateService<S>
 where
     S: Service<SubgraphRequest>,
@@ -237,13 +263,11 @@ where
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+        let headers = req.http_request.headers_mut();
         if let Some(name) = &self.name {
             let value = req.context.request.headers().get(name);
-
             if let Some(value) = value.or_else(|| self.default_value.as_ref()) {
-                req.http_request
-                    .headers_mut()
-                    .insert(self.rename.as_ref().unwrap_or(name), value.clone());
+                headers.insert(self.rename.as_ref().unwrap_or(name), value.clone());
             }
         } else if let Some(regex) = &self.regex {
             req.context
@@ -251,12 +275,13 @@ where
                 .headers()
                 .iter()
                 .filter(|(name, _)| regex.is_match(name.as_str()))
+                .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
                 .for_each(|(name, value)| {
-                    req.http_request.headers_mut().insert(name, value.clone());
+                    headers.insert(name, value.clone());
                 });
         } else {
             for (name, value) in req.context.request.headers() {
-                req.http_request.headers_mut().insert(name, value.clone());
+                headers.insert(name, value.clone());
             }
         }
         self.inner.call(req)
@@ -265,12 +290,6 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
-    use std::sync::Arc;
-
-    use tower::{BoxError, Layer};
-    use tower::{Service, ServiceExt};
-
     use crate::fetch::OperationKind;
     use crate::headers::{
         InsertConfig, InsertLayer, PropagateConfig, PropagateLayer, RemoveConfig, RemoveLayer,
@@ -278,6 +297,11 @@ mod test {
     use crate::layer::ConfigurableLayer;
     use crate::plugin_utils::MockSubgraphService;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
+    use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tower::{BoxError, Layer};
+    use tower::{Service, ServiceExt};
 
     #[tokio::test]
     async fn test_insert() -> Result<(), BoxError> {
@@ -456,6 +480,9 @@ mod test {
                 .header("da", "vda")
                 .header("db", "vdb")
                 .header("dc", "vdc")
+                .header(HOST, "host")
+                .header(CONTENT_LENGTH, "2")
+                .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
                 .into(),
@@ -469,6 +496,9 @@ mod test {
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
                 .into(),
@@ -479,6 +509,10 @@ mod test {
 
     impl SubgraphRequest {
         fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+            let mut headers = headers.clone();
+            headers.push((HOST.as_str(), "rhost"));
+            headers.push((CONTENT_LENGTH.as_str(), "22"));
+            headers.push((CONTENT_TYPE.as_str(), "graphql"));
             let actual_headers = self
                 .http_request
                 .headers()

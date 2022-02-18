@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 496
+assertion_line: 712
 expression: config
 
 ---
@@ -14,5 +14,4 @@ subgraphs:
 opentelemetry: ~
 plugins: {}
 spaceport: ~
-graph: ~
 

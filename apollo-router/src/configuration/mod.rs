@@ -100,7 +100,7 @@ pub struct Configuration {
     pub spaceport: Option<SpaceportConfig>,
 
     /// Studio Graph configuration.
-    #[serde(default)]
+    #[serde(skip, default = "studio_graph")]
     #[builder(default)]
     pub graph: Option<StudioGraph>,
 }
@@ -436,12 +436,39 @@ pub struct SpaceportConfig {
 
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct StudioGraph {
+    #[serde(skip, default = "apollo_graph_reference")]
     pub(crate) reference: String,
 
+    #[serde(skip, default = "apollo_key")]
     #[derivative(Debug = "ignore")]
     pub(crate) key: String,
+}
+
+fn studio_graph() -> Option<StudioGraph> {
+    if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
+        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF").expect(
+            "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+        );
+
+        Some(StudioGraph {
+            reference: apollo_graph_ref,
+            key: apollo_key,
+        })
+    } else {
+        None
+    }
+}
+
+fn apollo_key() -> String {
+    std::env::var("APOLLO_KEY")
+        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
+}
+
+fn apollo_graph_reference() -> String {
+    std::env::var("APOLLO_GRAPH_REF").expect(
+        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+    )
 }
 
 impl Default for SpaceportConfig {
