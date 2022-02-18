@@ -7,7 +7,7 @@ sidebar_title: Managed federation
 
 Uplink is the Apollo-hosted endpoint that your gateway polls to fetch its latest supergraph schema.
 To set up the schema download, create an API key at Te "Contributor" level and put it in the `APOLLO_KEY`
-environment variable, your graph id in `APollO_GRAPH_ID` and the variant in `APOLLO_GRAPH_VARIANT`,
+environment variable, your graph id in `APOllO_GRAPH_ID` and the variant in `APOLLO_GRAPH_VARIANT`,
 or the full graph reference in `APOLLO_GRAPH_REF`.
 
 Example: if your graph is named `MyGraph@current`, you can set `APOLLO_GRAPH_REF=MyGraph@current` or
@@ -26,15 +26,7 @@ If you don't wish to take advantage of usage reporting, then no configuration is
 
 ### Usage reporting
 
-```yaml:title=configuration.yaml
-# Apollo Studio Graph configuration details
-# If we don't specify a graph section, then no statistics are collected for
-# processing, since there is no point collecting statistics unless we have
-# somewhere to send them.
-graph:
-```
-
-To enable usage reporting, configure the `graph` section, and set up the `APOLLo_KEY` and `APOLLO_GRAPH_REF`
+To enable usage reporting, set up the `APOLLO_KEY` and `APOLLO_GRAPH_REF`
 environment variables as with Apollo Uplink.  The graph reference must refer to a valid graph/variant combination
 against which statistics are reported. The `key` must be a valid,
 [Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
@@ -65,7 +57,7 @@ spaceport:
 
 #### Internal spaceport
 
-This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration, so long as the `graph` configuration is set.
+This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration.
 
 In this mode it is possible to further configure the address at which the internal spaceport is listening via the `listener` property.  Configuring a `listener` should only be necessary if there is a clash on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), of if it's desirable to change the bind address.
 

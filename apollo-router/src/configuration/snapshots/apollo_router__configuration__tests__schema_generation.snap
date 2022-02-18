@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 674
+assertion_line: 702
 expression: "&schema"
 
 ---
@@ -10,12 +10,6 @@ expression: "&schema"
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
   "properties": {
-    "graph": {
-      "description": "Studio Graph configuration.",
-      "default": null,
-      "$ref": "#/definitions/StudioGraph",
-      "nullable": true
-    },
     "opentelemetry": {
       "description": "OpenTelemetry configuration.",
       "$ref": "#/definitions/OpenTelemetry",
@@ -285,10 +279,6 @@ expression: "&schema"
           "type": "string"
         }
       },
-      "additionalProperties": false
-    },
-    "StudioGraph": {
-      "type": "object",
       "additionalProperties": false
     },
     "Subgraph": {
