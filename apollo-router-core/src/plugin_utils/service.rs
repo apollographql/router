@@ -1,7 +1,8 @@
 use crate::{
     ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
-    RouterResponse, SubgraphRequest,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
 };
+
 #[macro_export]
 macro_rules! mock_service {
     ($name:ident, $request_type:ty, $response_type:ty) => {
@@ -37,4 +38,4 @@ macro_rules! mock_service {
 mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(QueryPlanning, QueryPlannerRequest, QueryPlannerResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
-mock_service!(Subgraph, SubgraphRequest, RouterResponse);
+mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);

@@ -165,13 +165,21 @@ server:
   listen: 127.0.0.1:4000
 opentelemetry:
   jaeger:
-    # optional url of the jaeger collector
-    collector_endpoint: "http://example.org"
+    # optional: if not present, jaeger will use the default UDP agent address
+    #endpoint:
+      # address for the UDP agent mode
+      # incomptable with collector
+      # agent: "127.0.0.1:1234"
+
+      # URL of the HTTP collector
+      # collector:" http://example.org"
+      # the username and password are obtained from the environment variables
+      # JAEGER_USERNAME and JAEGER_PASSWORD
+
     # name of the service used in traces
     # defaults to router
     service_name: "router"
-    # the username and password are obtained from the environment variables
-    # JAEGER_USERNAME and JAEGER_PASSWORD
+    
     trace_config:
       # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
       # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
@@ -273,33 +281,45 @@ graph:
   key: service:<redacted>
 ```
 
-You must configure the graph section. If you specify a graph section, then both the reference and the key must be specified. The reference must refer to a valid graph/version combination against which statistics are reported. The Key must be a valid API key which can be used for reporting statistics.
+To enable usage reporting, configure the `graph` section.  Within the `graph` section, both the `reference` and the `key` must be specified. The `reference` must refer to a valid graph/variant combination against which statistics are reported. The `key` must be a valid, [Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
 For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
-The key fulfills the same function as the APOLLO_KEY environment variable.
-The reference fulfills the same function as the APOLLO_GRAPH_REF environment variable.
-NB: These environment variables are *not* currently recognised by the router. This is being tracked by [issue](https://github.com/apollographql/router/issues/425)
+The `key` value fulfills the same function as the `APOLLO_KEY` environment variable in Apollo Server, Apollo Gateway and the Rover CLI.
+Similarly, the `reference` fulfills the same function as the `APOLLO_GRAPH_REF` environment variable.
 
-### Spaceport Configuration
+> **Note:** These environment variables are *not* currently recognised by the router. This is being tracked by [issue #425](https://github.com/apollographql/router/issues/425).  Please follow and enage on that issue if you're interested in this functionality!
 
-The spaceport can either be run as an internal, router specific component or as an external resource shared by multiple routers.
+### Spaceport configuration
+
+Spaceport can either be run as an internal, router-specific component or as an external resource shared by multiple routers.
 
 ```yaml:title=configuration.yaml
 # Spaceport configuration. These values are the default values if not specified
 spaceport:
-  # Should we spawn a Spaceport or talk to an existing external Spaceport?
+  # By default, Apollo Router will run an internal collector.  It can be
+  # configured to not do this by setting this to `true`.  When `true`, no
+  # agent will spawn and we will attempt to communicate to `collector` below.
   external: false
-  # What's the address of the Spaceport?
+  
+  # This can be left unconfigured when `external` is `false`.  When `true`,
+  # this should be the location of a spaceport that is running external from
+  # the Router.
   collector: https://127.0.0.1:50051
-  # Where should we listen IF we have spawned an internal Spaceport?
+
+  # For an internal spaceport instance (when `external` is `false`), what
+  # interface and port should we listen on.
   listener: 0.0.0.0:50051
 ```
 
-#### Internal Spaceport
+#### Internal spaceport
 
-This is the default and is most appropriate for evaluations, demos, development support and generally getting started. This requires no configuration by default and will be automatically started if the graph configuration is present.
-In this mode it is possible to further configure the address at which the internal spaceport is listening and the address of the spaceport to use. This should only be necessary if there is a clash on the default port, for instance if running multiple routers on the same system or clashing with another application.
+This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration, so long as the `graph` configuration is set with a `reference` and `key`.
 
-#### External Spaceport
+In this mode it is possible to further configure the address at which the internal spaceport is listening via the `listener` property.  Configuring a `listener` should only be necessary if there is a clash on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), of if it's desirable to change the bind address.
 
-In this case, external is true, the router will not start an internal spaceport task but will attempt to connect to an external process at the specified listener address. This mode of operation is intended for production environments where, for example, configuration of sensitive key data or allocation of reporting resources, can be centralised and tightly controlled. The listener parameter is ignored for an external spaceport. The collector parameter specifies the address of the shared spaceport.
+#### External spaceport
 
+Running an external spaceport _is not necessary in most circumstances_.  It may be desireable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally.  Under heavier workloads, it can also be beneficial to externalize the trace processing to reduce the amount of work that individiual Router instances take on.  The `listener` parameter is ignored for an external spaceport.
+
+To enable the external spaceport, another Router can be run to act as the collector with the exclusive role of processing Studio data.  To configure this, the "collector" should have `external` set to `false` and an appropriate `listener` address and port combination.  Routers exporting Studio data should have `external` set to `true`, `listener` unspecified, and their `collector` property configured to point to the collector Router.
+
+If you're looking for help with this feature, please [open a Discussion](https://github.com/apollographql/router/discussions). 

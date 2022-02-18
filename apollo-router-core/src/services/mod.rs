@@ -1,14 +1,8 @@
-mod execution_service;
-pub mod http_compat;
-mod router_service;
-
 pub use self::execution_service::*;
 pub use self::router_service::*;
-use crate::header_manipulation::HeaderManipulationLayer;
+use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
-use http::header::{HeaderName, COOKIE};
-use http::HeaderValue;
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
@@ -18,6 +12,9 @@ use std::sync::Arc;
 use tower::layer::util::Stack;
 use tower::ServiceBuilder;
 use tower_service::Service;
+mod execution_service;
+pub mod http_compat;
+mod router_service;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -88,9 +85,12 @@ pub struct SubgraphRequest {
     pub http_request: http_compat::Request<Request>,
 
     pub context: Context,
+
+    pub operation_kind: OperationKind,
 }
 
 assert_impl_all!(SubgraphResponse: Send);
+#[derive(Clone, Debug)]
 pub struct SubgraphResponse {
     pub response: http_compat::Response<Response>,
 
@@ -124,25 +124,6 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 }
 
 pub trait ServiceBuilderExt<L> {
-    //This will only compile for Endpoint services
-    fn propagate_all_headers(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-    fn propagate_header(
-        self,
-        header_name: &str,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-    fn propagate_or_default_header(
-        self,
-        header_name: &str,
-        value: HeaderValue,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-    fn remove_header(self, header_name: &str) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-    fn insert_header(
-        self,
-        header_name: &str,
-        value: HeaderValue,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-    fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>>;
-
     #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,
@@ -161,56 +142,6 @@ pub trait ServiceBuilderExt<L> {
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn propagate_all_headers(
-        self: ServiceBuilder<L>,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::propagate_all())
-    }
-
-    fn propagate_header(
-        self: ServiceBuilder<L>,
-        header_name: &str,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::propagate(
-            HeaderName::from_str(header_name).unwrap(),
-        ))
-    }
-
-    fn propagate_or_default_header(
-        self: ServiceBuilder<L>,
-        header_name: &str,
-        default_header_value: HeaderValue,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::propagate_or_default(
-            HeaderName::from_str(header_name).unwrap(),
-            default_header_value,
-        ))
-    }
-
-    fn insert_header(
-        self: ServiceBuilder<L>,
-        header_name: &str,
-        header_value: HeaderValue,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::insert(
-            HeaderName::from_str(header_name).unwrap(),
-            header_value,
-        ))
-    }
-
-    fn remove_header(
-        self: ServiceBuilder<L>,
-        header_name: &str,
-    ) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::remove(
-            HeaderName::from_str(header_name).unwrap(),
-        ))
-    }
-
-    fn propagate_cookies(self) -> ServiceBuilder<Stack<HeaderManipulationLayer, L>> {
-        self.layer(HeaderManipulationLayer::propagate(COOKIE))
-    }
-
     #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,

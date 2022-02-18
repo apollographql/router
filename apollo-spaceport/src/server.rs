@@ -172,34 +172,47 @@ impl ReportSpaceport {
             .build()
             .map_err(|e| Status::unavailable(e.to_string()))?;
 
+        let mut msg = "default error message".to_string();
         for i in 0..5 {
             // We know these requests can be cloned
             let task_req = req.try_clone().expect("requests must be clone-able");
             match client.execute(task_req).await {
                 Ok(v) => {
+                    let status = v.status();
                     let data = v
                         .text()
                         .await
                         .map_err(|e| Status::internal(e.to_string()))?;
-                    tracing::debug!("ingress response text: {:?}", data);
-                    let response = ReporterResponse {
-                        message: "Report accepted".to_string(),
-                    };
-                    return Ok(Response::new(response));
+                    // Handle various kinds of status:
+                    //  - if client error, terminate immediately
+                    //  - if server error, it may be transient so treat as retry-able
+                    //  - if ok, return ok
+                    if status.is_client_error() {
+                        tracing::error!("Client error reported at ingress: {}", data);
+                        return Err(Status::invalid_argument(data));
+                    } else if status.is_server_error() {
+                        tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
+                        msg = data;
+                    } else {
+                        tracing::debug!("ingress response text: {:?}", data);
+                        let response = ReporterResponse {
+                            message: "Report accepted".to_string(),
+                        };
+                        return Ok(Response::new(response));
+                    }
                 }
                 Err(e) => {
+                    // TODO: Ultimately need more sophisticated handling here. For example
+                    // a redirect should not be treated the same way as a connect or a
+                    // type builder error...
                     tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
-                    if i == 4 {
-                        return Err(Status::unavailable(e.to_string()));
-                    }
-                    backoff += Duration::from_millis(50);
-                    tokio::time::sleep(backoff).await;
+                    msg = e.to_string();
                 }
             }
+            backoff += Duration::from_millis(50);
+            tokio::time::sleep(backoff).await;
         }
-        // The compiler can't figure out the exit paths are covered,
-        // so to keep it happy have...
-        Err(Status::unavailable("should not happen..."))
+        Err(Status::unavailable(msg))
     }
 }
 

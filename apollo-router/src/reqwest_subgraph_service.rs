@@ -2,6 +2,7 @@ use apollo_router_core::prelude::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
+use tower::BoxError;
 use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
@@ -40,7 +41,7 @@ impl ReqwestSubgraphService {
 
 impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
     type Response = graphql::SubgraphResponse;
-    type Error = tower::BoxError;
+    type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -48,13 +49,13 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(
-        &mut self,
-        graphql::SubgraphRequest {
+    fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
+        let graphql::SubgraphRequest {
             http_request,
             context,
-        }: graphql::SubgraphRequest,
-    ) -> Self::Future {
+            ..
+        } = request;
+
         let http_client = self.http_client.clone();
         let target_url = if http_request.uri() == "/" {
             self.url.clone()
@@ -82,7 +83,14 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
             request.headers_mut().extend(headers.into_iter());
             *request.version_mut() = version;
 
-            let response = http_client.execute(request).await?;
+            let response = http_client.execute(request).await.map_err(|err| {
+                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+
+                graphql::FetchError::SubrequestHttpError {
+                    service: service_name.clone(),
+                    reason: err.to_string(),
+                }
+            })?;
             let body = response
                 .bytes()
                 .instrument(tracing::debug_span!("aggregate_response_data"))

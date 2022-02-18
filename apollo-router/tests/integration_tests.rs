@@ -16,7 +16,7 @@ use tower::ServiceExt;
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = graphql::Request::builder()
-            .query($query)
+            .query($query.to_string())
             .variables(Arc::new(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
@@ -32,7 +32,7 @@ macro_rules! assert_federated_response {
         let expected = query_node(&request).await.unwrap();
 
         let http_request = http::Request::builder()
-            .method("GET")
+            .method("POST")
             .body(request)
             .unwrap().into();
 
@@ -131,6 +131,89 @@ async fn basic_mutation() {
     );
 }
 
+#[tokio::test]
+async fn queries_should_work_over_get() {
+    let request = graphql::Request::builder()
+        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
+async fn mutation_should_not_work_over_get() {
+    let request = graphql::Request::builder()
+        .query(
+            r#"mutation {
+                createProduct(upc:"8", name:"Bob") {
+                  upc
+                  name
+                  reviews {
+                    body
+                  }
+                }
+                createReview(upc: "8", id:"100", body: "Bif"){
+                  id
+                  body
+                }
+              }"#,
+        )
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    // No services should be queried
+    let expected_service_hits = hashmap! {};
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
 #[test_span(tokio::test)]
 async fn variables() {
     assert_federated_response!(
@@ -173,12 +256,13 @@ async fn missing_variables() {
                     }
                 }
             }
-            "#,
+            "#
+            .to_string(),
         )
         .build();
 
     let http_request = http::Request::builder()
-        .method("GET")
+        .method("POST")
         .body(request)
         .unwrap()
         .into();

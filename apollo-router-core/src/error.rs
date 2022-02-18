@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Serialize, Deserialize)]
+#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
 pub enum FetchError {

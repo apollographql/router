@@ -1,7 +1,9 @@
-use apollo_router_core::{register_plugin, Plugin};
+use apollo_router_core::register_layer;
+use apollo_router_core::ConfigurableLayer;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::BoxError;
+use tower::layer::layer_fn;
+use tower::{BoxError, Layer};
 
 struct Hello {}
 
@@ -10,16 +12,24 @@ struct Conf {
     name: String,
 }
 
-impl Plugin for Hello {
+impl<S> Layer<S> for Hello {
+    type Service = S;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        layer_fn(|s| s).layer(inner)
+    }
+}
+
+impl ConfigurableLayer for Hello {
     type Config = Conf;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("Hello {}!", configuration.name);
-        Ok(Hello {})
+        Ok(Self {})
     }
 }
 
-register_plugin!("example.com", "hello", Hello);
+register_layer!("example.com", "hello", Hello);
 
 #[cfg(test)]
 mod tests {
@@ -27,10 +37,10 @@ mod tests {
     use std::str::FromStr;
 
     #[tokio::test]
-    async fn plugin_registered() {
-        apollo_router_core::plugins()
+    async fn layer_registered() {
+        apollo_router_core::layers()
             .get("example.com_hello")
-            .expect("Plugin not found")
+            .expect("Layer not found")
             .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
             .unwrap();
     }

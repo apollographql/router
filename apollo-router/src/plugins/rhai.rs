@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
-use apollo_router_core::plugin_utils::structures;
+use apollo_router_core::plugin_utils;
 use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
@@ -10,6 +10,7 @@ use http::HeaderMap;
 use http::{header::HeaderName, HeaderValue};
 use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
 
@@ -20,7 +21,7 @@ macro_rules! handle_error {
         match $result {
             Ok(res) => res,
             Err(err) => {
-                return structures::RouterResponse::builder()
+                return plugin_utils::RouterResponse::builder()
                     .errors(vec![Error::builder()
                         .message(format!("RHAI plugin error. {}: {}", $message, err))
                         .build()])
@@ -34,7 +35,7 @@ macro_rules! handle_error {
         match $result {
             Ok(res) => res,
             Err(err) => {
-                return structures::RouterResponse::builder()
+                return plugin_utils::RouterResponse::builder()
                     .errors(vec![Error::builder()
                         .message(format!("RHAI plugin error: {}", err))
                         .build()])
@@ -51,7 +52,7 @@ struct Rhai {
     ast: Option<AST>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 struct Conf {
     filename: PathBuf,
 }
@@ -97,11 +98,11 @@ impl Headers {
 impl Plugin for Rhai {
     type Config = Conf;
 
-    fn configure(&mut self, configuration: Self::Config) -> Result<(), BoxError> {
+    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("RHAI {:#?}!", configuration.filename);
         let engine = Engine::new();
-        self.ast = Some(engine.compile_file(configuration.filename)?);
-        Ok(())
+        let ast = Some(engine.compile_file(configuration.filename)?);
+        Ok(Self { ast })
     }
 
     fn router_service(
@@ -176,7 +177,7 @@ impl Plugin for Rhai {
     }
 }
 
-register_plugin!("rhai", Rhai);
+register_plugin!("apollographql.com", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
@@ -206,11 +207,12 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("rhai")
-            .expect("Plugin not found")();
-        dyn_plugin
-            .configure(&Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap())
-            .expect("Failed to configure");
+            .get("apollographql.com_rhai")
+            .expect("Plugin not found")
+            .create_instance(
+                &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
+            )
+            .unwrap();
         let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
         let fake_req = http_compat::Request::from(
             Request::builder()
@@ -224,7 +226,7 @@ mod tests {
         );
         let context = Context::new().with_request(fake_req);
         context.extensions_mut().await.insert("test", 5i64.into());
-        let router_req = structures::RouterRequest::builder().context(context);
+        let router_req = plugin_utils::RouterRequest::builder().context(context);
 
         let router_resp = router_service
             .ready()

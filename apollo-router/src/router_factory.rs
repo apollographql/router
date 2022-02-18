@@ -1,17 +1,14 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
-use apollo_router_core::header_manipulation::HeaderManipulationLayer;
+use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
-use http::header::HeaderName;
-use serde_json::Value;
-use std::str::FromStr;
 use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -74,30 +71,28 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
         for (name, subgraph) in &configuration.subgraphs {
-            let mut subgraph_service = BoxService::new(ReqwestSubgraphService::new(
-                name.to_string(),
-                subgraph.routing_url.clone(),
+            let dedup_layer = QueryDeduplicationLayer;
+            let mut subgraph_service = BoxService::new(dedup_layer.layer(
+                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
             ));
 
             for layer in &subgraph.layers {
-                match layer.get("kind") {
-                    Some(Value::String(kind)) if kind == "header" => {
-                        if let Some(header_name) =
-                            layer.get("propagate").as_ref().and_then(|v| v.as_str())
-                        {
-                            subgraph_service = BoxLayer::new(HeaderManipulationLayer::propagate(
-                                HeaderName::from_str(header_name).unwrap(),
-                            ))
-                            .layer(subgraph_service);
+                match layer.as_object().and_then(|o| o.iter().next()) {
+                    Some((kind, config)) => match apollo_router_core::layers().get(kind) {
+                        None => {
+                            errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
                         }
-                    }
-                    Some(_) => errors.push(ConfigurationError::LayerConfiguration {
+                        Some(factory) => match factory.create_instance(config) {
+                            Ok(layer) => subgraph_service = layer.layer(subgraph_service),
+                            Err(err) => errors.push(ConfigurationError::LayerConfiguration {
+                                layer: kind.to_string(),
+                                error: err.to_string(),
+                            }),
+                        },
+                    },
+                    None => errors.push(ConfigurationError::LayerConfiguration {
                         layer: "unknown".into(),
-                        error: "'kind' must be a string.".into(),
-                    }),
-                    _ => errors.push(ConfigurationError::LayerConfiguration {
-                        layer: "unknown".into(),
-                        error: "'kind' missing".into(),
+                        error: "layer must be an object".into(),
                     }),
                 }
             }
@@ -106,23 +101,20 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
         {
             let plugin_registry = apollo_router_core::plugins();
-            for (name, configuration) in &configuration.plugins {
+            for (name, configuration) in &configuration.plugins.plugins {
                 let name = name.as_str().to_string();
                 match plugin_registry.get(name.as_str()) {
-                    Some(factory) => {
-                        let mut plugin = (*factory)();
-                        match plugin.configure(configuration) {
-                            Ok(_) => {
-                                builder = builder.with_dyn_plugin(plugin);
-                            }
-                            Err(err) => {
-                                errors.push(ConfigurationError::PluginConfiguration {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
+                    Some(factory) => match factory.create_instance(configuration) {
+                        Ok(plugin) => {
+                            builder = builder.with_dyn_plugin(plugin);
                         }
-                    }
+                        Err(err) => {
+                            errors.push(ConfigurationError::PluginConfiguration {
+                                plugin: name,
+                                error: err.to_string(),
+                            });
+                        }
+                    },
                     None => {
                         errors.push(ConfigurationError::PluginUnknown(name));
                     }
@@ -154,5 +146,58 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         );
         tokio::spawn(worker.with_subscriber(dispatcher));
         Ok(service)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::router_factory::RouterServiceFactory;
+    use crate::{Configuration, YamlRouterServiceFactory};
+    use apollo_router_core::Schema;
+    use std::sync::Arc;
+    use tower_http::BoxError;
+
+    #[tokio::test]
+    async fn test_yaml_no_extras() {
+        let config = Configuration::builder().build();
+        let service = create_service(config).await;
+        assert!(service.is_ok())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_yaml_layers() {
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            subgraphs:
+                foo:
+                    routing_url: https://foo
+                    layers:
+                        - headers_insert:
+                              name: "foo"
+                              value: "foo"
+                            
+        "#,
+        )
+        .unwrap();
+        let service = create_service(config).await;
+        assert!(service.is_ok())
+    }
+
+    async fn create_service(config: Configuration) -> Result<(), BoxError> {
+        let schema: Schema = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1"),
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+        query: Query
+        mutation: Mutation
+        }"#
+        .parse()
+        .unwrap();
+
+        let service = YamlRouterServiceFactory::default()
+            .create(Arc::new(config), Arc::new(schema), None)
+            .await;
+        service.map(|_| ())
     }
 }

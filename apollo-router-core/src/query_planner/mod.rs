@@ -3,6 +3,7 @@ mod router_bridge_query_planner;
 mod selection;
 use crate::prelude::graphql::*;
 pub use caching_query_planner::*;
+use fetch::OperationKind;
 use futures::prelude::*;
 pub use router_bridge_query_planner::*;
 use serde::Deserialize;
@@ -14,7 +15,17 @@ pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
-    root: PlanNode,
+    pub(crate) root: PlanNode,
+}
+
+/// This default impl is useful for plugin_utils users
+/// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
+impl Default for QueryPlan {
+    fn default() -> Self {
+        Self {
+            root: PlanNode::Sequence { nodes: Vec::new() },
+        }
+    }
 }
 
 /// Query plans are composed of a set of nodes.
@@ -38,6 +49,17 @@ pub(crate) enum PlanNode {
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
+}
+
+impl PlanNode {
+    pub fn contains_mutations(&self) -> bool {
+        match self {
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::Flatten(_) => false,
+        }
+    }
 }
 
 impl QueryPlan {
@@ -71,6 +93,10 @@ impl QueryPlan {
             .await;
 
         Response::builder().data(value).errors(errors).build()
+    }
+
+    pub fn contains_mutations(&self) -> bool {
+        self.root.contains_mutations()
     }
 }
 
@@ -155,7 +181,7 @@ impl PlanNode {
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
                         .fetch_node(parent_value, current_dir, context, service_registry, schema)
-                        .instrument(tracing::trace_span!("fetch"))
+                        .instrument(tracing::info_span!("fetch"))
                         .await
                     {
                         Ok(v) => value = v,
@@ -209,7 +235,7 @@ impl PlanNode {
     }
 }
 
-mod fetch {
+pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
     use serde::Deserialize;
@@ -234,6 +260,17 @@ mod fetch {
 
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
+
+        /// The GraphQL operation kind that is used for the fetch.
+        operation_kind: OperationKind,
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum OperationKind {
+        Query,
+        Mutation,
+        Subscription,
     }
 
     struct Variables {
@@ -263,24 +300,25 @@ mod fetch {
 
                 let mut paths = Vec::new();
                 let mut values = Vec::new();
-                data.select_values_and_paths(current_dir, |_path, value| {
-                    paths.push(_path);
-                    values.push(value)
-                })?;
-
-                let representations = Value::Array(
-                    values
-                        .into_iter()
-                        .flat_map(|value| match value {
-                            Value::Object(content) => {
-                                select_object(content, requires, schema).transpose()
+                data.select_values_and_paths(current_dir, |path, value| {
+                    match value {
+                        Value::Object(content) => {
+                            let object = select_object(content, requires, schema)?;
+                            if let Some(value) = object {
+                                paths.push(path);
+                                values.push(value)
                             }
-                            _ => Some(Err(FetchError::ExecutionInvalidContent {
+                        }
+                        _ => {
+                            return Err(FetchError::ExecutionInvalidContent {
                                 reason: "not an object".to_string(),
-                            })),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                            })
+                        }
+                    }
+                    Ok(())
+                })?;
+                let representations = Value::Array(values);
+
                 variables.insert("representations", representations);
 
                 Ok(Variables { variables, paths })
@@ -311,11 +349,10 @@ mod fetch {
         ) -> Result<Value, FetchError> {
             let FetchNode {
                 operation,
+                operation_kind,
                 service_name,
                 ..
             } = self;
-
-            let query_span = tracing::trace_span!("subfetch", service = service_name.as_str());
 
             let Variables { variables, paths } = Variables::new(
                 &self.requires,
@@ -325,7 +362,6 @@ mod fetch {
                 context,
                 schema,
             )
-            .instrument(query_span.clone())
             .await?;
 
             let subgraph_request = SubgraphRequest {
@@ -340,6 +376,7 @@ mod fetch {
                     .unwrap()
                     .into(),
                 context: context.clone(),
+                operation_kind: *operation_kind,
             };
 
             let service = service_registry
@@ -349,7 +386,7 @@ mod fetch {
             // TODO not sure if we need a RouterReponse here as we don't do anything with it
             let (_parts, response) = service
                 .oneshot(subgraph_request)
-                .instrument(tracing::info_span!(parent: &query_span, "subfetch_stream"))
+                .instrument(tracing::trace_span!("subfetch_stream"))
                 .await
                 .map_err(|e| FetchError::SubrequestHttpError {
                     service: service_name.to_string(),
@@ -358,15 +395,13 @@ mod fetch {
                 .response
                 .into_parts();
 
-            query_span.in_scope(|| {
-                if !response.is_primary() {
-                    return Err(FetchError::SubrequestUnexpectedPatchResponse {
-                        service: service_name.to_owned(),
-                    });
-                }
+            if !response.is_primary() {
+                return Err(FetchError::SubrequestUnexpectedPatchResponse {
+                    service: service_name.to_owned(),
+                });
+            }
 
-                self.response_at_path(current_dir, paths, response)
-            })
+            self.response_at_path(current_dir, paths, response)
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]
@@ -410,6 +445,10 @@ mod fetch {
 
         pub(crate) fn service_name(&self) -> &str {
             &self.service_name
+        }
+
+        pub(crate) fn operation_kind(&self) -> &OperationKind {
+            &self.operation_kind
         }
     }
 }

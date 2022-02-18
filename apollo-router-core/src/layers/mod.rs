@@ -1,2 +1,5 @@
+pub mod apq;
 pub mod cache;
-pub mod header_manipulation;
+pub mod deduplication;
+pub mod forbid_http_get_mutations;
+pub mod headers;
