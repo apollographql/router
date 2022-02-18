@@ -229,11 +229,13 @@ struct PropagateService<S> {
 }
 
 lazy_static! {
+    // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
+    // These are not propagated by default using a regex match as they will not make sense for the
+    // second hop.
+    // In addition because our requests are not regular proxy requests content-type, content-length
+    // and host are also in the exclude list.
     static ref RESERVED_HEADERS: Vec<HeaderName> = [
         CONNECTION,
-        CONTENT_LENGTH,
-        CONTENT_TYPE,
-        HOST,
         PROXY_AUTHENTICATE,
         PROXY_AUTHORIZATION,
         TE,
