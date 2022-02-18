@@ -177,16 +177,6 @@ expression: "&schema"
           "required": [
             "com.example.hello"
           ]
-        },
-        {
-          "required": [
-            "com.example.hello_1"
-          ]
-        },
-        {
-          "required": [
-            "com.example.hello_2"
-          ]
         }
       ],
       "properties": {
@@ -203,12 +193,6 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         },
         "com.example.hello": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello_1": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello_2": {
           "$ref": "#/definitions/Conf"
         }
       }

@@ -51,8 +51,6 @@ impl Plugin for Hello {
 }
 
 register_plugin!("com.example", "hello", Hello);
-register_plugin!("com.example", "hello_1", Hello);
-register_plugin!("com.example", "hello_2", Hello);
 
 #[cfg(test)]
 mod tests {
