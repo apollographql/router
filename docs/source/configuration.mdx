@@ -235,6 +235,10 @@ There are a few specific layers which offer different header functionality:
 - **`headers_propagate`**
 
   This allows _selectively_ adding headers which were client-originated to the requests made to _specific_ subgraphs.
+  
+  > **Note:** The Router will _never_ propagate so-called [hop-by-hop headers].
+  
+  [hop-by-hop headers]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers, like `Content-length`
 
   They can be configured based on a `matching` pattern using [`regex`]:
 
