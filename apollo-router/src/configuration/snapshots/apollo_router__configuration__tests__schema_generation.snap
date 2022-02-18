@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 646
+assertion_line: 653
 expression: "&schema"
 
 ---
@@ -155,60 +155,60 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-            "apollo.test.com_always_fails_to_start"
+            "com.apollo.test.always_fails_to_start"
           ]
         },
         {
           "required": [
-            "apollo.test.com_always_fails_to_start_and_stop"
+            "com.apollo.test.always_fails_to_start_and_stop"
           ]
         },
         {
           "required": [
-            "apollo.test.com_always_fails_to_stop"
+            "com.apollo.test.always_fails_to_stop"
           ]
         },
         {
           "required": [
-            "apollo.test.com_always_starts_and_stops"
+            "com.apollo.test.always_starts_and_stops"
           ]
         },
         {
           "required": [
-            "example.com_hello"
+            "com.example.hello"
           ]
         },
         {
           "required": [
-            "example.com_hello_1"
+            "com.example.hello_1"
           ]
         },
         {
           "required": [
-            "example.com_hello_2"
+            "com.example.hello_2"
           ]
         }
       ],
       "properties": {
-        "apollo.test.com_always_fails_to_start": {
+        "com.apollo.test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
-        "apollo.test.com_always_fails_to_start_and_stop": {
+        "com.apollo.test.always_fails_to_start_and_stop": {
           "$ref": "#/definitions/Conf"
         },
-        "apollo.test.com_always_fails_to_stop": {
+        "com.apollo.test.always_fails_to_stop": {
           "$ref": "#/definitions/Conf"
         },
-        "apollo.test.com_always_starts_and_stops": {
+        "com.apollo.test.always_starts_and_stops": {
           "$ref": "#/definitions/Conf"
         },
-        "example.com_hello": {
+        "com.example.hello": {
           "$ref": "#/definitions/Conf"
         },
-        "example.com_hello_1": {
+        "com.example.hello_1": {
           "$ref": "#/definitions/Conf"
         },
-        "example.com_hello_2": {
+        "com.example.hello_2": {
           "$ref": "#/definitions/Conf"
         }
       }

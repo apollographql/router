@@ -188,7 +188,7 @@ macro_rules! register_plugin {
                 $name.to_string()
             }
             else {
-                format!("{}_{}", $group, $name)
+                format!("{}.{}", $group, $name)
             };
 
             $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {

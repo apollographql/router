@@ -50,9 +50,9 @@ impl Plugin for Hello {
     }
 }
 
-register_plugin!("example.com", "hello", Hello);
-register_plugin!("example.com", "hello_1", Hello);
-register_plugin!("example.com", "hello_2", Hello);
+register_plugin!("com.example", "hello", Hello);
+register_plugin!("com.example", "hello_1", Hello);
+register_plugin!("com.example", "hello_2", Hello);
 
 #[cfg(test)]
 mod tests {
@@ -62,7 +62,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("example.com_hello")
+            .get("com.example.hello")
             .expect("Plugin not found")
             .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
             .unwrap();
