@@ -36,7 +36,7 @@ like this:
 spaceport:
   external: false
   collector: https://127.0.0.1:50051
-  listener: 0.0.0.0:50051
+  listener: 127.0.0.1:50051
 ```
 
 (The above values are the defaults, so configuring like this will have the same
