@@ -161,6 +161,7 @@ where
             let matching_headers = headers
                 .iter()
                 .filter_map(|(name, _)| regex.is_match(name.as_str()).then(|| name.clone()))
+                .filter(|name| !RESERVED_HEADERS.contains(name))
                 .collect::<Vec<_>>();
             for name in matching_headers {
                 headers.remove(name);
@@ -225,8 +226,7 @@ struct PropagateService<S> {
 }
 
 lazy_static! {
-    static ref PROPAGATION_EXCLUSIONS: Vec<HeaderName> =
-        [CONTENT_LENGTH, CONTENT_TYPE, HOST].into();
+    static ref RESERVED_HEADERS: Vec<HeaderName> = [CONTENT_LENGTH, CONTENT_TYPE, HOST].into();
 }
 
 impl<S> Service<SubgraphRequest> for PropagateService<S>
@@ -254,10 +254,9 @@ where
                 .headers()
                 .iter()
                 .filter(|(name, _)| regex.is_match(name.as_str()))
+                .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
                 .for_each(|(name, value)| {
-                    if !PROPAGATION_EXCLUSIONS.contains(name) {
-                        headers.insert(name, value.clone());
-                    }
+                    headers.insert(name, value.clone());
                 });
         } else {
             for (name, value) in req.context.request.headers() {
@@ -270,13 +269,6 @@ where
 
 #[cfg(test)]
 mod test {
-    use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST};
-    use std::collections::HashSet;
-    use std::sync::Arc;
-
-    use tower::{BoxError, Layer};
-    use tower::{Service, ServiceExt};
-
     use crate::fetch::OperationKind;
     use crate::headers::{
         InsertConfig, InsertLayer, PropagateConfig, PropagateLayer, RemoveConfig, RemoveLayer,
@@ -284,6 +276,11 @@ mod test {
     use crate::layer::ConfigurableLayer;
     use crate::plugin_utils::MockSubgraphService;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
+    use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tower::{BoxError, Layer};
+    use tower::{Service, ServiceExt};
 
     #[tokio::test]
     async fn test_insert() -> Result<(), BoxError> {
@@ -478,6 +475,9 @@ mod test {
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
                 .into(),
@@ -488,6 +488,10 @@ mod test {
 
     impl SubgraphRequest {
         fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+            let mut headers = headers.clone();
+            headers.push((HOST.as_str(), "rhost"));
+            headers.push((CONTENT_LENGTH.as_str(), "22"));
+            headers.push((CONTENT_TYPE.as_str(), "graphql"));
             let actual_headers = self
                 .http_request
                 .headers()
