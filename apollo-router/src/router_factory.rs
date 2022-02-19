@@ -217,12 +217,6 @@ mod test {
     #[derive(Debug)]
     struct AlwaysStartsAndStopsPlugin {}
 
-    impl fmt::Display for AlwaysStartsAndStopsPlugin {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "AlwaysStartsAndStopsPlugin")
-        }
-    }
-
     #[derive(Debug, Default, Deserialize, JsonSchema)]
     struct Conf {
         name: String,
@@ -259,12 +253,6 @@ mod test {
     #[derive(Debug)]
     struct AlwaysFailsToStartPlugin {}
 
-    impl fmt::Display for AlwaysFailsToStartPlugin {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "AlwaysFailsToStartPlugin")
-        }
-    }
-
     #[async_trait::async_trait]
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
@@ -296,12 +284,6 @@ mod test {
     #[derive(Debug)]
     struct AlwaysFailsToStopPlugin {}
 
-    impl fmt::Display for AlwaysFailsToStopPlugin {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "AlwaysFailsToStopPlugin")
-        }
-    }
-
     #[async_trait::async_trait]
     impl Plugin for AlwaysFailsToStopPlugin {
         type Config = Conf;
@@ -332,12 +314,6 @@ mod test {
 
     #[derive(Debug)]
     struct AlwaysFailsToStartAndStopPlugin {}
-
-    impl fmt::Display for AlwaysFailsToStartAndStopPlugin {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "AlwaysFailsToStartAndStopPlugin")
-        }
-    }
 
     #[async_trait::async_trait]
     impl Plugin for AlwaysFailsToStartAndStopPlugin {

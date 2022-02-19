@@ -21,12 +21,6 @@ struct Hello {
     name: String,
 }
 
-impl fmt::Display for Hello {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Hello")
-    }
-}
-
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     name: String,
