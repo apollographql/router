@@ -97,7 +97,11 @@ pub(crate) fn try_initialize_subscriber(
 
             let provider = builder.with_span_processor(batch).build();
 
-            let tracer = provider.tracer("opentelemetry-jaeger", Some(env!("CARGO_PKG_VERSION")));
+            let tracer = provider.versioned_tracer(
+                "opentelemetry-jaeger",
+                Some(env!("CARGO_PKG_VERSION")),
+                None,
+            );
 
             // This code will hang unless we execute from a separate
             // thread.  See:
