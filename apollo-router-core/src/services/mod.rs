@@ -10,7 +10,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::layer::util::Stack;
-use tower::ServiceBuilder;
+use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
 mod execution_service;
 pub mod http_compat;
@@ -127,7 +127,7 @@ pub trait ServiceBuilderExt<L> {
     #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,
-        cache: Cache<Key, Result<Value, S::Error>>,
+        cache: Cache<Key, Result<Value, String>>,
         key_fn: KeyFn,
         value_fn: ValueFn,
         response_fn: ResponseFn,
@@ -135,7 +135,7 @@ pub trait ServiceBuilderExt<L> {
     where
         Request: Send,
         S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Send + Sync + Clone,
+        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send;
 }
@@ -145,7 +145,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     #[allow(clippy::type_complexity)]
     fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
         self,
-        cache: Cache<Key, Result<Value, S::Error>>,
+        cache: Cache<Key, Result<Value, String>>,
         key_fn: KeyFn,
         value_fn: ValueFn,
         response_fn: ResponseFn,
@@ -153,7 +153,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     where
         Request: Send,
         S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Send + Sync + Clone,
+        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send,
     {

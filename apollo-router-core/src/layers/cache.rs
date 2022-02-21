@@ -1,15 +1,16 @@
 use futures::future::BoxFuture;
+use futures::TryFutureExt;
 use moka::sync::Cache;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::task::Poll;
-use tower::{Layer, Service};
+use tower::{BoxError, Layer, Service};
 
 pub struct CachingService<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
 where
     Request: Send,
     S: Service<Request> + Send,
-    <S as Service<Request>>::Error: Clone + Send + Sync + 'static,
+    <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -17,7 +18,7 @@ where
     value_fn: ValueFn,
     response_fn: ResponseFn,
     inner: S,
-    cache: Cache<Key, Result<Value, S::Error>>,
+    cache: Cache<Key, Result<Value, String>>,
     phantom: PhantomData<Request>,
 }
 
@@ -31,16 +32,16 @@ where
     KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
     ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
     ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
-    <S as Service<Request>>::Error: Send + Sync + Clone,
+    <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send,
     <S as Service<Request>>::Future: Send,
 {
     type Response = S::Response;
-    type Error = S::Error;
+    type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
@@ -52,9 +53,9 @@ where
             Some(Ok(value)) => Box::pin(futures::future::ready(Ok((self.response_fn)(
                 request, value,
             )))),
-            Some(Err(err)) => Box::pin(futures::future::ready(Err(err))),
+            Some(Err(err)) => Box::pin(futures::future::ready(Err(BoxError::from(err)))),
             None => {
-                let delegate = self.inner.call(request);
+                let delegate = self.inner.call(request).err_into();
                 Box::pin(async move {
                     let response = delegate.await;
 
@@ -64,7 +65,7 @@ where
                             cache.insert(key, Ok(value));
                         }
                         Err(err) => {
-                            cache.insert(key, Err(err.clone()));
+                            cache.insert(key, Err(err.to_string()));
                         }
                     }
                     response
@@ -78,14 +79,14 @@ pub struct CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
 where
     Request: Send,
     S: Service<Request> + Send,
-    <S as Service<Request>>::Error: Send + Sync + 'static,
+    <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
     key_fn: KeyFn,
     value_fn: ValueFn,
     response_fn: ResponseFn,
-    cache: Cache<Key, Result<Value, S::Error>>,
+    cache: Cache<Key, Result<Value, String>>,
     phantom1: PhantomData<Request>,
     phantom2: PhantomData<Value>,
     phantom3: PhantomData<S>,
@@ -96,12 +97,12 @@ impl<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
 where
     Request: Send,
     S: Service<Request> + Send,
-    <S as Service<Request>>::Error: Send + Sync + 'static,
+    <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
     pub fn new(
-        cache: Cache<Key, Result<Value, S::Error>>,
+        cache: Cache<Key, Result<Value, String>>,
         key_fn: KeyFn,
         value_fn: ValueFn,
         response_fn: ResponseFn,
@@ -128,7 +129,7 @@ where
     KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
     ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
     ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
-    <S as Service<Request>>::Error: Clone + Send + Sync + 'static,
+    <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -243,7 +244,7 @@ mod test {
                     value: c,
                 },
             ))
-            .map_err(|e: BoxError| e.to_string())
             .service(mock_service.build())
+            .map_err(|e: BoxError| e.to_string())
     }
 }
