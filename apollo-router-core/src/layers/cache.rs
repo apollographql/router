@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::task::Poll;
 use tower::{BoxError, Layer, Service};
 
-pub struct CachingService<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
+pub struct CachingService<S, Request, Key, Value>
 where
     Request: Send,
     S: Service<Request> + Send,
@@ -14,24 +14,20 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    key_fn: KeyFn,
-    value_fn: ValueFn,
-    response_fn: ResponseFn,
+    key_fn: fn(&Request) -> Key,
+    value_fn: fn(&S::Response) -> Value,
+    response_fn: fn(Request, Value) -> S::Response,
     inner: S,
     cache: Cache<Key, Result<Value, String>>,
     phantom: PhantomData<Request>,
 }
 
-impl<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn> Service<Request>
-    for CachingService<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
+impl<S, Request, Key, Value> Service<Request> for CachingService<S, Request, Key, Value>
 where
     Request: Send,
     S: Service<Request> + Send,
     Key: Send + Sync + Eq + Hash + Clone + 'static,
     Value: Send + Sync + Clone + 'static,
-    KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
-    ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
-    ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
     <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send,
     <S as Service<Request>>::Future: Send,
@@ -46,7 +42,7 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         let cache = self.cache.clone();
-        let value_fn = self.value_fn.clone();
+        let value_fn = self.value_fn;
         let key = (self.key_fn)(&request);
         let value = self.cache.get(&key);
         match value {
@@ -75,7 +71,7 @@ where
     }
 }
 
-pub struct CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
+pub struct CachingLayer<S, Request, Key, Value>
 where
     Request: Send,
     S: Service<Request> + Send,
@@ -83,17 +79,16 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    key_fn: KeyFn,
-    value_fn: ValueFn,
-    response_fn: ResponseFn,
+    key_fn: fn(&Request) -> Key,
+    value_fn: fn(&S::Response) -> Value,
+    response_fn: fn(Request, Value) -> S::Response,
     cache: Cache<Key, Result<Value, String>>,
     phantom1: PhantomData<Request>,
     phantom2: PhantomData<Value>,
     phantom3: PhantomData<S>,
 }
 
-impl<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
-    CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
+impl<S, Request, Key, Value> CachingLayer<S, Request, Key, Value>
 where
     Request: Send,
     S: Service<Request> + Send,
@@ -103,9 +98,9 @@ where
 {
     pub fn new(
         cache: Cache<Key, Result<Value, String>>,
-        key_fn: KeyFn,
-        value_fn: ValueFn,
-        response_fn: ResponseFn,
+        key_fn: fn(&Request) -> Key,
+        value_fn: fn(&S::Response) -> Value,
+        response_fn: fn(Request, Value) -> S::Response,
     ) -> Self {
         Self {
             key_fn,
@@ -119,27 +114,23 @@ where
     }
 }
 
-impl<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn> Layer<S>
-    for CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>
+impl<S, Request, Key, Value> Layer<S> for CachingLayer<S, Request, Key, Value>
 where
     Request: Send,
     S: Service<Request> + Send,
     Key: Send + Sync + Eq + Hash + Clone + 'static,
     Value: Send + Sync + Clone + 'static,
-    KeyFn: Fn(&Request) -> Key + Clone + Send + 'static,
-    ValueFn: Fn(&S::Response) -> Value + Clone + Send + 'static,
-    ResponseFn: Fn(Request, Value) -> S::Response + Clone + Send + 'static,
     <S as Service<Request>>::Error: Into<BoxError>,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    type Service = CachingService<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>;
+    type Service = CachingService<S, Request, Key, Value>;
 
     fn layer(&self, inner: S) -> Self::Service {
         CachingService {
-            key_fn: self.key_fn.clone(),
-            value_fn: self.value_fn.clone(),
-            response_fn: self.response_fn.clone(),
+            key_fn: self.key_fn,
+            value_fn: self.value_fn,
+            response_fn: self.response_fn,
             inner,
             cache: self.cache.clone(),
             phantom: Default::default(),

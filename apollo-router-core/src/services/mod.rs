@@ -123,15 +123,15 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L> {
-    #[allow(clippy::type_complexity)]
-    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+    fn cache<S, Request, Key, Value>(
         self,
         cache: Cache<Key, Result<Value, String>>,
-        key_fn: KeyFn,
-        value_fn: ValueFn,
-        response_fn: ResponseFn,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+        key_fn: fn(&Request) -> Key,
+        value_fn: fn(&S::Response) -> Value,
+        response_fn: fn(Request, Value) -> S::Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
     where
         Request: Send,
         S: Service<Request> + Send,
@@ -143,35 +143,26 @@ pub trait ServiceBuilderExt<L> {
         self,
     ) -> ServiceBuilder<
         Stack<
-            CachingLayer<
-                S,
-                QueryPlannerRequest,
-                (Option<String>, Option<String>),
-                Arc<QueryPlan>,
-                fn(&QueryPlannerRequest) -> (Option<String>, Option<String>),
-                fn(&QueryPlannerResponse) -> Arc<QueryPlan>,
-                fn(QueryPlannerRequest, Arc<QueryPlan>) -> QueryPlannerResponse,
-            >,
+            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
             L,
         >,
     >
     where
-        S: Service<QueryPlannerRequest> + Send,
+        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
         <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<QueryPlannerRequest>>::Response: Send,
         <S as Service<QueryPlannerRequest>>::Future: Send;
 }
 
-//Demonstrate adding reusable stuff to ServiceBuilder.
+#[allow(clippy::type_complexity)]
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    #[allow(clippy::type_complexity)]
-    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+    fn cache<S, Request, Key, Value>(
         self,
         cache: Cache<Key, Result<Value, String>>,
-        key_fn: KeyFn,
-        value_fn: ValueFn,
-        response_fn: ResponseFn,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+        key_fn: fn(&Request) -> Key,
+        value_fn: fn(&S::Response) -> Value,
+        response_fn: fn(Request, Value) -> S::Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
     where
         Request: Send,
         S: Service<Request> + Send,
@@ -186,20 +177,12 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self,
     ) -> ServiceBuilder<
         Stack<
-            CachingLayer<
-                S,
-                QueryPlannerRequest,
-                (Option<String>, Option<String>),
-                Arc<QueryPlan>,
-                fn(&QueryPlannerRequest) -> (Option<String>, Option<String>),
-                fn(&QueryPlannerResponse) -> Arc<QueryPlan>,
-                fn(QueryPlannerRequest, Arc<QueryPlan>) -> QueryPlannerResponse,
-            >,
+            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
             L,
         >,
     >
     where
-        S: Service<QueryPlannerRequest> + Send,
+        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
         <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<QueryPlannerRequest>>::Response: Send,
         <S as Service<QueryPlannerRequest>>::Future: Send,
@@ -218,7 +201,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
             },
             |r: &QueryPlannerResponse| r.query_plan.clone(),
             |r: QueryPlannerRequest, v: Arc<QueryPlan>| QueryPlannerResponse {
-                query_plan: v.clone(),
+                query_plan: v,
                 context: r.context,
             },
         )
