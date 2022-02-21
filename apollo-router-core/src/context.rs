@@ -91,6 +91,14 @@ impl<T> Context<T> {
     {
         self.extensions.write().await.remove(k)
     }
+
+    pub async fn get_extension<Q>(&self, k: &Q) -> Option<Value>
+    where
+        ByteString: Borrow<Q>,
+        Q: ?Sized + Ord + Eq + Hash,
+    {
+        self.extensions.read().await.get(k).cloned()
+    }
 }
 
 impl Default for Context<()> {
