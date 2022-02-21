@@ -51,7 +51,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
 ], optional = true }
 prost-types = "0.9.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
-reqwest-middleware = "0.1.4"
+reqwest-middleware = "0.1.5"
 reqwest-tracing = { version = "0.2.1", features = ["opentelemetry_0_17"] }
 schemars = { version="0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
@@ -64,12 +64,12 @@ task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["net", "codec"] }
-tonic = { version = "0.6.0", optional = true }
+tonic = { version = "0.6.2", optional = true }
 tower = { version="0.4.12", features = ["util"] }
 tower-http = { version = "0.2.3", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.31"
-tracing-opentelemetry = "0.17.0"
+tracing-opentelemetry = "0.17.1"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
 typed-builder = "0.9.1"
 url = { version = "2.2.2", features = ["serde"] }
