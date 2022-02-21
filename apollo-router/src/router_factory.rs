@@ -149,6 +149,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             // Shutdown all the plugins we started
             for plugin in builder.plugins().iter_mut().rev() {
                 if let Err(err) = plugin.shutdown().await {
+                    // If we can't shutdown a plugin, we terminate the router since we can't
+                    // assume that it is safe to continue.
                     tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
                     tracing::error!("terminating router...");
                     std::process::exit(1);
@@ -179,6 +181,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // If we get here, everything is good so shutdown our previous plugins
         for mut plugin in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
+                // If we can't shutdown a plugin, we terminate the router since we can't
+                // assume that it is safe to continue.
                 tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
                 tracing::error!("terminating router...");
                 std::process::exit(1);
