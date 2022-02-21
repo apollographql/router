@@ -81,7 +81,7 @@ impl<T> Context<T> {
         self.extensions.write().await.insert(k, v)
     }
 
-    /// Inserts a key-value pair into extensions.
+    /// Removes a key-value pair from extensions.
     /// If extensions did not have this key present, None is returned.
     /// If extensions did have this key present, the value is updated, and the old value is returned.
     pub async fn remove_extension<Q>(&self, k: &Q) -> Option<Value>
