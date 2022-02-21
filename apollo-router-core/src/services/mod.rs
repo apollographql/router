@@ -138,6 +138,28 @@ pub trait ServiceBuilderExt<L> {
         <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send;
+
+    fn cache_query_plan<S>(
+        self,
+    ) -> ServiceBuilder<
+        Stack<
+            CachingLayer<
+                S,
+                QueryPlannerRequest,
+                (Option<String>, Option<String>),
+                Arc<QueryPlan>,
+                fn(&QueryPlannerRequest) -> (Option<String>, Option<String>),
+                fn(&QueryPlannerResponse) -> Arc<QueryPlan>,
+                fn(QueryPlannerRequest, Arc<QueryPlan>) -> QueryPlannerResponse,
+            >,
+            L,
+        >,
+    >
+    where
+        S: Service<QueryPlannerRequest> + Send,
+        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
+        <S as Service<QueryPlannerRequest>>::Response: Send,
+        <S as Service<QueryPlannerRequest>>::Future: Send;
 }
 
 //Demonstrate adding reusable stuff to ServiceBuilder.
@@ -158,5 +180,47 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         <S as Service<Request>>::Future: Send,
     {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
+    }
+
+    fn cache_query_plan<S>(
+        self,
+    ) -> ServiceBuilder<
+        Stack<
+            CachingLayer<
+                S,
+                QueryPlannerRequest,
+                (Option<String>, Option<String>),
+                Arc<QueryPlan>,
+                fn(&QueryPlannerRequest) -> (Option<String>, Option<String>),
+                fn(&QueryPlannerResponse) -> Arc<QueryPlan>,
+                fn(QueryPlannerRequest, Arc<QueryPlan>) -> QueryPlannerResponse,
+            >,
+            L,
+        >,
+    >
+    where
+        S: Service<QueryPlannerRequest> + Send,
+        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
+        <S as Service<QueryPlannerRequest>>::Response: Send,
+        <S as Service<QueryPlannerRequest>>::Future: Send,
+    {
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        self.cache(
+            moka::sync::CacheBuilder::new(plan_cache_limit).build(),
+            |r: &QueryPlannerRequest| {
+                (
+                    r.context.request.body().query.clone(),
+                    r.context.request.body().operation_name.clone(),
+                )
+            },
+            |r: &QueryPlannerResponse| r.query_plan.clone(),
+            |r: QueryPlannerRequest, v: Arc<QueryPlan>| QueryPlannerResponse {
+                query_plan: v.clone(),
+                context: r.context,
+            },
+        )
     }
 }
