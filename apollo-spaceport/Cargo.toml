@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 bytes = "1.1.0"
-clap = { version = "3.0.14", features = ["derive"] }
+clap = { version = "3.1.1", features = ["derive"] }
 flate2 = "1.0.22"
 prost = "0.9.0"
 prost-types = "0.9.0"
@@ -19,7 +19,7 @@ serde = { version = "1.0.136", features = ["derive"] }
 serde_json = { version = "1.0.79" }
 sys-info = "0.9.1"
 tonic = "0.6.2"
-tokio = { version = "1.16.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.17.0", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.31"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
 

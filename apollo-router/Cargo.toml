@@ -24,7 +24,7 @@ otlp-grpc = [
 otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
-anyhow = "1.0.53"
+anyhow = "1.0.54"
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "9a14371f3e5352920c74dcae85fa4e71b24f0449" }
 apollo-router-core = { path = "../apollo-router-core" }
 apollo-uplink = { path = "../uplink" }
@@ -62,7 +62,7 @@ static_assertions = "1.1.0"
 structopt = "0.3.26"
 task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
-tokio = { version = "1.16.1", features = ["full"] }
+tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["net", "codec"] }
 tonic = { version = "0.6.2", optional = true }
 tower = { version="0.4.12", features = ["util"] }
