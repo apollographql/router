@@ -1,6 +1,6 @@
 // This is a test used for rhai plugin
 
-fn router_service() {
+fn map_router_service_response() {
     // Header names are always in lower case
     if headers["x-custom-header"] == "CUSTOM_VALUE" {
         headers.coucou = "hello";
@@ -11,11 +11,12 @@ fn router_service() {
     context.addition = "Here is a new element in the context";
 }
 
-fn execution_service() {
+fn map_execution_service_request() {
     // Header names are always in lower case
     if headers["x-custom-header"] == "CUSTOM_VALUE" {
         headers.coucou = "hello";
     }
+        headers.coucou = "hello";
     context.test = 42;
     context.addition = `Here is a new element in the context with value ${context.test}`;
     context.test = 25;

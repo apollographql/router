@@ -24,7 +24,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
@@ -63,6 +63,7 @@ pub struct RouterRequest {
 }
 
 assert_impl_all!(RouterResponse: Send);
+#[derive(Clone)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
     pub context: Context,
