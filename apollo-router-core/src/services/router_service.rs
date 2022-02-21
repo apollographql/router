@@ -1,5 +1,5 @@
 use crate::apq::APQ;
-use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
+use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -265,7 +265,7 @@ impl PluggableRouterServiceBuilder {
         //ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let (execution_service, execution_worker) = Buffer::pair(
             ServiceBuilder::new()
-                .layer(BoxLayer::new(ForbidHttpGetMutations::default()))
+                .layer(ForbidHttpGetMutationsLayer::default())
                 .service(
                     self.plugins.iter_mut().fold(
                         ExecutionService::builder()
