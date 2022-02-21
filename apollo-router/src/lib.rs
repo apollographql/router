@@ -672,7 +672,7 @@ mod tests {
             .expect("couldn't deserialize into json"))
     }
 
-    #[test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_watching() {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");
@@ -703,7 +703,7 @@ mod tests {
         assert!(stream.into_future().now_or_never().is_none());
     }
 
-    #[test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_invalid() {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
@@ -718,7 +718,7 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_missing() {
         let mut stream = ConfigurationKind::File {
             path: temp_dir().join("does_not_exit"),
@@ -731,7 +731,7 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
     }
 
-    #[test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_no_watch() {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("testdata/supergraph_config.yaml");

@@ -335,7 +335,7 @@ where
     }
 
     async fn maybe_transition_to_running(
-        &self,
+        &mut self,
         state: PrivateState<<FA as RouterServiceFactory>::RouterService>,
     ) -> Result<
         PrivateState<<FA as RouterServiceFactory>::RouterService>,
@@ -378,7 +378,7 @@ where
         }
     }
     async fn reload_server(
-        &self,
+        &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         router_service: <FA as RouterServiceFactory>::RouterService,
@@ -793,7 +793,7 @@ mod tests {
             type Future = <Self::RouterService as Service<Request<graphql::Request>>>::Future;
 
             async fn create<'a>(
-                &'a self,
+                &'a mut self,
                 configuration: Arc<Configuration>,
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
