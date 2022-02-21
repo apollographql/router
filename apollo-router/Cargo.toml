@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -68,7 +68,7 @@ tokio-util = { git = "https://github.com/tokio-rs/tokio.git", rev = "91b9850", f
 # don't bump it to 0.6 until opentelemetry-otlp does
 tonic = { version = "0.5.2", optional = true }
 tower = { version="0.4.12", features = ["util"] }
-tower-http = { version = "0.2.2", features = ["trace"] }
+tower-http = { version = "0.2.3", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.31"
 tracing-opentelemetry = "0.16.0"
