@@ -10,3 +10,13 @@ fn router_service() {
     context.test = 42;
     context.addition = "Here is a new element in the context";
 }
+
+fn execution_service() {
+    // Header names are always in lower case
+    if headers["x-custom-header"] == "CUSTOM_VALUE" {
+        headers.coucou = "hello";
+    }
+    context.test = 42;
+    context.addition = `Here is a new element in the context with value ${context.test}`;
+    context.test = 25;
+}

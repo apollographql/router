@@ -1,4 +1,4 @@
-use super::{from_names_and_values, CompatRequest};
+use super::from_names_and_values;
 use crate::{Context, Error, Object, Path};
 use http::{Response, StatusCode};
 use serde_json_bytes::Value;

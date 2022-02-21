@@ -157,21 +157,17 @@ impl Plugin for Rhai {
             request
         });
 
-        let mut error: Option<Error> = None;
         service
-            .map_response(move |mut response: QueryPlannerResponse| {
+            .map_response(move |response: QueryPlannerResponse| {
                 let extensions = block_on(async { response.context.extensions().await.clone() });
                 let (_headers, context) =
                     match this.run_rhai_script(FUNCTION_NAME, headers_map, extensions) {
                         Ok(res) => res,
                         Err(err) => {
-                            // FIXME: there is no way to return an error properly
+                            // there is no way to return an error properly
                             (block_on(async { response.context.extensions_mut().await }))
                                 .insert("query_plan_error", err.into());
                             return plugin_utils::QueryPlannerResponse::builder()
-                                // .errors(vec![Error::builder()
-                                //     .message(format!("RHAI plugin error: {}", err))
-                                //     .build()])
                                 .context(response.context)
                                 .build()
                                 .into();
@@ -209,9 +205,10 @@ impl Plugin for Rhai {
 
         service
             .map_response(move |mut response: ExecutionResponse| {
-                if let Some(err) = (block_on(async { response.context.extensions().await }))
+                let previous_err = (block_on(async { response.context.extensions().await }))
                     .get("query_plan_error")
-                {
+                    .cloned();
+                if let Some(err) = previous_err {
                     return plugin_utils::ExecutionResponse::builder()
                         .errors(vec![Error::builder()
                             .message(format!("RHAI plugin error: {:?}", err))
@@ -332,11 +329,11 @@ impl Rhai {
         // Restore headers and context from the rhai execution script
         let headers = scope
             .get_value::<Headers>(HEADERS_VAR_NAME)
-            .ok_or("cannot get back headers from RHAI scope".to_string())?;
+            .ok_or_else(|| "cannot get back headers from RHAI scope".to_string())?;
         let context: Object = from_dynamic(
             &scope
                 .get_value::<Dynamic>(CONTEXT_VAR_NAME)
-                .ok_or("cannot get back context from RHAI scope".to_string())?,
+                .ok_or_else(|| "cannot get back context from RHAI scope".to_string())?,
         )
         .map_err(|err| {
             format!(
@@ -358,7 +355,7 @@ mod tests {
 
     use apollo_router_core::{
         http_compat,
-        plugin_utils::{MockRouterService, RouterResponse},
+        plugin_utils::{MockExecutionService, MockRouterService, RouterResponse},
         Context, DynPlugin, ResponseBody, RouterRequest,
     };
     use http::Request;
@@ -366,7 +363,7 @@ mod tests {
     use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test]
-    async fn rhai_plugin_registered() {
+    async fn rhai_plugin_router_service() {
         let mut mock_service = MockRouterService::new();
         mock_service
             .expect_call()
@@ -439,6 +436,72 @@ mod tests {
             &String::from("Here is a new element in the context")
         );
     }
-}
 
-// TODO: Add other hook function (other than only router_service)
+    #[tokio::test]
+    async fn rhai_plugin_execution_service() {
+        let mut mock_service = MockExecutionService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: ExecutionRequest| {
+                Ok(plugin_utils::ExecutionResponse::builder()
+                    .context(req.context)
+                    .build()
+                    .into())
+            });
+
+        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
+            .get("apollographql.com_rhai")
+            .expect("Plugin not found")
+            .create_instance(
+                &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
+            )
+            .unwrap();
+        let mut router_service =
+            dyn_plugin.execution_service(BoxService::new(mock_service.build()));
+        let fake_req = http_compat::Request::from(
+            Request::builder()
+                .header("X-CUSTOM-HEADER", "CUSTOM_VALUE")
+                .body(
+                    apollo_router_core::Request::builder()
+                        .query(String::new())
+                        .build(),
+                )
+                .unwrap(),
+        );
+        let context = Context::new().with_request(Arc::new(fake_req));
+        context.extensions_mut().await.insert("test", 5i64.into());
+        let exec_req = plugin_utils::ExecutionRequest::builder().context(context);
+
+        let exec_resp = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(exec_req.build().into())
+            .await
+            .unwrap();
+        assert_eq!(exec_resp.response.status(), 200);
+        let headers = exec_resp.response.headers().clone();
+        let context = exec_resp.context;
+        // Check if it fails
+        let body = exec_resp.response.into_body();
+        if !body.errors.is_empty() {
+            panic!(
+                "Contains errors : {}",
+                body.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+        }
+
+        assert_eq!(headers.get("coucou").unwrap(), &"hello");
+        let extensions = context.extensions().await;
+        assert_eq!(extensions.get("test").unwrap(), &25i64);
+        assert_eq!(
+            extensions.get("addition").unwrap(),
+            &String::from("Here is a new element in the context with value 42")
+        );
+    }
+}
