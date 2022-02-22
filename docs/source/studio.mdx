@@ -1,65 +1,63 @@
 ---
-title: Setting up managed federation
+title: Managed federation with the Apollo Router
 sidebar_title: Managed federation
 ---
 
+This article describes using the Apollo Router with [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/) and Apollo Studio.
+
 ## Connecting to Apollo Uplink
 
-Uplink is the Apollo-hosted endpoint that your gateway polls to fetch its latest supergraph schema.
-To set up the schema download, create an API key at the "Contributor" level and put it in the `APOLLO_KEY`
-environment variable, and the graph reference in `APOLLO_GRAPH_REF`.
+[Uplink](https://www.apollographql.com/docs/federation/managed-federation/uplink/) is the Apollo-hosted endpoint that a managed router polls to fetch its latest supergraph schema. To authenticate the Apollo Router with Studio:
 
-## Spaceport
+1. [Create a graph API key](https://www.apollographql.com/docs/studio/api-keys/#graph-api-keys) with the `Contributor` key role.
+2. In the router's environment, set the API key as the value of the `APOLLO_KEY` environment variable.
+3. Also set the `APOLLO_GRAPH_REF` environment variable to match whichever Studio graph and variant the router is using (e.g., `my-graph-id@production`).
 
-Spaceport reports usage data to the Apollo ingress. You can see how it is configured in the examples above.
+After you set these values, the Apollo Router automatically starts polling Uplink on startup. Setting these values also enables [usage reporting](#usage-reporting-agent-spaceport) by default.
 
-NB: This component is still evolving and you should expect functionality to change and evolve here. We are actively seeking user feedback as we work to shape this component.
+## Usage reporting agent (spaceport)
 
-### No usage reporting
+**Spaceport** is a reporting agent for the Apollo Router that can transmit usage data to Apollo Studio.
 
-If you don't wish to take advantage of usage reporting, then no configuration is required. This is the default.
+> **Note:** As with the rest of the Apollo Router, spaceport is in active development. Its behavior and functionality might change before general availability release. We welcome user feedback both during and after this alpha period.
 
-### Usage reporting
+### Enabling usage reporting
 
-To enable usage reporting, set up the `APOLLO_KEY` and `APOLLO_GRAPH_REF`
-environment variables as with Apollo Uplink.  The graph reference must refer to a valid graph/variant combination
-against which statistics are reported. The `key` must be a valid,
-[Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
-For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
+You enable usage reporting in the Apollo Router by following the same steps listed in [Connecting to Apollo Uplink](#connecting-to-apollo-uplink).
 
+More information on usage reporting is available in the [Studio documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/).
 
-### Spaceport configuration
+### Configuring spaceport
 
-Spaceport can either be run as an internal, router-specific component or as an external resource shared by multiple routers.
+Spaceport can run either as an [internal component](#internal-spaceport) of a single Apollo Router instance, or as an [external resource](#external-spaceport) shared by _multiple_ router instances.
 
 ```yaml:title=configuration.yaml
 # Spaceport configuration. These values are the default values if not specified
 spaceport:
-  # By default, Apollo Router will run an internal collector.  It can be
-  # configured to not do this by setting this to `true`.  When `true`, no
-  # agent will spawn and we will attempt to communicate to `collector` below.
+  # By default, Apollo Router runs an internal collector. You can override
+  # this default behavior by setting `external: true`. If `true`, no reporting
+  # agent spawns, and the router instead communicates with `collector` below.
   external: false
-  
-  # This can be left unconfigured when `external` is `false`.  When `true`,
-  # this should be the location of a spaceport that is running external from
-  # the Router.
+
+  # If `external` is `true`, this should be the location of a spaceport
+  # that's running external from the Router. Omit otherwise.
   collector: https://127.0.0.1:50051
 
-  # For an internal spaceport instance (when `external` is `false`), what
-  # interface and port should we listen on.
+  # If `external` is `false`, this is the interface and port to listen on.
+  # Omit otherwise.
   listener: 127.0.0.1:50051
 ```
 
 #### Internal spaceport
 
-This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration.
+By default, spaceport runs within a single Apollo Router instance. This default is recommended for most cases, including in production environments. It requires no additional configuration beyond the setup in [Connecting to Apollo Uplink](#connecting-to-apollo-uplink).
 
-In this mode it is possible to further configure the address at which the internal spaceport is listening via the `listener` property.  Configuring a `listener` should only be necessary if there is a clash on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), of if it's desirable to change the bind address.
+You can configure which address the internal spaceport listens on by setting the `listener` property [shown above](#configuring-spaceport). This should only be necessary if there's a conflict on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), or if it's desirable to change the bind address.
 
 #### External spaceport
 
-Running an external spaceport _is not necessary in most circumstances_.  It may be desireable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally.  Under heavier workloads, it can also be beneficial to externalize the trace processing to reduce the amount of work that individiual Router instances take on.  The `listener` parameter is ignored for an external spaceport.
+Running an external spaceport _is not necessary in most cases_. It might be desirable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally.  Under heavier workloads, it can also be beneficial to externalize the trace processing to reduce the amount of work that individiual router instances take on. The `listener` parameter is ignored for an external spaceport.
 
-To enable the external spaceport, another Router can be run to act as the collector with the exclusive role of processing Studio data.  To configure this, the "collector" should have `external` set to `false` and an appropriate `listener` address and port combination.  Routers exporting Studio data should have `external` set to `true`, `listener` unspecified, and their `collector` property configured to point to the collector Router.
+To enable the external spaceport, another Router can be run to act as the collector with the _exclusive_ role of processing Studio data. To configure this, the "collector" should have `external` set to `false` and an appropriate `listener` address and port combination. Routers exporting Studio data should set `external` to `true`, omit `listener`, and configure the `collector` property to point to the collector router.
 
-If you're looking for help with this feature, please [open a Discussion](https://github.com/apollographql/router/discussions). 
+For help with this feature, please [open a discussion](https://github.com/apollographql/router/discussions).
