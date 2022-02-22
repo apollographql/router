@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
-use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
+use apollo_router_core::ServiceBuilderExt;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
@@ -9,7 +9,7 @@ use apollo_router_core::{
 use apollo_router_core::{prelude::*, Context};
 use std::sync::Arc;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxService};
+use tower::util::BoxCloneService;
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -86,10 +86,13 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
 
         for (name, subgraph) in &configuration.subgraphs {
-            let dedup_layer = QueryDeduplicationLayer;
-            let mut subgraph_service = BoxService::new(dedup_layer.layer(
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            ));
+            let mut subgraph_service = ServiceBuilder::new()
+                .dedup_subgraph_requests()
+                .service(ReqwestSubgraphService::new(
+                    name.to_string(),
+                    subgraph.routing_url.clone(),
+                ))
+                .boxed();
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {
