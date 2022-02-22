@@ -157,7 +157,11 @@ impl PipelineBuilder {
         }
         let provider = provider_builder.build();
 
-        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
+        let tracer = provider.versioned_tracer(
+            "apollo-opentelemetry",
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
         // This code will hang unless we execute from a separate
         // thread.  See:
         // https://github.com/apollographql/router/issues/331
@@ -186,7 +190,11 @@ impl PipelineBuilder {
         }
         let provider = provider_builder.build();
 
-        let tracer = provider.tracer("apollo-opentelemetry", Some(env!("CARGO_PKG_VERSION")));
+        let tracer = provider.versioned_tracer(
+            "apollo-opentelemetry",
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
         let _prev_global_provider = global::set_tracer_provider(provider);
 
         Ok(tracer)
