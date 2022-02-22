@@ -1,10 +1,9 @@
 use crate::prelude::graphql::*;
 use crate::services::http_compat;
-use futures::Future;
 use serde_json_bytes::ByteString;
 use std::hash::Hash;
 use std::{borrow::Borrow, sync::Arc};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct Context<T = Arc<http_compat::Request<Request>>> {
