@@ -98,7 +98,7 @@ server:
 
 ## Logging
 
-The Apollo Router enables JSON-formatted logging only if `stdout` is _not_ a TTY.
+The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments). JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver.
 
 ## Configuration file
 
@@ -233,7 +233,7 @@ subgraphs:
 
 You can customize which HTTP headers the Apollo Router includes in its requests to your individual subgraphs. You specify these headers on a per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-More specifically, each subgraph's configuration includes a `layers` array that lists a sequence of transformations for the router to perform (in order) before sending a request:
+More specifically, each subgraph's configuration includes a `layers` array that can include header-related actions for the router to perform (in order) before sending a request:
 
 ```yaml{4-12}
 products:
