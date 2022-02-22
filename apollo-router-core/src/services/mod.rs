@@ -188,7 +188,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     where
         Request: Send,
         Key: Clone + Eq + Hash + Send,
-        S: Service<Request> + Send + Clone,
+        S: Service<Request> + Send,
         <S as Service<Request>>::Response: Clone + Send,
         <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Future: Send,
@@ -202,7 +202,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         Stack<DeduplicationLayer<S, SubgraphRequest, http_compat::Request<Request>>, L>,
     >
     where
-        S: Service<SubgraphRequest, Response = SubgraphResponse> + Send + Clone,
+        S: Service<SubgraphRequest, Response = SubgraphResponse> + Send,
         <S as Service<SubgraphRequest>>::Response: Clone + Send,
         <S as Service<SubgraphRequest>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<SubgraphRequest>>::Future: Send,

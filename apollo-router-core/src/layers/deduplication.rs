@@ -12,7 +12,7 @@ pub struct DeduplicationLayer<S, Request, Key>
 where
     Request: Send,
     Key: Eq + Hash + Send,
-    S: Service<Request> + Send + Clone,
+    S: Service<Request> + Send,
     <S as Service<Request>>::Response: Clone + Send,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
     <S as Service<Request>>::Future: Send,
@@ -26,7 +26,7 @@ impl<S, Request, Key> DeduplicationLayer<S, Request, Key>
 where
     Request: Send,
     Key: Eq + Hash + Send,
-    S: Service<Request> + Send + Clone,
+    S: Service<Request> + Send,
     <S as Service<Request>>::Response: Clone + Send,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
     <S as Service<Request>>::Future: Send,
@@ -48,7 +48,7 @@ impl<S, Request, Key> Layer<S> for DeduplicationLayer<S, Request, Key>
 where
     Request: Send + 'static,
     Key: Clone + Eq + Hash + Send + 'static,
-    S: Service<Request> + Send + Clone,
+    S: Service<Request> + Send,
     <S as Service<Request>>::Response: Clone + Send,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
     <S as Service<Request>>::Future: Send,
@@ -64,13 +64,12 @@ pub struct DeduplicationService<S, Request, Key>
 where
     Request: Send + 'static,
     Key: Clone + Eq + Hash + Send + 'static,
-    S: Service<Request> + Send + Clone,
+    S: Service<Request> + Send,
     <S as Service<Request>>::Response: Clone + Send,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
     <S as Service<Request>>::Future: Send,
 {
     service: S,
-    ready_service: Option<S>,
     key_fn: fn(&Request) -> Option<&Key>,
     request_fn: fn(&Key) -> Request,
     merge_fn: fn(Request, S::Response) -> S::Response,
@@ -82,7 +81,7 @@ impl<S, Request, Key> DeduplicationService<S, Request, Key>
 where
     Request: Send + 'static,
     Key: Clone + Eq + Hash + Send + 'static,
-    S: Service<Request> + Send + Clone,
+    S: Service<Request> + Send,
     <S as Service<Request>>::Response: Clone + Send,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
     <S as Service<Request>>::Future: Send,
@@ -95,7 +94,6 @@ where
     ) -> Self {
         DeduplicationService {
             service,
-            ready_service: None,
             key_fn,
             request_fn,
             merge_fn,
@@ -105,10 +103,9 @@ where
 
     #[allow(clippy::type_complexity)]
     async fn dedup(
-        mut service: S,
+        future: S::Future,
         wait_map: Arc<Mutex<HashMap<Key, Sender<Result<S::Response, String>>>>>,
         key: Key,
-        request_fn: fn(&Key) -> Request,
     ) -> Result<S::Response, BoxError> {
         loop {
             let mut locked_wait_map = wait_map.lock().await;
@@ -130,8 +127,7 @@ where
                     locked_wait_map.insert(key.clone(), tx.clone());
                     drop(locked_wait_map);
 
-                    let downstream_request = (request_fn)(&key);
-                    let res = service.call(downstream_request).await;
+                    let res = future.await;
 
                     {
                         let mut locked_wait_map = wait_map.lock().await;
@@ -159,7 +155,7 @@ impl<S, Request, Key> Service<Request> for DeduplicationService<S, Request, Key>
 where
     Request: Send + 'static,
     Key: Clone + Eq + Hash + Send + 'static,
-    S: Service<Request> + Send + Clone + 'static,
+    S: Service<Request> + Send + 'static,
     <S as Service<Request>>::Response: Clone + Send + 'static,
     <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
     <S as Service<Request>>::Future: Send + 'static,
@@ -169,28 +165,29 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.ready_service
-            .get_or_insert_with(|| self.service.clone())
-            .poll_ready(cx)
-            .map_err(Into::into)
+        self.service.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        let mut service = self.ready_service.take().unwrap();
         let key = (self.key_fn)(&request);
         match key {
             Some(key) => {
-                let request_fn = self.request_fn;
+                // Here we're going to call the service but not act on the future unless we need to.
+                // This removes the need to clone the service at the cost of creating the future.
+                // Requiring clone services is limiting, but not sure of the implications of using
+                // this pattern.
+                let downstream_request = (self.request_fn)(key);
+                let future = self.service.call(downstream_request);
                 let merge_fn = self.merge_fn;
                 let wait_map = self.wait_map.clone();
                 let key = key.clone();
                 Box::pin(async move {
-                    Self::dedup(service, wait_map, key, request_fn)
+                    Self::dedup(future, wait_map, key)
                         .await
                         .map(|response| (merge_fn)(request, response))
                 })
             }
-            None => service.call(request).map_err(Into::into).boxed(),
+            None => self.service.call(request).map_err(Into::into).boxed(),
         }
     }
 }
