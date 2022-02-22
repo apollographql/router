@@ -18,8 +18,6 @@ use serde_json_bytes::ByteString;
 
 use tower::{util::BoxService, BoxError, ServiceExt};
 
-const HEADERS_VAR_NAME: &str = "headers";
-const CONTEXT_VAR_NAME: &str = "context";
 const CONTEXT_ERROR: &str = "__rhai_error";
 
 #[derive(Default, Clone)]
@@ -48,7 +46,7 @@ impl RhaiObjectSetterGetter for Object {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Headers(HeaderMap);
 impl Headers {
     fn set_header(&mut self, name: String, value: String) -> Result<(), Box<EvalAltResult>> {
@@ -479,6 +477,33 @@ impl Plugin for Rhai {
     }
 }
 
+#[derive(Clone, Debug)]
+struct RhaiContext {
+    headers: Headers,
+    extensions: Dynamic,
+}
+
+impl RhaiContext {
+    fn new(headers: Headers, extensions: Dynamic) -> Self {
+        Self {
+            headers,
+            extensions,
+        }
+    }
+    fn get_headers(&mut self) -> Headers {
+        self.headers.clone()
+    }
+    fn set_headers(&mut self, headers: Headers) {
+        self.headers = headers;
+    }
+    fn get_extensions(&mut self) -> Dynamic {
+        self.extensions.clone()
+    }
+    fn set_extensions(&mut self, extensions: Dynamic) {
+        self.extensions = extensions;
+    }
+}
+
 impl Rhai {
     fn run_rhai_script(
         &self,
@@ -487,37 +512,43 @@ impl Rhai {
         extensions: Object,
     ) -> Result<(HeaderMap, Object), String> {
         let mut engine = Engine::new();
-        engine.register_indexer_set_result(Headers::set_header);
-        engine.register_indexer_get(Headers::get_header);
-        engine.register_indexer_set(Object::set);
-        engine.register_indexer_get(Object::get_cloned);
+        engine
+            .register_indexer_set_result(Headers::set_header)
+            .register_indexer_get(Headers::get_header)
+            .register_indexer_set(Object::set)
+            .register_indexer_get(Object::get_cloned)
+            .register_type::<RhaiContext>()
+            .register_get_set(
+                "headers",
+                RhaiContext::get_headers,
+                RhaiContext::set_headers,
+            )
+            .register_get_set(
+                "extensions",
+                RhaiContext::get_extensions,
+                RhaiContext::set_extensions,
+            );
         let mut scope = Scope::new();
-        scope.push(HEADERS_VAR_NAME, Headers(headers_map.clone()));
         let ext_dynamic = to_dynamic(extensions)
             .map_err(|err| format!("Cannot convert extensions to dynamic: {:?}", err))?;
-        scope.push(CONTEXT_VAR_NAME, ext_dynamic);
-
-        engine
-            .call_fn(&mut scope, &self.ast, function_name, ())
-            .map_err(|err| format!("RHAI plugin error: {}", err))?;
+        let response: RhaiContext = engine
+            .call_fn(
+                &mut scope,
+                &self.ast,
+                function_name,
+                (RhaiContext::new(Headers(headers_map.clone()), ext_dynamic),),
+            )
+            .map_err(|err| err.to_string())?;
 
         // Restore headers and context from the rhai execution script
-        let headers = scope
-            .get_value::<Headers>(HEADERS_VAR_NAME)
-            .ok_or_else(|| "cannot get back headers from RHAI scope".to_string())?;
-        let context: Object = from_dynamic(
-            &scope
-                .get_value::<Dynamic>(CONTEXT_VAR_NAME)
-                .ok_or_else(|| "cannot get back context from RHAI scope".to_string())?,
-        )
-        .map_err(|err| {
+        let context: Object = from_dynamic(&response.extensions).map_err(|err| {
             format!(
                 "cannot convert context coming from RHAI scope into an Object: {:?}",
                 err
             )
         })?;
 
-        Ok((headers.0, context))
+        Ok((response.headers.0, context))
     }
 }
 
@@ -604,7 +635,7 @@ mod tests {
         }
 
         assert_eq!(headers.get("coucou").unwrap(), &"hello");
-        assert_eq!(headers.get("coming_from_context").unwrap(), &"value_15");
+        assert_eq!(headers.get("coming_from_extensions").unwrap(), &"value_15");
         let extensions = context.extensions().await;
         assert_eq!(extensions.get("test").unwrap(), &42i64);
         assert_eq!(
@@ -672,7 +703,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "RHAI plugin error: RHAI plugin error: Runtime error: An error occured (line 22, position 5) in call to function map_execution_service_request"
+            "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function map_execution_service_request"
         );
     }
 }

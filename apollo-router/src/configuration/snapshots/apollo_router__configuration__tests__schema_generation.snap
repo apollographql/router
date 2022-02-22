@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 642
+assertion_line: 649
 expression: "&schema"
 
 ---
@@ -155,11 +155,19 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
+            "apollographql.com_rhai"
+          ]
+        },
+        {
+          "required": [
             "example.com_hello"
           ]
         }
       ],
       "properties": {
+        "apollographql.com_rhai": {
+          "$ref": "#/definitions/Conf"
+        },
         "example.com_hello": {
           "$ref": "#/definitions/Conf"
         }

@@ -1,24 +1,26 @@
 // This is a test used for rhai plugin
 
-fn map_router_service_response() {
+fn map_router_service_response(context) {
+    context.headers["blabla"] = "here is a test";
     // Header names are always in lower case
-    if headers["x-custom-header"] == "CUSTOM_VALUE" {
-        headers.coucou = "hello";
+    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        context.headers.coucou = "hello";
     }
-    let value = context.test + 10;
-    headers["coming_from_context"] = `value_${value}`;
-    context.test = 42;
-    context.addition = "Here is a new element in the context";
+    let value = context.extensions.test + 10;
+    context.headers["coming_from_extensions"] = `value_${value}`;
+    context.extensions.test = 42;
+    context.extensions.addition = "Here is a new element in the context";
+
+    context
 }
 
-fn map_execution_service_request() {
+fn map_execution_service_request(context) {
     // Header names are always in lower case
-    if headers["x-custom-header"] == "CUSTOM_VALUE" {
-        headers.coucou = "hello";
+    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        context.headers.coucou = "hello";
     }
-    context.test = 42;
-    context.addition = `Here is a new element in the context with value ${context.test}`;
-    context.test = 25;
+    context.extensions.test = 42;
+    context.extensions.addition = `Here is a new element in the context with value ${context.extensions.test}`;
+    context.extensions.test = 25;
     throw "An error occured";
-
 }
