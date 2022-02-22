@@ -97,7 +97,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |mut request: RouterRequest| {
                     let extensions = block_on(async { request.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
                         extensions,
@@ -109,7 +109,7 @@ impl Plugin for Rhai {
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = context;
+                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
 
                     for (header_name, header_value) in &headers {
                         request
@@ -198,7 +198,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |request: QueryPlannerRequest| {
                     let extensions = block_on(async { request.context.extensions().await.clone() });
-                    let (_headers, context) = match this.run_rhai_script(
+                    let (_headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
                         extensions,
@@ -210,7 +210,7 @@ impl Plugin for Rhai {
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = context;
+                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
 
                     request
                 })
@@ -229,7 +229,7 @@ impl Plugin for Rhai {
                 .map_response(move |response: QueryPlannerResponse| {
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
                         extensions,
@@ -252,7 +252,7 @@ impl Plugin for Rhai {
                             .append(header_name, header_value.clone());
                     }
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    *(block_on(async { ctx.extensions_mut().await })) = context;
+                    *(block_on(async { ctx.extensions_mut().await })) = extensions;
 
                     plugin_utils::QueryPlannerResponse::builder()
                         .context(ctx)
@@ -281,7 +281,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |request: ExecutionRequest| {
                     let extensions = block_on(async { request.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
                         extensions,
@@ -301,7 +301,7 @@ impl Plugin for Rhai {
                     }
 
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    *(block_on(async { ctx.extensions_mut().await })) = context;
+                    *(block_on(async { ctx.extensions_mut().await })) = extensions;
 
                     plugin_utils::ExecutionRequest::builder()
                         .context(ctx)
@@ -336,7 +336,7 @@ impl Plugin for Rhai {
 
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
                         extensions,
@@ -352,7 +352,7 @@ impl Plugin for Rhai {
                                 .into();
                         }
                     };
-                    *(block_on(async { response.context.extensions_mut().await })) = context;
+                    *(block_on(async { response.context.extensions_mut().await })) = extensions;
 
                     for (header_name, header_value) in &headers {
                         response
@@ -385,7 +385,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |mut request: SubgraphRequest| {
                     let extensions = block_on(async { request.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
                         extensions,
@@ -397,7 +397,7 @@ impl Plugin for Rhai {
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = context;
+                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
 
                     for (header_name, header_value) in &headers {
                         request
@@ -435,7 +435,7 @@ impl Plugin for Rhai {
 
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
+                    let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
                         extensions,
@@ -451,7 +451,7 @@ impl Plugin for Rhai {
                                 .into();
                         }
                     };
-                    *(block_on(async { response.context.extensions_mut().await })) = context;
+                    *(block_on(async { response.context.extensions_mut().await })) = extensions;
 
                     for (header_name, header_value) in &headers {
                         response

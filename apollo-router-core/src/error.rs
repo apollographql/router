@@ -115,22 +115,20 @@ impl FetchError {
 #[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default, TypedBuilder)]
 #[error("{message}")]
 #[serde(rename_all = "camelCase")]
-#[builder(field_defaults(default, setter(strip_option)))]
+#[builder(field_defaults(default))]
 pub struct Error {
-    #[builder(setter(!strip_option))]
     /// The error message.
     pub message: String,
 
-    #[builder(setter(!strip_option))]
     /// The locations of the error from the originating request.
     pub locations: Vec<Location>,
 
     /// The path of the error.
+    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
     #[serde(default, skip_serializing_if = "Object::is_empty")]
-    #[builder(setter(!strip_option))]
     pub extensions: Object,
 }
 
