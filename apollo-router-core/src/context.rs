@@ -46,16 +46,8 @@ impl From<Context<http_compat::Request<Request>>> for Context<Arc<http_compat::R
 }
 
 impl<T> Context<T> {
-    /// Take a read lock of extensions
-    /// Be careful when using this method, you could create deadlock if you use `lock_extensions_mut` in the same scope
-    pub fn lock_extensions(&self) -> impl Future<Output = RwLockReadGuard<Object>> {
-        self.extensions.read()
-    }
-
-    /// Take a write lock of extensions
-    /// Be careful when using this method, you could create deadlock if you use `lock_extensions` in the same scope
-    pub fn lock_extensions_mut(&self) -> impl Future<Output = RwLockWriteGuard<Object>> {
-        self.extensions.write()
+    pub fn extensions(&self) -> Arc<RwLock<Object>> {
+        self.extensions.clone()
     }
 
     pub async fn cloned_extensions(&self) -> Object {
