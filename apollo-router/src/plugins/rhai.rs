@@ -125,28 +125,31 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "map_router_service_response";
-        if self
+
+        tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
+        let this = self.clone();
+        let function_found = self
             .ast
             .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE)
-        {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
-            let this = self.clone();
-
-            service = service
-                .map_response(move |mut response: RouterResponse| {
-                    let previous_err = (block_on(async { response.context.extensions().await }))
-                        .get(CONTEXT_ERROR)
-                        .cloned();
-                    if let Some(err) = previous_err {
-                        return plugin_utils::RouterResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!("RHAI plugin error: {:?}", err))
-                                .build()])
-                            .context(response.context)
-                            .build()
-                            .into();
-                    }
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
+        service = service
+            .map_response(move |mut response: RouterResponse| {
+                let previous_err = (block_on(async { response.context.extensions().await }))
+                    .get(CONTEXT_ERROR)
+                    .cloned();
+                if let Some(err) = previous_err {
+                    return plugin_utils::RouterResponse::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!(
+                                "RHAI plugin error: {}",
+                                err.as_str().expect("previous error must be a string")
+                            ))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
+                if function_found {
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
                     let (headers, context) = match this.run_rhai_script(
@@ -173,11 +176,11 @@ impl Plugin for Rhai {
                             .headers_mut()
                             .append(header_name, header_value.clone());
                     }
+                }
 
-                    response
-                })
-                .boxed()
-        }
+                response
+            })
+            .boxed();
 
         service
     }
@@ -312,28 +315,32 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "map_execution_service_response";
-        if self
+
+        tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
+        let this = self.clone();
+        let function_found = self
             .ast
             .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE)
-        {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
-            let this = self.clone();
-            service = service
-                .map_response(move |mut response: ExecutionResponse| {
-                    let previous_err = (block_on(async { response.context.extensions().await }))
-                        .get(CONTEXT_ERROR)
-                        .cloned();
-                    if let Some(err) = previous_err {
-                        return plugin_utils::ExecutionResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!("RHAI plugin error: {:?}", err))
-                                .build()])
-                            .context(response.context)
-                            .build()
-                            .into();
-                    }
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
+        service = service
+            .map_response(move |mut response: ExecutionResponse| {
+                let previous_err = (block_on(async { response.context.extensions().await }))
+                    .get(CONTEXT_ERROR)
+                    .cloned();
+                if let Some(err) = previous_err {
+                    return plugin_utils::ExecutionResponse::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!(
+                                "RHAI plugin error: {}",
+                                err.as_str().expect("previous error must be a string")
+                            ))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
 
+                if function_found {
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
@@ -360,11 +367,11 @@ impl Plugin for Rhai {
                             .headers_mut()
                             .insert(header_name, header_value.clone());
                     }
+                }
 
-                    response
-                })
-                .boxed();
-        }
+                response
+            })
+            .boxed();
 
         service
     }
@@ -412,27 +419,30 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "map_subgraph_service_response";
-        if self
+        let function_found = self
             .ast
             .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE)
-        {
-            let this = self.clone();
-            service = service
-                .map_response(move |mut response: SubgraphResponse| {
-                    let previous_err = (block_on(async { response.context.extensions().await }))
-                        .get(CONTEXT_ERROR)
-                        .cloned();
-                    if let Some(err) = previous_err {
-                        return plugin_utils::SubgraphResponse::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!("RHAI plugin error: {:?}", err))
-                                .build()])
-                            .context(response.context)
-                            .build()
-                            .into();
-                    }
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
+        let this = self.clone();
+        service = service
+            .map_response(move |mut response: SubgraphResponse| {
+                let previous_err = (block_on(async { response.context.extensions().await }))
+                    .get(CONTEXT_ERROR)
+                    .cloned();
+                if let Some(err) = previous_err {
+                    return plugin_utils::SubgraphResponse::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!(
+                                "RHAI plugin error: {}",
+                                err.as_str().expect("previous error must be a string")
+                            ))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
 
+                if function_found {
                     let extensions =
                         block_on(async { response.context.extensions().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
@@ -459,11 +469,11 @@ impl Plugin for Rhai {
                             .headers_mut()
                             .insert(header_name, header_value.clone());
                     }
+                }
 
-                    response
-                })
-                .boxed()
-        }
+                response
+            })
+            .boxed();
 
         service
     }
@@ -489,7 +499,7 @@ impl Rhai {
 
         engine
             .call_fn(&mut scope, &self.ast, function_name, ())
-            .map_err(|err| format!("RHAI plugin error: {:?}", err))?;
+            .map_err(|err| format!("RHAI plugin error: {}", err))?;
 
         // Restore headers and context from the rhai execution script
         let headers = scope
@@ -604,7 +614,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rhai_plugin_execution_service() {
+    async fn rhai_plugin_execution_service_error() {
         let mut mock_service = MockExecutionService::new();
         mock_service
             .expect_call()
@@ -647,13 +657,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(exec_resp.response.status(), 200);
-        let headers = exec_resp.response.headers().clone();
-        let context = exec_resp.context;
         // Check if it fails
         let body = exec_resp.response.into_body();
-        if !body.errors.is_empty() {
+        if body.errors.is_empty() {
             panic!(
-                "Contains errors : {}",
+                "Must contain errors : {}",
                 body.errors
                     .into_iter()
                     .map(|err| err.to_string())
@@ -662,12 +670,9 @@ mod tests {
             );
         }
 
-        // assert_eq!(headers.get("coucou").unwrap(), &"hello");
-        let extensions = context.extensions().await;
-        assert_eq!(extensions.get("test").unwrap(), &25i64);
         assert_eq!(
-            extensions.get("addition").unwrap(),
-            &String::from("Here is a new element in the context with value 42")
+            body.errors.get(0).unwrap().message.as_str(),
+            "RHAI plugin error: RHAI plugin error: Runtime error: An error occured (line 22, position 5) in call to function map_execution_service_request"
         );
     }
 }

@@ -16,8 +16,9 @@ fn map_execution_service_request() {
     if headers["x-custom-header"] == "CUSTOM_VALUE" {
         headers.coucou = "hello";
     }
-        headers.coucou = "hello";
     context.test = 42;
     context.addition = `Here is a new element in the context with value ${context.test}`;
     context.test = 25;
+    throw "An error occured";
+
 }
