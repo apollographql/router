@@ -24,7 +24,7 @@ otlp-grpc = [
 otlp-http = ["opentelemetry-otlp/http-proto"]
 
 [dependencies]
-anyhow = "1.0.54"
+anyhow = "1.0.55"
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "9a14371f3e5352920c74dcae85fa4e71b24f0449" }
 apollo-router-core = { path = "../apollo-router-core" }
 apollo-uplink = { path = "../uplink" }
