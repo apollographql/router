@@ -67,6 +67,9 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          name: Install rover
+          command:  npm i -g @apollo/rover
   linux_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
@@ -87,6 +90,9 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          name: Install rover
+          command:  npm i -g @apollo/rover
 
   windows_prepare_node_env:
     #TODO[igni]: check for node version before we try to install it
@@ -121,6 +127,10 @@ commands:
           name: Assert npm version
           command: |
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+      - run:
+          name: Install rover
+          command: iwr 'https://rover.apollo.dev/win/latest' | iex
+
   windows_prepare_test_env:
     steps:
       - restore_cache:

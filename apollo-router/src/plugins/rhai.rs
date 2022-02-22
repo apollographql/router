@@ -94,7 +94,8 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |mut request: RouterRequest| {
-                    let extensions = block_on(async { request.context.extensions().await.clone() });
+                    let extensions =
+                        block_on(async { request.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
@@ -102,12 +103,18 @@ impl Plugin for Rhai {
                     ) {
                         Ok(res) => res,
                         Err(err) => {
-                            (block_on(async { request.context.extensions_mut().await }))
-                                .insert(CONTEXT_ERROR, err.into());
+                            block_on(async {
+                                request
+                                    .context
+                                    .insert_extension(CONTEXT_ERROR, err.into())
+                                    .await
+                            });
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *request.context.extensions().write().await = extensions;
+                    });
 
                     for (header_name, header_value) in &headers {
                         request
@@ -132,9 +139,15 @@ impl Plugin for Rhai {
             .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
         service = service
             .map_response(move |mut response: RouterResponse| {
-                let previous_err = (block_on(async { response.context.extensions().await }))
-                    .get(CONTEXT_ERROR)
-                    .cloned();
+                let previous_err = block_on(async {
+                    response
+                        .context
+                        .extensions()
+                        .read()
+                        .await
+                        .get(CONTEXT_ERROR)
+                        .cloned()
+                });
                 if let Some(err) = previous_err {
                     return plugin_utils::RouterResponse::builder()
                         .errors(vec![Error::builder()
@@ -149,7 +162,7 @@ impl Plugin for Rhai {
                 }
                 if function_found {
                     let extensions =
-                        block_on(async { response.context.extensions().await.clone() });
+                        block_on(async { response.context.extensions().read().await.clone() });
                     let (headers, context) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
@@ -166,7 +179,7 @@ impl Plugin for Rhai {
                                 .into();
                         }
                     };
-                    *(block_on(async { response.context.extensions_mut().await })) = context;
+                    block_on(async { *response.context.extensions().write().await = context });
 
                     for (header_name, header_value) in &headers {
                         response
@@ -198,7 +211,8 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |request: QueryPlannerRequest| {
-                    let extensions = block_on(async { request.context.extensions().await.clone() });
+                    let extensions =
+                        block_on(async { request.context.extensions().read().await.clone() });
                     let (_headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
@@ -206,12 +220,18 @@ impl Plugin for Rhai {
                     ) {
                         Ok(res) => res,
                         Err(err) => {
-                            (block_on(async { request.context.extensions_mut().await }))
-                                .insert(CONTEXT_ERROR, err.into());
+                            block_on(async {
+                                request
+                                    .context
+                                    .insert_extension(CONTEXT_ERROR, err.into())
+                                    .await
+                            });
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *request.context.extensions().write().await = extensions;
+                    });
 
                     request
                 })
@@ -229,7 +249,7 @@ impl Plugin for Rhai {
             service = service
                 .map_response(move |response: QueryPlannerResponse| {
                     let extensions =
-                        block_on(async { response.context.extensions().await.clone() });
+                        block_on(async { response.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
@@ -238,8 +258,12 @@ impl Plugin for Rhai {
                         Ok(res) => res,
                         Err(err) => {
                             // there is no way to return an error properly
-                            (block_on(async { response.context.extensions_mut().await }))
-                                .insert(CONTEXT_ERROR, err.into());
+                            block_on(async {
+                                response
+                                    .context
+                                    .insert_extension(CONTEXT_ERROR, err.into())
+                                    .await;
+                            });
                             return plugin_utils::QueryPlannerResponse::builder()
                                 .context(response.context)
                                 .build()
@@ -253,7 +277,9 @@ impl Plugin for Rhai {
                             .append(header_name, header_value.clone());
                     }
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    *(block_on(async { ctx.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *ctx.extensions().write().await = extensions;
+                    });
 
                     plugin_utils::QueryPlannerResponse::builder()
                         .context(ctx)
@@ -281,7 +307,8 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |request: ExecutionRequest| {
-                    let extensions = block_on(async { request.context.extensions().await.clone() });
+                    let extensions =
+                        block_on(async { request.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
@@ -289,8 +316,12 @@ impl Plugin for Rhai {
                     ) {
                         Ok(res) => res,
                         Err(err) => {
-                            (block_on(async { request.context.extensions_mut().await }))
-                                .insert(CONTEXT_ERROR, err.into());
+                            block_on(async {
+                                request
+                                    .context
+                                    .insert_extension(CONTEXT_ERROR, err.into())
+                                    .await
+                            });
                             return request;
                         }
                     };
@@ -302,7 +333,9 @@ impl Plugin for Rhai {
                     }
 
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    *(block_on(async { ctx.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *ctx.extensions().write().await = extensions;
+                    });
 
                     plugin_utils::ExecutionRequest::builder()
                         .context(ctx)
@@ -322,9 +355,15 @@ impl Plugin for Rhai {
             .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
         service = service
             .map_response(move |mut response: ExecutionResponse| {
-                let previous_err = (block_on(async { response.context.extensions().await }))
-                    .get(CONTEXT_ERROR)
-                    .cloned();
+                let previous_err = block_on(async {
+                    response
+                        .context
+                        .extensions()
+                        .read()
+                        .await
+                        .get(CONTEXT_ERROR)
+                        .cloned()
+                });
                 if let Some(err) = previous_err {
                     return plugin_utils::ExecutionResponse::builder()
                         .errors(vec![Error::builder()
@@ -340,7 +379,7 @@ impl Plugin for Rhai {
 
                 if function_found {
                     let extensions =
-                        block_on(async { response.context.extensions().await.clone() });
+                        block_on(async { response.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
@@ -357,7 +396,7 @@ impl Plugin for Rhai {
                                 .into();
                         }
                     };
-                    *(block_on(async { response.context.extensions_mut().await })) = extensions;
+                    block_on(async { *response.context.extensions().write().await = extensions });
 
                     for (header_name, header_value) in &headers {
                         response
@@ -389,7 +428,8 @@ impl Plugin for Rhai {
             tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
             service = service
                 .map_request(move |mut request: SubgraphRequest| {
-                    let extensions = block_on(async { request.context.extensions().await.clone() });
+                    let extensions =
+                        block_on(async { request.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_REQUEST,
                         request.context.request.headers(),
@@ -397,12 +437,18 @@ impl Plugin for Rhai {
                     ) {
                         Ok(res) => res,
                         Err(err) => {
-                            (block_on(async { request.context.extensions_mut().await }))
-                                .insert(CONTEXT_ERROR, err.into());
+                            (block_on(async {
+                                request
+                                    .context
+                                    .insert_extension(CONTEXT_ERROR, err.into())
+                                    .await
+                            }));
                             return request;
                         }
                     };
-                    *(block_on(async { request.context.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *request.context.extensions().write().await = extensions;
+                    });
 
                     for (header_name, header_value) in &headers {
                         request
@@ -424,9 +470,15 @@ impl Plugin for Rhai {
         let this = self.clone();
         service = service
             .map_response(move |mut response: SubgraphResponse| {
-                let previous_err = (block_on(async { response.context.extensions().await }))
-                    .get(CONTEXT_ERROR)
-                    .cloned();
+                let previous_err = block_on(async {
+                    response
+                        .context
+                        .extensions()
+                        .read()
+                        .await
+                        .get(CONTEXT_ERROR)
+                        .cloned()
+                });
                 if let Some(err) = previous_err {
                     return plugin_utils::SubgraphResponse::builder()
                         .errors(vec![Error::builder()
@@ -442,7 +494,7 @@ impl Plugin for Rhai {
 
                 if function_found {
                     let extensions =
-                        block_on(async { response.context.extensions().await.clone() });
+                        block_on(async { response.context.extensions().read().await.clone() });
                     let (headers, extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
@@ -459,7 +511,9 @@ impl Plugin for Rhai {
                                 .into();
                         }
                     };
-                    *(block_on(async { response.context.extensions_mut().await })) = extensions;
+                    block_on(async {
+                        *response.context.extensions().write().await = extensions;
+                    });
 
                     for (header_name, header_value) in &headers {
                         response
@@ -583,7 +637,7 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("apollographql.com_rhai")
+            .get("apollographql.com.rhai")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
@@ -601,7 +655,7 @@ mod tests {
                 .unwrap(),
         );
         let context = Context::new().with_request(fake_req);
-        context.extensions_mut().await.insert("test", 5i64.into());
+        context.insert_extension("test", 5i64.into()).await;
         let router_req = plugin_utils::RouterRequest::builder().context(context);
 
         let router_resp = router_service
@@ -636,11 +690,23 @@ mod tests {
 
         assert_eq!(headers.get("coucou").unwrap(), &"hello");
         assert_eq!(headers.get("coming_from_extensions").unwrap(), &"value_15");
-        let extensions = context.extensions().await;
-        assert_eq!(extensions.get("test").unwrap(), &42i64);
         assert_eq!(
-            extensions.get("addition").unwrap(),
-            &String::from("Here is a new element in the context")
+            context
+                .get_extension("test")
+                .await
+                .unwrap()
+                .as_i64()
+                .unwrap(),
+            42i64
+        );
+        assert_eq!(
+            context
+                .get_extension("addition")
+                .await
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "Here is a new element in the context"
         );
     }
 
@@ -658,7 +724,7 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("apollographql.com_rhai")
+            .get("apollographql.com.rhai")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
@@ -677,7 +743,7 @@ mod tests {
                 .unwrap(),
         );
         let context = Context::new().with_request(Arc::new(fake_req));
-        context.extensions_mut().await.insert("test", 5i64.into());
+        context.insert_extension("test", 5i64.into()).await;
         let exec_req = plugin_utils::ExecutionRequest::builder().context(context);
 
         let exec_resp = router_service

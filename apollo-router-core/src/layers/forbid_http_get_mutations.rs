@@ -2,54 +2,40 @@ use crate::{plugin_utils, ExecutionRequest, ExecutionResponse};
 use futures::future::BoxFuture;
 use http::{Method, StatusCode};
 use std::task::Poll;
-use tower::{BoxError, Layer, Service};
+use tower::{Layer, Service};
 
-#[derive(Clone, Default)]
 pub struct ForbidHttpGetMutations {}
 
 pub struct ForbidHttpGetMutationsService<S>
 where
-    S: Service<ExecutionRequest>,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
+    <S as Service<ExecutionRequest>>::Future: Send + 'static,
 {
     service: S,
-    _forbid_http_get_mutations: ForbidHttpGetMutations,
 }
 
-impl<S> ForbidHttpGetMutationsService<S>
-where
-    S: Service<ExecutionRequest>,
-{
-    pub fn new(service: S) -> Self {
-        Self {
-            service,
-            _forbid_http_get_mutations: ForbidHttpGetMutations {},
-        }
-    }
-}
+#[derive(Default)]
+pub struct ForbidHttpGetMutationsLayer {}
 
-impl<S> Layer<S> for ForbidHttpGetMutations
+impl<S> Layer<S> for ForbidHttpGetMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
+    <S as Service<ExecutionRequest>>::Future: Send + 'static,
 {
     type Service = ForbidHttpGetMutationsService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ForbidHttpGetMutationsService {
-            service,
-            _forbid_http_get_mutations: self.clone(),
-        }
+        ForbidHttpGetMutationsService { service }
     }
 }
 
 impl<S> Service<ExecutionRequest> for ForbidHttpGetMutationsService<S>
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>,
-    S::Future: Send + 'static,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
+    <S as Service<ExecutionRequest>>::Future: Send,
 {
-    type Response = <S as Service<ExecutionRequest>>::Response;
-
-    type Error = <S as Service<ExecutionRequest>>::Error;
-
+    type Response = ExecutionResponse;
+    type Error = S::Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -103,7 +89,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutations {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
@@ -122,7 +108,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutations {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
@@ -141,7 +127,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutations {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
@@ -161,7 +147,7 @@ mod forbid_http_get_mutations_tests {
         let expected_allow_header = "POST";
 
         let mock = MockExecutionService::new().build();
-        let mut service_stack = ForbidHttpGetMutations {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Mutation);
 

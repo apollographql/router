@@ -1,5 +1,5 @@
 use crate::apq::APQ;
-use crate::forbid_http_get_mutations::ForbidHttpGetMutations;
+use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
-use tower::util::{BoxCloneService, BoxLayer, BoxService};
+use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
@@ -71,7 +71,7 @@ where
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        //Consume our cloned services and allow ownership to be transferred to the async block.
+        // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
 
@@ -201,6 +201,11 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    // Consume the builder and retrieve its plugins
+    pub fn plugins(self) -> Vec<Box<dyn DynPlugin>> {
+        self.plugins
+    }
+
     pub fn with_subgraph_service<
         S: Service<
                 SubgraphRequest,
@@ -220,19 +225,29 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
-    pub async fn build(mut self) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
-        //Reverse the order of the plugins for usability
-        self.plugins.reverse();
+    pub async fn build(
+        mut self,
+    ) -> (
+        BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+        Vec<Box<dyn DynPlugin>>,
+    ) {
+        // Note: The plugins are always applied in reverse, so that the
+        // fold is applied in the correct sequence. We could reverse
+        // the list of plugins, but we want them back in the original
+        // order at the end of this function. Instead, we reverse the
+        // various iterators that we create for folding and leave
+        // the plugins in their original order.
 
+        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
 
-        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let (query_planner_service, query_worker) = Buffer::pair(
             ServiceBuilder::new().service(
-                self.plugins.iter_mut().fold(
+                self.plugins.iter_mut().rev().fold(
                     CachingQueryPlanner::new(
                         RouterBridgeQueryPlanner::new(self.schema.clone()),
                         plan_cache_limit,
@@ -245,7 +260,7 @@ impl PluggableRouterServiceBuilder {
         );
         tokio::spawn(query_worker.with_subscriber(self.dispatcher.clone()));
 
-        //SubgraphService takes a SubgraphRequest and outputs a RouterResponse
+        // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
             .services
             .into_iter()
@@ -253,6 +268,7 @@ impl PluggableRouterServiceBuilder {
                 let service = self
                     .plugins
                     .iter_mut()
+                    .rev()
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
                 let (service, worker) = Buffer::pair(service, self.buffer);
@@ -262,12 +278,12 @@ impl PluggableRouterServiceBuilder {
             })
             .collect();
 
-        //ExecutionService takes a PlannedRequest and outputs a RouterResponse
+        // ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let (execution_service, execution_worker) = Buffer::pair(
             ServiceBuilder::new()
-                .layer(BoxLayer::new(ForbidHttpGetMutations::default()))
+                .layer(ForbidHttpGetMutationsLayer::default())
                 .service(
-                    self.plugins.iter_mut().fold(
+                    self.plugins.iter_mut().rev().fold(
                         ExecutionService::builder()
                             .schema(self.schema.clone())
                             .subgraph_services(subgraphs)
@@ -313,10 +329,10 @@ impl PluggableRouterServiceBuilder {
         }
         */
 
-        //Router service takes a graphql::Request and outputs a graphql::Response
+        // Router service takes a graphql::Request and outputs a graphql::Response
         let (router_service, router_worker) = Buffer::pair(
             ServiceBuilder::new().layer(APQ::default()).service(
-                self.plugins.iter_mut().fold(
+                self.plugins.iter_mut().rev().fold(
                     RouterService::builder()
                         .query_planner_service(query_planner_service)
                         .query_execution_service(execution_service)
@@ -332,6 +348,6 @@ impl PluggableRouterServiceBuilder {
         );
         tokio::spawn(router_worker.with_subscriber(self.dispatcher.clone()));
 
-        router_service.boxed_clone()
+        (router_service.boxed_clone(), self.plugins)
     }
 }

@@ -10,7 +10,7 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::layer::util::Stack;
-use tower::ServiceBuilder;
+use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
 mod execution_service;
 pub mod http_compat;
@@ -124,40 +124,87 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L> {
-    #[allow(clippy::type_complexity)]
-    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+    fn cache<S, Request, Key, Value>(
         self,
-        cache: Cache<Key, Result<Value, S::Error>>,
-        key_fn: KeyFn,
-        value_fn: ValueFn,
-        response_fn: ResponseFn,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+        cache: Cache<Key, Result<Value, String>>,
+        key_fn: fn(&Request) -> Key,
+        value_fn: fn(&S::Response) -> Value,
+        response_fn: fn(Request, Value) -> S::Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
     where
         Request: Send,
         S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Send + Sync + Clone,
+        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send;
+
+    fn cache_query_plan<S>(
+        self,
+    ) -> ServiceBuilder<
+        Stack<
+            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
+            L,
+        >,
+    >
+    where
+        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
+        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
+        <S as Service<QueryPlannerRequest>>::Response: Send,
+        <S as Service<QueryPlannerRequest>>::Future: Send;
 }
 
-//Demonstrate adding reusable stuff to ServiceBuilder.
+#[allow(clippy::type_complexity)]
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    #[allow(clippy::type_complexity)]
-    fn cache<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>(
+    fn cache<S, Request, Key, Value>(
         self,
-        cache: Cache<Key, Result<Value, S::Error>>,
-        key_fn: KeyFn,
-        value_fn: ValueFn,
-        response_fn: ResponseFn,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value, KeyFn, ValueFn, ResponseFn>, L>>
+        cache: Cache<Key, Result<Value, String>>,
+        key_fn: fn(&Request) -> Key,
+        value_fn: fn(&S::Response) -> Value,
+        response_fn: fn(Request, Value) -> S::Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
     where
         Request: Send,
         S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Send + Sync + Clone,
+        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<Request>>::Response: Send,
         <S as Service<Request>>::Future: Send,
     {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
+    }
+
+    fn cache_query_plan<S>(
+        self,
+    ) -> ServiceBuilder<
+        Stack<
+            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
+            L,
+        >,
+    >
+    where
+        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
+        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
+        <S as Service<QueryPlannerRequest>>::Response: Send,
+        <S as Service<QueryPlannerRequest>>::Future: Send,
+    {
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
+        self.cache(
+            moka::sync::CacheBuilder::new(plan_cache_limit).build(),
+            |r: &QueryPlannerRequest| {
+                (
+                    r.context.request.body().query.clone(),
+                    r.context.request.body().operation_name.clone(),
+                )
+            },
+            |r: &QueryPlannerResponse| r.query_plan.clone(),
+            |r: QueryPlannerRequest, v: Arc<QueryPlan>| QueryPlannerResponse {
+                query_plan: v,
+                context: r.context,
+            },
+        )
     }
 }

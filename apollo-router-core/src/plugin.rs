@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tower::util::BoxService;
@@ -60,7 +60,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
-    type Config: JsonSchema;
+    type Config: JsonSchema + DeserializeOwned;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError>;
 
@@ -100,6 +100,14 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
     }
+
+    fn name(&self) -> &'static str {
+        get_type_of(self)
+    }
+}
+
+fn get_type_of<T>(_: &T) -> &'static str {
+    std::any::type_name::<T>()
 }
 
 #[async_trait]
@@ -129,6 +137,8 @@ pub trait DynPlugin: Send + Sync + 'static {
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+
+    fn name(&self) -> &'static str;
 }
 
 #[async_trait]
@@ -174,6 +184,10 @@ where
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
     }
+
+    fn name(&self) -> &'static str {
+        self.name()
+    }
 }
 
 /// Register a plugin with a group and a name
@@ -187,7 +201,7 @@ macro_rules! register_plugin {
                 $name.to_string()
             }
             else {
-                format!("{}_{}", $group, $name)
+                format!("{}.{}", $group, $name)
             };
 
             $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {

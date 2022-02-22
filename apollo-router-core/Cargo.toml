@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -40,7 +40,7 @@ sha2 = "0.10.2"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 thiserror = "1.0.30"
-tokio = { version = "1.16.1", features = ["rt", "sync"] }
+tokio = { version = "1.17.0", features = ["rt", "sync"] }
 tower = { version = "0.4.12", features = ["util", "buffer"] }
 tower-service = "0.3.1"
 tower-test = "0.4.0"

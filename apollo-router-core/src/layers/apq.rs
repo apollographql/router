@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
 use std::task::Poll;
-use tower::{BoxError, Layer, Service};
+use tower::{Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
@@ -67,7 +67,7 @@ where
 
 impl<S> Service<RouterRequest> for APQService<S>
 where
-    S: Service<RouterRequest, Response = RouterResponse, Error = BoxError>,
+    S: Service<RouterRequest, Response = RouterResponse>,
     S::Future: Send + 'static,
 {
     type Response = <S as Service<RouterRequest>>::Response;

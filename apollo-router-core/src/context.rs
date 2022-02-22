@@ -1,8 +1,9 @@
 use crate::prelude::graphql::*;
 use crate::services::http_compat;
-use futures::Future;
-use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use serde_json_bytes::ByteString;
+use std::hash::Hash;
+use std::{borrow::Borrow, sync::Arc};
+use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct Context<T = Arc<http_compat::Request<Request>>> {
@@ -44,12 +45,53 @@ impl From<Context<http_compat::Request<Request>>> for Context<Arc<http_compat::R
 }
 
 impl<T> Context<T> {
-    pub fn extensions(&self) -> impl Future<Output = RwLockReadGuard<Object>> {
-        self.extensions.read()
+    pub fn extensions(&self) -> Arc<RwLock<Object>> {
+        self.extensions.clone()
     }
 
-    pub fn extensions_mut(&self) -> impl Future<Output = RwLockWriteGuard<Object>> {
-        self.extensions.write()
+    pub async fn cloned_extensions(&self) -> Object {
+        self.extensions.read().await.clone()
+    }
+
+    pub async fn extensions_len(&self) -> usize {
+        self.extensions.read().await.len()
+    }
+
+    pub async fn is_extensions_empty(&self) -> bool {
+        self.extensions.read().await.is_empty()
+    }
+
+    pub async fn clear(&self) {
+        self.extensions.write().await.clear()
+    }
+
+    /// Inserts a key-value pair into extensions.
+    /// If extensions did not have this key present, None is returned.
+    /// If extensions did have this key present, the value is updated, and the old value is returned.
+    pub async fn insert_extension<K>(&self, k: K, v: Value) -> Option<Value>
+    where
+        K: Into<ByteString>,
+    {
+        self.extensions.write().await.insert(k, v)
+    }
+
+    /// Removes a key-value pair from extensions.
+    /// If extensions did not have this key present, None is returned.
+    /// If extensions did have this key present, the value is updated, and the old value is returned.
+    pub async fn remove_extension<Q>(&self, k: &Q) -> Option<Value>
+    where
+        ByteString: Borrow<Q>,
+        Q: ?Sized + Ord + Eq + Hash,
+    {
+        self.extensions.write().await.remove(k)
+    }
+
+    pub async fn get_extension<Q>(&self, k: &Q) -> Option<Value>
+    where
+        ByteString: Borrow<Q>,
+        Q: ?Sized + Ord + Eq + Hash,
+    {
+        self.extensions.read().await.get(k).cloned()
     }
 }
 

@@ -3,6 +3,9 @@ title: Apollo Router usage and config
 sidebar_title: ⚙️ Usage and config
 ---
 
+import { Link } from "gatsby"
+
+
 > For installation instructions, see the [quickstart](../quickstart/).
 
 You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
@@ -99,16 +102,27 @@ Apollo Router detects if the stdout is a TTY and enables JSON logging only if it
 
 ## Configuration file
 
-Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are listed below:
+Apollo Router takes an **optional** YAML configuration file as input via the `--config` option. To show the full possibility of options, all supported configuration options are illustrated below:
 
 ```yaml:title=configuration.yaml
-# Configuration of the router's HTTP server
+#
+# The Apollo Router doesn't require a configuration file to run.  This
+# example is a verbose representation of possible configuration.  It's
+# more of an "everything and the kitchen sink" of potential configuration
+# rather than any recommendation.
+#
+
+#
+# server: Configuration of the HTTP server
+#
 server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
 
-  # Cross origin request headers
+  #
+  # CORS (Cross Origin Resource Sharing)
+  #
   cors:
     # Set to false to disallow any origin and rely exclusively on `origins`
     # Defaults to true
@@ -124,30 +138,180 @@ server:
     # Allowed request methods
     # Defaults to GET, POST, OPTIONS.
     methods: [ GET, POST, OPTIONS ]
-    # Which response headers should be made available to scripts running in the browser,
-    # in response to a cross-origin request.
+    # Which response headers should be made available to scripts running in the
+    # browser in response to a cross-origin request.
     expose_headers:
 
-# Names and URLs of all subgraphs
-# By default, this information is parsed from the supergraph schema
-# Provide it here to override subgraph names or URLs
+#
+# Subgraphs
+#
+# This configuration affects the communication with underlying subgraphs.
+# The `subgraphs` property is a map to individual named subgraphs and should
+# map to the subgraph name that is defined in the Supergraph.
+#
+# On each named subgraph of the subgraphs map, these properties can be set:
+#
+#  - routing_url
+#  - layers
+#
+# These are explained further below.
+#
+# * routing_url *
+#
+# The URL the Router should connect to for this subgraph.
+#
+# By default, routing information is parsed from the supergraph which is
+# typically sufficient for most environments and respects the settings which
+# you've set during composition in Apollo Studio or via Rover.  Provide it here
+# only to *override* the supergraph's subgraph routing URLs.
+#
+#
+# * layers *
+#
+# This is a map of configurable layers which will be invoked.
+#
+# Layers are features (either native or extensions) which can be enabled for
+# each subgraph.  Common layers are the "headers*" layers, and an example can be
+# found for below.  For more information, see later in the documentation.
+#
+
 subgraphs:
-  # Defines a subgraph named "accounts"
+  # Specifies the runtime configuration for talking to the "accounts" subgraph.
   accounts:
-    # The URL of the accounts subgraph's GraphQL endpoint
+    # The URL of the "accounts" subgraph's GraphQL endpoint
     routing_url: http://localhost:4001/graphql
-  # Defines a second subgraph named "products"
+
+    # Layers to be applied to the "accounts" subgraph.
+    layers:
+      - headers_propagate:
+          matching:
+            regex: ^upstream-header-.*
+      - headers_propagate:
+          named:
+            name: "old-name"
+            rename: "new-name"
+            default_value: "0"
+      - headers_propagate:
+          named:
+            name: "old-name"
+            rename: "new-name"
+            default_value: "0"
+      - headers_remove:
+          name: "x-legacy-account-id"
+      - headers_remove:
+          matching:
+            regex: ^x-deprecated.*
+      - headers_insert:
+          name: "router-subgraph-name"
+          value: "accounts"
+
+  # Specifies the runtime configuration for talking to the "products" subgraph.
   products:
+    # The URL of the "products" subgraph's GraphQL endpoint
     routing_url: http://localhost:4003/graphql
 
-# graph configuration, see later section
+    # Layers to be applied to the "products" subgraph.
+    layers:
+      - headers_insert:
+          name: "router-subgraph-name"
+          value: "products"
+      - headers_remove:
+          name: "x-legacy-tracking-id"
+
+
+# graph configuration, see documentation below
 # graph:
 
-# spaceport configuration, see later section
+# spaceport configuration, see documentation below
 # spaceport:
 
-# OpenTelemetry configuration, see next section
+# OpenTelemetry configuration, see documentation below
 # opentelemetry:
+```
+
+## Configuring headers received by subgraphs
+
+Passing headers is supported by leveraging pre-built functionality in the Router known as "layers".  They are therefore defined in the pipeline as members of the named `subgraphs` member (e.g., `reviews`, `products`; often, certain headers only go to certain services) and further defined within the `layers` array.  The `layers` are an array since they're applied in an ordered fashion and later layers may override a previous layer's actions.
+
+There are a few specific layers which offer different header functionality:
+
+- **`headers_propagate`**
+
+  This allows _selectively_ adding headers which were client-originated to the requests made to _specific_ subgraphs.
+  
+  > **Note:** The Router will _never_ propagate so-called [hop-by-hop headers].
+  
+  [hop-by-hop headers]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers, like `Content-length`
+
+  They can be configured based on a `matching` pattern using [`regex`]:
+
+  ```yaml
+      - headers_propagate:
+          matching:
+            regex: .*
+  ```
+
+  [`regex`]: https://docs.rs/regex/latest/regex/
+
+  Or by a static string using the `named` option.  These `named` configurations have additional flexibility since they can have either:
+
+  * `default_value`: A value to set in the event that one was not sent by the client.
+  * `rename`: Allow the header's key to be renamed to a new name.
+
+  Additionally, both `default_value` and `rename` can be paired together:
+
+  ```yaml
+      - headers_propagate:
+          named:
+            name: "foo"
+            default_value: "bar"
+            rename: "fii"
+          named:
+            name: "Authorization"
+
+- **`headers_remove`**
+
+  The `headers_remove` layer allows removing a header that was client-originated and not sending it to a specific subgraph.  In the same way as `headers_propagate` can match either exactly or based on a regular expression using [`regex`].
+
+> **Note:** The Router will _never_ remove so-called [hop-by-hop headers].
+  ```yaml
+      # Do not send this service the "Cookie" header.
+      - headers_remove:
+          name: "Cookie"
+      - headers_remove:
+          matching:
+            # Remove headers using the legacy 'x-' prefix.
+            regex: ^x-.*$
+  ```
+
+- **`headers_insert`**
+
+  The `headers_insert` layer allows adding a header to requests going to a specific subgraph.  In this case, this header is a static string that is originated in the router, rather than a header being sent from the client.
+
+  ```yaml
+      - headers_insert:
+          name: "sent-from-our-apollo-router"
+          value: "indeed"
+  ```
+
+In order to clearly see the hierarchy, here is an example of how two headers are configured for an `accounts` and a `products` subgraph.  These two subgraphs will both be sent `router-subgraph-name` headers with either the `accounts` or `products` value, respectively.  Any other subgraph will not receive any headers at all.
+
+```yaml
+subgraphs:
+  # These headers apply to the "accounts" subgraph only.
+  # They will not be passed to the "products" subgraph (below).
+  accounts:
+    layers:
+      - headers_insert:
+          name: "router-subgraph-name"
+          value: "accounts"
+  products:
+    # Layers to be applied to the "products" subgraph only.
+  # They will not be passed to the "accounts" subgraph (above).
+    layers:
+      - headers_insert:
+          name: "router-subgraph-name"
+          value: "products"
 ```
 
 ## Tracing
@@ -257,69 +421,6 @@ opentelemetry:
                   - value2
 ```
 
-## Spaceport
+## Uplink and Spaceport configuration
 
-Spaceport reports usage data to the Apollo ingress. You can see how it is configured in the examples above.
-
-NB: This component is still evolving and you should expect functionality to change and evolve here. We are actively seeking user feedback as we work to shape this component.
-
-### No usage reporting
-
-If you don't wish to take advantage of usage reporting, then no configuration is required. This is the default.
-
-### Usage reporting
-
-```yaml:title=configuration.yaml
-# Apollo Studio Graph configuration details
-# If we don't specify a graph section, then no statistics are collected for
-# processing, since there is no point collecting statistics unless we have
-# somewhere to send them.
-graph:
-  # Which graph should our Spaceport be sending data about?
-  reference: Benchmarking@current
-  # Key used to send data
-  key: service:<redacted>
-```
-
-To enable usage reporting, configure the `graph` section.  Within the `graph` section, both the `reference` and the `key` must be specified. The `reference` must refer to a valid graph/variant combination against which statistics are reported. The `key` must be a valid, [Contributor API key](https://www.apollographql.com/docs/studio/org/members/#organization-wide-member-roles) which can be used for reporting statistics.
-For more details on this process, refer to the [usage reporting documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/)
-The `key` value fulfills the same function as the `APOLLO_KEY` environment variable in Apollo Server, Apollo Gateway and the Rover CLI.
-Similarly, the `reference` fulfills the same function as the `APOLLO_GRAPH_REF` environment variable.
-
-> **Note:** These environment variables are *not* currently recognised by the router. This is being tracked by [issue #425](https://github.com/apollographql/router/issues/425).  Please follow and enage on that issue if you're interested in this functionality!
-
-### Spaceport configuration
-
-Spaceport can either be run as an internal, router-specific component or as an external resource shared by multiple routers.
-
-```yaml:title=configuration.yaml
-# Spaceport configuration. These values are the default values if not specified
-spaceport:
-  # By default, Apollo Router will run an internal collector.  It can be
-  # configured to not do this by setting this to `true`.  When `true`, no
-  # agent will spawn and we will attempt to communicate to `collector` below.
-  external: false
-  
-  # This can be left unconfigured when `external` is `false`.  When `true`,
-  # this should be the location of a spaceport that is running external from
-  # the Router.
-  collector: https://127.0.0.1:50051
-
-  # For an internal spaceport instance (when `external` is `false`), what
-  # interface and port should we listen on.
-  listener: 0.0.0.0:50051
-```
-
-#### Internal spaceport
-
-This is the default appropriate for most cirumstances, including many production deployments.  This is the default collector mode and requires no additional configuration, so long as the `graph` configuration is set with a `reference` and `key`.
-
-In this mode it is possible to further configure the address at which the internal spaceport is listening via the `listener` property.  Configuring a `listener` should only be necessary if there is a clash on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), of if it's desirable to change the bind address.
-
-#### External spaceport
-
-Running an external spaceport _is not necessary in most circumstances_.  It may be desireable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally.  Under heavier workloads, it can also be beneficial to externalize the trace processing to reduce the amount of work that individiual Router instances take on.  The `listener` parameter is ignored for an external spaceport.
-
-To enable the external spaceport, another Router can be run to act as the collector with the exclusive role of processing Studio data.  To configure this, the "collector" should have `external` set to `false` and an appropriate `listener` address and port combination.  Routers exporting Studio data should have `external` set to `true`, `listener` unspecified, and their `collector` property configured to point to the collector Router.
-
-If you're looking for help with this feature, please [open a Discussion](https://github.com/apollographql/router/discussions). 
+See the  <Link to="/studio">managed federation configuration</Link>

@@ -21,7 +21,7 @@ impl From<QueryPlannerResponse> for crate::QueryPlannerResponse {
             let ctx =
                 Context::new().with_request(queryplanner_response.request.unwrap_or_default());
             if let Some(extensions) = queryplanner_response.extensions {
-                *(block_on(async { ctx.extensions_mut().await })) = extensions;
+                block_on(async { *(ctx.extensions().write().await) = extensions });
             }
 
             ctx
