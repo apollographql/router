@@ -438,7 +438,10 @@ fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
         tracing::warn!("Could not find required definition: {}", query);
         return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
     }
-    tracing::debug!("looking for operation: {}", if op_name.is_empty() { "{empty}" } else { &op_name });
+    tracing::debug!(
+        "looking for operation: {}",
+        if op_name.is_empty() { "-" } else { &op_name }
+    );
     let required_definition = required_definitions.pop().unwrap();
     tracing::debug!("required_definition: {:?}", required_definition);
 
