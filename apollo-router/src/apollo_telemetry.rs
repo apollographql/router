@@ -409,7 +409,7 @@ fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
     // with the operation definition name.
     // If we find more than one match, then in either case we will
     // fail.
-    let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name == "" {
+    let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name.is_empty() {
         Box::new(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
                 if let Some(v) = op_def.name() {
