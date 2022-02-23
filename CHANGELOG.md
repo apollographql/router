@@ -36,8 +36,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   When GraphQL operation names are not nececessary to execute an operation (i.e., when there is only a single operation in a GraphQL document) and the GraphQL operation is _not_ named (i.e., it is anonymous), the `operation_name` attribute on the trace spans that are associated with the request will no longer contain a single hyphen character (`-`) but will instead be an empty string.  This matches the way that these operations are represented during the GraphQL operation's life-cycle as well.
 
-- **Router documentation went missing in studio** [PR #540](https://github.com/apollographql/router/pull/540)
-  This PR updates the introspection query cache to comply with recent studio updates.
+- **Resolved case of missing documentation in Apollo Studio Explorer** ([PR #540](https://github.com/apollographql/router/pull/540))
+
+   We've resolved a scenario that prevented Apollo Studio Explorer from displaying documentation by adding support for a new introspection query which also queries for deprecation (i.e., `includeDeprecated`) on `input` arguments.
   
 # [v0.1.0-alpha.6] 2022-02-18
 
