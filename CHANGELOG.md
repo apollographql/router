@@ -28,6 +28,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :bug: Fixes
 
+- **Studio Explorer Boilerplate HTML** ([PR #526](https://github.com/apollograpqhl/router/pull/526))
+
+  This replaces the behavior of redirecting directly to studio with the more complete implementation which includes a landing-page that is served locally and offers a redirect to Studio. This will match the behavior of Apollo Server and Apollo Gateway today, exactly. This offers more transparency to the user to understand what about to happen (the redirect) and allows them to optionally make the behavior sticky (on account of a browser cookie) for future requests.
+
 - **Anonymous operation names are now empty in tracing** ([PR #525](https://github.com/apollograpqhl/router/pull/525))
 
   When GraphQL operation names are not nececessary to execute an operation (i.e., when there is only a single operation in a GraphQL document) and the GraphQL operation is _not_ named (i.e., it is anonymous), the `operation_name` attribute on the trace spans that are associated with the request will no longer contain a single hyphen character (`-`) but will instead be an empty string.  This matches the way that these operations are represented during the GraphQL operation's life-cycle as well.
