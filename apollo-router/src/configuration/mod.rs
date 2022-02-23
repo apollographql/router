@@ -25,7 +25,6 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use thiserror::Error;
 use typed_builder::TypedBuilder;
 
@@ -80,29 +79,10 @@ pub struct Configuration {
     #[builder(default)]
     pub subgraphs: HashMap<String, Subgraph>,
 
-    /// OpenTelemetry configuration.
-    #[builder(default)]
-    pub opentelemetry: Option<OpenTelemetry>,
-
-    #[serde(skip)]
-    #[builder(default)]
-    #[derivative(Debug = "ignore")]
-    pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
-
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
     pub plugins: Plugins,
-
-    /// Spaceport configuration.
-    #[serde(default)]
-    #[builder(default)]
-    pub spaceport: Option<SpaceportConfig>,
-
-    /// Studio Graph configuration.
-    #[serde(skip, default = "studio_graph")]
-    #[builder(default)]
-    pub graph: Option<StudioGraph>,
 }
 
 fn default_listen() -> ListenAddr {
@@ -443,21 +423,6 @@ pub struct StudioGraph {
     #[serde(skip, default = "apollo_key")]
     #[derivative(Debug = "ignore")]
     pub(crate) key: String,
-}
-
-fn studio_graph() -> Option<StudioGraph> {
-    if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
-        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF").expect(
-            "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
-        );
-
-        Some(StudioGraph {
-            reference: apollo_graph_ref,
-            key: apollo_key,
-        })
-    } else {
-        None
-    }
 }
 
 fn apollo_key() -> String {

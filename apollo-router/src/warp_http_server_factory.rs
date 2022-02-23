@@ -1,4 +1,5 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::get_dispatcher;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
@@ -59,6 +60,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
         <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
+        let dispatcher = get_dispatcher();
+
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -69,12 +72,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .as_ref()
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
-
-            let dispatcher = configuration
-                .subscriber
-                .clone()
-                .map(tracing::Dispatch::new)
-                .unwrap_or_default();
 
             let routes = get_health_request()
                 .or(get_graphql_request_or_redirect(service.clone()))

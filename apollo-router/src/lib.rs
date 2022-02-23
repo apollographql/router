@@ -9,7 +9,6 @@ mod plugins;
 pub mod reqwest_subgraph_service;
 pub mod router_factory;
 mod state_machine;
-mod trace;
 mod warp_http_server_factory;
 
 use crate::configuration::SpaceportConfig;
@@ -26,18 +25,39 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
+use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
+use tracing::Dispatch;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+
+static SUBSCRIBER: Lazy<Mutex<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>>> =
+    Lazy::new(|| Mutex::new(None));
+
+/// Retrieve a new dispatcher which uses the global subscriber
+pub fn get_dispatcher() -> Dispatch {
+    let sub_guard = SUBSCRIBER.lock().unwrap();
+
+    sub_guard
+        .clone()
+        .map(tracing::Dispatch::new)
+        .unwrap_or_default()
+}
+
+/// Update our subscriber. Should only be invoked from OTEL plugin.
+pub fn set_subscriber(new_sub: Arc<dyn tracing::Subscriber + Send + Sync + 'static>) {
+    SUBSCRIBER.lock().unwrap().replace(new_sub);
+}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -258,20 +278,22 @@ impl ConfigurationKind {
                 }
             }
         }
-        .map(|event| match event {
-            UpdateConfiguration(mut config) => {
-                match trace::try_initialize_subscriber(&config) {
-                    Ok(subscriber) => {
-                        config.subscriber = Some(subscriber);
-                    }
-                    Err(err) => {
-                        tracing::error!("Could not initialize tracing subscriber: {}", err,);
-                    }
-                };
-                UpdateConfiguration(config)
-            }
-            _ => event,
-        })
+        /*
+            .map(|event| match event {
+                UpdateConfiguration(mut config) => {
+                    match trace::try_initialize_subscriber(&config) {
+                        Ok(subscriber) => {
+                            config.subscriber = Some(subscriber);
+                        }
+                        Err(err) => {
+                            tracing::error!("Could not initialize tracing subscriber: {}", err,);
+                        }
+                    };
+                    UpdateConfiguration(config)
+                }
+                _ => event,
+            })
+        */
         .chain(stream::iter(vec![NoMoreConfiguration]))
         .boxed()
     }

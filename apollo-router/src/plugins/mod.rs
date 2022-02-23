@@ -1,1 +1,2 @@
 mod hello;
+mod otel;

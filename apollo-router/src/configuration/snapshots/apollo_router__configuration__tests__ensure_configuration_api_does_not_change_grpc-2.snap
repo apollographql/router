@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 741
+assertion_line: 684
 expression: config
 
 ---
@@ -11,43 +11,5 @@ subgraphs:
   example:
     routing_url: "http://foo/"
     layers: []
-opentelemetry:
-  otlp:
-    tracing:
-      exporter:
-        grpc:
-          endpoint: "http://example.org/"
-          metadata:
-            - foo: bar
-            - foo: baz
-            - bar: baz
-          protocol: Grpc
-          timeout: 42
-          tls_config: ~
-      trace_config:
-        sampler:
-          ParentBased:
-            TraceIdRatioBased: 0.42
-        max_events_per_span: 1
-        max_attributes_per_span: 2
-        max_links_per_span: 3
-        max_attributes_per_event: 4
-        max_attributes_per_link: 5
-        resource:
-          attrs:
-            key1:
-              String: value
-            key2:
-              Bool: true
-            key3:
-              I64: 42
-            key4:
-              F64: 42.0
-            key5:
-              Array:
-                String:
-                  - value1
-                  - value2
 plugins: {}
-spaceport: ~
 
