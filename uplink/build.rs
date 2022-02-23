@@ -21,22 +21,24 @@ fn main() {
             .output()
             .expect("failed to execute process");
 
-        let mut buf = Vec::new();
-        let _ = File::open("uplink.graphql")
-            .unwrap()
-            .read_to_end(&mut buf)
-            .unwrap();
         let data = output.stdout;
-        assert_eq!(
-            std::str::from_utf8(&buf).unwrap(),
-            std::str::from_utf8(&data).unwrap(),
-            "Uplink schema changed"
-        );
 
-        File::create("uplink.graphql")
-            .expect("could not createuplink.graphql file")
-            .write_all(&data)
-            .expect("could not write downloaded uplink schema");
+        match File::open("uplink.graphql") {
+            Err(_) => File::create("uplink.graphql")
+                .expect("could not create uplink.graphql file")
+                .write_all(&data)
+                .expect("could not write downloaded uplink schema"),
+            Ok(mut file) => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+
+                assert_eq!(
+                    std::str::from_utf8(&buf).unwrap(),
+                    std::str::from_utf8(&data).unwrap(),
+                    "Uplink schema changed"
+                );
+            }
+        }
     }
 }
 

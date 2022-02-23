@@ -14,7 +14,7 @@ module.exports = {
         algoliaIndexName: 'router',
         algoliaFilters: ['docset:router'],
         sidebarCategories: {
-          null: ["index", "quickstart", "configuration", "build-from-source", "studio"],
+          null: ["index", "quickstart", "configuration", "build-from-source", "managed-federation"],
         },
       },
     },

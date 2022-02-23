@@ -1,6 +1,6 @@
 ---
 title: Apollo Router usage and config
-sidebar_title: ⚙️ Usage and config
+sidebar_title: Usage and config
 ---
 
 import { Link } from "gatsby"
@@ -68,7 +68,7 @@ You can also provide this value via the `CONFIGURATION_PATH` environment variabl
 </td>
 <td>
 
-Log level which may be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 Default: `info`
 
@@ -80,9 +80,9 @@ Default: `info`
 
 ## Handling CORS
 
-If you attempt to query Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
+If you attempt to query the Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
 
-You can configure CORS in the [YAML configuration file](#configuration-file) you can provide to Apollo Router.
+You can configure CORS in the [YAML configuration file](#configuration-file) you provide to the Apollo Router.
 
 Here's an example configuration for adding `localhost` to the list of approved origins:
 
@@ -98,16 +98,16 @@ server:
 
 ## Logging
 
-Apollo Router detects if the stdout is a TTY and enables JSON logging only if it is not.
+The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments). JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver.
 
 ## Configuration file
 
-Apollo Router takes an **optional** YAML configuration file as input via the `--config` option. To show the full possibility of options, all supported configuration options are illustrated below:
+Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are shown below:
 
 ```yaml:title=configuration.yaml
 #
-# The Apollo Router doesn't require a configuration file to run.  This
-# example is a verbose representation of possible configuration.  It's
+# The Apollo Router doesn't require a configuration file to run. This
+# example is a verbose representation of possible configuration. It's
 # more of an "everything and the kitchen sink" of potential configuration
 # rather than any recommendation.
 #
@@ -229,77 +229,92 @@ subgraphs:
 # opentelemetry:
 ```
 
-## Configuring headers received by subgraphs
+## Passing headers to subgraphs
 
-Passing headers is supported by leveraging pre-built functionality in the Router known as "layers".  They are therefore defined in the pipeline as members of the named `subgraphs` member (e.g., `reviews`, `products`; often, certain headers only go to certain services) and further defined within the `layers` array.  The `layers` are an array since they're applied in an ordered fashion and later layers may override a previous layer's actions.
+You can customize which HTTP headers the Apollo Router includes in its requests to your individual subgraphs. You specify these headers on a per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-There are a few specific layers which offer different header functionality:
+More specifically, each subgraph's configuration includes a `layers` array that can include header-related actions for the router to perform (in order) before sending a request:
 
-- **`headers_propagate`**
+```yaml{4-12}
+products:
+  # ...other configuration...
 
-  This allows _selectively_ adding headers which were client-originated to the requests made to _specific_ subgraphs.
-  
-  > **Note:** The Router will _never_ propagate so-called [hop-by-hop headers].
-  
-  [hop-by-hop headers]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers, like `Content-length`
+  layers:
+    - headers_propagate:
+        matching:
+          regex: ^upstream-header-.*
+    - headers_remove:
+        name: "x-legacy-account-id"
+    - headers_insert:
+        name: "router-subgraph-name"
+        value: "accounts"
+```
 
-  They can be configured based on a `matching` pattern using [`regex`]:
+The following transformations are specific to customizing headers sent to subgraphs:
 
-  ```yaml
-      - headers_propagate:
-          matching:
-            regex: .*
-  ```
+### `headers_propagate`
 
-  [`regex`]: https://docs.rs/regex/latest/regex/
+Enables you to selectively propagate headers that were included in the client's request to the router.
 
-  Or by a static string using the `named` option.  These `named` configurations have additional flexibility since they can have either:
+> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length`.
 
-  * `default_value`: A value to set in the event that one was not sent by the client.
-  * `rename`: Allow the header's key to be renamed to a new name.
+You can specify which headers to propagate based on a matching [regex pattern](https://docs.rs/regex/latest/regex/):
 
-  Additionally, both `default_value` and `rename` can be paired together:
+```yaml
+- headers_propagate:
+    matching:
+      regex: .*
+```
 
-  ```yaml
-      - headers_propagate:
-          named:
-            name: "foo"
-            default_value: "bar"
-            rename: "fii"
-          named:
-            name: "Authorization"
+You can also provide a static string with the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
-- **`headers_remove`**
+* `default_value`: A value to set if _no_ value was sent by the client
+* `rename`: Renames the header's key to the provided value
 
-  The `headers_remove` layer allows removing a header that was client-originated and not sending it to a specific subgraph.  In the same way as `headers_propagate` can match either exactly or based on a regular expression using [`regex`].
+```yaml
+- headers_propagate:
+    named:
+      name: "x-user-id"
+      default_value: "abc123"
+      rename: "account-id"
+    named:
+      name: "Authorization"
+```
 
-> **Note:** The Router will _never_ remove so-called [hop-by-hop headers].
-  ```yaml
-      # Do not send this service the "Cookie" header.
-      - headers_remove:
-          name: "Cookie"
-      - headers_remove:
-          matching:
-            # Remove headers using the legacy 'x-' prefix.
-            regex: ^x-.*$
-  ```
+### `headers_remove`
 
-- **`headers_insert`**
+Enables you to selectively remove headers that were included in the client's request to the router. Similar to [`headers_propagate`](#headers-propagate), this option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
 
-  The `headers_insert` layer allows adding a header to requests going to a specific subgraph.  In this case, this header is a static string that is originated in the router, rather than a header being sent from the client.
+> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length`.
 
-  ```yaml
-      - headers_insert:
-          name: "sent-from-our-apollo-router"
-          value: "indeed"
-  ```
+```yaml
+# Do not send this subgraph the "Cookie" header.
+- headers_remove:
+    name: "Cookie"
+- headers_remove:
+    matching:
+      # Remove headers that include the legacy 'x-' prefix.
+      regex: ^x-.*$
+```
 
-In order to clearly see the hierarchy, here is an example of how two headers are configured for an `accounts` and a `products` subgraph.  These two subgraphs will both be sent `router-subgraph-name` headers with either the `accounts` or `products` value, respectively.  Any other subgraph will not receive any headers at all.
+### `headers_insert`
+
+Enables you to add custom headers to requests going to a specific subgraph. These headers are always static strings that originate in the router, instead of originating in the client.
+
+```yaml
+- headers_insert:
+    name: "sent-from-our-apollo-router"
+    value: "indeed"
+```
+
+### Example
+
+Here's an example of customizing different headers for two subgraphs: `accounts` and `products`. These two subgraphs are both sent `router-subgraph-name` headers with either the `accounts` or `products` value, respectively. Any other subgraph receives _no_ headers.
 
 ```yaml
 subgraphs:
   # These headers apply to the "accounts" subgraph only.
-  # They will not be passed to the "products" subgraph (below).
+  # They are not passed to the "products" subgraph (below).
   accounts:
     layers:
       - headers_insert:
@@ -307,20 +322,20 @@ subgraphs:
           value: "accounts"
   products:
     # Layers to be applied to the "products" subgraph only.
-  # They will not be passed to the "accounts" subgraph (above).
+    # They are not passed to the "accounts" subgraph (above).
     layers:
       - headers_insert:
           name: "router-subgraph-name"
           value: "products"
 ```
 
-## Tracing
+## OpenTelemetry tracing
 
-The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), it has exporters for [Jaeger](https://www.jaegertracing.io/) and for the [OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter) over HTTP or gRPC.
-It will generate a trace of the various phases of the GraphQL query and their dependencies.
+The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for [Jaeger](https://www.jaegertracing.io/) and the [OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter) over HTTP or gRPC. The router generates traces that include the various phases of executing a GraphQL operation and associated dependencies.
 
-It will send a `TraceParent` header to subgraphs so they can create and send their own spans under the same trace.
-If the request to the Router already contains a `TraceParent` header, it will use its value as trace id instead of generating a random one.
+The router sends a `TraceParent` header to subgraphs so they can create and send their own spans under the same trace.
+
+If the router receives an incoming request that already contains a `TraceParent` header, it uses that header's trace ID instead of generating a random one.
 
 ### Using Jaeger
 
@@ -343,11 +358,11 @@ opentelemetry:
     # name of the service used in traces
     # defaults to router
     service_name: "router"
-    
+
     trace_config:
-      # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
-      # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
-      # be recorded or not
+      # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+      # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+      # and 1 and decides on trace creation whether it will be recorded.
       sampler:
         TraceIdRatioBased: 0.42
       max_events_per_span: 1
@@ -394,9 +409,9 @@ opentelemetry:
           metadata:
             - foo: bar
       trace_config:
-        # trace sampling, possible values are `AlwaysOn`, `AlwaysOff` or `TraceIdRatioBased: number`
-        # the ratio sampler takes a value between 0 and 1 and decides at the trace creation if it will
-        # be recorded or not
+        # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+        # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+        # and 1 and decides on trace creation whether it will be recorded.
         sampler:
           TraceIdRatioBased: 0.42
         max_events_per_span: 1
@@ -421,6 +436,6 @@ opentelemetry:
                   - value2
 ```
 
-## Uplink and Spaceport configuration
+## Configuring managed federation
 
-See the  <Link to="/studio">managed federation configuration</Link>
+See [Managed federation with the Apollo Router](/studio/).

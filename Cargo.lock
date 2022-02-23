@@ -63,9 +63,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.54"
+version = "1.0.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a99269dff3bc004caa411f38845c20303f1e393ca2bd6581576fa3a7f59577d"
+checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
 
 [[package]]
 name = "apollo-parser"
@@ -3233,7 +3233,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=135a2c506c87e2b9eea47e2905383268e8d8d757#135a2c506c87e2b9eea47e2905383268e8d8d757"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=cf87257b9d58701cd9e09e8b5992f809147a2165#cf87257b9d58701cd9e09e8b5992f809147a2165"
 dependencies = [
  "anyhow",
  "deno_core",
