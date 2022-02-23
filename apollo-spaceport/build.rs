@@ -6,5 +6,7 @@ fn main() {
         .compile(&proto_files, &["."])
         .unwrap_or_else(|e| panic!("protobuf compile error: {}", e));
 
-    println!("cargo:rerun-if-changed={:?}", proto_files);
+    for file in proto_files {
+        println!("cargo:rerun-if-changed={}", file);
+    }
 }
