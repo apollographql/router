@@ -149,7 +149,7 @@ async fn rt_main() -> Result<()> {
         }
         (None, Ok(apollo_key)) => {
             let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
-            .map_err(|_| anyhow!("cannot set up Uplink schema download if the APOLLO_GRAPH_REF environment variable is not set"))?;
+            .map_err(|_| anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
 
             SchemaKind::Registry {
                 apollo_key,
@@ -163,9 +163,14 @@ async fn rt_main() -> Result<()> {
 
         $ ./router --supergraph <file>`
 
-        Or using an Uplink by setting the APOLLO_KEY and APOLLO_GRAPH_REF environment variable
-
-        $ APOLLO_KEY=XXX APOLLO_GRAPH_REF=XXX ./router
+        Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
+        and APOLLO_GRAPH_REF environment variables to your graph's settings.
+        
+          $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+          
+        For more on Apollo Studio and Managed Federation, see our documentation:
+        
+          https://www.apollographql.com/docs/router/managed-federation/
 
     🪐 The supergraph can be built or downloaded from the Apollo Registry
        using the Rover CLI. To find out how, see:
