@@ -28,7 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :bug: Fixes
 
-- **Anonymous operation names are now empty in tracing** ([PR #TODO](https://github.com/apollograpqhl/router/pull/TODO))
+- **Anonymous operation names are now empty in tracing** ([PR #525](https://github.com/apollograpqhl/router/pull/525))
 
   When GraphQL operation names are not nececessary to execute an operation (i.e., when there is only a single operation in a GraphQL document) and the GraphQL operation is _not_ named (i.e., it is anonymous), the `operation_name` attribute on the trace spans that are associated with the request will no longer contain a single hyphen character (`-`) but will instead be an empty string.  This matches the way that these operations are represented during the GraphQL operation's life-cycle as well.
 
