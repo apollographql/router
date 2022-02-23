@@ -21,16 +21,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   [reference]: http://link
 
  -->
-
+ 
 # Upcoming
 
 > Not yet in a release!
 
-## :bug: Fixes
+## :sparkles: Features
 
-- **Studio Explorer Boilerplate HTML** ([PR #526](https://github.com/apollograpqhl/router/pull/526))
+- **Apollo Studio Explorer landing page** ([PR #526](https://github.com/apollographql/router/pull/526)
 
-  This replaces the behavior of redirecting directly to studio with the more complete implementation which includes a landing-page that is served locally and offers a redirect to Studio. This will match the behavior of Apollo Server and Apollo Gateway today, exactly. This offers more transparency to the user to understand what about to happen (the redirect) and allows them to optionally make the behavior sticky (on account of a browser cookie) for future requests.
+  We've replaced the _redirect_ to Apollo Studio with a statically rendered landing page.  This supersedes the previous redirect approach was merely introduced as a short-cut.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
+
+  It is also possible to _save_ the redirect preference and make the behavior sticky for future visits.  As a bonus, this also resolves the failure to preserve the correct HTTP scheme (e.g., `https://`) in the event that the Apollo Router was operating behind a TLS-terminating proxy, since the redirect is now handled client-side.
+
+  Overall, this should be a more durable and more transparent experience for the user.
 
 - **Anonymous operation names are now empty in tracing** ([PR #525](https://github.com/apollograpqhl/router/pull/525))
 
