@@ -32,6 +32,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   We've replaced the _redirect_ to Apollo Studio with a statically rendered landing page.  This supersedes the previous redirect approach was merely introduced as a short-cut.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
 
+- **Display Apollo Router version on startup** ([PR #543](https://github.com/apollographql/router/pull/543))
+  The Apollo Router displays its version on startup from now on, which will come in handy when debugging/observing how your application behaves.
+
+## :bug: Fixes
+
   It is also possible to _save_ the redirect preference and make the behavior sticky for future visits.  As a bonus, this also resolves the failure to preserve the correct HTTP scheme (e.g., `https://`) in the event that the Apollo Router was operating behind a TLS-terminating proxy, since the redirect is now handled client-side.
 
   Overall, this should be a more durable and more transparent experience for the user.
