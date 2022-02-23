@@ -278,22 +278,6 @@ impl ConfigurationKind {
                 }
             }
         }
-        /*
-            .map(|event| match event {
-                UpdateConfiguration(mut config) => {
-                    match trace::try_initialize_subscriber(&config) {
-                        Ok(subscriber) => {
-                            config.subscriber = Some(subscriber);
-                        }
-                        Err(err) => {
-                            tracing::error!("Could not initialize tracing subscriber: {}", err,);
-                        }
-                    };
-                    UpdateConfiguration(config)
-                }
-                _ => event,
-            })
-        */
         .chain(stream::iter(vec![NoMoreConfiguration]))
         .boxed()
     }
