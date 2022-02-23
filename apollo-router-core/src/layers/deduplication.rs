@@ -144,6 +144,12 @@ where
 
                     // Our use case is very specific, so we are sure that
                     // we won't get any errors here.
+
+                    // Note that previous implementation notified in waiters in a separate thread.
+                    // However the logic in the broadcast channel is such that a single mutex
+                    // is updated and the waiting threads are notified to wake.
+                    // It introduces a reasonable performance hit to use the extra thread just to update
+                    // the mutex and woke the waiting threads.
                     tx.send(value.clone())
                         .map_err(|_| ())
                         .expect("there is always at least one receiver alive, the _rx guard; qed");
