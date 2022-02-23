@@ -58,7 +58,7 @@ impl Query {
     }
 
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn parse(query: impl Into<String>) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -411,7 +411,7 @@ mod tests {
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
             let schema: Schema = $schema.parse().expect("could not parse schema");
-            let query = Query::parse($query).expect("could not parse query");
+            let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
             query.format_response(&mut response, $operation, &schema);
             assert_eq_and_ordered!(response.data, $expected);
@@ -607,6 +607,7 @@ mod tests {
                     .query
                     .as_ref()
                     .expect("query has been added right above; qed"),
+                &schema,
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
