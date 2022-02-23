@@ -119,7 +119,6 @@ where
                         context: context.into(),
                     })
                     .await?;
-
                 let mut response = execution
                     .call(ExecutionRequest {
                         query_plan: planned_query.query_plan,
@@ -161,7 +160,7 @@ pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     buffer: usize,
     plugins: Vec<Box<dyn DynPlugin>>,
-    services: Vec<(
+    subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
@@ -174,8 +173,8 @@ impl PluggableRouterServiceBuilder {
             schema,
             buffer,
             plugins: Default::default(),
-            services: Default::default(),
             dispatcher: Default::default(),
+            subgraph_services: Default::default(),
         }
     }
 
@@ -217,7 +216,8 @@ impl PluggableRouterServiceBuilder {
     where
         <S as Service<SubgraphRequest>>::Future: Send,
     {
-        self.services.push((name.to_string(), service.boxed()));
+        self.subgraph_services
+            .push((name.to_string(), service.boxed()));
         self
     }
 
@@ -265,7 +265,7 @@ impl PluggableRouterServiceBuilder {
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
-            .services
+            .subgraph_services
             .into_iter()
             .map(|(name, s)| {
                 let service = self
@@ -368,6 +368,26 @@ impl PluggableRouterServiceBuilder {
                 .boxed(),
             self.buffer,
         );
+
+        let router_service = router_service
+            .map_result(|response: Result<RouterResponse, BoxError>| {
+                if let Err(error) = response {
+                    let response = crate::plugin_utils::RouterResponse::builder()
+                        .errors(vec![crate::Error {
+                            message: error.to_string(),
+                            locations: Default::default(),
+                            path: Default::default(),
+                            extensions: Default::default(),
+                        }])
+                        .build()
+                        .into();
+                    Ok(response)
+                } else {
+                    response
+                }
+            })
+            .boxed_clone();
+
         tokio::spawn(
             router_worker.with_subscriber(
                 self.dispatcher
@@ -377,6 +397,6 @@ impl PluggableRouterServiceBuilder {
             ),
         );
 
-        (router_service.boxed_clone(), self.plugins)
+        (router_service, self.plugins)
     }
 }

@@ -8,5 +8,5 @@ members = [
     "fuzz",
     "uplink",
     "xtask",
+    "examples/*",
 ]
-

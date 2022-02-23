@@ -34,6 +34,54 @@ pub enum ResponseBody {
     RawString(String),
 }
 
+impl TryFrom<ResponseBody> for Response {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::GraphQL(res) => Ok(res),
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawJSON")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawString")
+            }
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for String {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
+            }
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
+            }
+            ResponseBody::RawString(res) => Ok(res),
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for serde_json::Value {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(res) => Ok(res),
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found RawString")
+            }
+        }
+    }
+}
+
 impl From<Response> for ResponseBody {
     fn from(response: Response) -> Self {
         Self::GraphQL(response)
