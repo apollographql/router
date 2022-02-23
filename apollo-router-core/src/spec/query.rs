@@ -34,27 +34,26 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        match data {
-            Value::Object(init) => {
-                let output = self.operations.iter().fold(init, |mut input, operation| {
-                    if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                        let mut output = Object::default();
-                        self.apply_selection_set(
-                            &operation.selection_set,
-                            &mut input,
-                            &mut output,
-                            schema,
-                        );
-                        output
-                    } else {
-                        input
-                    }
-                });
-                response.data = output.into();
-            }
-            _ => {
-                failfast_debug!("Invalid type for data in response.");
-            }
+        if let Value::Object(mut init) = data {
+            self.filter_errors(&response.errors, operation_name, &mut init, schema);
+
+            let output = self.operations.iter().fold(init, |mut input, operation| {
+                if operation_name.is_none() || operation.name.as_deref() == operation_name {
+                    let mut output = Object::default();
+                    self.apply_selection_set(
+                        &operation.selection_set,
+                        &mut input,
+                        &mut output,
+                        schema,
+                    );
+                    output
+                } else {
+                    input
+                }
+            });
+            response.data = output.into();
+        } else {
+            failfast_debug!("Invalid type for data in response.");
         }
     }
 
@@ -228,6 +227,41 @@ impl Query {
                 }
             }
         }
+    }
+
+    fn filter_errors(
+        &self,
+        errors: &[Error],
+        operation_name: Option<&str>,
+        input: &mut Object,
+        schema: &Schema,
+    ) {
+        //FIXME: did we check that before
+        let operation = if let Some(name) = operation_name {
+            self.operations
+                .iter()
+                .filter(|op| op.name.as_deref() == Some(name))
+                .next()
+                .unwrap()
+        } else {
+            self.operations.iter().next().unwrap()
+        };
+
+        println!("operation: {:?}", operation);
+        for error in errors {
+            if let Some(path) = &error.path {
+                self.nullify_error(path, input, schema);
+                /*et output = self.operations.iter().fold(init, |mut input, operation| {
+                if operation_name.is_none() || operation.name.as_deref() == operation_name {
+                    let mut output = Object::default();*/
+            }
+        }
+    }
+
+    fn nullify_error(&self, path: &Path, input: &mut Object, schema: &Schema) {
+        println!("will nullify error at path {}: {:?}", path, path);
+        println!("object: {:?}", input);
+        println!("operations: {:?}", self.operations);
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
@@ -674,6 +708,51 @@ mod tests {
             "type Foo{bar:Bar!} type Bar{x:Int!}",
             "query($foo:Foo){x}",
             json!({"foo":{"bar":{"x":1}}})
+        );
+    }
+
+    macro_rules! assert_filter_errors {
+        ($schema:expr, $query:expr, $response:expr, $errors:expr, $operation:expr, $expected:expr $(,)?) => {{
+            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let query = Query::parse($query).expect("could not parse query");
+            let mut response = Response::builder()
+                .data($response.clone())
+                .errors(
+                    $errors
+                        .as_array()
+                        .as_ref()
+                        .unwrap()
+                        .into_iter()
+                        .map(|e| Error::from_value("test", e.clone()).unwrap())
+                        .collect(),
+                )
+                .build();
+            query.format_response(&mut response, $operation, &schema);
+            assert_eq_and_ordered!(response.data, $expected);
+        }};
+    }
+
+    #[test]
+    fn filter_errors1() {
+        let schema = "";
+        let query = "query MyOperation { foo }";
+        let response = json! {{
+            "foo": "1",
+            "other": "2",
+        }};
+        let errors = json! { [
+
+        ]};
+
+        assert_filter_errors!(
+            schema,
+            query,
+            response,
+            errors,
+            Some("MyOperation"),
+            json! {{
+                "foo": "1",
+            }},
         );
     }
 }
