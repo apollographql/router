@@ -34,14 +34,14 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::Dispatch;
+use tracing::{Dispatch, Subscriber};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
-static SUBSCRIBER: Lazy<Mutex<Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>>> =
+static SUBSCRIBER: Lazy<Mutex<Option<Arc<dyn Subscriber + Send + Sync + 'static>>>> =
     Lazy::new(|| Mutex::new(None));
 
 /// Retrieve a new dispatcher which uses the global subscriber
@@ -55,7 +55,7 @@ pub fn get_dispatcher() -> Dispatch {
 }
 
 /// Update our subscriber. Should only be invoked from OTEL plugin.
-pub fn set_subscriber(new_sub: Arc<dyn tracing::Subscriber + Send + Sync + 'static>) {
+pub fn set_subscriber(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
     SUBSCRIBER.lock().unwrap().replace(new_sub);
 }
 

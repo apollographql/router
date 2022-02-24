@@ -76,14 +76,9 @@ impl Plugin for Otel {
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {
-            match &self.config.spaceport {
-                Some(v) => {
-                    self.tx.send(v.clone()).await?;
-                }
-                None => {
-                    self.tx.send(Default::default()).await?;
-                }
-            }
+            self.tx
+                .send(self.config.spaceport.clone().unwrap_or_default())
+                .await?;
         }
         Ok(())
     }
