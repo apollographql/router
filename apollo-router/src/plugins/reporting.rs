@@ -26,18 +26,18 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug)]
-struct OtelError;
+struct ReportingError;
 
-impl fmt::Display for OtelError {
+impl fmt::Display for ReportingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "OtelError")
+        write!(f, "ReportingError")
     }
 }
 
-impl std::error::Error for OtelError {}
+impl std::error::Error for ReportingError {}
 
 #[derive(Debug)]
-struct Otel {
+struct Reporting {
     config: Conf,
     tx: tokio::sync::mpsc::Sender<SpaceportConfig>,
 }
@@ -67,11 +67,11 @@ fn studio_graph() -> Option<StudioGraph> {
 }
 
 #[async_trait::async_trait]
-impl Plugin for Otel {
+impl Plugin for Reporting {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("starting: {}: {}", stringify!(Otel), self.name());
+        tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
         set_subscriber(self.try_initialize_subscriber()?);
 
         // Only check for notify if we have graph configuration
@@ -84,12 +84,12 @@ impl Plugin for Otel {
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("shutting down: {}: {}", stringify!(Otel), self.name());
+        tracing::debug!("shutting down: {}: {}", stringify!(Reporting), self.name());
         Ok(())
     }
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("Otel configuration {:?}!", configuration);
+        tracing::debug!("Reporting configuration {:?}!", configuration);
         // Create graph configuration based on environment variables
         configuration.graph = studio_graph();
 
@@ -135,14 +135,14 @@ impl Plugin for Otel {
             }
             tracing::debug!("terminating spaceport loop");
         });
-        Ok(Otel {
+        Ok(Reporting {
             config: configuration,
             tx,
         })
     }
 }
 
-impl Otel {
+impl Reporting {
     fn try_initialize_subscriber(
         &self,
     ) -> Result<Arc<dyn tracing::Subscriber + Send + Sync + 'static>, BoxError> {
@@ -359,19 +359,17 @@ async fn do_listen(addr_str: String) -> bool {
     true
 }
 
-register_plugin!("com.apollo", "otel", Otel);
+register_plugin!("com.apollographql", "reporting", Reporting);
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.apollo.otel")
+            .get("com.apollographql.reporting")
             .expect("Plugin not found")
-            .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
+            .create_instance(&serde_json::json!({ "opentelemetry": null }))
             .unwrap();
     }
 }

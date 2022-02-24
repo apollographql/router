@@ -88,10 +88,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             if !configuration
                 .plugins
                 .plugins
-                .contains_key("com.apollo.otel")
+                .contains_key("com.apollographql.reporting")
             {
                 configuration.plugins.plugins.insert(
-                    "com.apollo.otel".to_string(),
+                    "com.apollographql.reporting".to_string(),
                     serde_json::json!({ "opentelemetry": null }),
                 );
             }

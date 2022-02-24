@@ -1,2 +1,2 @@
 mod hello;
-mod otel;
+mod reporting;

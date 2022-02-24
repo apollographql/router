@@ -135,11 +135,6 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-            "com.apollo.otel"
-          ]
-        },
-        {
-          "required": [
             "com.apollo.test.always_fails_to_start"
           ]
         },
@@ -160,14 +155,16 @@ expression: "&schema"
         },
         {
           "required": [
+            "com.apollographql.reporting"
+          ]
+        },
+        {
+          "required": [
             "com.example.hello"
           ]
         }
       ],
       "properties": {
-        "com.apollo.otel": {
-          "$ref": "#/definitions/Conf"
-        },
         "com.apollo.test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
@@ -178,6 +175,9 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         },
         "com.apollo.test.always_starts_and_stops": {
+          "$ref": "#/definitions/Conf"
+        },
+        "com.apollographql.reporting": {
           "$ref": "#/definitions/Conf"
         },
         "com.example.hello": {
