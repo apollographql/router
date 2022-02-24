@@ -249,6 +249,21 @@ impl Query {
         };
 
         println!("operation: {:?}", operation);
+        let operation_list = match operation.kind {
+            OperationKind::Query => schema.object_types.get("Query"),
+            OperationKind::Mutation => schema.object_types.get("Mutation"),
+            OperationKind::Subscription => {
+                tracing::error!("we do not support subscriptions yet");
+                return;
+            }
+        };
+
+        if operation_list.is_none() {
+            tracing::error!("cannot find the right operation type, that should have been caught by the query planner");
+            return;
+        }
+
+        let operation_list = operation_list.unwrap();
 
         for selection in &operation.selection_set {
             match selection {
@@ -256,29 +271,27 @@ impl Query {
                     name,
                     selection_set,
                 } => {
-                    let schema_operation = match operation.kind {
-                        OperationKind::Query => schema
-                            .object_types
-                            .get("Query")
-                            .as_ref()
-                            .and_then(|q| q.field(name)),
-                        OperationKind::Mutation => schema
-                            .object_types
-                            .get("Mutation")
-                            .as_ref()
-                            .and_then(|m| m.field(name)),
-                        OperationKind::Subscription => None,
-                    };
-                    println!("type for operation {}: {:?}", name, schema_operation);
+                    let schema_operation = operation_list.field(name);
+                    println!(
+                        "type for operation {}: {:?}, selection: {:?}",
+                        name, schema_operation, selection_set
+                    );
 
                     match schema_operation {
                         None => todo!(),
                         Some(field_type) => match input.get_mut(name.as_str()) {
                             None => {}
-                            Some(value) => match field_type.filter_errors(value, schema) {
-                                Ok(_) => return,
-                                Err(_) => {}
-                            },
+                            Some(value) => {
+                                //match field_type.filter_errors(value, selection_set, schema) {
+                                match field_type.filter_errors(
+                                    value,
+                                    selection_set.as_deref(),
+                                    schema,
+                                ) {
+                                    Ok(_) => return,
+                                    Err(_) => {}
+                                }
+                            }
                         },
                     }
 
@@ -873,7 +886,7 @@ mod tests {
         }};
         assert_format_response!(
             schema,
-            query,
+            "query  { me { name } }",
             response,
             None,
             json! {{

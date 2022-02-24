@@ -88,6 +88,7 @@ impl FieldType {
     pub(crate) fn filter_errors(
         &self,
         value: &mut Value,
+        selections: Option<&[Selection]>,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         println!(
@@ -108,7 +109,7 @@ impl FieldType {
                     println!("passed null to NonNull, returning invalidvalue");
                     return Err(InvalidValue);
                 } else {
-                    match inner_type.filter_errors(value, schema) {
+                    match inner_type.filter_errors(value, selections, schema) {
                         Ok(()) => {
                             return if value.is_null() {
                                 Err(InvalidValue)
@@ -131,24 +132,18 @@ impl FieldType {
                     // if the types are nullable, the inner call to filter_errors will take care
                     // of setting the current entry to null
                     vec.iter_mut()
-                        .try_for_each(|x| inner_type.filter_errors(x, schema))
+                        .try_for_each(|x| inner_type.filter_errors(x, selections, schema))
                 })
             }
 
             FieldType::Named(name) => {
-                /*if let Some(o) = value.as_object_mut() {
-                    let v =
-                } else {
-                    Err(InvalidValue)
-                }*/
-
                 value
                     .as_object_mut()
                     .ok_or(InvalidValue)
                     .and_then(|object| {
                         if let Some(object_type) = schema.object_types.get(name) {
                             let r = object_type
-                                .filter_errors(object, schema)
+                                .filter_errors(object, selections, schema)
                                 .map_err(|_| InvalidValue);
 
                             println!("res for object {}: {:?}", name, r);

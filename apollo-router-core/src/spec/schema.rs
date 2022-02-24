@@ -311,16 +311,45 @@ macro_rules! implement_object_type_or_interface {
             pub(crate) fn filter_errors(
                 &self,
                 object: &mut Object,
+                selections: Option<&[Selection]>,
                 schema: &Schema,
             ) -> Result<(), InvalidObject> {
-                self
+                if let Some(selections) = selections {
+                    for selection in selections {
+                        match selection {
+                            Selection::Field {
+                                name,
+                                selection_set,
+                            }=> {
+                                println!("object will test field {} with selection {:?}", name, selection_set);
+                                let  ty  = self.fields.get(name).expect("FIXME");
+                                let mut null = Value::Null;
+                                let value = object.get_mut(name.as_str()).unwrap_or(&mut null);
+                                println!(">{:?} field {} = {} ", ty, name, value);
+                                let r = ty.filter_errors(value,selection_set.as_deref(), schema);
+                                println!("<{:?} field {} => res = {:?}", ty, name, r);
+                                if r.is_err() {
+                                    return Err(InvalidObject);
+                                }
+                            },
+                            Selection::InlineFragment {
+                                fragment,
+                            }=> todo!(),
+                            Selection::FragmentSpread {
+                                name,
+                            } => todo!(),
+                        }
+                    }
+                }
+                //FIXME: interfaces?
+                /*self
                     .fields
                     .iter()
                     .try_for_each(|(name, ty)| {
                         let mut null = Value::Null;
                         let value = object.get_mut(name.as_str()).unwrap_or(&mut null);
                         println!(">{:?} field {} = {} ", ty, name, value);
-                        let r = ty.filter_errors(value, schema);
+                        let r = ty.filter_errors(value,selections, schema);
                         println!("<{:?} field {} => res = {:?}", ty, name, r);
 
 
@@ -333,6 +362,9 @@ macro_rules! implement_object_type_or_interface {
                     .iter()
                     .flat_map(|name| schema.interfaces.get(name))
                     .try_for_each(|interface| interface.filter_errors(object, schema))
+                */
+
+                Ok(())
             }
 
             pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {
