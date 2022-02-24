@@ -307,6 +307,33 @@ macro_rules! implement_object_type_or_interface {
                     .flat_map(|name| schema.interfaces.get(name))
                     .try_for_each(|interface| interface.validate_object(object, schema))
             }
+
+            pub(crate) fn filter_errors(
+                &self,
+                object: &mut Object,
+                schema: &Schema,
+            ) -> Result<(), InvalidObject> {
+                self
+                    .fields
+                    .iter()
+                    .try_for_each(|(name, ty)| {
+                        let mut null = Value::Null;
+                        let value = object.get_mut(name.as_str()).unwrap_or(&mut null);
+                        println!(">{:?} field {} = {} ", ty, name, value);
+                        let r = ty.filter_errors(value, schema);
+                        println!("<{:?} field {} => res = {:?}", ty, name, r);
+
+
+                        r
+                    })
+                    .map_err(|_| InvalidObject)?;
+
+                self
+                    .interfaces
+                    .iter()
+                    .flat_map(|name| schema.interfaces.get(name))
+                    .try_for_each(|interface| interface.filter_errors(object, schema))
+            }
         }
 
         $(

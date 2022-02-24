@@ -84,6 +84,111 @@ impl FieldType {
             _ => Err(InvalidValue),
         }
     }
+
+    pub(crate) fn filter_errors(
+        &self,
+        value: &mut Value,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
+        println!(
+            "will test type {:?} for value {:?}",
+            self,
+            serde_json::to_string(&value).unwrap()
+        );
+        // for every type, if we have an invalid value, we will replace it with null
+        // and return Ok(()), because values are optional by default
+        // here we match only on the field type and not the value, to avoid a move of
+        // the &mut Value, because we would not be able to set it to null afterwards
+        let res = match self {
+            // for non null types, we validate with the inner type, then if we get an InvalidValue
+            // we set it to null and immediately return an error instead of Ok(()), because we
+            // want the error to go up until the next nullable parent
+            FieldType::NonNull(inner_type) => {
+                if value.is_null() {
+                    println!("passed null to NonNull, returning invalidvalue");
+                    return Err(InvalidValue);
+                } else {
+                    match inner_type.filter_errors(value, schema) {
+                        Ok(()) => {
+                            return if value.is_null() {
+                                Err(InvalidValue)
+                            } else {
+                                Ok(())
+                            };
+                        }
+                        Err(InvalidValue) => {
+                            println!("nonnull got invalid value");
+                            *value = Value::Null;
+                            return Err(InvalidValue);
+                        }
+                    }
+                }
+            }
+            FieldType::List(inner_type) => {
+                value.as_array_mut().ok_or(InvalidValue).and_then(|vec| {
+                    // if the list contains nonnullable types, we will receive a Err(InvalidValue)
+                    // and should replace the entire list with null
+                    // if the types are nullable, the inner call to filter_errors will take care
+                    // of setting the current entry to null
+                    vec.iter_mut()
+                        .try_for_each(|x| inner_type.filter_errors(x, schema))
+                })
+            }
+
+            FieldType::Named(name) => {
+                /*if let Some(o) = value.as_object_mut() {
+                    let v =
+                } else {
+                    Err(InvalidValue)
+                }*/
+
+                value
+                    .as_object_mut()
+                    .ok_or(InvalidValue)
+                    .and_then(|object| {
+                        if let Some(object_type) = schema.object_types.get(name) {
+                            let r = object_type
+                                .filter_errors(object, schema)
+                                .map_err(|_| InvalidValue);
+
+                            println!("res for object {}: {:?}", name, r);
+                            r
+                        } else {
+                            Err(InvalidValue)
+                        }
+                    })
+            }
+
+            // the rest of the possible types just need to validate the expected value
+            FieldType::Int => {
+                let opt = if value.is_i64() {
+                    value.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else if value.is_u64() {
+                    value.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else {
+                    None
+                };
+                opt.map(|_| ()).ok_or(InvalidValue)
+            }
+            FieldType::Float => value.as_f64().map(|_| ()).ok_or(InvalidValue),
+            FieldType::Boolean => value.as_bool().map(|_| ()).ok_or(InvalidValue),
+            FieldType::String => value.as_str().map(|_| ()).ok_or(InvalidValue),
+            FieldType::Id => {
+                if value.is_string() || value.is_i64() || value.is_u64() || value.is_f64() {
+                    Ok(())
+                } else {
+                    Err(InvalidValue)
+                }
+            }
+        };
+
+        println!("res: {:?}", res);
+        if res.is_err() {
+            *value = Value::Null;
+        }
+
+        Ok(())
+    }
 }
 
 impl From<ast::Type> for FieldType {

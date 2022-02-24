@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::{fetch::OperationKind, prelude::graphql::*};
 use apollo_parser::ast;
 use derivative::Derivative;
 use std::collections::{HashMap, HashSet};
@@ -58,7 +58,7 @@ impl Query {
     }
 
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
+    pub fn parse(query: impl Into<String>) -> Option<Self> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -242,27 +242,67 @@ impl Query {
                 .iter()
                 .filter(|op| op.name.as_deref() == Some(name))
                 .next()
+                //FIXME
                 .unwrap()
         } else {
             self.operations.iter().next().unwrap()
         };
 
         println!("operation: {:?}", operation);
+
+        for selection in &operation.selection_set {
+            match selection {
+                Selection::Field {
+                    name,
+                    selection_set,
+                } => {
+                    let schema_operation = match operation.kind {
+                        OperationKind::Query => schema
+                            .object_types
+                            .get("Query")
+                            .as_ref()
+                            .and_then(|q| q.fields.get(name)),
+                        OperationKind::Mutation => schema
+                            .object_types
+                            .get("Mutation")
+                            .as_ref()
+                            .and_then(|m| m.fields.get(name)),
+                        OperationKind::Subscription => None,
+                    };
+                    println!("type for operation {}: {:?}", name, schema_operation);
+
+                    match schema_operation {
+                        None => todo!(),
+                        Some(field_type) => match input.get_mut(name.as_str()) {
+                            None => {}
+                            Some(value) => match field_type.filter_errors(value, schema) {
+                                Ok(_) => return,
+                                Err(_) => {}
+                            },
+                        },
+                    }
+
+                    // FIXME: should we set the entire response to null in all those cases?
+                    input.insert("name", Value::Null);
+                    return;
+                }
+                Selection::InlineFragment { fragment } => todo!(),
+                Selection::FragmentSpread { name } => todo!(),
+            }
+        }
+        /*FIXME can we assume that we can validate only value types, while ignoring error paths?
         for error in errors {
             if let Some(path) = &error.path {
                 self.nullify_error(path, input, schema);
-                /*et output = self.operations.iter().fold(init, |mut input, operation| {
-                if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                    let mut output = Object::default();*/
             }
-        }
+        }*/
     }
 
-    fn nullify_error(&self, path: &Path, input: &mut Object, schema: &Schema) {
+    /*fn nullify_error(&self, path: &Path, input: &mut Object, schema: &Schema) {
         println!("will nullify error at path {}: {:?}", path, path);
         println!("object: {:?}", input);
         println!("operations: {:?}", self.operations);
-    }
+    }*/
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
@@ -320,6 +360,7 @@ impl Query {
 #[derive(Debug)]
 struct Operation {
     name: Option<String>,
+    kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<String, FieldType>,
 }
@@ -356,10 +397,21 @@ impl From<ast::OperationDefinition> for Operation {
             })
             .collect();
 
+        let kind = operation
+            .operation_type()
+            .and_then(|op| {
+                op.query_token()
+                    .map(|_| OperationKind::Query)
+                    .or(op.mutation_token().map(|_| OperationKind::Mutation))
+                    .or(op.subscription_token().map(|_| OperationKind::Subscription))
+            })
+            .unwrap_or(OperationKind::Query);
+
         Operation {
             selection_set,
             name,
             variables,
+            kind,
         }
     }
 }
@@ -411,7 +463,7 @@ mod tests {
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
             let schema: Schema = $schema.parse().expect("could not parse schema");
-            let query = Query::parse($query, &schema).expect("could not parse query");
+            let query = Query::parse($query).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
             query.format_response(&mut response, $operation, &schema);
             assert_eq_and_ordered!(response.data, $expected);
@@ -607,7 +659,6 @@ mod tests {
                     .query
                     .as_ref()
                     .expect("query has been added right above; qed"),
-                &schema,
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
@@ -712,47 +763,136 @@ mod tests {
         );
     }
 
-    macro_rules! assert_filter_errors {
-        ($schema:expr, $query:expr, $response:expr, $errors:expr, $operation:expr, $expected:expr $(,)?) => {{
-            let schema: Schema = $schema.parse().expect("could not parse schema");
-            let query = Query::parse($query).expect("could not parse query");
-            let mut response = Response::builder()
-                .data($response.clone())
-                .errors(
-                    $errors
-                        .as_array()
-                        .as_ref()
-                        .unwrap()
-                        .into_iter()
-                        .map(|e| Error::from_value("test", e.clone()).unwrap())
-                        .collect(),
-                )
-                .build();
-            query.format_response(&mut response, $operation, &schema);
-            assert_eq_and_ordered!(response.data, $expected);
-        }};
-    }
-
     #[test]
-    fn filter_errors1() {
-        let schema = "";
-        let query = "query MyOperation { foo }";
+    fn filter_root_errors() {
+        let schema = "type Query {
+            getInt: Int
+            getNonNullString: String!
+        }";
+        let query = "query MyOperation { getInt }";
         let response = json! {{
-            "foo": "1",
+            "getInt": "1",
             "other": "2",
         }};
-        let errors = json! { [
 
-        ]};
-
-        assert_filter_errors!(
+        assert_format_response!(
             schema,
             query,
             response,
-            errors,
             Some("MyOperation"),
             json! {{
-                "foo": "1",
+                "getInt": null,
+            }},
+        );
+
+        let query = "query { getNonNullString }";
+        let response = json! {{
+            "getNonNullString": 1,
+        }};
+
+        //FIXME what's the expected result when a null moves up to
+        // the root operation?
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            None,
+            json! {{
+                "getNonNullString": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_object_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            name: String
+        }";
+        let query = "query  { me { id name } }";
+
+        let response = json! {{
+            "me": {
+                "id": "a",
+                "name": 1,
+            },
+        }};
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": null,
+                },
+            }},
+        );
+
+        let response = json! {{
+            "me": {
+                "id": 1,
+                "name": 1,
+            },
+        }};
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        let response = json! {{
+            "me": {
+                "name": 1,
+            },
+        }};
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_list_errors() {
+        let schema = "type Query {
+            list: TestList
+        }
+
+        type TestList {
+            l1: [String]
+            l2: [String!]
+            l3: [String]!
+            l4: [String!]!
+        }";
+
+        assert_format_response!(
+            schema,
+            "query { list { l1 } }",
+            json! {{
+                "list": {
+                    "l1": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l1": ["abc", null, null, null, "def"],
+                },
             }},
         );
     }
