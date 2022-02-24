@@ -21,7 +21,34 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   [reference]: http://link
 
  -->
+ 
+# Upcoming
 
+> Not yet in a release!
+
+## :sparkles: Features
+
+- **Apollo Studio Explorer landing page** ([PR #526](https://github.com/apollographql/router/pull/526)
+
+  We've replaced the _redirect_ to Apollo Studio with a statically rendered landing page.  This supersedes the previous redirect approach was merely introduced as a short-cut.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
+
+- **Display Apollo Router version on startup** ([PR #543](https://github.com/apollographql/router/pull/543))
+  The Apollo Router displays its version on startup from now on, which will come in handy when debugging/observing how your application behaves.
+
+## :bug: Fixes
+
+  It is also possible to _save_ the redirect preference and make the behavior sticky for future visits.  As a bonus, this also resolves the failure to preserve the correct HTTP scheme (e.g., `https://`) in the event that the Apollo Router was operating behind a TLS-terminating proxy, since the redirect is now handled client-side.
+
+  Overall, this should be a more durable and more transparent experience for the user.
+
+- **Anonymous operation names are now empty in tracing** ([PR #525](https://github.com/apollograpqhl/router/pull/525))
+
+  When GraphQL operation names are not nececessary to execute an operation (i.e., when there is only a single operation in a GraphQL document) and the GraphQL operation is _not_ named (i.e., it is anonymous), the `operation_name` attribute on the trace spans that are associated with the request will no longer contain a single hyphen character (`-`) but will instead be an empty string.  This matches the way that these operations are represented during the GraphQL operation's life-cycle as well.
+
+- **Resolved case of missing documentation in Apollo Studio Explorer** ([PR #540](https://github.com/apollographql/router/pull/540))
+
+   We've resolved a scenario that prevented Apollo Studio Explorer from displaying documentation by adding support for a new introspection query which also queries for deprecation (i.e., `includeDeprecated`) on `input` arguments.
+  
 # [v0.1.0-alpha.6] 2022-02-18
 
 ## :sparkles: Features

@@ -114,6 +114,12 @@ async fn rt_main() -> Result<()> {
 
     GLOBAL_ENV_FILTER.set(env_filter).unwrap();
 
+    tracing::info!(
+        "{}@{}",
+        std::env!("CARGO_PKG_NAME"),
+        std::env!("CARGO_PKG_VERSION")
+    );
+
     let current_directory = std::env::current_dir()?;
 
     let configuration = opt
