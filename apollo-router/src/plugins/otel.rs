@@ -89,11 +89,10 @@ impl Plugin for Otel {
     }
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::info!("Otel configuration {:?}!", configuration);
+        tracing::debug!("Otel configuration {:?}!", configuration);
         // Create graph configuration based on environment variables
         configuration.graph = studio_graph();
-        tracing::info!("opentelemetry config: {:?}", configuration.opentelemetry);
-        // configuration.opentelemetry = None;
+
         // Studio Agent Spaceport listener
         let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
 

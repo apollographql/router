@@ -78,6 +78,25 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             errors.append(&mut e);
         }
 
+        // Because studio usage reporting requires the OTEL plugin,
+        // we must force the addition of the OTEL plugin if APOLLO_KEY
+        // is set.
+        if std::env::var("APOLLO_KEY").is_ok() {
+            // If the user has not specified OTEL configuration, then
+            // insert a valid "minimal" configuration which allows
+            // studio usage reporting to function
+            if !configuration
+                .plugins
+                .plugins
+                .contains_key("com.apollo.otel")
+            {
+                configuration.plugins.plugins.insert(
+                    "com.apollo.otel".to_string(),
+                    serde_json::json!({ "opentelemetry": null }),
+                );
+            }
+        }
+
         let buffer = 20000;
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
 
