@@ -28,6 +28,7 @@ miette = { version = "3.3.0", features = ["fancy"] }
 mockall = "0.11.0"
 moka = { version = "0.6.4", features = ["future", "futures-util"] }
 once_cell = "1.9.0"
+opentelemetry = { version = "0.17.0", features = ["rt-tokio"] }
 paste = "1.0.6"
 regex = "1.5.4"
 router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "cf87257b9d58701cd9e09e8b5992f809147a2165" }
@@ -45,6 +46,7 @@ tower = { version = "0.4.12", features = ["full"] }
 tower-service = "0.3.1"
 tower-test = "0.4.0"
 tracing = "0.1.31"
+tracing-opentelemetry = "0.17.2"
 typed-builder = "0.9.1"
 url = "2.2.2"
 urlencoding = "2.1.0"
