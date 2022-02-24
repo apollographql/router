@@ -334,6 +334,10 @@ macro_rules! implement_object_type_or_interface {
                     .flat_map(|name| schema.interfaces.get(name))
                     .try_for_each(|interface| interface.filter_errors(object, schema))
             }
+
+            pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {
+                self.fields.get(name)
+            }
         }
 
         $(

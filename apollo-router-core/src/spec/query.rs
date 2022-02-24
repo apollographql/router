@@ -261,12 +261,12 @@ impl Query {
                             .object_types
                             .get("Query")
                             .as_ref()
-                            .and_then(|q| q.fields.get(name)),
+                            .and_then(|q| q.field(name)),
                         OperationKind::Mutation => schema
                             .object_types
                             .get("Mutation")
                             .as_ref()
-                            .and_then(|m| m.fields.get(name)),
+                            .and_then(|m| m.field(name)),
                         OperationKind::Subscription => None,
                     };
                     println!("type for operation {}: {:?}", name, schema_operation);
