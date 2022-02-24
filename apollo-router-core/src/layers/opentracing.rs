@@ -2,13 +2,14 @@ use std::fmt::Display;
 use std::task::{Context, Poll};
 
 use crate::layer::ConfigurableLayer;
-use crate::{register_layer, SubgraphRequest};
+use crate::{register_layer, services, SubgraphRequest};
 use http::HeaderValue;
 use opentelemetry::trace::TraceContextExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::{BoxError, Layer, Service};
-use tracing::Span;
+use tracing::instrument::Instrumented;
+use tracing::{span, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 register_layer!("opentracing", OpenTracingLayer);
@@ -69,21 +70,27 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = Instrumented<<S as tower::Service<services::SubgraphRequest>>::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        let span_context = Span::current().context();
+        let current_span = Span::current();
+        let span_context = current_span.context();
         let span_ref = span_context.span();
         let current_span_ctx = span_ref.span_context();
-        let (trace_id, span_id, trace_flags) = (
+        let (trace_id, parent_span_id, trace_flags) = (
             current_span_ctx.trace_id(),
             current_span_ctx.span_id(),
             current_span_ctx.trace_flags(),
         );
+
+        let new_span = span!(parent: current_span, Level::INFO, "subgraph_request");
+        let new_span_context = new_span.context();
+        let new_span_ref = new_span_context.span();
+        let span_id = new_span_ref.span_context().span_id();
 
         match self.format {
             PropagationFormat::Jaeger => {
@@ -92,7 +99,7 @@ where
                     HeaderValue::from_str(&format!(
                         "{}:{}:{}:{}",
                         trace_id,
-                        span_id,
+                        parent_span_id,
                         span_id,
                         trace_flags.to_u8()
                     ))
@@ -110,7 +117,7 @@ where
                 );
                 req.http_request.headers_mut().insert(
                     "X-B3-ParentSpanId",
-                    HeaderValue::from_str(&span_id.to_string()).unwrap(),
+                    HeaderValue::from_str(&parent_span_id.to_string()).unwrap(),
                 );
                 req.http_request.headers_mut().insert(
                     "X-B3-Sampled",
@@ -121,6 +128,6 @@ where
             }
         }
 
-        self.inner.call(req)
+        self.inner.call(req).instrument(new_span)
     }
 }

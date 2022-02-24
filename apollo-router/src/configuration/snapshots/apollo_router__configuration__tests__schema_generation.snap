@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 702
+assertion_line: 680
 expression: "&schema"
 
 ---
@@ -145,6 +145,17 @@ expression: "&schema"
     "OpenTelemetry": {
       "$ref": "#/definitions/OpenTelemetry"
     },
+    "OpenTracingConfig": {
+      "type": "object",
+      "required": [
+        "format"
+      ],
+      "properties": {
+        "format": {
+          "$ref": "#/definitions/PropagationFormat"
+        }
+      }
+    },
     "Plugins": {
       "anyOf": [
         {
@@ -239,6 +250,13 @@ expression: "&schema"
           },
           "additionalProperties": false
         }
+      ]
+    },
+    "PropagationFormat": {
+      "type": "string",
+      "enum": [
+        "jaeger",
+        "zipkin_b3"
       ]
     },
     "RemoveConfig": {
@@ -337,6 +355,11 @@ expression: "&schema"
                 "required": [
                   "headers_remove"
                 ]
+              },
+              {
+                "required": [
+                  "opentracing"
+                ]
               }
             ],
             "properties": {
@@ -351,6 +374,9 @@ expression: "&schema"
               },
               "headers_remove": {
                 "$ref": "#/definitions/RemoveConfig"
+              },
+              "opentracing": {
+                "$ref": "#/definitions/OpenTracingConfig"
               }
             }
           }
