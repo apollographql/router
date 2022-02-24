@@ -864,6 +864,24 @@ mod tests {
                 "me": null,
             }},
         );
+
+        // a non null field not present in the query should not be an error
+        let response = json! {{
+            "me": {
+                "name": "a",
+            },
+        }};
+        assert_format_response!(
+            schema,
+            query,
+            response,
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+        );
     }
 
     #[test]
