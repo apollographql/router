@@ -1,29 +1,152 @@
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+mod otlp;
+
 use crate::apollo_telemetry::new_pipeline;
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-use crate::configuration::otlp;
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-use crate::configuration::otlp::Tracing;
-use crate::configuration::JaegerEndpoint;
-use crate::configuration::OpenTelemetry;
-use crate::configuration::SpaceportConfig;
-use crate::configuration::StudioGraph;
+use crate::apollo_telemetry::SpaceportConfig;
+use crate::apollo_telemetry::StudioGraph;
+use crate::configuration::{default_service_name, default_service_namespace};
 use crate::set_subscriber;
 use crate::GLOBAL_ENV_FILTER;
 use apollo_router_core::{register_plugin, Plugin};
 use apollo_spaceport::server::ReportSpaceport;
+use derivative::Derivative;
 use futures::Future;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::{BatchSpanProcessor, Sampler};
+use opentelemetry::sdk::Resource;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
+/*
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+use otlp;
+*/
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+use otlp::Tracing;
+use reqwest::Url;
+use schemars::gen::SchemaGenerator;
+use schemars::schema::Schema;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::BoxError;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum OpenTelemetry {
+    Jaeger(Option<Jaeger>),
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+    Otlp(otlp::Otlp),
+}
+
+// This short circuits the Opentelemetry schema generation.
+// When Otel is moved to a plugin this will be removed.
+impl JsonSchema for OpenTelemetry {
+    fn schema_name() -> String {
+        stringify!(OpenTelemetry).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        gen.subschema_for::<OpenTelemetry>()
+    }
+}
+
+#[derive(Debug, Clone, Derivative, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[derivative(Default)]
+pub struct Jaeger {
+    pub endpoint: Option<JaegerEndpoint>,
+    #[serde(default = "default_service_name")]
+    #[derivative(Default(value = "default_service_name()"))]
+    pub service_name: String,
+    #[serde(skip, default = "default_jaeger_username")]
+    #[derivative(Default(value = "default_jaeger_username()"))]
+    pub username: Option<String>,
+    #[serde(skip, default = "default_jaeger_password")]
+    #[derivative(Default(value = "default_jaeger_password()"))]
+    pub password: Option<String>,
+    pub trace_config: Option<TraceConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum JaegerEndpoint {
+    Agent(SocketAddr),
+    Collector(Url),
+}
+
+fn default_jaeger_username() -> Option<String> {
+    std::env::var("JAEGER_USERNAME").ok()
+}
+
+fn default_jaeger_password() -> Option<String> {
+    std::env::var("JAEGER_PASSWORD").ok()
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TraceConfig {
+    pub sampler: Option<Sampler>,
+    pub max_events_per_span: Option<u32>,
+    pub max_attributes_per_span: Option<u32>,
+    pub max_links_per_span: Option<u32>,
+    pub max_attributes_per_event: Option<u32>,
+    pub max_attributes_per_link: Option<u32>,
+    pub resource: Option<Resource>,
+}
+
+impl TraceConfig {
+    pub fn trace_config(&self) -> opentelemetry::sdk::trace::Config {
+        let mut trace_config = opentelemetry::sdk::trace::config();
+        if let Some(sampler) = self.sampler.clone() {
+            let sampler: opentelemetry::sdk::trace::Sampler = sampler;
+            trace_config = trace_config.with_sampler(sampler);
+        }
+        if let Some(n) = self.max_events_per_span {
+            trace_config = trace_config.with_max_events_per_span(n);
+        }
+        if let Some(n) = self.max_attributes_per_span {
+            trace_config = trace_config.with_max_attributes_per_span(n);
+        }
+        if let Some(n) = self.max_links_per_span {
+            trace_config = trace_config.with_max_links_per_span(n);
+        }
+        if let Some(n) = self.max_attributes_per_event {
+            trace_config = trace_config.with_max_attributes_per_event(n);
+        }
+        if let Some(n) = self.max_attributes_per_link {
+            trace_config = trace_config.with_max_attributes_per_link(n);
+        }
+
+        let resource = self
+            .resource
+            .as_ref()
+            .map(|r| {
+                Resource::new(
+                    r.clone()
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v))
+                        .collect::<Vec<KeyValue>>(),
+                )
+            })
+            .unwrap_or_else(|| {
+                Resource::new(vec![
+                    KeyValue::new("service.name", default_service_name()),
+                    KeyValue::new("service.namespace", default_service_namespace()),
+                ])
+            });
+
+        trace_config = trace_config.with_resource(resource);
+
+        trace_config
+    }
+}
 
 #[derive(Debug)]
 struct ReportingError;

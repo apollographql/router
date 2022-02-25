@@ -11,7 +11,7 @@ pub mod router_factory;
 mod state_machine;
 mod warp_http_server_factory;
 
-use crate::configuration::SpaceportConfig;
+use crate::apollo_telemetry::SpaceportConfig;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
