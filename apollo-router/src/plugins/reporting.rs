@@ -15,10 +15,6 @@ use opentelemetry::sdk::trace::{BatchSpanProcessor, Sampler};
 use opentelemetry::sdk::Resource;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
-/*
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-use otlp;
-*/
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use otlp::Tracing;
 use reqwest::Url;
