@@ -1,4 +1,4 @@
-use crate::Fragment;
+use crate::{FieldType, Fragment, ObjectType, Schema};
 use apollo_parser::ast;
 
 #[derive(Debug, Clone)]
@@ -6,6 +6,7 @@ pub(crate) enum Selection {
     Field {
         name: String,
         selection_set: Option<Vec<Selection>>,
+        field_type: FieldType,
     },
     InlineFragment {
         fragment: Fragment,
@@ -15,8 +16,12 @@ pub(crate) enum Selection {
     },
 }
 
-impl From<ast::Selection> for Selection {
-    fn from(selection: ast::Selection) -> Self {
+impl Selection {
+    pub(crate) fn from_ast(
+        selection: ast::Selection,
+        current_type: &FieldType,
+        schema: &Schema,
+    ) -> Option<Self> {
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
@@ -27,14 +32,29 @@ impl From<ast::Selection> for Selection {
                     .to_string();
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
                 let name = alias.unwrap_or(name);
-                let selection_set = field
-                    .selection_set()
-                    .map(|x| x.selections().into_iter().map(Into::into).collect());
 
-                Self::Field {
+                let current_object_type = current_type
+                    .inner_type_name()
+                    .and_then(|name| schema.object_types.get(name))?;
+
+                let field_type = current_object_type.field(&name)?;
+
+                let selection_set = if field_type.is_builtin_scalar() {
+                    None
+                } else {
+                    field.selection_set().and_then(|x| {
+                        x.selections()
+                            .into_iter()
+                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .collect()
+                    })
+                };
+
+                Some(Self::Field {
                     name,
                     selection_set,
-                }
+                    field_type: field_type.clone(),
+                })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
             ast::Selection::InlineFragment(inline_fragment) => {
@@ -43,8 +63,8 @@ impl From<ast::Selection> for Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                     .into_iter()
-                    .map(Into::into)
-                    .collect();
+                    .map(|selection| Selection::from_ast(selection, current_type, schema))
+                    .collect::<Option<Vec<_>>>()?;
 
                 let type_condition = inline_fragment
                     .type_condition()
@@ -56,12 +76,12 @@ impl From<ast::Selection> for Selection {
                     .text()
                     .to_string();
 
-                Self::InlineFragment {
+                Some(Self::InlineFragment {
                     fragment: Fragment {
                         type_condition,
                         selection_set,
                     },
-                }
+                })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             ast::Selection::FragmentSpread(fragment_spread) => {
@@ -73,7 +93,55 @@ impl From<ast::Selection> for Selection {
                     .text()
                     .to_string();
 
-                Self::FragmentSpread { name }
+                Some(Self::FragmentSpread { name })
+            }
+        }
+    }
+
+    pub(crate) fn from_operation_ast(
+        selection: ast::Selection,
+        current_object_type: &ObjectType,
+        schema: &Schema,
+    ) -> Option<Self> {
+        match selection {
+            // Spec: https://spec.graphql.org/draft/#Field
+            ast::Selection::Field(field) => {
+                let name = field
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
+                let name = alias.unwrap_or(name);
+
+                let field_type = current_object_type.field(&name)?;
+
+                let selection_set = if field_type.is_builtin_scalar() {
+                    None
+                } else {
+                    field.selection_set().and_then(|x| {
+                        x.selections()
+                            .into_iter()
+                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .collect()
+                    })
+                };
+
+                Some(Self::Field {
+                    name,
+                    selection_set,
+                    field_type: field_type.clone(),
+                })
+            }
+            // Spec: https://spec.graphql.org/draft/#InlineFragment
+            ast::Selection::InlineFragment(_) => {
+                //FIXME: there should be no fragment there right?
+                None
+            }
+            // Spec: https://spec.graphql.org/draft/#FragmentSpread
+            ast::Selection::FragmentSpread(_) => {
+                //FIXME: there should be no fragment there right?
+                None
             }
         }
     }

@@ -34,9 +34,7 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        if let Value::Object(mut init) = data {
-            self.filter_errors(&response.errors, operation_name, &mut init, schema);
-
+        if let Value::Object(init) = data {
             let output = self.operations.iter().fold(init, |mut input, operation| {
                 if operation_name.is_none() || operation.name.as_deref() == operation_name {
                     let mut output = Object::default();
@@ -58,7 +56,7 @@ impl Query {
     }
 
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn parse(query: impl Into<String>) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -74,13 +72,13 @@ impl Query {
         }
 
         let document = tree.document();
-        let fragments = Fragments::from(&document);
+        let fragments = Fragments::from_ast(&document, schema)?;
 
         let operations = document
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Some(operation.into())
+                    Operation::from_ast(operation, schema)
                 } else {
                     None
                 }
@@ -125,71 +123,139 @@ impl Query {
         })
     }
 
+    fn format_value(
+        &self,
+        field_type: &FieldType,
+        input: Value,
+        selection_set: &[Selection],
+        schema: &Schema,
+    ) -> Result<Value, InvalidValue> {
+        // for every type, if we have an invalid value, we will replace it with null
+        // and return Ok(()), because values are optional by default
+        match field_type {
+            // for non null types, we validate with the inner type, then if we get an InvalidValue
+            // we set it to null and immediately return an error instead of Ok(()), because we
+            // want the error to go up until the next nullable parent
+            FieldType::NonNull(inner_type) => {
+                match self.format_value(inner_type, input, selection_set, schema) {
+                    Err(_) => Err(InvalidValue),
+                    Ok(Value::Null) => Err(InvalidValue),
+                    Ok(value) => Ok(value),
+                }
+            }
+
+            // if the list contains nonnullable types, we will receive a Err(InvalidValue)
+            // and should replace the entire list with null
+            // if the types are nullable, the inner call to filter_errors will take care
+            // of setting the current entry to null
+            FieldType::List(inner_type) => match input {
+                Value::Array(input_array) => {
+                    match input_array
+                        .into_iter()
+                        .map(|element| {
+                            self.format_value(inner_type, element, selection_set, schema)
+                        })
+                        .collect()
+                    {
+                        Err(InvalidValue) => Ok(Value::Null),
+                        Ok(value) => Ok(value),
+                    }
+                }
+                _ => Ok(Value::Null),
+            },
+
+            FieldType::Named(type_name) => {
+                match schema.object_types.get(type_name) {
+                    // try with custom scalars then
+                    None => {
+                        if schema.custom_scalars.contains(type_name) {
+                            Ok(input)
+                        } else {
+                            Ok(Value::Null)
+                        }
+                    }
+                    Some(object_type) => match input {
+                        Value::Object(mut input_object) => {
+                            let mut output_object = Object::default();
+
+                            match self.apply_selection_set(
+                                selection_set,
+                                &mut input_object,
+                                &mut output_object,
+                                schema,
+                            ) {
+                                Ok(()) => Ok(Value::Object(output_object)),
+                                Err(InvalidValue) => Ok(Value::Null),
+                            }
+                        }
+                        _ => Ok(Value::Null),
+                    },
+                }
+            }
+
+            // the rest of the possible types just need to validate the expected value
+            FieldType::Int => {
+                let opt = if input.is_i64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else if input.is_u64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else {
+                    None
+                };
+
+                // if the value is invalid, we do not insert it in the output object
+                // which is equivalent to inserting null
+                if opt.is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Float => {
+                if input.as_f64().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Boolean => {
+                if input.as_bool().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::String => {
+                if input.as_str().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Id => {
+                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+        }
+    }
+
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
         input: &mut Object,
         output: &mut Object,
         schema: &Schema,
-    ) {
+    ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
                 Selection::Field {
                     name,
                     selection_set,
+                    field_type,
                 } => {
                     if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
-                        if let Some(selection_set) = selection_set {
-                            match input_value {
-                                Value::Object(mut input_object) => {
-                                    let mut output_object = Object::default();
-                                    self.apply_selection_set(
-                                        selection_set,
-                                        &mut input_object,
-                                        &mut output_object,
-                                        schema,
-                                    );
-                                    output.insert(field_name, output_object.into());
-                                }
-                                Value::Array(input_array) => {
-                                    let output_array = input_array
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(|(i, mut element)| {
-                                            if let Some(input_object) = element.as_object_mut() {
-                                                let mut output_object = Object::default();
-                                                self.apply_selection_set(
-                                                    selection_set,
-                                                    input_object,
-                                                    &mut output_object,
-                                                    schema,
-                                                );
-                                                output_object.into()
-                                            } else {
-                                                failfast_debug!(
-                                                    "Array element is not an object: {}[{}]",
-                                                    name,
-                                                    i,
-                                                );
-                                                element
-                                            }
-                                        })
-                                        .collect::<Value>();
-                                    output.insert(field_name, output_array);
-                                }
-                                _ => {
-                                    output.insert(field_name, input_value);
-                                    failfast_debug!(
-                                        "Field is not an object nor an array of object: {}",
-                                        name,
-                                    );
-                                }
-                            }
-                        } else {
-                            output.insert(field_name, input_value);
-                        }
-                    } else {
-                        failfast_debug!("Missing field: {}", name);
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let value =
+                            self.format_value(field_type, input_value, selection_set, schema)?;
+                        output.insert(field_name, value);
                     }
                 }
                 Selection::InlineFragment {
@@ -201,7 +267,7 @@ impl Query {
                 } => {
                     if let Some(typename) = input.get("__typename") {
                         if typename.as_str() == Some(type_condition.as_str()) {
-                            self.apply_selection_set(selection_set, input, output, schema);
+                            self.apply_selection_set(selection_set, input, output, schema)?;
                         }
                     }
                 }
@@ -218,7 +284,7 @@ impl Query {
                                     input,
                                     output,
                                     schema,
-                                );
+                                )?;
                             }
                         }
                     } else {
@@ -227,95 +293,9 @@ impl Query {
                 }
             }
         }
+
+        Ok(())
     }
-
-    fn filter_errors(
-        &self,
-        errors: &[Error],
-        operation_name: Option<&str>,
-        input: &mut Object,
-        schema: &Schema,
-    ) {
-        //FIXME: did we check that before
-        let operation = if let Some(name) = operation_name {
-            self.operations
-                .iter()
-                .filter(|op| op.name.as_deref() == Some(name))
-                .next()
-                //FIXME
-                .unwrap()
-        } else {
-            self.operations.iter().next().unwrap()
-        };
-
-        println!("operation: {:?}", operation);
-        let operation_list = match operation.kind {
-            OperationKind::Query => schema.object_types.get("Query"),
-            OperationKind::Mutation => schema.object_types.get("Mutation"),
-            OperationKind::Subscription => {
-                tracing::error!("we do not support subscriptions yet");
-                return;
-            }
-        };
-
-        if operation_list.is_none() {
-            tracing::error!("cannot find the right operation type, that should have been caught by the query planner");
-            return;
-        }
-
-        let operation_list = operation_list.unwrap();
-
-        for selection in &operation.selection_set {
-            match selection {
-                Selection::Field {
-                    name,
-                    selection_set,
-                } => {
-                    let schema_operation = operation_list.field(name);
-                    println!(
-                        "type for operation {}: {:?}, selection: {:?}",
-                        name, schema_operation, selection_set
-                    );
-
-                    match schema_operation {
-                        None => todo!(),
-                        Some(field_type) => match input.get_mut(name.as_str()) {
-                            None => {}
-                            Some(value) => {
-                                //match field_type.filter_errors(value, selection_set, schema) {
-                                match field_type.filter_errors(
-                                    value,
-                                    selection_set.as_deref(),
-                                    schema,
-                                ) {
-                                    Ok(_) => return,
-                                    Err(_) => {}
-                                }
-                            }
-                        },
-                    }
-
-                    // FIXME: should we set the entire response to null in all those cases?
-                    input.insert("name", Value::Null);
-                    return;
-                }
-                Selection::InlineFragment { fragment } => todo!(),
-                Selection::FragmentSpread { name } => todo!(),
-            }
-        }
-        /*FIXME can we assume that we can validate only value types, while ignoring error paths?
-        for error in errors {
-            if let Some(path) = &error.path {
-                self.nullify_error(path, input, schema);
-            }
-        }*/
-    }
-
-    /*fn nullify_error(&self, path: &Path, input: &mut Object, schema: &Schema) {
-        println!("will nullify error at path {}: {:?}", path, path);
-        println!("object: {:?}", input);
-        println!("operations: {:?}", self.operations);
-    }*/
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
@@ -373,21 +353,37 @@ impl Query {
 #[derive(Debug)]
 struct Operation {
     name: Option<String>,
-    kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<String, FieldType>,
 }
 
-impl From<ast::OperationDefinition> for Operation {
+impl Operation {
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from(operation: ast::OperationDefinition) -> Self {
+    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
         let name = operation.name().map(|x| x.text().to_string());
+
+        let kind = operation
+            .operation_type()
+            .and_then(|op| {
+                op.query_token()
+                    .map(|_| OperationKind::Query)
+                    .or(op.mutation_token().map(|_| OperationKind::Mutation))
+                    .or(op.subscription_token().map(|_| OperationKind::Subscription))
+            })
+            .unwrap_or(OperationKind::Query);
+
+        let operation_list = match kind {
+            OperationKind::Query => schema.object_types.get("Query")?,
+            OperationKind::Mutation => schema.object_types.get("Mutation")?,
+            OperationKind::Subscription => return None,
+        };
+
         let selection_set = operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(Into::into)
-            .collect();
+            .map(|selection| Selection::from_operation_ast(selection, operation_list, schema))
+            .collect::<Option<_>>()?;
         let variables = operation
             .variable_definitions()
             .iter()
@@ -410,22 +406,11 @@ impl From<ast::OperationDefinition> for Operation {
             })
             .collect();
 
-        let kind = operation
-            .operation_type()
-            .and_then(|op| {
-                op.query_token()
-                    .map(|_| OperationKind::Query)
-                    .or(op.mutation_token().map(|_| OperationKind::Mutation))
-                    .or(op.subscription_token().map(|_| OperationKind::Subscription))
-            })
-            .unwrap_or(OperationKind::Query);
-
-        Operation {
+        Some(Operation {
             selection_set,
             name,
             variables,
-            kind,
-        }
+        })
     }
 }
 
@@ -476,7 +461,7 @@ mod tests {
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
             let schema: Schema = $schema.parse().expect("could not parse schema");
-            let query = Query::parse($query).expect("could not parse query");
+            let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
             query.format_response(&mut response, $operation, &schema);
             assert_eq_and_ordered!(response.data, $expected);
@@ -672,6 +657,7 @@ mod tests {
                     .query
                     .as_ref()
                     .expect("query has been added right above; qed"),
+                &schema,
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
@@ -811,7 +797,6 @@ mod tests {
             response,
             None,
             json! {{
-                "getNonNullString": null,
             }},
         );
     }
@@ -874,7 +859,9 @@ mod tests {
             response,
             None,
             json! {{
-                "me": null,
+                "me": {
+                    "name": null,
+                },
             }},
         );
 

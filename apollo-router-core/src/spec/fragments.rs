@@ -2,13 +2,13 @@ use crate::*;
 use apollo_parser::ast;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Fragments {
     map: HashMap<String, Fragment>,
 }
 
-impl From<&ast::Document> for Fragments {
-    fn from(document: &ast::Document) -> Self {
+impl Fragments {
+    pub(crate) fn from_ast(document: &ast::Document, schema: &Schema) -> Option<Self> {
         let map = document
             .definitions()
             .filter_map(|definition| match definition {
@@ -21,12 +21,7 @@ impl From<&ast::Document> for Fragments {
                         .unwrap()
                         .text()
                         .to_string();
-                    let selection_set = fragment_definition
-                        .selection_set()
-                        .expect("the node SelectionSet is not optional in the spec; qed")
-                        .selections()
-                        .map(Into::into)
-                        .collect();
+
                     let type_condition = fragment_definition
                         .type_condition()
                         .expect("Fragments must specify the type they apply to; qed")
@@ -36,6 +31,19 @@ impl From<&ast::Document> for Fragments {
                         .expect("the node Name is not optional in the spec; qed")
                         .text()
                         .to_string();
+
+                    let selection_set = fragment_definition
+                        .selection_set()
+                        .expect("the node SelectionSet is not optional in the spec; qed")
+                        .selections()
+                        .map(|selection| {
+                            Selection::from_ast(
+                                selection,
+                                &FieldType::Named(type_condition.clone()),
+                                schema,
+                            )
+                        })
+                        .collect::<Option<_>>()?;
 
                     Some((
                         name,
@@ -48,7 +56,7 @@ impl From<&ast::Document> for Fragments {
                 _ => None,
             })
             .collect();
-        Fragments { map }
+        Some(Fragments { map })
     }
 }
 

@@ -236,17 +236,28 @@ impl std::str::FromStr for Schema {
             })
             .collect();
 
-        let fragments = Fragments::from(&document);
-
-        Ok(Self {
+        let mut schema = Self {
             subtype_map,
             string: s.to_owned(),
             subgraphs,
             object_types,
             interfaces,
             custom_scalars,
-            fragments,
-        })
+            fragments: Fragments::default(),
+        };
+        if let Some(fragments) = Fragments::from_ast(&document, &schema) {
+            schema.fragments = fragments;
+
+            Ok(schema)
+        } else {
+            // empty error here, waiting for apollo-rs semantic analysis to provide meaningful
+            // errors when parsing Fragments
+            let errors = ParseErrors {
+                raw_schema: s.to_string(),
+                errors: vec![],
+            };
+            return Err(SchemaError::Parse(errors));
+        }
     }
 }
 
@@ -282,7 +293,7 @@ macro_rules! implement_object_type_or_interface {
         #[derive(Debug)]
         $visibility struct $name {
             name: String,
-            fields: HashMap<String, FieldType>,
+            pub(crate) fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
         }
 
@@ -306,65 +317,6 @@ macro_rules! implement_object_type_or_interface {
                     .iter()
                     .flat_map(|name| schema.interfaces.get(name))
                     .try_for_each(|interface| interface.validate_object(object, schema))
-            }
-
-            pub(crate) fn filter_errors(
-                &self,
-                object: &mut Object,
-                selections: Option<&[Selection]>,
-                schema: &Schema,
-            ) -> Result<(), InvalidObject> {
-                if let Some(selections) = selections {
-                    for selection in selections {
-                        match selection {
-                            Selection::Field {
-                                name,
-                                selection_set,
-                            }=> {
-                                println!("object will test field {} with selection {:?}", name, selection_set);
-                                let  ty  = self.fields.get(name).expect("FIXME");
-                                let mut null = Value::Null;
-                                let value = object.get_mut(name.as_str()).unwrap_or(&mut null);
-                                println!(">{:?} field {} = {} ", ty, name, value);
-                                let r = ty.filter_errors(value,selection_set.as_deref(), schema);
-                                println!("<{:?} field {} => res = {:?}", ty, name, r);
-                                if r.is_err() {
-                                    return Err(InvalidObject);
-                                }
-                            },
-                            Selection::InlineFragment {
-                                fragment,
-                            }=> todo!(),
-                            Selection::FragmentSpread {
-                                name,
-                            } => todo!(),
-                        }
-                    }
-                }
-                //FIXME: interfaces?
-                /*self
-                    .fields
-                    .iter()
-                    .try_for_each(|(name, ty)| {
-                        let mut null = Value::Null;
-                        let value = object.get_mut(name.as_str()).unwrap_or(&mut null);
-                        println!(">{:?} field {} = {} ", ty, name, value);
-                        let r = ty.filter_errors(value,selections, schema);
-                        println!("<{:?} field {} => res = {:?}", ty, name, r);
-
-
-                        r
-                    })
-                    .map_err(|_| InvalidObject)?;
-
-                self
-                    .interfaces
-                    .iter()
-                    .flat_map(|name| schema.interfaces.get(name))
-                    .try_for_each(|interface| interface.filter_errors(object, schema))
-                */
-
-                Ok(())
             }
 
             pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {

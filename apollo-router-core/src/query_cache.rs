@@ -17,7 +17,7 @@ struct QueryCacheResolver {
 impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
     async fn retrieve(&self, key: String) -> Result<Option<Arc<Query>>, CacheResolverError> {
         let schema = self.schema.clone();
-        let query_parsing_future = tokio::task::spawn_blocking(|| Query::parse(key));
+        let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key, &schema));
         let parsed_query = match query_parsing_future.await {
             Ok(res) => res.map(Arc::new),
             // Silently ignore cancelled tasks (never happen for blocking tasks).
