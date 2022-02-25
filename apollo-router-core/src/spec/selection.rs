@@ -125,19 +125,19 @@ impl Selection {
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
-                let name = field
+                let original_name = field
                     .name()
                     .expect("the node Name is not optional in the spec; qed")
                     .text()
                     .to_string();
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                let name = alias.unwrap_or(name);
+                let name = alias.unwrap_or(original_name.clone());
 
                 println!(
-                    "Selection::from_operation_ast: looking for name {} in {:?}",
-                    name, current_object_type
+                    "Selection::from_operation_ast: looking for name {} (alias? {}) in {:?}",
+                    original_name, name, current_object_type
                 );
-                let field_type = current_object_type.field(&name)?;
+                let field_type = current_object_type.field(&original_name)?;
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None

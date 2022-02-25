@@ -35,7 +35,10 @@ impl Query {
     ) {
         let data = std::mem::take(&mut response.data);
         if let Value::Object(mut input) = data {
-            println!("will format response for {:?}", input);
+            println!(
+                "==================================\nwill format response for {:?}",
+                input
+            );
             println!(
                 "op name={:?} self.operations = {:?}",
                 operation_name, self.operations
@@ -61,6 +64,8 @@ impl Query {
                 );
                 println!("apply_selection_res: {:?}", res);
                 response.data = output.into();
+            } else {
+                failfast_debug!("can't find operation for {:?}", operation_name);
             }
         } else {
             failfast_debug!("Invalid type for data in response.");
@@ -291,6 +296,12 @@ impl Query {
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in selection_set {
+            println!(
+                "apply_selection_set[{}]input {:?}, output {:?}",
+                line!(),
+                input,
+                output
+            );
             match selection {
                 Selection::Field {
                     name,
@@ -545,15 +556,24 @@ mod tests {
     #[test]
     fn reformat_response_data_field() {
         assert_format_response!(
-            "",
-            "{
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+            }",
+            "query Test {
                 foo
                 stuff{bar}
                 array{bar}
                 baz
                 alias:baz
-                alias_obj:baz_obj{bar}
-                alias_array:baz_array{bar}
+                alias_obj:stuff{bar}
+                alias_array:array{bar}
             }",
             json! {{
                 "foo": "1",
@@ -565,7 +585,7 @@ mod tests {
                 "alias_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
                 "other": "13",
             }},
-            None,
+            Some("Test"),
             json! {{
                 "foo": "1",
                 "stuff": {
@@ -701,9 +721,11 @@ mod tests {
                 foo: String
                 stuff: Baz
                 array: [Element]
+                other: Bar
             }
 
             type Baz {
+                bar: String
                 baz: String
             }
 
@@ -713,29 +735,36 @@ mod tests {
 
             union Element = Baz | Bar | String
             ",
-            "{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}",
+            "{get {foo stuff{bar baz} ...fragment array{bar baz} other{bar}}}",
             json! {{
-                "foo": "1",
-                "stuff": {"baz": "2"},
-                "array": [
-                    {"baz": "3"},
-                    "4",
-                    {"bar": "5"},
-                ],
-                "other": "6",
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {"baz": "3"},
+                        "4",
+                        {"bar": "5"},
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
             }},
             None,
             json! {{
-                "foo": "1",
-                "stuff": {
-                    "baz": "2",
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "baz": "2",
+                    },
+                    "array": [
+                        {"baz": "3"},
+                        "4",
+                        {"bar": "5"},
+                    ],
+                    "other": "6",
                 },
-                "array": [
-                    {"baz": "3"},
-                    "4",
-                    {"bar": "5"},
-                ],
-                "other": "6",
             }},
         );
     }
