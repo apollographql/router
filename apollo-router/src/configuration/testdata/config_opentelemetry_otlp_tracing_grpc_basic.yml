@@ -3,8 +3,3 @@ server:
 subgraphs:
   example:
     routing_url: http://foo
-opentelemetry:
-  otlp:
-    tracing:
-      exporter:
-        grpc:

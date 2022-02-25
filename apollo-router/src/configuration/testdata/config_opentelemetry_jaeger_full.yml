@@ -3,8 +3,3 @@ server:
 subgraphs:
   example:
     routing_url: http://foo
-opentelemetry:
-  jaeger:
-    endpoint:
-      collector: http://example.org
-    service_name: bar
