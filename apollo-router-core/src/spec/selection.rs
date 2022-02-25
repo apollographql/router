@@ -25,6 +25,7 @@ impl Selection {
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
+                println!("Selection::from_ast[{}] field {}", line!(), field);
                 let name = field
                     .name()
                     .expect("the node Name is not optional in the spec; qed")
@@ -58,13 +59,11 @@ impl Selection {
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
             ast::Selection::InlineFragment(inline_fragment) => {
-                let selection_set = inline_fragment
-                    .selection_set()
-                    .expect("the node SelectionSet is not optional in the spec; qed")
-                    .selections()
-                    .into_iter()
-                    .map(|selection| Selection::from_ast(selection, current_type, schema))
-                    .collect::<Option<Vec<_>>>()?;
+                println!(
+                    "Selection::from_ast[{}] inline {}",
+                    line!(),
+                    inline_fragment
+                );
 
                 let type_condition = inline_fragment
                     .type_condition()
@@ -76,6 +75,21 @@ impl Selection {
                     .text()
                     .to_string();
 
+                let current_type = FieldType::Named(type_condition.clone());
+
+                let selection_set = inline_fragment
+                    .selection_set()
+                    .expect("the node SelectionSet is not optional in the spec; qed")
+                    .selections()
+                    .into_iter()
+                    .map(|selection| Selection::from_ast(selection, &current_type, schema))
+                    .collect::<Option<Vec<_>>>()?;
+                println!(
+                    "Selection::from_ast[{}] selection_set {:?}",
+                    line!(),
+                    selection_set
+                );
+
                 Some(Self::InlineFragment {
                     fragment: Fragment {
                         type_condition,
@@ -85,6 +99,11 @@ impl Selection {
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             ast::Selection::FragmentSpread(fragment_spread) => {
+                println!(
+                    "Selection::from_ast[{}] spread {}",
+                    line!(),
+                    fragment_spread
+                );
                 let name = fragment_spread
                     .fragment_name()
                     .expect("the node FragmentName is not optional in the spec; qed")
@@ -114,18 +133,35 @@ impl Selection {
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
                 let name = alias.unwrap_or(name);
 
+                println!(
+                    "Selection::from_operation_ast: looking for name {} in {:?}",
+                    name, current_object_type
+                );
                 let field_type = current_object_type.field(&name)?;
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
                 } else {
                     field.selection_set().and_then(|x| {
+                        println!(
+                            "Selection::from_operation_ast[{}] field={}, selections = {}",
+                            line!(),
+                            field,
+                            x
+                        );
                         x.selections()
                             .into_iter()
-                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .map(|selection| {
+                                println!("=======>will test selection: {}", selection);
+                                let res = Selection::from_ast(selection, &field_type, schema);
+                                println!("<=======res: {:?}", res);
+                                res
+                            })
                             .collect()
                     })
                 };
+
+                println!("======> generated selection_set: {:?}", selection_set);
 
                 Some(Self::Field {
                     name,
@@ -134,12 +170,22 @@ impl Selection {
                 })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
-            ast::Selection::InlineFragment(_) => {
+            ast::Selection::InlineFragment(inline_fragment) => {
+                println!(
+                    "Selection::from_operation_ast[{}] got inline fragment: {:?}",
+                    line!(),
+                    inline_fragment
+                );
                 //FIXME: there should be no fragment there right?
                 None
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
-            ast::Selection::FragmentSpread(_) => {
+            ast::Selection::FragmentSpread(fragment) => {
+                println!(
+                    "Selection::from_operation_ast[{}] got fragment spread: {:?}",
+                    line!(),
+                    fragment
+                );
                 //FIXME: there should be no fragment there right?
                 None
             }

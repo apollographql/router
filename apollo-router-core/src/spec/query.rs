@@ -34,22 +34,34 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        if let Value::Object(init) = data {
-            let output = self.operations.iter().fold(init, |mut input, operation| {
-                if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                    let mut output = Object::default();
-                    self.apply_selection_set(
-                        &operation.selection_set,
-                        &mut input,
-                        &mut output,
-                        schema,
-                    );
-                    output
-                } else {
-                    input
-                }
-            });
-            response.data = output.into();
+        if let Value::Object(mut input) = data {
+            println!("will format response for {:?}", input);
+            println!(
+                "op name={:?} self.operations = {:?}",
+                operation_name, self.operations
+            );
+
+            let operation = match operation_name {
+                Some(name) => self
+                    .operations
+                    .iter()
+                    // we should have an error if the only operation is anonymous but the query specifies a name
+                    .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
+                None => self.operations.get(0),
+            };
+
+            if let Some(operation) = operation {
+                println!("found operation {:?}", operation);
+                let mut output = Object::default();
+                let res = self.apply_selection_set(
+                    &operation.selection_set,
+                    &mut input,
+                    &mut output,
+                    schema,
+                );
+                println!("apply_selection_res: {:?}", res);
+                response.data = output.into();
+            }
         } else {
             failfast_debug!("Invalid type for data in response.");
         }
@@ -78,7 +90,9 @@ impl Query {
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Operation::from_ast(operation, schema)
+                    let res = Operation::from_ast(operation, schema);
+                    println!("operation::from_ast returned {:?}", res);
+                    res
                 } else {
                     None
                 }
@@ -130,6 +144,13 @@ impl Query {
         selection_set: &[Selection],
         schema: &Schema,
     ) -> Result<Value, InvalidValue> {
+        println!(
+            "===> format_value[{}] field_type {:?} selections: {:?}",
+            line!(),
+            field_type,
+            selection_set
+        );
+
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
@@ -165,7 +186,30 @@ impl Query {
             },
 
             FieldType::Named(type_name) => {
-                match schema.object_types.get(type_name) {
+                println!("object types: {:?}", schema.object_types);
+                match input {
+                    Value::Object(mut input_object) => {
+                        let mut output_object = Object::default();
+
+                        println!(
+                            "format_value[{}] will apply selection set {:?} on object {:?}",
+                            line!(),
+                            selection_set,
+                            input_object
+                        );
+                        match self.apply_selection_set(
+                            selection_set,
+                            &mut input_object,
+                            &mut output_object,
+                            schema,
+                        ) {
+                            Ok(()) => Ok(Value::Object(output_object)),
+                            Err(InvalidValue) => Ok(Value::Null),
+                        }
+                    }
+                    _ => Ok(Value::Null),
+                }
+                /*match schema.object_types.get(type_name) {
                     // try with custom scalars then
                     None => {
                         if schema.custom_scalars.contains(type_name) {
@@ -178,6 +222,8 @@ impl Query {
                         Value::Object(mut input_object) => {
                             let mut output_object = Object::default();
 
+                            println!("apply_selection_set[{}] will apply selection set {:?} on object {:?}",
+                            line!(), selection_set, input_object);
                             match self.apply_selection_set(
                                 selection_set,
                                 &mut input_object,
@@ -190,7 +236,7 @@ impl Query {
                         }
                         _ => Ok(Value::Null),
                     },
-                }
+                }*/
             }
 
             // the rest of the possible types just need to validate the expected value
@@ -252,6 +298,12 @@ impl Query {
                     field_type,
                 } => {
                     if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
+                        println!(
+                            "apply_selection_set[{}] {}: {:?}",
+                            line!(),
+                            name.as_str(),
+                            input_value
+                        );
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
@@ -272,13 +324,26 @@ impl Query {
                     }
                 }
                 Selection::FragmentSpread { name } => {
+                    println!("apply_selection_set[{}] got fragment: {:?}", line!(), name);
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
+                        println!(
+                            "apply_selection_set[{}] will try to apply {:?}",
+                            line!(),
+                            fragment
+                        );
+
                         if let Some(typename) = input.get("__typename") {
                             if typename.as_str() == Some(fragment.type_condition.as_str()) {
+                                println!(
+                                    "apply_selection_set[{}] type condition matched on {:?}",
+                                    line!(),
+                                    typename.as_str()
+                                );
+
                                 self.apply_selection_set(
                                     &fragment.selection_set,
                                     input,
@@ -372,6 +437,8 @@ impl Operation {
             })
             .unwrap_or(OperationKind::Query);
 
+        println!("Operation::from_ast[{}] kind = {:?}", line!(), kind);
+
         let operation_list = match kind {
             OperationKind::Query => schema.object_types.get("Query")?,
             OperationKind::Mutation => schema.object_types.get("Mutation")?,
@@ -384,6 +451,12 @@ impl Operation {
             .selections()
             .map(|selection| Selection::from_operation_ast(selection, operation_list, schema))
             .collect::<Option<_>>()?;
+        println!(
+            "Operation::from_ast[{}] selections = {:?}",
+            line!(),
+            selection_set
+        );
+
         let variables = operation
             .variable_definitions()
             .iter()
@@ -405,6 +478,7 @@ impl Operation {
                 (name, ty)
             })
             .collect();
+        println!("Operation::from_ast[{}]", line!());
 
         Some(Operation {
             selection_set,
@@ -516,67 +590,103 @@ mod tests {
 
     #[test]
     fn reformat_response_data_inline_fragment() {
+        let schema = "type Query {
+            get: Test    
+          }
+  
+          type Stuff {
+              stuff: Bar
+          }
+          type Bar {
+              bar: String
+          }
+          type Thing {
+              id: String
+          }
+          union Test = Stuff | Thing";
+        let query = "{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }";
         assert_format_response!(
-            "",
-            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            schema,
+            query,
             json! {
-                {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}
+                {"get": {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}}
             },
             None,
             json! {{
-                "stuff": {
-                    "bar": "2",
-                },
+                "get": {
+                    "stuff": {
+                        "bar": "2",
+                    },
+                }
             }},
         );
 
         assert_format_response!(
-            "",
-            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            schema,
+            query,
             json! {
-                {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}
+                {"get": {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}}
             },
             None,
             json! {{
-                "id": "1",
-
+                "get": {
+                    "id": "1",
+                }
             }},
         );
     }
 
     #[test]
     fn reformat_response_data_fragment_spread() {
+        let schema = "type Query {
+          thing: Thing    
+        }
+
+        type Foo {
+            foo: String
+        }
+        type Bar {
+            bar: String
+        }
+        type Baz {
+            baz: String
+        }
+        union Thing = Foo | Bar | Baz
+
+        fragment baz on Baz {baz}";
+        let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar}";
+
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"foo": "1"}
+                {"thing": {"foo": "1"}}
             },
         );
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"bar": "2"}
+                {"thing": {"bar": "2"} }
             },
         );
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"baz": "3"}
+                {"thing": {"baz": "3"} }
             },
         );
     }
@@ -584,7 +694,25 @@ mod tests {
     #[test]
     fn reformat_response_data_best_effort() {
         assert_format_response!(
-            "",
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                foo: String
+                stuff: Baz
+                array: [Element]
+            }
+
+            type Baz {
+                baz: String
+            }
+
+            type Bar {
+                bar: String
+            }
+
+            union Element = Baz | Bar | String
+            ",
             "{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}",
             json! {{
                 "foo": "1",
@@ -614,22 +742,19 @@ mod tests {
 
     #[test]
     fn reformat_matching_operation() {
-        let schema = "";
+        let schema = "
+        type Query {
+            foo: String
+            other: String
+        }
+        ";
         let query = "query MyOperation { foo }";
         let response = json! {{
             "foo": "1",
             "other": "2",
         }};
-        assert_format_response!(
-            schema,
-            query,
-            response,
-            Some("OtherOperation"),
-            json! {{
-                "foo": "1",
-                "other": "2",
-            }},
-        );
+        // an invalid operation name should fail
+        assert_format_response!(schema, query, response, Some("OtherOperation"), Value::Null,);
         assert_format_response!(
             schema,
             query,
@@ -680,8 +805,16 @@ mod tests {
 
     #[test]
     fn variable_validation() {
-        assert_validation!("", "query($foo:Boolean){x}", json!({}));
-        assert_validation_error!("", "query($foo:Boolean!){x}", json!({}));
+        assert_validation!(
+            "type Query { x: String }",
+            "query($foo:Boolean){x}",
+            json!({})
+        );
+        assert_validation_error!(
+            "type Query { x: String }",
+            "query($foo:Boolean!){x}",
+            json!({})
+        );
         assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":true}));
         assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":"true"}));
         assert_validation_error!("", "query($foo:Boolean!){x}", json!({"foo":"str"}));
