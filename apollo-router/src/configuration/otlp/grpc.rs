@@ -57,7 +57,7 @@ mod header_map_serde {
         let mut serializable_format =
             Vec::with_capacity(map.as_ref().map(|x| x.len()).unwrap_or(0));
 
-        serializable_format.extend(map.iter().map(|x| x.iter()).flatten().map(|key_and_value| {
+        serializable_format.extend(map.iter().flat_map(|x| x.iter()).map(|key_and_value| {
             match key_and_value {
                 KeyAndValueRef::Ascii(key, value) => {
                     let mut map = HashMap::with_capacity(1);
