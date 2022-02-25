@@ -759,11 +759,11 @@ mod tests {
                         "baz": "2",
                     },
                     "array": [
-                        {"baz": "3"},
-                        "4",
-                        {"bar": "5"},
+                        {},
+                        null,
+                        {},
                     ],
-                    "other": "6",
+                    "other": null,
                 },
             }},
         );
