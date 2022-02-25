@@ -56,7 +56,7 @@ pub enum ConfigurationError {
     PluginStartup { plugin: String, error: String },
     /// Plugin {plugin} could not be stopped: {error}
     PluginShutdown { plugin: String, error: String },
-    /// Unknown payer {0}
+    /// Unknown layer {0}
     LayerUnknown(String),
     /// Layer {layer} could not be configured: {error}
     LayerConfiguration { layer: String, error: String },
@@ -78,7 +78,7 @@ pub struct Configuration {
     /// Mapping of name to subgraph that the router may contact.
     #[serde(default)]
     #[builder(default)]
-    pub subgraphs: HashMap<String, Subgraph>,
+    pub subgraphs: HashMap<String, SubgraphConf>,
 
     /// OpenTelemetry configuration.
     #[builder(default)]
@@ -111,47 +111,42 @@ fn default_listen() -> ListenAddr {
 
 impl Configuration {
     pub fn load_subgraphs(
-        &mut self,
+        &self,
         schema: &graphql::Schema,
-    ) -> Result<(), Vec<ConfigurationError>> {
+    ) -> Result<HashMap<String, Subgraph>, Vec<ConfigurationError>> {
         let mut errors = Vec::new();
+        let mut subgraphs = HashMap::new();
 
         for (name, schema_url) in schema.subgraphs() {
-            match self.subgraphs.get(name) {
-                None => {
-                    if schema_url.is_empty() {
-                        errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
-                        continue;
-                    }
-                    match Url::parse(schema_url) {
-                        Err(_e) => {
-                            errors.push(ConfigurationError::InvalidSubgraphUrl {
-                                subgraph: name.to_owned(),
-                                url: schema_url.to_owned(),
-                            });
-                        }
-                        Ok(routing_url) => {
-                            self.subgraphs.insert(
-                                name.to_owned(),
-                                Subgraph {
-                                    routing_url,
-                                    layers: Vec::new(),
-                                },
-                            );
-                        }
-                    }
+            if schema_url.is_empty() {
+                errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
+                continue;
+            }
+            match Url::parse(schema_url) {
+                Err(_e) => {
+                    errors.push(ConfigurationError::InvalidSubgraphUrl {
+                        subgraph: name.to_owned(),
+                        url: schema_url.to_owned(),
+                    });
                 }
-                Some(subgraph) => {
-                    if !schema_url.is_empty() && schema_url != subgraph.routing_url.as_str() {
-                        tracing::warn!("overriding URL from subgraph {} at {} with URL from the configuration file: {}",
-                name, schema_url, subgraph.routing_url);
-                    }
+                Ok(routing_url) => {
+                    subgraphs.insert(
+                        name.to_owned(),
+                        Subgraph {
+                            routing_url,
+                            layers: self
+                                .subgraphs
+                                .get(name)
+                                .map(|s| s.layers.clone())
+                                .unwrap_or_default(),
+                        },
+                    );
                 }
             }
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(subgraphs)
         } else {
             Err(errors)
         }
@@ -222,7 +217,25 @@ pub struct Subgraph {
     pub layers: Vec<Value>,
 }
 
-impl JsonSchema for Subgraph {
+impl Subgraph {
+    pub fn new(routing_url: Url, layers: Vec<Value>) -> Self {
+        Self {
+            routing_url,
+            layers,
+        }
+    }
+}
+
+/// Configuration for a subgraph.
+#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
+pub struct SubgraphConf {
+    /// Layer configuration
+    #[serde(default)]
+    #[builder(default)]
+    pub layers: Vec<Value>,
+}
+
+impl JsonSchema for SubgraphConf {
     fn schema_name() -> String {
         stringify!(Subgraph).to_string()
     }
@@ -733,24 +746,12 @@ mod tests {
     }
 
     #[test]
-    fn routing_url_compatibility_with_schema() {
-        let mut configuration = Configuration::builder()
+    fn routing_url_in_schema() {
+        let configuration = Configuration::builder()
             .subgraphs(
                 [
-                    (
-                        "inventory".to_string(),
-                        Subgraph {
-                            routing_url: Url::parse("http://inventory/graphql").unwrap(),
-                            layers: Vec::new(),
-                        },
-                    ),
-                    (
-                        "products".to_string(),
-                        Subgraph {
-                            routing_url: Url::parse("http://products/graphql").unwrap(),
-                            layers: Vec::new(),
-                        },
-                    ),
+                    ("inventory".to_string(), SubgraphConf { layers: Vec::new() }),
+                    ("products".to_string(), SubgraphConf { layers: Vec::new() }),
                 ]
                 .iter()
                 .cloned()
@@ -762,73 +763,75 @@ mod tests {
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "")
+          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
+          REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
+        }"#
+        .parse()
+        .unwrap();
+
+        let subgraphs = configuration.load_subgraphs(&schema).unwrap();
+
+        // if no configuration override, use the URL from the supergraph
+        assert_eq!(
+            subgraphs.get("accounts").unwrap().routing_url.as_str(),
+            "http://localhost:4001/graphql"
+        );
+        // if both configuration and schema specify a non empty URL, the configuration wins
+        // this should show a warning in logs
+        assert_eq!(
+            subgraphs.get("inventory").unwrap().routing_url.as_str(),
+            "http://localhost:4002/graphql"
+        );
+        // if the configuration has a non empty routing URL, and the supergraph
+        // has an empty one, the configuration wins
+        assert_eq!(
+            subgraphs.get("products").unwrap().routing_url.as_str(),
+            "http://localhost:4003/graphql"
+        );
+
+        assert_eq!(
+            subgraphs.get("reviews").unwrap().routing_url.as_str(),
+            "http://localhost:4004/graphql"
+        );
+    }
+
+    #[test]
+    fn missing_subgraph_url() {
+        let configuration = Configuration::builder()
+            .subgraphs(
+                [
+                    ("inventory".to_string(), SubgraphConf { layers: Vec::new() }),
+                    ("products".to_string(), SubgraphConf { layers: Vec::new() }),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
+            )
+            .build();
+
+        let schema: graphql::Schema = r#"
+        enum join__Graph {
+          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
+          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#
         .parse()
         .unwrap();
 
         let res = configuration.load_subgraphs(&schema);
+        let errors =
+            res.expect_err("Must have an error because we have one missing subgraph routing url");
 
-        // if no configuration override, use the URL from the supergraph
-        assert_eq!(
-            configuration
-                .subgraphs
-                .get("accounts")
-                .unwrap()
-                .routing_url
-                .as_str(),
-            "http://localhost:4001/graphql"
-        );
-        // if both configuration and schema specify a non empty URL, the configuration wins
-        // this should show a warning in logs
-        assert_eq!(
-            configuration
-                .subgraphs
-                .get("inventory")
-                .unwrap()
-                .routing_url
-                .as_str(),
-            "http://inventory/graphql"
-        );
-        // if the configuration has a non empty routing URL, and the supergraph
-        // has an empty one, the configuration wins
-        assert_eq!(
-            configuration
-                .subgraphs
-                .get("products")
-                .unwrap()
-                .routing_url
-                .as_str(),
-            "http://products/graphql"
-        );
-        // if the configuration has a no routing URL, and the supergraph
-        // has an empty one, it does not get into the configuration
-        // and loading returns an error
-        assert!(configuration.subgraphs.get("reviews").is_none());
+        assert_eq!(errors.len(), 1);
 
-        match res {
-            Err(errors) => {
-                assert_eq!(errors.len(), 1);
-
-                if let Some(ConfigurationError::MissingSubgraphUrl(subgraph)) = errors.get(0) {
-                    assert_eq!(subgraph, "reviews");
-                } else {
-                    panic!(
-                        "expected missing subgraph URL for 'reviews', got: {:?}",
-                        errors
-                    );
-                }
-            }
-            Ok(()) => panic!("expected missing subgraph URL for 'reviews'"),
+        if let Some(ConfigurationError::MissingSubgraphUrl(subgraph)) = errors.get(0) {
+            assert_eq!(subgraph, "reviews");
+        } else {
+            panic!(
+                "expected missing subgraph URL for 'reviews', got: {:?}",
+                errors
+            );
         }
-    }
-
-    #[test]
-    fn invalid_subgraph_url() {
-        let err = serde_yaml::from_str::<Configuration>(include_str!("testdata/invalid_url.yaml"))
-            .unwrap_err();
-
-        assert_eq!(err.to_string(), "subgraphs.accounts.routing_url: invalid value: string \"abcd\", expected relative URL without a base at line 5 column 18");
     }
 }

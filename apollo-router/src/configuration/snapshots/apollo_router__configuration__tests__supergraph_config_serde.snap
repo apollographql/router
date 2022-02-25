@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 707
+assertion_line: 701
 expression: config
 
 ---
@@ -19,16 +19,12 @@ server:
       - PUT
 subgraphs:
   accounts:
-    routing_url: "http://localhost:4001/graphql"
     layers: []
   inventory:
-    routing_url: "http://localhost:4004/graphql"
     layers: []
   products:
-    routing_url: "http://localhost:4003/graphql"
     layers: []
   reviews:
-    routing_url: "http://localhost:4002/graphql"
     layers: []
 opentelemetry: ~
 plugins: {}

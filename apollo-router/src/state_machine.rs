@@ -451,7 +451,7 @@ impl<T> ResultExt<T> for Result<T, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::Subgraph;
+    use crate::configuration::SubgraphConf;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use apollo_router_core::http_compat::{Request, Response};
@@ -466,7 +466,6 @@ mod tests {
     use std::task::{Context, Poll};
     use test_log::test;
     use tower::{BoxError, Service};
-    use url::Url;
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -655,15 +654,13 @@ mod tests {
                                 [
                                     (
                                         "accounts".to_string(),
-                                        Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                        SubgraphConf {
                                             layers: Vec::new(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
-                                        Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                        SubgraphConf {
                                             layers: Vec::new(),
                                         }
                                     )
@@ -678,7 +675,7 @@ mod tests {
                     UpdateSchema(Box::new(r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                            PRODUCTS @join__graph(name: "products" url: "")
+                            PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
                             INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
                         }"#.parse().unwrap())),
                     Shutdown
@@ -690,7 +687,7 @@ mod tests {
                         schema: r#"
                         enum join__Graph {
                             ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                            PRODUCTS @join__graph(name: "products" url: "")
+                            PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
                             INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
                         }"#.to_string()
                     },
