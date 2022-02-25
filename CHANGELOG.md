@@ -24,7 +24,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :sparkles: Features
 
-- **Apollo Studio Explorer landing page** ([PR #526](https://github.com/apollographql/router/pull/526)
+- **Apollo Studio Explorer landing page** ([PR #526](https://github.com/apollographql/router/pull/526))
 
   We've replaced the _redirect_ to Apollo Studio with a statically rendered landing page.  This supersedes the previous redirect approach was merely introduced as a short-cut.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
 
