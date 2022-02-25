@@ -20,30 +20,44 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
  
-# [v0.1.0-alpha.8] Not yet released
+# [v0.1.0-alpha.8] 2022-03-08
 
 ## :sparkles: Features
 
-- **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
-  Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
-
 - **Sync and async checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
-  You can now write plugins that can act as check points in the services! Checkpoints allow you to make checks, and either return early with a Response, or forward a Request down the query pipeline.
+
+  You can now write plugins that can act as check points in services! Checkpoints allow you to make checks, and either return early with a `Response`, or forward a `Request` down the query pipeline.
+
+- **Contracts support** ([PR #573](https://github.com/apollographql/router/pull/573))
+
+  The Apollo Router now supports [Apollo Studio Contracts](https://www.apollographql.com/docs/studio/contracts/)!
+
+- **Add OpenTracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
+
+  OpenTracing support has been added into the reporting plugin.  You're now able to have span propagation (via headers) via two common formats supported by the `opentracing` crate: `zipkin_b3` and `jaeger`.
+
 
 ## :bug: Fixes
 
-- **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
-  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (for instance, Reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the router lifecycle. This change now ensures that Reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration. 
+- **Managed Federation no longer requires `router_url`** ([PR #553](https://github.com/apollographql/router/pull/553))
 
-- **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
-  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
+  When using Managed Federation, it is no longer necessary to provide a `routing_url` value.  Instead, the values provided by Studio will be used and the `routing_url` can be used only to override those URLs.
+
+- **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
+
+  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (e.g., reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the Router lifecycle. This change now ensures that the reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration.
+
+- **Propagate Router operation lifecycle errors** ([PR #537](https://github.com/apollographql/router/issues/537))
+
+  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occurred during query planning and query execution will be displayed as GraphQL errors instead of an empty payload.
 
 ## :nail_care: Improvements
 
 - **Introduce Checkpoint and Step** ([PR #558](https://github.com/apollographql/router/pull/558))
-  Layers and Extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fullfilled already and it can bail out. A caching layer for example could return Step::Return(response) if the cache hit was successful, and Step::Continue(request) if the cache missed.
 
-# [v0.1.0-alpha.7] 2022-02-25
+  Layers and extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fulfilled already and it can bail out. A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` in the event of a cache "miss".
+
+# [v0.1.0-alpha.8] 2022-02-25
 
 ## :sparkles: Features
 
