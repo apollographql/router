@@ -400,7 +400,7 @@ mod test {
         )
         .unwrap();
         let service = create_service(config).await;
-        assert!(!service.is_ok())
+        assert!(service.is_err())
     }
 
     #[tokio::test]
@@ -428,7 +428,7 @@ mod test {
         )
         .unwrap();
         let service = create_service(config).await;
-        assert!(!service.is_ok())
+        assert!(service.is_err())
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
