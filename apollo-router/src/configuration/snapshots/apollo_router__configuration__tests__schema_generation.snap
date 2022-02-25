@@ -1,10 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-<<<<<<< HEAD
-assertion_line: 649
-=======
-assertion_line: 702
->>>>>>> 3999ae34c5c99d6c73b3d30c92d532a00fd7aa1c
+assertion_line: 680
 expression: "&schema"
 
 ---
@@ -153,18 +149,16 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-<<<<<<< HEAD
-            "apollographql.com_rhai"
-=======
-            "com.apollo.test.always_fails_to_start"
->>>>>>> 3999ae34c5c99d6c73b3d30c92d532a00fd7aa1c
+            "apollographql.com.rhai"
           ]
         },
         {
           "required": [
-<<<<<<< HEAD
-            "example.com_hello"
-=======
+            "com.apollo.test.always_fails_to_start"
+          ]
+        },
+        {
+          "required": [
             "com.apollo.test.always_fails_to_start_and_stop"
           ]
         },
@@ -181,17 +175,13 @@ expression: "&schema"
         {
           "required": [
             "com.example.hello"
->>>>>>> 3999ae34c5c99d6c73b3d30c92d532a00fd7aa1c
           ]
         }
       ],
       "properties": {
-<<<<<<< HEAD
-        "apollographql.com_rhai": {
+        "apollographql.com.rhai": {
           "$ref": "#/definitions/Conf"
         },
-        "example.com_hello": {
-=======
         "com.apollo.test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
@@ -205,7 +195,6 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         },
         "com.example.hello": {
->>>>>>> 3999ae34c5c99d6c73b3d30c92d532a00fd7aa1c
           "$ref": "#/definitions/Conf"
         }
       }
