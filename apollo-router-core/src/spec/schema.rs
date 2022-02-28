@@ -256,7 +256,7 @@ impl std::str::FromStr for Schema {
                 raw_schema: s.to_string(),
                 errors: vec![],
             };
-            return Err(SchemaError::Parse(errors));
+            Err(SchemaError::Parse(errors))
         }
     }
 }

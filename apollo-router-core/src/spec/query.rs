@@ -35,15 +35,6 @@ impl Query {
     ) {
         let data = std::mem::take(&mut response.data);
         if let Value::Object(mut input) = data {
-            println!(
-                "==================================\nwill format response for {:?}",
-                input
-            );
-            println!(
-                "op name={:?} self.operations = {:?}",
-                operation_name, self.operations
-            );
-
             let operation = match operation_name {
                 Some(name) => self
                     .operations
@@ -54,7 +45,6 @@ impl Query {
             };
 
             if let Some(operation) = operation {
-                println!("found operation {:?}", operation);
                 let mut output = Object::default();
                 let res = self.apply_selection_set(
                     &operation.selection_set,
@@ -62,7 +52,6 @@ impl Query {
                     &mut output,
                     schema,
                 );
-                println!("apply_selection_res: {:?}", res);
                 response.data = output.into();
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
@@ -95,9 +84,7 @@ impl Query {
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    let res = Operation::from_ast(operation, schema);
-                    println!("operation::from_ast returned {:?}", res);
-                    res
+                    Operation::from_ast(operation, schema)
                 } else {
                     None
                 }
@@ -149,13 +136,6 @@ impl Query {
         selection_set: &[Selection],
         schema: &Schema,
     ) -> Result<Value, InvalidValue> {
-        println!(
-            "===> format_value[{}] field_type {:?} selections: {:?}",
-            line!(),
-            field_type,
-            selection_set
-        );
-
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
@@ -190,59 +170,22 @@ impl Query {
                 _ => Ok(Value::Null),
             },
 
-            FieldType::Named(type_name) => {
-                println!("object types: {:?}", schema.object_types);
-                match input {
-                    Value::Object(mut input_object) => {
-                        let mut output_object = Object::default();
+            FieldType::Named(type_name) => match input {
+                Value::Object(mut input_object) => {
+                    let mut output_object = Object::default();
 
-                        println!(
-                            "format_value[{}] will apply selection set {:?} on object {:?}",
-                            line!(),
-                            selection_set,
-                            input_object
-                        );
-                        match self.apply_selection_set(
-                            selection_set,
-                            &mut input_object,
-                            &mut output_object,
-                            schema,
-                        ) {
-                            Ok(()) => Ok(Value::Object(output_object)),
-                            Err(InvalidValue) => Ok(Value::Null),
-                        }
+                    match self.apply_selection_set(
+                        selection_set,
+                        &mut input_object,
+                        &mut output_object,
+                        schema,
+                    ) {
+                        Ok(()) => Ok(Value::Object(output_object)),
+                        Err(InvalidValue) => Ok(Value::Null),
                     }
-                    _ => Ok(Value::Null),
                 }
-                /*match schema.object_types.get(type_name) {
-                    // try with custom scalars then
-                    None => {
-                        if schema.custom_scalars.contains(type_name) {
-                            Ok(input)
-                        } else {
-                            Ok(Value::Null)
-                        }
-                    }
-                    Some(object_type) => match input {
-                        Value::Object(mut input_object) => {
-                            let mut output_object = Object::default();
-
-                            println!("apply_selection_set[{}] will apply selection set {:?} on object {:?}",
-                            line!(), selection_set, input_object);
-                            match self.apply_selection_set(
-                                selection_set,
-                                &mut input_object,
-                                &mut output_object,
-                                schema,
-                            ) {
-                                Ok(()) => Ok(Value::Object(output_object)),
-                                Err(InvalidValue) => Ok(Value::Null),
-                            }
-                        }
-                        _ => Ok(Value::Null),
-                    },
-                }*/
-            }
+                _ => Ok(Value::Null),
+            },
 
             // the rest of the possible types just need to validate the expected value
             FieldType::Int => {
@@ -296,12 +239,6 @@ impl Query {
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in selection_set {
-            println!(
-                "apply_selection_set[{}]input {:?}, output {:?}",
-                line!(),
-                input,
-                output
-            );
             match selection {
                 Selection::Field {
                     name,
@@ -309,20 +246,12 @@ impl Query {
                     field_type,
                 } => {
                     if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
-                        println!(
-                            "apply_selection_set[{}] {}: {:?}",
-                            line!(),
-                            name.as_str(),
-                            input_value
-                        );
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
                         output.insert(field_name, value);
-                    } else {
-                        if field_type.is_non_null() {
-                            return Err(InvalidValue);
-                        }
+                    } else if field_type.is_non_null() {
+                        return Err(InvalidValue);
                     }
                 }
                 Selection::InlineFragment {
@@ -341,26 +270,13 @@ impl Query {
                     }
                 }
                 Selection::FragmentSpread { name } => {
-                    println!("apply_selection_set[{}] got fragment: {:?}", line!(), name);
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
-                        println!(
-                            "apply_selection_set[{}] will try to apply {:?}",
-                            line!(),
-                            fragment
-                        );
-
                         if let Some(typename) = input.get("__typename") {
                             if typename.as_str() == Some(fragment.type_condition.as_str()) {
-                                println!(
-                                    "apply_selection_set[{}] type condition matched on {:?}",
-                                    line!(),
-                                    typename.as_str()
-                                );
-
                                 self.apply_selection_set(
                                     &fragment.selection_set,
                                     input,
@@ -452,12 +368,10 @@ impl Operation {
             .and_then(|op| {
                 op.query_token()
                     .map(|_| OperationKind::Query)
-                    .or(op.mutation_token().map(|_| OperationKind::Mutation))
-                    .or(op.subscription_token().map(|_| OperationKind::Subscription))
+                    .or_else(|| op.mutation_token().map(|_| OperationKind::Mutation))
+                    .or_else(|| op.subscription_token().map(|_| OperationKind::Subscription))
             })
             .unwrap_or(OperationKind::Query);
-
-        println!("Operation::from_ast[{}] kind = {:?}", line!(), kind);
 
         let operation_list = match kind {
             OperationKind::Query => schema.object_types.get("Query")?,
@@ -471,11 +385,6 @@ impl Operation {
             .selections()
             .map(|selection| Selection::from_operation_ast(selection, operation_list, schema))
             .collect::<Option<_>>()?;
-        println!(
-            "Operation::from_ast[{}] selections = {:?}",
-            line!(),
-            selection_set
-        );
 
         let variables = operation
             .variable_definitions()
@@ -498,7 +407,6 @@ impl Operation {
                 (name, ty)
             })
             .collect();
-        println!("Operation::from_ast[{}]", line!());
 
         Some(Operation {
             selection_set,

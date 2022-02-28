@@ -112,10 +112,7 @@ impl FieldType {
     }
 
     pub fn is_non_null(&self) -> bool {
-        match self {
-            FieldType::NonNull(_) => true,
-            _ => false,
-        }
+        matches!(self, FieldType::NonNull(_))
     }
 }
 
