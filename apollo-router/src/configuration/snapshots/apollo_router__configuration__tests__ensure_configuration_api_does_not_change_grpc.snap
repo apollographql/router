@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 734
+assertion_line: 525
 expression: config
 
 ---
@@ -10,12 +10,5 @@ server:
 subgraphs:
   example:
     layers: []
-opentelemetry:
-  otlp:
-    tracing:
-      exporter:
-        grpc: ~
-      trace_config: ~
 plugins: {}
-spaceport: ~
 

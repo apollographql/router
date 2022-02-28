@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 748
+assertion_line: 539
 expression: config
 
 ---
@@ -10,24 +10,5 @@ server:
 subgraphs:
   example:
     layers: []
-opentelemetry:
-  otlp:
-    tracing:
-      exporter:
-        grpc:
-          endpoint: ~
-          metadata: ~
-          protocol: ~
-          timeout: ~
-          tls_config:
-            domain_name: ~
-            ca:
-              env: SECRET_STUFF
-            cert:
-              file: /foo
-            key:
-              file: /bar
-      trace_config: ~
 plugins: {}
-spaceport: ~
 

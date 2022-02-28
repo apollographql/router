@@ -1,4 +1,5 @@
 use apollo_router::configuration::Configuration;
+use apollo_router::get_dispatcher;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
@@ -308,14 +309,8 @@ async fn query_rust(
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let dispatcher = config
-        .subscriber
-        .clone()
-        .map(tracing::Dispatch::new)
-        .unwrap_or_default();
+    let mut builder = PluggableRouterServiceBuilder::new(Arc::clone(&schema), 10);
     let subgraphs = config.load_subgraphs(&schema).unwrap();
-
-    let mut builder = PluggableRouterServiceBuilder::new(schema, 10, dispatcher);
     for (name, subgraph) in &subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
@@ -330,6 +325,7 @@ async fn query_rust(
         builder = builder.with_subgraph_service(name, service);
     }
 
+    builder = builder.with_dispatcher(get_dispatcher());
     let (mut router, _) = builder.build().await;
 
     let stream = router.ready().await.unwrap().call(request).await.unwrap();
