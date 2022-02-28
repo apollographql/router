@@ -2088,4 +2088,94 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn filter_extended_interface_errors() {
+        let schema = "type Query {
+            me: NamedEntity
+        }
+
+        interface NamedEntity {
+            name: String
+        }
+
+        type User implements NamedEntity {
+            name: String
+        }
+
+        type User2 implements NamedEntity {
+            name: String
+        }
+
+        extend interface NamedEntity {
+            name2: String!
+        }
+
+        extend type User {
+            name2: String!
+        }
+
+        extend type User2 {
+            name2: String!
+        }
+        ";
+
+        let query = "query  { me { name2 } }";
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
 }
