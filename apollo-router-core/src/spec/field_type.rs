@@ -110,6 +110,13 @@ impl FieldType {
             | FieldType::Boolean => true,
         }
     }
+
+    pub fn is_non_null(&self) -> bool {
+        match self {
+            FieldType::NonNull(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<ast::Type> for FieldType {

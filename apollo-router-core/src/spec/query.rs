@@ -319,6 +319,10 @@ impl Query {
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
                         output.insert(field_name, value);
+                    } else {
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     }
                 }
                 Selection::InlineFragment {
@@ -332,6 +336,8 @@ impl Query {
                         if typename.as_str() == Some(type_condition.as_str()) {
                             self.apply_selection_set(selection_set, input, output, schema)?;
                         }
+                    } else {
+                        return Err(InvalidValue);
                     }
                 }
                 Selection::FragmentSpread { name } => {
@@ -362,8 +368,11 @@ impl Query {
                                     schema,
                                 )?;
                             }
+                        } else {
+                            return Err(InvalidValue);
                         }
                     } else {
+                        // the fragment should have been already checked with the schema
                         failfast_debug!("Missing fragment named: {}", name);
                     }
                 }
@@ -1055,15 +1064,25 @@ mod tests {
             schema,
             query,
             json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
                 "me": {
                     "name": 1,
                 },
             }},
             None,
             json! {{
-                "me": {
-                    "name": null,
-                },
+                "me": null,
             }},
         );
 
