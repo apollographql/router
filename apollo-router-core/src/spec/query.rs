@@ -1240,4 +1240,163 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn filter_nested_object_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            name: String
+            reviews1: [Review]
+            reviews2: [Review!]
+            reviews3: [Review]!
+            reviews4: [Review!]!
+        }
+        
+        type Review {
+            text1: String
+            text2: String!
+        }
+        ";
+
+        let query_review1_text1 = "query  { me { id reviews1 { text1 } } }";
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        let query_review1_text2 = "query  { me { id reviews1 { text2 } } }";
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        /*        // reviews2: [Review!]
+        let query_review_1 = "query  { me { id reviews2 } }";
+        assert_format_response!(
+            schema,
+            query_review_1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ {  } ],
+                },
+            }},
+        );*/
+    }
 }
