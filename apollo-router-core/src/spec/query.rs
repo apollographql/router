@@ -46,7 +46,9 @@ impl Query {
 
             if let Some(operation) = operation {
                 let mut output = Object::default();
-                let res = self.apply_selection_set(
+                //FIXME: what do we do if theentire operation selection set failed?
+                // return an explicit error?
+                let _res = self.apply_selection_set(
                     &operation.selection_set,
                     &mut input,
                     &mut output,
