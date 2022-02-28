@@ -5,7 +5,7 @@ use crate::apollo_telemetry::new_pipeline;
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
-use crate::set_subscriber;
+use crate::set_dispatcher;
 use crate::GLOBAL_ENV_FILTER;
 use apollo_router_core::{register_plugin, Plugin};
 use apollo_spaceport::server::ReportSpaceport;
@@ -191,7 +191,7 @@ impl Plugin for Reporting {
 
     async fn startup(&mut self) -> Result<(), BoxError> {
         tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
-        set_subscriber(self.try_initialize_subscriber()?);
+        set_dispatcher(self.try_initialize_subscriber()?);
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {

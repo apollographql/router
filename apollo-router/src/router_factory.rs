@@ -15,6 +15,8 @@ use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 
+const REPORTING_MODULE_NAME: &str = "com.apollographql.reporting";
+
 /// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
@@ -78,20 +80,20 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             errors.append(&mut e);
         }
 
-        // Because studio usage reporting requires the OTEL plugin,
-        // we must force the addition of the OTEL plugin if APOLLO_KEY
+        // Because studio usage reporting requires the Reporting plugin,
+        // we must force the addition of the Reporting plugin if APOLLO_KEY
         // is set.
         if std::env::var("APOLLO_KEY").is_ok() {
-            // If the user has not specified OTEL configuration, then
+            // If the user has not specified Reporting configuration, then
             // insert a valid "minimal" configuration which allows
             // studio usage reporting to function
             if !configuration
                 .plugins
                 .plugins
-                .contains_key("com.apollographql.reporting")
+                .contains_key(REPORTING_MODULE_NAME)
             {
                 configuration.plugins.plugins.insert(
-                    "com.apollographql.reporting".to_string(),
+                    REPORTING_MODULE_NAME.to_string(),
                     serde_json::json!({ "opentelemetry": null }),
                 );
             }
@@ -130,9 +132,13 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
         {
-            let plugin_registry = apollo_router_core::plugins();
-            for (name, configuration) in &configuration.plugins.plugins {
-                let name = name.as_str().to_string();
+            async fn process_plugin(
+                mut builder: PluggableRouterServiceBuilder,
+                errors: &mut Vec<ConfigurationError>,
+                name: String,
+                configuration: &serde_json::Value,
+            ) -> PluggableRouterServiceBuilder {
+                let plugin_registry = apollo_router_core::plugins();
                 match plugin_registry.get(name.as_str()) {
                     Some(factory) => match factory.create_instance(configuration) {
                         Ok(mut plugin) => match plugin.startup().await {
@@ -141,23 +147,52 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                             }
                             Err(err) => {
                                 tracing::error!("starting plugin: {}, error: {}", name, err);
-                                errors.push(ConfigurationError::PluginStartup {
+                                (*errors).push(ConfigurationError::PluginStartup {
                                     plugin: name,
                                     error: err.to_string(),
                                 });
                             }
                         },
                         Err(err) => {
-                            errors.push(ConfigurationError::PluginConfiguration {
+                            (*errors).push(ConfigurationError::PluginConfiguration {
                                 plugin: name,
                                 error: err.to_string(),
                             });
                         }
                     },
                     None => {
-                        errors.push(ConfigurationError::PluginUnknown(name));
+                        (*errors).push(ConfigurationError::PluginUnknown(name));
                     }
                 }
+                builder
+            }
+
+            // We ensured that the Reporting plugin was in the list of plugins
+            // above. Now make sure that we process that plugin before any
+            // other plugins.
+            let reporting_configuration = configuration
+                .plugins
+                .plugins
+                .get(REPORTING_MODULE_NAME)
+                .expect("reporting plugin must be present");
+            builder = process_plugin(
+                builder,
+                &mut errors,
+                REPORTING_MODULE_NAME.to_string(),
+                reporting_configuration,
+            )
+            .await;
+
+            // Process the remaining plugins. Filter out the reporting module so that
+            // we don't process it twice
+            for (name, configuration) in configuration
+                .plugins
+                .plugins
+                .iter()
+                .filter(|(name, _)| *name != REPORTING_MODULE_NAME)
+            {
+                let name = name.clone();
+                builder = process_plugin(builder, &mut errors, name, configuration).await;
             }
         }
         if !errors.is_empty() {
@@ -178,12 +213,12 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
 
         // This **must** run after:
-        //  - the OTEL plugin is initialized.
+        //  - the Reporting plugin is initialized.
         //  - all configuration errors are checked
         // and **before** build() is called.
         //
         // This is because our global SUBSCRIBER is initialized by
-        // the startup() method of our OTEL plugin.
+        // the startup() method of our Reporting plugin.
         let dispatcher = get_dispatcher();
         builder = builder.with_dispatcher(dispatcher.clone());
         let (pluggable_router_service, plugins) = builder.build().await;
