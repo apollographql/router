@@ -35,6 +35,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
   Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
 
+## :nail_care: Improvements
+
+- **Introduce Checkpoint and Step** ([PR #558](https://github.com/apollographql/router/pull/558))
+  Layers and Extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fullfilled already and it can bail out. A caching layer for example could return Step::Return(response) if the cache hit was successful, and Step::Forward(request) if the cache missed.
+
 # [v0.1.0-alpha.7] 2022-02-25
 
 ## :sparkles: Features
