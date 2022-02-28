@@ -11,6 +11,7 @@ pub struct Schema {
     interfaces: HashMap<String, Interface>,
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) fragments: Fragments,
+    pub(crate) enums: HashMap<String, HashSet<String>>,
 }
 
 impl std::str::FromStr for Schema {
@@ -236,6 +237,40 @@ impl std::str::FromStr for Schema {
             })
             .collect();
 
+        let enums: HashMap<String, HashSet<String>> = document
+            .definitions()
+            .filter_map(|definition| match definition {
+                // Spec: https://spec.graphql.org/draft/#sec-Enums
+                ast::Definition::EnumTypeDefinition(definition) => {
+                    let name = definition
+                        .name()
+                        .expect("the node Name is not optional in the spec; qed")
+                        .text()
+                        .to_string();
+
+                    let enum_values: HashSet<String> = definition
+                        .enum_values_definition()
+                        .expect("the node EnumValuesDefinition is not optional in the spec; qed")
+                        .enum_value_definitions()
+                        .filter_map(|value| {
+                            value.enum_value().map(|val| {
+                                //FIXME: should we check for true/false/null here
+                                // https://spec.graphql.org/draft/#EnumValue
+                                val.name()
+                                    .expect("the node Name is not optional in the spec; qed")
+                                    .text()
+                                    .to_string()
+                            })
+                        })
+                        .collect();
+
+                    Some((name, enum_values))
+                }
+
+                _ => None,
+            })
+            .collect();
+
         let mut schema = Self {
             subtype_map,
             string: s.to_owned(),
@@ -244,6 +279,7 @@ impl std::str::FromStr for Schema {
             interfaces,
             custom_scalars,
             fragments: Fragments::default(),
+            enums,
         };
         if let Some(fragments) = Fragments::from_ast(&document, &schema) {
             schema.fragments = fragments;

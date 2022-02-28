@@ -175,6 +175,17 @@ impl Query {
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
                     return Ok(input);
+                } else if let Some(enum_type) = schema.enums.get(type_name) {
+                    return match input.as_str() {
+                        Some(s) => {
+                            if enum_type.contains(s) {
+                                Ok(input)
+                            } else {
+                                Ok(Value::Null)
+                            }
+                        }
+                        None => Ok(Value::Null),
+                    };
                 }
 
                 match input {
@@ -1801,6 +1812,131 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_enum_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            a: A
+            b: A!
+        }
+
+        enum A {
+            X
+            Y
+            Z
+        }";
+
+        let query_a = "query  { me { id a } }";
+
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "X",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "X",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                },
+            }},
+        );
+
+        let query_b = "query  { me { id b } }";
+
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "X",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "X",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
                 }
             }},
             None,
