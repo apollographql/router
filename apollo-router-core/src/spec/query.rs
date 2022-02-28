@@ -170,22 +170,30 @@ impl Query {
                 _ => Ok(Value::Null),
             },
 
-            FieldType::Named(type_name) => match input {
-                Value::Object(mut input_object) => {
-                    let mut output_object = Object::default();
-
-                    match self.apply_selection_set(
-                        selection_set,
-                        &mut input_object,
-                        &mut output_object,
-                        schema,
-                    ) {
-                        Ok(()) => Ok(Value::Object(output_object)),
-                        Err(InvalidValue) => Ok(Value::Null),
-                    }
+            FieldType::Named(type_name) => {
+                // we cannot know about the expected format of custom scalars
+                // so we must pass them directly to the client
+                if schema.custom_scalars.contains(type_name) {
+                    return Ok(input);
                 }
-                _ => Ok(Value::Null),
-            },
+
+                match input {
+                    Value::Object(mut input_object) => {
+                        let mut output_object = Object::default();
+
+                        match self.apply_selection_set(
+                            selection_set,
+                            &mut input_object,
+                            &mut output_object,
+                            schema,
+                        ) {
+                            Ok(()) => Ok(Value::Object(output_object)),
+                            Err(InvalidValue) => Ok(Value::Null),
+                        }
+                    }
+                    _ => Ok(Value::Null),
+                }
+            }
 
             // the rest of the possible types just need to validate the expected value
             FieldType::Int => {
@@ -1669,6 +1677,135 @@ mod tests {
                 "me": {
                     "name": "a",
                 },
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_scalar_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            a: A
+            b: A!
+        }
+        
+        scalar A
+        ";
+
+        let query = "query  { me { id a } }";
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": {
+                        "field": 1234,
+                    },
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": {
+                        "field": 1234,
+                    },
+                },
+            }},
+        );
+
+        let query2 = "query  { me { id b } }";
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": {
+                        "field": 1234,
+                    },
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": {
+                        "field": 1234,
+                    },
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": null,
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
             }},
         );
     }
