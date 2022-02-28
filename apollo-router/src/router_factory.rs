@@ -1,4 +1,5 @@
 use crate::configuration::{Configuration, ConfigurationError};
+use crate::get_dispatcher;
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
@@ -77,13 +78,27 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             errors.append(&mut e);
         }
 
-        let dispatcher = configuration
-            .subscriber
-            .clone()
-            .map(tracing::Dispatch::new)
-            .unwrap_or_default();
+        // Because studio usage reporting requires the OTEL plugin,
+        // we must force the addition of the OTEL plugin if APOLLO_KEY
+        // is set.
+        if std::env::var("APOLLO_KEY").is_ok() {
+            // If the user has not specified OTEL configuration, then
+            // insert a valid "minimal" configuration which allows
+            // studio usage reporting to function
+            if !configuration
+                .plugins
+                .plugins
+                .contains_key("com.apollographql.reporting")
+            {
+                configuration.plugins.plugins.insert(
+                    "com.apollographql.reporting".to_string(),
+                    serde_json::json!({ "opentelemetry": null }),
+                );
+            }
+        }
+
         let buffer = 20000;
-        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer, dispatcher.clone());
+        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
 
         for (name, subgraph) in &configuration.subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
@@ -162,6 +177,15 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             return Err(Box::new(ConfigurationError::InvalidConfiguration));
         }
 
+        // This **must** run after:
+        //  - the OTEL plugin is initialized.
+        //  - all configuration errors are checked
+        // and **before** build() is called.
+        //
+        // This is because our global SUBSCRIBER is initialized by
+        // the startup() method of our OTEL plugin.
+        let dispatcher = get_dispatcher();
+        builder = builder.with_dispatcher(dispatcher.clone());
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let (service, worker) = Buffer::pair(
@@ -400,7 +424,7 @@ mod test {
         )
         .unwrap();
         let service = create_service(config).await;
-        assert!(!service.is_ok())
+        assert!(service.is_err())
     }
 
     #[tokio::test]
@@ -428,7 +452,7 @@ mod test {
         )
         .unwrap();
         let service = create_service(config).await;
-        assert!(!service.is_ok())
+        assert!(service.is_err())
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {

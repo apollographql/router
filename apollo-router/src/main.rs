@@ -1,6 +1,6 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
 use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
 use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
@@ -140,21 +140,43 @@ async fn rt_main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
-    let schema = if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
-        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
-            .expect("cannot set up Uplink schema download if  the APOLLO_GRAPH_REF environment variable is not set");
-
-        SchemaKind::Registry {
-            apollo_key,
-            apollo_graph_ref,
+    let schema = match (opt.supergraph_path, std::env::var("APOLLO_KEY")) {
+        (Some(supergraph_path), _) => {
+            let supergraph_path = if supergraph_path.is_relative() {
+                current_directory.join(supergraph_path)
+            } else {
+                supergraph_path
+            };
+            SchemaKind::File {
+                path: supergraph_path,
+                watch: opt.watch,
+                delay: None,
+            }
         }
-    } else {
-        ensure!(
-            opt.supergraph_path.is_some(),
-            r#"
+        (None, Ok(apollo_key)) => {
+            let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
+            .map_err(|_| anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
+
+            SchemaKind::Registry {
+                apollo_key,
+                apollo_graph_ref,
+            }
+        }
+        _ => {
+            return Err(anyhow!(
+                r#"
     💫 Apollo Router requires a supergraph to be set using '--supergraph':
 
         $ ./router --supergraph <file>`
+
+        Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
+        and APOLLO_GRAPH_REF environment variables to your graph's settings.
+        
+          $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+          
+        For more on Apollo Studio and Managed Federation, see our documentation:
+        
+          https://www.apollographql.com/docs/router/managed-federation/
 
     🪐 The supergraph can be built or downloaded from the Apollo Registry
        using the Rover CLI. To find out how, see:
@@ -170,20 +192,8 @@ async fn rt_main() -> Result<()> {
 
         $ ./router --supergraph starstuff.graphql
 
-    "#
-        );
-
-        let supergraph_path = opt.supergraph_path.unwrap();
-
-        let supergraph_path = if supergraph_path.is_relative() {
-            current_directory.join(supergraph_path)
-        } else {
-            supergraph_path
-        };
-        SchemaKind::File {
-            path: supergraph_path,
-            watch: opt.watch,
-            delay: None,
+    "#,
+            ));
         }
     };
 

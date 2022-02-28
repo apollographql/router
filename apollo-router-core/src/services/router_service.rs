@@ -174,17 +174,17 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
-    dispatcher: Dispatch,
+    dispatcher: Option<Dispatch>,
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, buffer: usize, dispatcher: Dispatch) -> Self {
+    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
         Self {
             schema,
             buffer,
             plugins: Default::default(),
             services: Default::default(),
-            dispatcher,
+            dispatcher: Default::default(),
         }
     }
 
@@ -198,6 +198,11 @@ impl PluggableRouterServiceBuilder {
 
     pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
         self.plugins.push(plugin);
+        self
+    }
+
+    pub fn with_dispatcher(mut self, dispatcher: Dispatch) -> PluggableRouterServiceBuilder {
+        self.dispatcher = Some(dispatcher);
         self
     }
 
@@ -258,7 +263,14 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(query_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            query_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -272,7 +284,14 @@ impl PluggableRouterServiceBuilder {
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
                 let (service, worker) = Buffer::pair(service, self.buffer);
-                tokio::spawn(worker.with_subscriber(self.dispatcher.clone()));
+                tokio::spawn(
+                    worker.with_subscriber(
+                        self.dispatcher
+                            .as_ref()
+                            .expect("safe to assume dispatcher is some")
+                            .clone(),
+                    ),
+                );
 
                 (name.clone(), service)
             })
@@ -294,7 +313,14 @@ impl PluggableRouterServiceBuilder {
                 ),
             self.buffer,
         );
-        tokio::spawn(execution_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            execution_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -346,7 +372,14 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(router_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            router_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         (router_service.boxed_clone(), self.plugins)
     }

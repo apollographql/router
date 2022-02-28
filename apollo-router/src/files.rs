@@ -82,7 +82,7 @@ pub(crate) mod tests {
     #[cfg(test)]
     pub(crate) fn create_temp_file() -> (PathBuf, File) {
         let path = temp_dir().join(format!("{}", uuid::Uuid::new_v4()));
-        let file = std::fs::File::create(path.to_owned()).unwrap();
+        let file = std::fs::File::create(&path).unwrap();
         (path, file)
     }
 

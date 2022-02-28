@@ -30,6 +30,7 @@ use apollo_parser::{ast, Parser};
 use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
+use derivative::Derivative;
 use opentelemetry::{
     global,
     runtime::Tokio,
@@ -41,17 +42,68 @@ use opentelemetry::{
     trace::{TraceError, TracerProvider},
     Value,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::task::JoinError;
 
-use crate::configuration::{SpaceportConfig, StudioGraph};
+const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
+const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
 
-pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
-pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
+fn default_collector() -> String {
+    DEFAULT_SERVER_URL.to_string()
+}
 
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
+
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
+#[derivative(Debug)]
+pub struct StudioGraph {
+    #[serde(skip, default = "apollo_graph_reference")]
+    pub(crate) reference: String,
+
+    #[serde(skip, default = "apollo_key")]
+    #[derivative(Debug = "ignore")]
+    pub(crate) key: String,
+}
+
+fn apollo_key() -> String {
+    std::env::var("APOLLO_KEY")
+        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
+}
+
+fn apollo_graph_reference() -> String {
+    std::env::var("APOLLO_GRAPH_REF").expect(
+        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+    )
+}
+
+impl Default for SpaceportConfig {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external: false,
+        }
+    }
+}
 /// Pipeline builder
 #[derive(Debug)]
 pub struct PipelineBuilder {
