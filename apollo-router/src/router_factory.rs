@@ -167,29 +167,38 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 builder
             }
 
-            // We ensured that the Reporting plugin was in the list of plugins
-            // above. Now make sure that we process that plugin before any
-            // other plugins.
-            let reporting_configuration = configuration
+            // If it was required, we ensured that the Reporting plugin was in the
+            // list of plugins above. Now make sure that we process that plugin
+            // before any other plugins.
+            let already_processed_plugins = if configuration
                 .plugins
                 .plugins
-                .get(REPORTING_MODULE_NAME)
-                .expect("reporting plugin must be present");
-            builder = process_plugin(
-                builder,
-                &mut errors,
-                REPORTING_MODULE_NAME.to_string(),
-                reporting_configuration,
-            )
-            .await;
+                .contains_key(REPORTING_MODULE_NAME)
+            {
+                let reporting_configuration = configuration
+                    .plugins
+                    .plugins
+                    .get(REPORTING_MODULE_NAME)
+                    .expect("reporting plugin must be present");
+                builder = process_plugin(
+                    builder,
+                    &mut errors,
+                    REPORTING_MODULE_NAME.to_string(),
+                    reporting_configuration,
+                )
+                .await;
+                vec![REPORTING_MODULE_NAME]
+            } else {
+                vec![]
+            };
 
-            // Process the remaining plugins. Filter out the reporting module so that
-            // we don't process it twice
+            // Process the remaining plugins. We use already_processed_plugins to skip
+            // those plugins we already processed.
             for (name, configuration) in configuration
                 .plugins
                 .plugins
                 .iter()
-                .filter(|(name, _)| *name != REPORTING_MODULE_NAME)
+                .filter(|(name, _)| !already_processed_plugins.contains(&name.as_str()))
             {
                 let name = name.clone();
                 builder = process_plugin(builder, &mut errors, name, configuration).await;
@@ -306,7 +315,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollo.test",
+        "com.apollographql.test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -337,7 +346,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollo.test",
+        "com.apollographql.test",
         "always_fails_to_start",
         AlwaysFailsToStartPlugin
     );
@@ -368,7 +377,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollo.test",
+        "com.apollographql.test",
         "always_fails_to_stop",
         AlwaysFailsToStopPlugin
     );
@@ -402,7 +411,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollo.test",
+        "com.apollographql.test",
         "always_fails_to_start_and_stop",
         AlwaysFailsToStartAndStopPlugin
     );
@@ -439,7 +448,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollo.test.always_starts_and_stops:
+                com.apollographql.test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -453,7 +462,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollo.test.always_fails_to_start:
+                com.apollographql.test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -467,7 +476,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollo.test.always_fails_to_stop:
+                com.apollographql.test.always_fails_to_stop:
                     name: albert
         "#,
         )
@@ -481,7 +490,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollo.test.always_fails_to_start_and_stop:
+                com.apollographql.test.always_fails_to_start_and_stop:
                     name: albert
         "#,
         )
