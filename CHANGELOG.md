@@ -27,6 +27,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
   Plugins need to execute in sequence of declaration *except* for certain "core" plugins (for instance, Reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the router lifecycle. This change now ensures that Reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration. 
 
+- **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
+  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
+
 # [v0.1.0-alpha.7] 2022-02-25
 
 ## :sparkles: Features
