@@ -31,11 +31,20 @@ impl Selection {
                     .text()
                     .to_string();
 
-                let current_object_type = current_type
-                    .inner_type_name()
-                    .and_then(|name| schema.object_types.get(name))?;
-
-                let field_type = current_object_type.field(&field_name)?;
+                let field_type = current_type.inner_type_name().and_then(|name| {
+                    //looking into object types
+                    schema
+                        .object_types
+                        .get(name)
+                        .and_then(|ty| ty.field(&field_name))
+                        // otherwise, it might be an interface
+                        .or_else(|| {
+                            schema
+                                .interfaces
+                                .get(name)
+                                .and_then(|ty| ty.field(&field_name))
+                        })
+                })?;
 
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
                 let name = alias.unwrap_or(field_name);

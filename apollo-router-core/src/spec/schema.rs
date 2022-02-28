@@ -8,7 +8,7 @@ pub struct Schema {
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, String>,
     pub(crate) object_types: HashMap<String, ObjectType>,
-    interfaces: HashMap<String, Interface>,
+    pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) fragments: Fragments,
     pub(crate) enums: HashMap<String, HashSet<String>>,
@@ -329,7 +329,7 @@ macro_rules! implement_object_type_or_interface {
         #[derive(Debug)]
         $visibility struct $name {
             name: String,
-            pub(crate) fields: HashMap<String, FieldType>,
+            fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
         }
 
@@ -418,7 +418,7 @@ implement_object_type_or_interface!(
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
 // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
 implement_object_type_or_interface!(
-    Interface =>
+    pub(crate) Interface =>
     ast::InterfaceTypeDefinition,
     ast::InterfaceTypeExtension,
 );

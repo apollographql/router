@@ -1945,4 +1945,147 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn filter_interface_errors() {
+        let schema = "type Query {
+            me: NamedEntity
+        }
+
+        interface NamedEntity {
+            name: String
+            name2: String!
+        }
+
+        type User implements NamedEntity {
+            name: String
+            surname: String!
+        }
+
+        type User2 implements NamedEntity {
+            name: String
+            surname: String!
+        }
+        ";
+
+        let query = "query  { me { name } }";
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": { },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+        );
+
+        let query2 = "query  { me { name2 } }";
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
 }
