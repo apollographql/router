@@ -1,8 +1,7 @@
 use std::fmt::Display;
 use std::task::{Context, Poll};
 
-use crate::layer::ConfigurableLayer;
-use crate::{register_layer, services, SubgraphRequest};
+use apollo_router_core::{ConfigurableLayer, SubgraphRequest};
 use http::HeaderValue;
 use opentelemetry::trace::TraceContextExt;
 use schemars::JsonSchema;
@@ -12,11 +11,9 @@ use tracing::instrument::Instrumented;
 use tracing::{span, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-register_layer!("opentracing", OpenTracingLayer);
-
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
-enum PropagationFormat {
+pub enum PropagationFormat {
     Jaeger,
     ZipkinB3,
 }
@@ -30,12 +27,13 @@ impl Display for PropagationFormat {
     }
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
-struct OpenTracingConfig {
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+pub struct OpenTracingConfig {
     format: PropagationFormat,
 }
 
-struct OpenTracingLayer {
+#[derive(Debug)]
+pub struct OpenTracingLayer {
     format: PropagationFormat,
 }
 
@@ -59,7 +57,7 @@ impl<S> Layer<S> for OpenTracingLayer {
     }
 }
 
-struct OpenTracingService<S> {
+pub struct OpenTracingService<S> {
     inner: S,
     format: PropagationFormat,
 }
@@ -70,7 +68,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Instrumented<<S as tower::Service<services::SubgraphRequest>>::Future>;
+    type Future = Instrumented<<S as tower::Service<SubgraphRequest>>::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)

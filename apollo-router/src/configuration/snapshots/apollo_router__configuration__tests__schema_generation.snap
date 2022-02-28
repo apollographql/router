@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 645
+assertion_line: 474
 expression: "&schema"
 
 ---
@@ -235,13 +235,6 @@ expression: "&schema"
         }
       ]
     },
-    "PropagationFormat": {
-      "type": "string",
-      "enum": [
-        "jaeger",
-        "zipkin_b3"
-      ]
-    },
     "RemoveConfig": {
       "oneOf": [
         {
@@ -318,11 +311,6 @@ expression: "&schema"
                 "required": [
                   "headers_remove"
                 ]
-              },
-              {
-                "required": [
-                  "opentracing"
-                ]
               }
             ],
             "properties": {
@@ -337,9 +325,6 @@ expression: "&schema"
               },
               "headers_remove": {
                 "$ref": "#/definitions/RemoveConfig"
-              },
-              "opentracing": {
-                "$ref": "#/definitions/OpenTracingConfig"
               }
             }
           }
