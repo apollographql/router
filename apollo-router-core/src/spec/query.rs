@@ -607,7 +607,8 @@ mod tests {
         type Baz {
             baz: String
         }
-        union Thing = Foo | Bar | Baz
+        union Thing = Foo
+        extend union Thing = Bar | Baz
 
         fragment baz on Baz {baz}";
         let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar}";
