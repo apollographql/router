@@ -1271,8 +1271,7 @@ mod tests {
             name: String
             reviews1: [Review]
             reviews2: [Review!]
-            reviews3: [Review]!
-            reviews4: [Review!]!
+            reviews3: [Review!]!
         }
         
         type Review {
@@ -1397,11 +1396,49 @@ mod tests {
             }},
         );
 
-        /*        // reviews2: [Review!]
-        let query_review_1 = "query  { me { id reviews2 } }";
+        // reviews2: [Review!]
+        let query_review2_text1 = "query  { me { id reviews2 { text1 } } }";
         assert_format_response!(
             schema,
-            query_review_1,
+            query_review2_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": [ { } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review2_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review2_text1,
             json! {{
                 "me": {
                     "id": "a",
@@ -1413,9 +1450,171 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "reviews1": [ {  } ],
+                    "reviews2": [ { "text1": null } ],
                 },
             }},
-        );*/
+        );
+
+        let query_review2_text2 = "query  { me { id reviews2 { text2 } } }";
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+
+        //reviews3: [Review!]!
+        let query_review3_text1 = "query  { me { id reviews3 { text1 } } }";
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        let query_review3_text2 = "query  { me { id reviews3 { text2 } } }";
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
     }
 }
