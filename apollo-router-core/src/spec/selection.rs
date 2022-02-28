@@ -26,19 +26,20 @@ impl Selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
                 println!("Selection::from_ast[{}] field {}", line!(), field);
-                let name = field
+                let field_name = field
                     .name()
                     .expect("the node Name is not optional in the spec; qed")
                     .text()
                     .to_string();
-                let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                let name = alias.unwrap_or(name);
 
                 let current_object_type = current_type
                     .inner_type_name()
                     .and_then(|name| schema.object_types.get(name))?;
 
-                let field_type = current_object_type.field(&name)?;
+                let field_type = current_object_type.field(&field_name)?;
+
+                let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
+                let name = alias.unwrap_or(field_name);
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
