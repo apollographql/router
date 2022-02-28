@@ -170,35 +170,27 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             // If it was required, we ensured that the Reporting plugin was in the
             // list of plugins above. Now make sure that we process that plugin
             // before any other plugins.
-            let already_processed_plugins = if configuration
-                .plugins
-                .plugins
-                .contains_key(REPORTING_MODULE_NAME)
-            {
-                let reporting_configuration = configuration
-                    .plugins
-                    .plugins
-                    .get(REPORTING_MODULE_NAME)
-                    .expect("reporting plugin must be present");
-                builder = process_plugin(
-                    builder,
-                    &mut errors,
-                    REPORTING_MODULE_NAME.to_string(),
-                    reporting_configuration,
-                )
-                .await;
-                vec![REPORTING_MODULE_NAME]
-            } else {
-                vec![]
+            let already_processed = match configuration.plugins.plugins.get(REPORTING_MODULE_NAME) {
+                Some(reporting_configuration) => {
+                    builder = process_plugin(
+                        builder,
+                        &mut errors,
+                        REPORTING_MODULE_NAME.to_string(),
+                        reporting_configuration,
+                    )
+                    .await;
+                    vec![REPORTING_MODULE_NAME]
+                }
+                None => vec![],
             };
 
-            // Process the remaining plugins. We use already_processed_plugins to skip
+            // Process the remaining plugins. We use already_processed to skip
             // those plugins we already processed.
             for (name, configuration) in configuration
                 .plugins
                 .plugins
                 .iter()
-                .filter(|(name, _)| !already_processed_plugins.contains(&name.as_str()))
+                .filter(|(name, _)| !already_processed.contains(&name.as_str()))
             {
                 let name = name.clone();
                 builder = process_plugin(builder, &mut errors, name, configuration).await;
