@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/plugins/reporting/otlp/grpc.rs
+assertion_line: 110
+expression: "std::str::from_utf8(&buffer).unwrap()"
+
+---
+---
+- foo: bar
+- foo: baz
+- bar: foo
+

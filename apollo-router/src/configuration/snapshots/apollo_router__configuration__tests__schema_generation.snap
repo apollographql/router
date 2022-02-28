@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 702
+assertion_line: 474
 expression: "&schema"
 
 ---
@@ -10,11 +10,6 @@ expression: "&schema"
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
   "properties": {
-    "opentelemetry": {
-      "description": "OpenTelemetry configuration.",
-      "$ref": "#/definitions/OpenTelemetry",
-      "nullable": true
-    },
     "plugins": {
       "description": "Plugin configuration",
       "default": {},
@@ -27,12 +22,6 @@ expression: "&schema"
         "cors": null
       },
       "$ref": "#/definitions/Server"
-    },
-    "spaceport": {
-      "description": "Spaceport configuration.",
-      "default": null,
-      "$ref": "#/definitions/SpaceportConfig",
-      "nullable": true
     },
     "subgraphs": {
       "description": "Mapping of name to subgraph that the router may contact.",
@@ -142,29 +131,31 @@ expression: "&schema"
         }
       ]
     },
-    "OpenTelemetry": {
-      "$ref": "#/definitions/OpenTelemetry"
-    },
     "Plugins": {
       "anyOf": [
         {
           "required": [
-            "com.apollo.test.always_fails_to_start"
+            "com.apollographql.reporting"
           ]
         },
         {
           "required": [
-            "com.apollo.test.always_fails_to_start_and_stop"
+            "com.apollographql.test.always_fails_to_start"
           ]
         },
         {
           "required": [
-            "com.apollo.test.always_fails_to_stop"
+            "com.apollographql.test.always_fails_to_start_and_stop"
           ]
         },
         {
           "required": [
-            "com.apollo.test.always_starts_and_stops"
+            "com.apollographql.test.always_fails_to_stop"
+          ]
+        },
+        {
+          "required": [
+            "com.apollographql.test.always_starts_and_stops"
           ]
         },
         {
@@ -174,16 +165,19 @@ expression: "&schema"
         }
       ],
       "properties": {
-        "com.apollo.test.always_fails_to_start": {
+        "com.apollographql.reporting": {
           "$ref": "#/definitions/Conf"
         },
-        "com.apollo.test.always_fails_to_start_and_stop": {
+        "com.apollographql.test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
-        "com.apollo.test.always_fails_to_stop": {
+        "com.apollographql.test.always_fails_to_start_and_stop": {
           "$ref": "#/definitions/Conf"
         },
-        "com.apollo.test.always_starts_and_stops": {
+        "com.apollographql.test.always_fails_to_stop": {
+          "$ref": "#/definitions/Conf"
+        },
+        "com.apollographql.test.always_starts_and_stops": {
           "$ref": "#/definitions/Conf"
         },
         "com.example.hello": {
@@ -289,26 +283,6 @@ expression: "&schema"
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
           "default": "127.0.0.1:4000",
           "$ref": "#/definitions/ListenAddr"
-        }
-      },
-      "additionalProperties": false
-    },
-    "SpaceportConfig": {
-      "type": "object",
-      "required": [
-        "external"
-      ],
-      "properties": {
-        "collector": {
-          "default": "https://127.0.0.1:50051",
-          "type": "string"
-        },
-        "external": {
-          "type": "boolean"
-        },
-        "listener": {
-          "default": "127.0.0.1:50051",
-          "type": "string"
         }
       },
       "additionalProperties": false

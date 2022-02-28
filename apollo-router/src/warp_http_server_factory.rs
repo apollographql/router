@@ -1,4 +1,5 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
+use crate::get_dispatcher;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
@@ -20,9 +21,8 @@ use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use warp::host::Authority;
 use warp::{
-    http::{header::HeaderMap, StatusCode, Uri},
+    http::{header::HeaderMap, StatusCode},
     hyper::Body,
     Filter,
 };
@@ -59,6 +59,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
         <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
+        let dispatcher = get_dispatcher();
+
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -69,12 +71,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .as_ref()
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
-
-            let dispatcher = configuration
-                .subscriber
-                .clone()
-                .map(tracing::Dispatch::new)
-                .unwrap_or_default();
 
             let routes = get_health_request()
                 .or(get_graphql_request_or_redirect(service.clone()))
@@ -246,7 +242,6 @@ where
     warp::get()
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::header::optional::<String>("accept"))
-        .and(warp::host::optional())
         .and(
             warp::query::raw()
                 .or(warp::any().map(String::default))
@@ -254,14 +249,11 @@ where
         )
         .and(warp::header::headers_cloned())
         .and_then(
-            move |accept: Option<String>,
-                  host: Option<Authority>,
-                  query: String,
-                  header_map: HeaderMap| {
+            move |accept: Option<String>, query: String, header_map: HeaderMap| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                        redirect_to_studio(host)
+                        display_home_page()
                     } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
                         run_graphql_request(service, http::Method::GET, request, header_map).await
                     } else {
@@ -277,29 +269,9 @@ where
         )
 }
 
-fn redirect_to_studio(host: Option<Authority>) -> Box<dyn Reply> {
-    // Try to redirect to Studio
-    if host.is_some() {
-        if let Ok(uri) = format!(
-            "https://studio.apollographql.com/sandbox?endpoint=http://{}",
-            // we made sure host.is_some() above
-            host.unwrap()
-        )
-        .parse::<Uri>()
-        {
-            Box::new(warp::redirect::temporary(uri))
-        } else {
-            Box::new(warp::reply::with_status(
-                "Invalid host to redirect to",
-                StatusCode::BAD_REQUEST,
-            ))
-        }
-    } else {
-        Box::new(warp::reply::with_status(
-            "Invalid host to redirect to",
-            StatusCode::BAD_REQUEST,
-        ))
-    }
+fn display_home_page() -> Box<dyn Reply> {
+    let html = include_str!("../resources/index.html");
+    Box::new(warp::reply::html(html))
 }
 
 fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
@@ -345,7 +317,7 @@ where
     name = "graphql_request",
     fields(
         query = %request.query.clone().unwrap_or_default(),
-        operation_name = %request.operation_name.clone().unwrap_or_else(|| "-".to_string()),
+        operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()),
         client_name,
         client_version
     ),
@@ -465,7 +437,7 @@ mod tests {
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
         ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
-        LOCATION, ORIGIN,
+        ORIGIN,
     };
     use reqwest::redirect::Policy;
     use reqwest::{Client, Method, StatusCode};
@@ -608,7 +580,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn redirect_to_studio() -> Result<(), FederatedServerError> {
+    async fn display_home_page() -> Result<(), FederatedServerError> {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
@@ -625,19 +597,15 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 response.status(),
-                StatusCode::TEMPORARY_REDIRECT,
+                StatusCode::OK,
                 "{}",
                 response.text().await.unwrap()
             );
-            assert_header!(
-                &response,
-                LOCATION,
-                vec![format!(
-                    "https://studio.apollographql.com/sandbox?endpoint={}",
-                    server.listen_address()
-                )],
-                "Incorrect redirect url"
-            );
+            assert!(response
+                .text()
+                .await
+                .unwrap()
+                .starts_with("<!DOCTYPE html>"))
         }
 
         server.shutdown().await

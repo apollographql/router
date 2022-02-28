@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 707
+assertion_line: 650
 expression: config
 
 ---
@@ -30,7 +30,5 @@ subgraphs:
   reviews:
     routing_url: "http://localhost:4002/graphql"
     layers: []
-opentelemetry: ~
 plugins: {}
-spaceport: ~
 

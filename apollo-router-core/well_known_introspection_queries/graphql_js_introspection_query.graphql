@@ -1,89 +1,98 @@
 
-query IntrospectionQuery {
-    __schema {
-    queryType { name }
-    mutationType { name }
-    subscriptionType { name }
-    types {
-        ...FullType
-    }
-    directives {
-        name
+    query IntrospectionQuery {
+      __schema {
         
-        locations
-        args {
-        ...InputValue
+        queryType { name }
+        mutationType { name }
+        subscriptionType { name }
+        types {
+          ...FullType
         }
+        directives {
+          name
+          description
+          
+          locations
+          args(includeDeprecated: true) {
+            ...InputValue
+          }
+        }
+      }
     }
-    }
-}
-fragment FullType on __Type {
-    kind
-    name
-    
-    fields(includeDeprecated: true) {
-    name
-    
-    args {
+
+    fragment FullType on __Type {
+      kind
+      name
+      description
+      
+      fields(includeDeprecated: true) {
+        name
+        description
+        args(includeDeprecated: true) {
+          ...InputValue
+        }
+        type {
+          ...TypeRef
+        }
+        isDeprecated
+        deprecationReason
+      }
+      inputFields(includeDeprecated: true) {
         ...InputValue
-    }
-    type {
+      }
+      interfaces {
         ...TypeRef
+      }
+      enumValues(includeDeprecated: true) {
+        name
+        description
+        isDeprecated
+        deprecationReason
+      }
+      possibleTypes {
+        ...TypeRef
+      }
     }
-    isDeprecated
-    deprecationReason
+
+    fragment InputValue on __InputValue {
+      name
+      description
+      type { ...TypeRef }
+      defaultValue
+      isDeprecated
+      deprecationReason
     }
-    inputFields {
-    ...InputValue
-    }
-    interfaces {
-    ...TypeRef
-    }
-    enumValues(includeDeprecated: true) {
-    name
-    
-    isDeprecated
-    deprecationReason
-    }
-    possibleTypes {
-    ...TypeRef
-    }
-}
-fragment InputValue on __InputValue {
-    name
-    
-    type { ...TypeRef }
-    defaultValue
-}
-fragment TypeRef on __Type {
-    kind
-    name
-    ofType {
-    kind
-    name
-    ofType {
+
+    fragment TypeRef on __Type {
+      kind
+      name
+      ofType {
         kind
         name
         ofType {
-        kind
-        name
-        ofType {
+          kind
+          name
+          ofType {
             kind
             name
             ofType {
-            kind
-            name
-            ofType {
+              kind
+              name
+              ofType {
                 kind
                 name
                 ofType {
-                kind
-                name
+                  kind
+                  name
+                  ofType {
+                    kind
+                    name
+                  }
                 }
+              }
             }
-            }
+          }
         }
-        }
+      }
     }
-    }
-}
+  

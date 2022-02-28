@@ -1,16 +1,9 @@
 //! Logic for loading configuration in to an object model
 
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-pub mod otlp;
-
-use crate::apollo_telemetry::{DEFAULT_LISTEN, DEFAULT_SERVER_URL};
 use apollo_router_core::prelude::*;
 use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
-use opentelemetry::sdk::trace::Sampler;
-use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
 use reqwest::Url;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::{
@@ -25,7 +18,6 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use thiserror::Error;
 use typed_builder::TypedBuilder;
 
@@ -80,29 +72,10 @@ pub struct Configuration {
     #[builder(default)]
     pub subgraphs: HashMap<String, Subgraph>,
 
-    /// OpenTelemetry configuration.
-    #[builder(default)]
-    pub opentelemetry: Option<OpenTelemetry>,
-
-    #[serde(skip)]
-    #[builder(default)]
-    #[derivative(Debug = "ignore")]
-    pub subscriber: Option<Arc<dyn tracing::Subscriber + Send + Sync + 'static>>,
-
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
     pub plugins: Plugins,
-
-    /// Spaceport configuration.
-    #[serde(default)]
-    #[builder(default)]
-    pub spaceport: Option<SpaceportConfig>,
-
-    /// Studio Graph configuration.
-    #[serde(skip, default = "studio_graph")]
-    #[builder(default)]
-    pub graph: Option<StudioGraph>,
 }
 
 fn default_listen() -> ListenAddr {
@@ -414,132 +387,12 @@ impl Cors {
     }
 }
 
-fn default_collector() -> String {
-    DEFAULT_SERVER_URL.to_string()
-}
-
-fn default_listener() -> String {
-    DEFAULT_LISTEN.to_string()
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct SpaceportConfig {
-    pub(crate) external: bool,
-
-    #[serde(default = "default_collector")]
-    pub(crate) collector: String,
-
-    #[serde(default = "default_listener")]
-    pub(crate) listener: String,
-}
-
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
-#[derivative(Debug)]
-pub struct StudioGraph {
-    #[serde(skip, default = "apollo_graph_reference")]
-    pub(crate) reference: String,
-
-    #[serde(skip, default = "apollo_key")]
-    #[derivative(Debug = "ignore")]
-    pub(crate) key: String,
-}
-
-fn studio_graph() -> Option<StudioGraph> {
-    if let Ok(apollo_key) = std::env::var("APOLLO_KEY") {
-        let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF").expect(
-            "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
-        );
-
-        Some(StudioGraph {
-            reference: apollo_graph_ref,
-            key: apollo_key,
-        })
-    } else {
-        None
-    }
-}
-
-fn apollo_key() -> String {
-    std::env::var("APOLLO_KEY")
-        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
-}
-
-fn apollo_graph_reference() -> String {
-    std::env::var("APOLLO_GRAPH_REF").expect(
-        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
-    )
-}
-
-impl Default for SpaceportConfig {
-    fn default() -> Self {
-        Self {
-            collector: default_collector(),
-            listener: default_listener(),
-            external: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)]
-pub enum OpenTelemetry {
-    Jaeger(Option<Jaeger>),
-    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-    Otlp(otlp::Otlp),
-}
-
-// This short circuits the Opentelemetry schema generation.
-// When Otel is moved to a plugin this will be removed.
-impl JsonSchema for OpenTelemetry {
-    fn schema_name() -> String {
-        stringify!(OpenTelemetry).to_string()
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<OpenTelemetry>()
-    }
-}
-
-#[derive(Debug, Clone, Derivative, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-#[derivative(Default)]
-pub struct Jaeger {
-    pub endpoint: Option<JaegerEndpoint>,
-    #[serde(default = "default_service_name")]
-    #[derivative(Default(value = "default_service_name()"))]
-    pub service_name: String,
-    #[serde(skip, default = "default_jaeger_username")]
-    #[derivative(Default(value = "default_jaeger_username()"))]
-    pub username: Option<String>,
-    #[serde(skip, default = "default_jaeger_password")]
-    #[derivative(Default(value = "default_jaeger_password()"))]
-    pub password: Option<String>,
-    pub trace_config: Option<TraceConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum JaegerEndpoint {
-    Agent(SocketAddr),
-    Collector(Url),
-}
-
-fn default_service_name() -> String {
+pub(crate) fn default_service_name() -> String {
     "router".to_string()
 }
 
-fn default_service_namespace() -> String {
+pub(crate) fn default_service_namespace() -> String {
     "apollo".to_string()
-}
-
-fn default_jaeger_username() -> Option<String> {
-    std::env::var("JAEGER_USERNAME").ok()
-}
-
-fn default_jaeger_password() -> Option<String> {
-    std::env::var("JAEGER_PASSWORD").ok()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -591,65 +444,6 @@ impl TlsConfig {
         }
 
         Ok(config)
-    }
-}
-
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TraceConfig {
-    pub sampler: Option<Sampler>,
-    pub max_events_per_span: Option<u32>,
-    pub max_attributes_per_span: Option<u32>,
-    pub max_links_per_span: Option<u32>,
-    pub max_attributes_per_event: Option<u32>,
-    pub max_attributes_per_link: Option<u32>,
-    pub resource: Option<Resource>,
-}
-
-impl TraceConfig {
-    pub fn trace_config(&self) -> opentelemetry::sdk::trace::Config {
-        let mut trace_config = opentelemetry::sdk::trace::config();
-        if let Some(sampler) = self.sampler.clone() {
-            let sampler: opentelemetry::sdk::trace::Sampler = sampler;
-            trace_config = trace_config.with_sampler(sampler);
-        }
-        if let Some(n) = self.max_events_per_span {
-            trace_config = trace_config.with_max_events_per_span(n);
-        }
-        if let Some(n) = self.max_attributes_per_span {
-            trace_config = trace_config.with_max_attributes_per_span(n);
-        }
-        if let Some(n) = self.max_links_per_span {
-            trace_config = trace_config.with_max_links_per_span(n);
-        }
-        if let Some(n) = self.max_attributes_per_event {
-            trace_config = trace_config.with_max_attributes_per_event(n);
-        }
-        if let Some(n) = self.max_attributes_per_link {
-            trace_config = trace_config.with_max_attributes_per_link(n);
-        }
-
-        let resource = self
-            .resource
-            .as_ref()
-            .map(|r| {
-                Resource::new(
-                    r.clone()
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v))
-                        .collect::<Vec<KeyValue>>(),
-                )
-            })
-            .unwrap_or_else(|| {
-                Resource::new(vec![
-                    KeyValue::new("service.name", default_service_name()),
-                    KeyValue::new("service.namespace", default_service_namespace()),
-                ])
-            });
-
-        trace_config = trace_config.with_resource(resource);
-
-        trace_config
     }
 }
 
