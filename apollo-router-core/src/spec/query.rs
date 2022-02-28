@@ -1004,16 +1004,15 @@ mod tests {
         }";
         let query = "query  { me { id name } }";
 
-        let response = json! {{
-            "me": {
-                "id": "a",
-                "name": 1,
-            },
-        }};
         assert_format_response!(
             schema,
             query,
-            response,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                },
+            }},
             None,
             json! {{
                 "me": {
@@ -1023,31 +1022,43 @@ mod tests {
             }},
         );
 
-        let response = json! {{
-            "me": {
-                "id": 1,
-                "name": 1,
-            },
-        }};
         assert_format_response!(
             schema,
             query,
-            response,
+            json! {{
+                "me": {
+                    "id": 1,
+                    "name": 1,
+                },
+            }},
             None,
             json! {{
                 "me": null,
             }},
         );
 
-        let response = json! {{
-            "me": {
-                "name": 1,
-            },
-        }};
         assert_format_response!(
             schema,
             query,
-            response,
+            json! {{
+                "me": {
+                    "id": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": 1,
+                },
+            }},
             None,
             json! {{
                 "me": {
@@ -1057,15 +1068,14 @@ mod tests {
         );
 
         // a non null field not present in the query should not be an error
-        let response = json! {{
-            "me": {
-                "name": "a",
-            },
-        }};
         assert_format_response!(
             schema,
             "query  { me { name } }",
-            response,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
             None,
             json! {{
                 "me": {
