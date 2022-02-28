@@ -1104,5 +1104,130 @@ mod tests {
                 },
             }},
         );
+
+        assert_format_response!(
+            schema,
+            "query { list { l1 } }",
+            json! {{
+                "list": {
+                    "l1": "abc",
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l1": null,
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l2 } }",
+            json! {{
+                "list": {
+                    "l2": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l2": null,
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l2 } }",
+            json! {{
+                "list": {
+                    "l2": ["abc", "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l2": ["abc", "def"],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l3 } }",
+            json! {{
+                "list": {
+                    "l3": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l3": ["abc", null, null, null, "def"],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l3 } }",
+            json! {{
+                "list": {
+                    "l3": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list":null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                },
+            }},
+            None,
+            json! {{
+                "list": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": ["abc", "def"],
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l4": ["abc", "def"],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": null,
+            }},
+        );
     }
 }
