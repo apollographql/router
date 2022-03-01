@@ -1888,7 +1888,7 @@ dependencies = [
 [[package]]
 name = "houston"
 version = "0.0.0"
-source = "git+https://github.com/apollographql/rover/?rev=c650649682ab891a3b718b5277c3b2e9a5fc5224#c650649682ab891a3b718b5277c3b2e9a5fc5224"
+source = "git+https://github.com/apollographql/rover.git?rev=c650649682ab891a3b718b5277c3b2e9a5fc5224#c650649682ab891a3b718b5277c3b2e9a5fc5224"
 dependencies = [
  "camino",
  "directories-next",
@@ -3531,7 +3531,7 @@ dependencies = [
 [[package]]
 name = "rover-client"
 version = "0.0.0"
-source = "git+https://github.com/apollographql/rover/?rev=c650649682ab891a3b718b5277c3b2e9a5fc5224#c650649682ab891a3b718b5277c3b2e9a5fc5224"
+source = "git+https://github.com/apollographql/rover.git?rev=c650649682ab891a3b718b5277c3b2e9a5fc5224#c650649682ab891a3b718b5277c3b2e9a5fc5224"
 dependencies = [
  "apollo-encoder",
  "apollo-federation-types",
