@@ -31,20 +31,27 @@ impl Selection {
                     .text()
                     .to_string();
 
-                let field_type = current_type.inner_type_name().and_then(|name| {
-                    //looking into object types
-                    schema
-                        .object_types
-                        .get(name)
-                        .and_then(|ty| ty.field(&field_name))
-                        // otherwise, it might be an interface
-                        .or_else(|| {
+                let field_type = if field_name.as_str() == "__typename" {
+                    FieldType::String
+                } else {
+                    current_type
+                        .inner_type_name()
+                        .and_then(|name| {
+                            //looking into object types
                             schema
-                                .interfaces
+                                .object_types
                                 .get(name)
                                 .and_then(|ty| ty.field(&field_name))
-                        })
-                })?;
+                                // otherwise, it might be an interface
+                                .or_else(|| {
+                                    schema
+                                        .interfaces
+                                        .get(name)
+                                        .and_then(|ty| ty.field(&field_name))
+                                })
+                        })?
+                        .clone()
+                };
 
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
                 let name = alias.unwrap_or(field_name);
@@ -55,7 +62,7 @@ impl Selection {
                     field.selection_set().and_then(|x| {
                         x.selections()
                             .into_iter()
-                            .map(|selection| Selection::from_ast(selection, field_type, schema))
+                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
                             .collect()
                     })
                 };
@@ -63,7 +70,7 @@ impl Selection {
                 Some(Self::Field {
                     name,
                     selection_set,
-                    field_type: field_type.clone(),
+                    field_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
