@@ -616,7 +616,8 @@ mod tests {
     #[test]
     fn reformat_response_data_inline_fragment() {
         let schema = "type Query {
-            get: Test    
+            get: Test
+            getStuff: Stuff
           }
   
           type Stuff {
@@ -656,6 +657,23 @@ mod tests {
             json! {{
                 "get": {
                     "id": "1",
+                }
+            }},
+        );
+
+        // when using a fragment on an operation exported by a subgraph,
+        // we might not get a __typename field, we should instead be able
+        // to know the type in advance
+        assert_format_response!(
+            schema,
+            "{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }",
+            json! {
+                {"getStuff": { "stuff": {"bar": "2"}}}
+            },
+            None,
+            json! {{
+                "get": {
+                    "stuff": {"bar": "2"},
                 }
             }},
         );
@@ -1087,6 +1105,23 @@ mod tests {
             json! {{
                 "me": {
                     "name": "a",
+                },
+            }},
+        );
+
+        // if a field appears multiple times, selection should be deduplicated
+        assert_format_response!(
+            schema,
+            "query  { me { id id } }",
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
                 },
             }},
         );
