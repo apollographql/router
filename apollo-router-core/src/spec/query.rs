@@ -46,15 +46,16 @@ impl Query {
 
             if let Some(operation) = operation {
                 let mut output = Object::default();
-                //FIXME: what do we do if theentire operation selection set failed?
-                // return an explicit error?
-                let _res = self.apply_selection_set(
+
+                response.data = match self.apply_selection_set(
                     &operation.selection_set,
                     &mut input,
                     &mut output,
                     schema,
-                );
-                response.data = output.into();
+                ) {
+                    Ok(()) => output.into(),
+                    Err(InvalidValue) => Value::Null,
+                }
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -506,7 +507,7 @@ mod tests {
             }",
             "query Test {
                 foo
-                stuff{bar}
+                stuff{bar __typename }
                 array{bar}
                 baz
                 alias:baz
@@ -515,7 +516,7 @@ mod tests {
             }",
             json! {{
                 "foo": "1",
-                "stuff": {"bar": "2"},
+                "stuff": {"bar": "2", "__typename": "Bar"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
                 "baz": "7",
                 "alias": "7",
@@ -528,6 +529,7 @@ mod tests {
                 "foo": "1",
                 "stuff": {
                     "bar": "2",
+                    "__typename": "Bar",
                 },
                 "array": [
                     {"bar": "3"},
@@ -919,16 +921,7 @@ mod tests {
             "getNonNullString": 1,
         }};
 
-        //FIXME what's the expected result when a null moves up to
-        // the root operation?
-        assert_format_response!(
-            schema,
-            query,
-            response,
-            None,
-            json! {{
-            }},
-        );
+        assert_format_response!(schema, query, response, None, Value::Null,);
     }
 
     #[test]
