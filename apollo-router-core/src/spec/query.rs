@@ -47,15 +47,12 @@ impl Query {
             if let Some(operation) = operation {
                 let mut output = Object::default();
 
-                response.data = match self.apply_selection_set(
-                    &operation.selection_set,
-                    &mut input,
-                    &mut output,
-                    schema,
-                ) {
-                    Ok(()) => output.into(),
-                    Err(InvalidValue) => Value::Null,
-                }
+                response.data =
+                    match self.apply_root_selection_set(&operation, &mut input, &mut output, schema)
+                    {
+                        Ok(()) => output.into(),
+                        Err(InvalidValue) => Value::Null,
+                    }
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -320,6 +317,72 @@ impl Query {
         Ok(())
     }
 
+    fn apply_root_selection_set(
+        &self,
+        operation: &Operation,
+        input: &mut Object,
+        output: &mut Object,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
+        for selection in &operation.selection_set {
+            match selection {
+                Selection::Field {
+                    name,
+                    selection_set,
+                    field_type,
+                } => {
+                    if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let value =
+                            self.format_value(field_type, input_value, selection_set, schema)?;
+                        output.insert(field_name, value);
+                    } else if field_type.is_non_null() {
+                        return Err(InvalidValue);
+                    }
+                }
+                Selection::InlineFragment {
+                    fragment:
+                        Fragment {
+                            type_condition,
+                            selection_set,
+                        },
+                } => {
+                    // top level objects will not provide a __typename field
+                    match (type_condition.as_str(), operation.kind) {
+                        ("Query", OperationKind::Query) | ("Mutation", OperationKind::Mutation) => {
+                        }
+                        _ => {
+                            return Err(InvalidValue);
+                        }
+                    }
+                    self.apply_selection_set(selection_set, input, output, schema)?;
+                }
+                Selection::FragmentSpread { name } => {
+                    if let Some(fragment) = self
+                        .fragments
+                        .get(name)
+                        .or_else(|| schema.fragments.get(name))
+                    {
+                        // top level objects will not provide a __typename field
+                        match (fragment.type_condition.as_str(), operation.kind) {
+                            ("Query", OperationKind::Query)
+                            | ("Mutation", OperationKind::Mutation) => {}
+                            _ => {
+                                return Err(InvalidValue);
+                            }
+                        }
+                        self.apply_selection_set(&fragment.selection_set, input, output, schema)?;
+                    } else {
+                        // the fragment should have been already checked with the schema
+                        failfast_debug!("Missing fragment named: {}", name);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
     pub fn validate_variables(&self, request: &Request, schema: &Schema) -> Result<(), Response> {
@@ -376,6 +439,7 @@ impl Query {
 #[derive(Debug)]
 struct Operation {
     name: Option<String>,
+    kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<String, FieldType>,
 }
@@ -434,6 +498,7 @@ impl Operation {
             selection_set,
             name,
             variables,
+            kind,
         })
     }
 }
@@ -2171,6 +2236,130 @@ mod tests {
             None,
             json! {{
                 "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_errors_top_level_fragment() {
+        let schema = "type Query {
+            get: Thing   
+          }
+  
+          type Thing {
+              name: String
+              name2: String!
+          }";
+
+        let query = "{ ...frag } fragment frag on Query { __typename get { name } }";
+        assert_format_response!(
+            schema,
+            query,
+            json! {
+                { "get": {"name": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": "a",
+                }
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query,
+            json! {
+                { "get": {"name": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": null,
+                }
+            }},
+        );
+
+        let query2 = "{ ...frag2 } fragment frag2 on Query { __typename get { name2 } }";
+        assert_format_response!(
+            schema,
+            query2,
+            json! {
+                { "get": {"name2": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name2": "a",
+                }
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query2,
+            json! {
+                { "get": {"name2": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": null
+            }},
+        );
+
+        let query3 = "{ ... on Query { __typename get { name } } }";
+        assert_format_response!(
+            schema,
+            query3,
+            json! {
+                { "get": {"name": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": "a",
+                }
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query3,
+            json! {
+                { "get": {"name": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": null,
+                }
+            }},
+        );
+
+        let query4 = "{ ... on Query { __typename get { name2 } } }";
+        assert_format_response!(
+            schema,
+            query4,
+            json! {
+                { "get": {"name2": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name2": "a",
+                }
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            query4,
+            json! {
+                { "get": {"name2": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": null,
             }},
         );
     }
