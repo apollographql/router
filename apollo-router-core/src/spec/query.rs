@@ -465,12 +465,19 @@ impl Operation {
             OperationKind::Subscription => return None,
         };
 
-        let selection_set = operation
+        let mut known_selections = HashSet::new();
+        let mut selection_set = Vec::new();
+        for selection in operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema))
-            .collect::<Option<_>>()?;
+        {
+            let selection = Selection::from_ast(selection, &current_field_type, schema)?;
+            if !known_selections.contains(&selection) {
+                known_selections.insert(selection.clone());
+                selection_set.push(selection);
+            }
+        }
 
         let variables = operation
             .variable_definitions()

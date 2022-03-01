@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use crate::{FieldType, Fragment, Schema};
 use apollo_parser::ast;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {
     Field {
         name: String,
@@ -60,10 +62,17 @@ impl Selection {
                     None
                 } else {
                     field.selection_set().and_then(|x| {
-                        x.selections()
-                            .into_iter()
-                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
-                            .collect()
+                        let mut known_selections = HashSet::new();
+                        let mut selection_set = Vec::new();
+                        for selection in x.selections() {
+                            let selection = Selection::from_ast(selection, &field_type, schema)?;
+                            if !known_selections.contains(&selection) {
+                                known_selections.insert(selection.clone());
+                                selection_set.push(selection);
+                            }
+                        }
+
+                        Some(selection_set)
                     })
                 };
 
@@ -87,13 +96,19 @@ impl Selection {
 
                 let current_type = FieldType::Named(type_condition.clone());
 
-                let selection_set = inline_fragment
+                let mut known_selections = HashSet::new();
+                let mut selection_set = Vec::new();
+                for selection in inline_fragment
                     .selection_set()
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
-                    .into_iter()
-                    .map(|selection| Selection::from_ast(selection, &current_type, schema))
-                    .collect::<Option<Vec<_>>>()?;
+                {
+                    let selection = Selection::from_ast(selection, &current_type, schema)?;
+                    if !known_selections.contains(&selection) {
+                        known_selections.insert(selection.clone());
+                        selection_set.push(selection);
+                    }
+                }
 
                 Some(Self::InlineFragment {
                     fragment: Fragment {

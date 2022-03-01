@@ -5,7 +5,7 @@ use apollo_parser::ast;
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FieldType {
     Named(String),
     List(Box<FieldType>),
