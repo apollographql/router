@@ -48,7 +48,7 @@ impl Query {
                 let mut output = Object::default();
 
                 response.data =
-                    match self.apply_root_selection_set(&operation, &mut input, &mut output, schema)
+                    match self.apply_root_selection_set(operation, &mut input, &mut output, schema)
                     {
                         Ok(()) => output.into(),
                         Err(InvalidValue) => Value::Null,
@@ -469,7 +469,7 @@ impl Operation {
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_ast(selection.clone(), &current_field_type, schema))
+            .map(|selection| Selection::from_ast(selection, &current_field_type, schema))
             .collect::<Option<_>>()?;
 
         let variables = operation

@@ -1,4 +1,4 @@
-use crate::{FieldType, Fragment, ObjectType, Schema};
+use crate::{FieldType, Fragment, Schema};
 use apollo_parser::ast;
 
 #[derive(Debug, Clone)]
