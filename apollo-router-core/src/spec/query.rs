@@ -459,9 +459,9 @@ impl Operation {
             })
             .unwrap_or(OperationKind::Query);
 
-        let operation_list = match kind {
-            OperationKind::Query => schema.object_types.get("Query")?,
-            OperationKind::Mutation => schema.object_types.get("Mutation")?,
+        let current_field_type = match kind {
+            OperationKind::Query => FieldType::Named("Query".to_string()),
+            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
             OperationKind::Subscription => return None,
         };
 
@@ -469,7 +469,7 @@ impl Operation {
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_operation_ast(selection, operation_list, schema))
+            .map(|selection| Selection::from_ast(selection.clone(), &current_field_type, schema))
             .collect::<Option<_>>()?;
 
         let variables = operation
