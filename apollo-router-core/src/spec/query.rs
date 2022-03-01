@@ -1132,6 +1132,23 @@ mod tests {
                 },
             }},
         );
+
+        assert_format_response!(
+            schema,
+            "query  { me { id ...on User { id } } }",
+            json! {{
+                "me": {
+                    "__typename": "User",
+                    "id": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+        );
     }
 
     #[test]
