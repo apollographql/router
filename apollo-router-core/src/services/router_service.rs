@@ -8,6 +8,7 @@ use crate::{
     SubgraphResponse,
 };
 use futures::future::BoxFuture;
+use futures::TryFutureExt;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -130,37 +131,40 @@ where
                     .call(QueryPlannerRequest {
                         context: req.context.into(),
                     })
-                    .await;
-                let mut response = match planned_query {
-                    Ok(planned_query) => {
-                        execution
-                            .call(ExecutionRequest {
-                                query_plan: planned_query.query_plan,
-                                context: planned_query.context,
-                            })
-                            .await
-                    }
-                    Err(err) => Err(err),
-                };
+                    .await?;
 
-                if let Ok(response) = &mut response {
-                    if let Some(query) = query {
-                        tracing::debug_span!("format_response").in_scope(move || {
-                            query.format_response(
-                                response.response.body_mut(),
-                                operation_name.as_deref(),
-                                &schema,
-                            )
-                        });
-                    }
+                let mut response = execution
+                    .call(ExecutionRequest {
+                        query_plan: planned_query.query_plan,
+                        context: planned_query.context,
+                    })
+                    .await?;
+
+                if let Some(query) = query {
+                    tracing::debug_span!("format_response").in_scope(|| {
+                        query.format_response(
+                            response.response.body_mut(),
+                            operation_name.as_deref(),
+                            &schema,
+                        )
+                    });
                 }
 
-                response.map(|execution_response| RouterResponse {
-                    response: execution_response.response.map(ResponseBody::GraphQL),
-                    context: execution_response.context,
+                Ok(RouterResponse {
+                    context: response.context,
+                    response: response.response.map(ResponseBody::GraphQL),
                 })
             }
-        };
+        }
+        .or_else(|error: BoxError| async move {
+            Ok(plugin_utils::RouterResponse::builder()
+                .errors(vec![crate::Error {
+                    message: error.to_string(),
+                    ..Default::default()
+                }])
+                .build()
+                .into())
+        });
 
         Box::pin(fut)
     }
