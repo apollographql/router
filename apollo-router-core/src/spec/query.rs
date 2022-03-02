@@ -2141,7 +2141,7 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "a": "hello",
+                    "b": "hello",
                 }
             }},
             None,
@@ -2157,7 +2157,7 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "a": null,
+                    "b": null,
                 }
             }},
             None,
