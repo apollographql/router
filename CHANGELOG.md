@@ -22,6 +22,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
  
 # [v0.1.0-alpha.8] Not yet released
 
+## :sparkles: Features
+
+- **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
+  Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
+
 ## :bug: Fixes
 
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
