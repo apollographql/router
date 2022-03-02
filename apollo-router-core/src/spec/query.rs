@@ -270,8 +270,8 @@ impl Query {
                             self.format_value(field_type, input_value, selection_set, schema)?;
                         output.insert(field_name, value);
 
-                    // if a field was already equested by a previous selection, it was removed
-                    // from the input valur and should already be of the right type (mandated
+                    // if a field was already requested by a previous selection, it was removed
+                    // from the input value and should already be of the right type (mandated
                     // by the schema) so we do not need to validate it again
                     // if it is not present in input and is non null, we have an invalid value
                     } else if !output.contains_key(name.as_str()) {
@@ -286,32 +286,39 @@ impl Query {
                             type_condition,
                             selection_set,
                         },
+                    known_type,
                 } => {
-                    if let Some(typename) = input.get("__typename") {
-                        if typename.as_str() == Some(type_condition.as_str()) {
-                            self.apply_selection_set(selection_set, input, output, schema)?;
-                        }
-                    } else {
-                        return Err(InvalidValue);
+                    // known_type = true means that from the query's shape, we know
+                    // we should get the right type here. But in the case we get a
+                    // __typename field and it does not match, we should not apply
+                    // that fragment
+                    if input
+                        .get("__typename")
+                        .map(|val| val.as_str() == Some(type_condition.as_str()))
+                        .unwrap_or(*known_type)
+                    {
+                        self.apply_selection_set(selection_set, input, output, schema)?;
                     }
                 }
-                Selection::FragmentSpread { name } => {
+                Selection::FragmentSpread { name, known_type } => {
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
-                        if let Some(typename) = input.get("__typename") {
-                            if typename.as_str() == Some(fragment.type_condition.as_str()) {
-                                self.apply_selection_set(
-                                    &fragment.selection_set,
-                                    input,
-                                    output,
-                                    schema,
-                                )?;
-                            }
-                        } else {
-                            return Err(InvalidValue);
+                        if input
+                            .get("__typename")
+                            .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
+                            .unwrap_or_else(|| {
+                                known_type.as_deref() == Some(fragment.type_condition.as_str())
+                            })
+                        {
+                            self.apply_selection_set(
+                                &fragment.selection_set,
+                                input,
+                                output,
+                                schema,
+                            )?;
                         }
                     } else {
                         // the fragment should have been already checked with the schema
@@ -353,6 +360,7 @@ impl Query {
                             type_condition,
                             selection_set,
                         },
+                    known_type: _,
                 } => {
                     // top level objects will not provide a __typename field
                     match (type_condition.as_str(), operation.kind) {
@@ -364,7 +372,10 @@ impl Query {
                     }
                     self.apply_selection_set(selection_set, input, output, schema)?;
                 }
-                Selection::FragmentSpread { name } => {
+                Selection::FragmentSpread {
+                    name,
+                    known_type: _,
+                } => {
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
@@ -674,6 +685,25 @@ mod tests {
                 }
             }},
         );
+    }
+
+    #[test]
+    fn inline_fragment_on_top_level_operation() {
+        let schema = "type Query {
+            get: Test
+            getStuff: Stuff
+          }
+
+          type Stuff {
+              stuff: Bar
+          }
+          type Bar {
+              bar: String
+          }
+          type Thing {
+              id: String
+          }
+          union Test = Stuff | Thing";
 
         // when using a fragment on an operation exported by a subgraph,
         // we might not get a __typename field, we should instead be able
@@ -686,7 +716,7 @@ mod tests {
             },
             None,
             json! {{
-                "get": {
+                "getStuff": {
                     "stuff": {"bar": "2"},
                 }
             }},

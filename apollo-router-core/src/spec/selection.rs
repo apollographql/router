@@ -12,9 +12,11 @@ pub(crate) enum Selection {
     },
     InlineFragment {
         fragment: Fragment,
+        known_type: bool,
     },
     FragmentSpread {
         name: String,
+        known_type: Option<String>,
     },
 }
 
@@ -94,7 +96,7 @@ impl Selection {
                     .text()
                     .to_string();
 
-                let current_type = FieldType::Named(type_condition.clone());
+                let fragment_type = FieldType::Named(type_condition.clone());
 
                 let mut known_selections = HashSet::new();
                 let mut selection_set = Vec::new();
@@ -103,7 +105,7 @@ impl Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                 {
-                    let selection = Selection::from_ast(selection, &current_type, schema)?;
+                    let selection = Selection::from_ast(selection, &fragment_type, schema)?;
                     if !known_selections.contains(&selection) {
                         known_selections.insert(selection.clone());
                         selection_set.push(selection);
@@ -115,6 +117,7 @@ impl Selection {
                         type_condition,
                         selection_set,
                     },
+                    known_type: current_type == &fragment_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
@@ -127,7 +130,14 @@ impl Selection {
                     .text()
                     .to_string();
 
-                Some(Self::FragmentSpread { name })
+                Some(Self::FragmentSpread {
+                    name,
+                    known_type: if let FieldType::Named(type_name) = current_type {
+                        Some(type_name.clone())
+                    } else {
+                        None
+                    },
+                })
             }
         }
     }
