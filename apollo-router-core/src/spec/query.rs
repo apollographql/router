@@ -744,6 +744,7 @@ mod tests {
         fragment baz on Baz {baz}";
         let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar}";
 
+        // should only select fields from Foo
         assert_format_response!(
             schema,
             query,
@@ -755,6 +756,7 @@ mod tests {
                 {"thing": {"foo": "1"}}
             },
         );
+        // should only select fields from Bar
         assert_format_response!(
             schema,
             query,
@@ -766,6 +768,7 @@ mod tests {
                 {"thing": {"bar": "2"} }
             },
         );
+        // should only select fields from Baz
         assert_format_response!(
             schema,
             query,
@@ -1027,28 +1030,28 @@ mod tests {
             getInt: Int
             getNonNullString: String!
         }";
-        let query = "query MyOperation { getInt }";
-        let response = json! {{
-            "getInt": "1",
-            "other": "2",
-        }};
-
         assert_format_response!(
             schema,
-            query,
-            response,
+            "query MyOperation { getInt }",
+            json! {{
+                "getInt": "not_an_int",
+                "other": "2",
+            }},
             Some("MyOperation"),
             json! {{
                 "getInt": null,
             }},
         );
 
-        let query = "query { getNonNullString }";
-        let response = json! {{
-            "getNonNullString": 1,
-        }};
-
-        assert_format_response!(schema, query, response, None, Value::Null,);
+        assert_format_response!(
+            schema,
+            "query { getNonNullString }",
+            json! {{
+                "getNonNullString": 1,
+            }},
+            None,
+            Value::Null,
+        );
     }
 
     #[test]
@@ -1063,6 +1066,7 @@ mod tests {
         }";
         let query = "query  { me { id name } }";
 
+        // name expected a string, got an int
         assert_format_response!(
             schema,
             query,
@@ -1081,6 +1085,7 @@ mod tests {
             }},
         );
 
+        // non null id expected a string, got an int
         assert_format_response!(
             schema,
             query,
@@ -1096,6 +1101,7 @@ mod tests {
             }},
         );
 
+        // non null id got a null
         assert_format_response!(
             schema,
             query,
@@ -1110,6 +1116,7 @@ mod tests {
             }},
         );
 
+        // non null id was absent
         assert_format_response!(
             schema,
             query,
@@ -1122,6 +1129,7 @@ mod tests {
             }},
         );
 
+        // non null id was absent
         assert_format_response!(
             schema,
             query,
@@ -1170,6 +1178,7 @@ mod tests {
             }},
         );
 
+        // duplicate id field
         assert_format_response!(
             schema,
             "query  { me { id ...on User { id } } }",
@@ -1201,6 +1210,8 @@ mod tests {
             l4: [String!]!
         }";
 
+        // l1: nullable list of nullable elements
+        // any error should stop at the list elements
         assert_format_response!(
             schema,
             "query { list { l1 } }",
@@ -1218,6 +1229,7 @@ mod tests {
             }},
         );
 
+        // l1 expected a list, got a string
         assert_format_response!(
             schema,
             "query { list { l1 } }",
@@ -1234,6 +1246,8 @@ mod tests {
             }},
         );
 
+        // l2: nullable list of non nullable elements
+        // any element error should nullify the entire list
         assert_format_response!(
             schema,
             "query { list { l2 } }",
@@ -1268,6 +1282,8 @@ mod tests {
             }},
         );
 
+        // l3: nullable list of nullable elements
+        // any element error should stop at the list elements
         assert_format_response!(
             schema,
             "query { list { l3 } }",
@@ -1285,6 +1301,7 @@ mod tests {
             }},
         );
 
+        // non null l3 expected a list, got an int, parrent element should be null
         assert_format_response!(
             schema,
             "query { list { l3 } }",
@@ -1299,6 +1316,9 @@ mod tests {
             }},
         );
 
+        // l4: non nullable list of non nullable elements
+        // any element error should nullify the entire list,
+        // which will nullify the parent element
         assert_format_response!(
             schema,
             "query { list { l4 } }",
@@ -1364,7 +1384,10 @@ mod tests {
         }
         ";
 
+        // nullable parent and child elements
+        // child errors should stop at the child's level
         let query_review1_text1 = "query  { me { id reviews1 { text1 } } }";
+        // nullable text1 was absent, should we keep the empty object, or put a text1: null here?
         assert_format_response!(
             schema,
             query_review1_text1,
@@ -1384,6 +1407,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 was null
         assert_format_response!(
             schema,
             query_review1_text1,
@@ -1403,6 +1427,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 expected a string, got an int, so text1 is nullified
         assert_format_response!(
             schema,
             query_review1_text1,
@@ -1422,7 +1447,9 @@ mod tests {
             }},
         );
 
+        // text2 is non null so errors should nullify reviews1 element
         let query_review1_text2 = "query  { me { id reviews1 { text2 } } }";
+        // text2 was absent, reviews1 element should be nullified
         assert_format_response!(
             schema,
             query_review1_text2,
@@ -1442,6 +1469,7 @@ mod tests {
             }},
         );
 
+        // text2 was null, reviews1 element should be nullified
         assert_format_response!(
             schema,
             query_review1_text2,
@@ -1461,6 +1489,7 @@ mod tests {
             }},
         );
 
+        // text2 expected a string, got an int, text2 is nullified, reviews1 element should be nullified
         assert_format_response!(
             schema,
             query_review1_text2,
@@ -1481,7 +1510,9 @@ mod tests {
         );
 
         // reviews2: [Review!]
+        // reviews2 elements are non null, so any error there should nullify the entire list
         let query_review2_text1 = "query  { me { id reviews2 { text1 } } }";
+        // nullable text1 was absent
         assert_format_response!(
             schema,
             query_review2_text1,
@@ -1501,6 +1532,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 was null
         assert_format_response!(
             schema,
             query_review2_text1,
@@ -1520,6 +1552,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 expected a string, got an int
         assert_format_response!(
             schema,
             query_review2_text1,
@@ -1539,7 +1572,9 @@ mod tests {
             }},
         );
 
+        // text2 is non null
         let query_review2_text2 = "query  { me { id reviews2 { text2 } } }";
+        // text2 was absent, so the reviews2 element is nullified, so reviews2 is nullified
         assert_format_response!(
             schema,
             query_review2_text2,
@@ -1558,6 +1593,7 @@ mod tests {
                 },
             }},
         );
+        // text2 was null, so the reviews2 element is nullified, so reviews2 is nullified
         assert_format_response!(
             schema,
             query_review2_text2,
@@ -1576,6 +1612,7 @@ mod tests {
                 },
             }},
         );
+        // text2 expected a string, got an int, so the reviews2 element is nullified, so reviews2 is nullified
         assert_format_response!(
             schema,
             query_review2_text2,
@@ -1596,7 +1633,9 @@ mod tests {
         );
 
         //reviews3: [Review!]!
+        // reviews3 is non null, and its elements are non null
         let query_review3_text1 = "query  { me { id reviews3 { text1 } } }";
+        // nullable text1 was absent
         assert_format_response!(
             schema,
             query_review3_text1,
@@ -1616,6 +1655,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 was null
         assert_format_response!(
             schema,
             query_review3_text1,
@@ -1635,6 +1675,7 @@ mod tests {
             }},
         );
 
+        // nullable text1 expected a string, got an int
         assert_format_response!(
             schema,
             query_review3_text1,
@@ -1654,7 +1695,9 @@ mod tests {
             }},
         );
 
+        // reviews3 is non null, and its elements are non null, text2 is  on null
         let query_review3_text2 = "query  { me { id reviews3 { text2 } } }";
+        // text2 was absent, nulls should propagate up to the operation
         assert_format_response!(
             schema,
             query_review3_text2,
@@ -1670,6 +1713,7 @@ mod tests {
                 "me": null,
             }},
         );
+        // text2 was null, nulls should propagate up to the operation
         assert_format_response!(
             schema,
             query_review3_text2,
@@ -1685,6 +1729,7 @@ mod tests {
                 "me": null,
             }},
         );
+        // text2 expected a string, got an int, nulls should propagate up to the operation
         assert_format_response!(
             schema,
             query_review3_text2,
@@ -1714,6 +1759,7 @@ mod tests {
         }";
         let query = "query  { me { id identifiant:id } }";
 
+        // both aliases got valid values
         assert_format_response!(
             schema,
             query,
@@ -1732,6 +1778,7 @@ mod tests {
             }},
         );
 
+        // non null identifiant expected a string, got an int, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -1747,6 +1794,7 @@ mod tests {
             }},
         );
 
+        // non null identifiant was null, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -1762,6 +1810,7 @@ mod tests {
             }},
         );
 
+        // non null identifiant was absent, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -1778,6 +1827,7 @@ mod tests {
 
         let query2 = "query  { me { name name2:name } }";
 
+        // both aliases got valid values
         assert_format_response!(
             schema,
             query2,
@@ -1796,6 +1846,7 @@ mod tests {
             }},
         );
 
+        // nullable name2 expected a string, got an int, name2 should be null
         assert_format_response!(
             schema,
             query2,
@@ -1814,6 +1865,7 @@ mod tests {
             }},
         );
 
+        // nullable name2 was null
         assert_format_response!(
             schema,
             query2,
@@ -1832,6 +1884,7 @@ mod tests {
             }},
         );
 
+        // nullable name2 was absent
         assert_format_response!(
             schema,
             query2,
@@ -1866,6 +1919,7 @@ mod tests {
 
         let query = "query  { me { id a } }";
 
+        // scalar a is present, no further validation
         assert_format_response!(
             schema,
             query,
@@ -1884,6 +1938,7 @@ mod tests {
             }},
         );
 
+        // scalar a is present, no further validation
         assert_format_response!(
             schema,
             query,
@@ -1908,6 +1963,7 @@ mod tests {
 
         let query2 = "query  { me { id b } }";
 
+        // non null scalar b is present, no further validation
         assert_format_response!(
             schema,
             query2,
@@ -1926,6 +1982,7 @@ mod tests {
             }},
         );
 
+        // non null scalar b is present, no further validation
         assert_format_response!(
             schema,
             query2,
@@ -1948,6 +2005,7 @@ mod tests {
             }},
         );
 
+        // non null scalar b was null, the operatiuon should be null
         assert_format_response!(
             schema,
             query2,
@@ -1963,6 +2021,7 @@ mod tests {
             }},
         );
 
+        // non null scalar b was absent, the operatiuon should be null
         assert_format_response!(
             schema,
             query2,
@@ -1998,6 +2057,7 @@ mod tests {
 
         let query_a = "query  { me { id a } }";
 
+        // enum a got a correct value
         assert_format_response!(
             schema,
             query_a,
@@ -2016,6 +2076,7 @@ mod tests {
             }},
         );
 
+        // nullable enum a expected "X", "Y" or "Z", got another string, a should be null
         assert_format_response!(
             schema,
             query_a,
@@ -2034,6 +2095,7 @@ mod tests {
             }},
         );
 
+        // nullable enum a was null
         assert_format_response!(
             schema,
             query_a,
@@ -2054,6 +2116,7 @@ mod tests {
 
         let query_b = "query  { me { id b } }";
 
+        // non nullable enum b got a correct value
         assert_format_response!(
             schema,
             query_b,
@@ -2071,7 +2134,7 @@ mod tests {
                 },
             }},
         );
-
+        // non nullable enum b expected "X", "Y" or "Z", got another string, b and the operation should be null
         assert_format_response!(
             schema,
             query_b,
@@ -2087,6 +2150,7 @@ mod tests {
             }},
         );
 
+        // non nullable enum b was null, the operation should be null
         assert_format_response!(
             schema,
             query_b,
@@ -2127,6 +2191,7 @@ mod tests {
 
         let query = "query  { me { name } }";
 
+        // nullable name field got a correct value
         assert_format_response!(
             schema,
             query,
@@ -2143,6 +2208,7 @@ mod tests {
             }},
         );
 
+        // nullable name field was absent
         assert_format_response!(
             schema,
             query,
@@ -2155,6 +2221,7 @@ mod tests {
             }},
         );
 
+        // nullable name field was null
         assert_format_response!(
             schema,
             query,
@@ -2171,6 +2238,7 @@ mod tests {
             }},
         );
 
+        // nullable name field expected a string, got an int
         assert_format_response!(
             schema,
             query,
@@ -2189,6 +2257,7 @@ mod tests {
 
         let query2 = "query  { me { name2 } }";
 
+        // non nullable name2 field got a correct value
         assert_format_response!(
             schema,
             query2,
@@ -2205,6 +2274,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 field was absent, the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2217,6 +2287,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 field was null, the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2231,6 +2302,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 field expected a string, got an int, name2 and the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2246,11 +2318,9 @@ mod tests {
         );
 
         // we should be able to handle duplicate fields even across fragments and interfaces
-        let query3 = "query  { me { ... on User { name2 } name2 } }";
-
         assert_format_response!(
             schema,
-            query3,
+            "query  { me { ... on User { name2 } name2 } }",
             json! {{
                 "me": {
                     "__typename": "User",
@@ -2299,6 +2369,7 @@ mod tests {
 
         let query = "query  { me { name2 } }";
 
+        // non nullable name2 got a correct value
         assert_format_response!(
             schema,
             query,
@@ -2315,6 +2386,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 was null, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -2329,6 +2401,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 was absent, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -2341,6 +2414,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 expected a string, got an int, the operation should be null
         assert_format_response!(
             schema,
             query,
@@ -2367,7 +2441,9 @@ mod tests {
               name2: String!
           }";
 
+        // fragments can appear on top level queries
         let query = "{ ...frag } fragment frag on Query { __typename get { name } }";
+        // nullable name got a correct value
         assert_format_response!(
             schema,
             query,
@@ -2382,6 +2458,7 @@ mod tests {
             }},
         );
 
+        // nullable name was null
         assert_format_response!(
             schema,
             query,
@@ -2397,6 +2474,7 @@ mod tests {
         );
 
         let query2 = "{ ...frag2 } fragment frag2 on Query { __typename get { name2 } }";
+        // non nullable name2 got a correct value
         assert_format_response!(
             schema,
             query2,
@@ -2411,6 +2489,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 was null, the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2424,6 +2503,7 @@ mod tests {
         );
 
         let query3 = "{ ... on Query { __typename get { name } } }";
+        // nullable name got a correct value
         assert_format_response!(
             schema,
             query3,
@@ -2438,6 +2518,7 @@ mod tests {
             }},
         );
 
+        // nullable name was null
         assert_format_response!(
             schema,
             query3,
@@ -2453,6 +2534,7 @@ mod tests {
         );
 
         let query4 = "{ ... on Query { __typename get { name2 } } }";
+        // non nullable name2 got a correct value
         assert_format_response!(
             schema,
             query4,
@@ -2467,6 +2549,7 @@ mod tests {
             }},
         );
 
+        // non nullable name2 was null, the operation should be null
         assert_format_response!(
             schema,
             query4,
