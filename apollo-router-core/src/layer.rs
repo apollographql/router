@@ -72,6 +72,16 @@ pub trait ConfigurableLayer: Send + Sync + 'static + Sized {
 /// Layers will appear in the configuration as a layer property called: {group}_{name}
 #[macro_export]
 macro_rules! register_layer {
+    ($name: literal, $value: ident) => {
+        startup::on_startup! {
+            let qualified_name = $name.to_string();
+
+            $crate::register_layer(qualified_name, $crate::LayerFactory::new(|configuration| {
+                let layer = $value::new(serde_json::from_value(configuration.clone())?)?;
+                Ok(tower::util::BoxLayer::new(layer))
+            }, |gen| gen.subschema_for::<<$value as $crate::ConfigurableLayer>::Config>()));
+        }
+    };
     ($group: literal, $name: literal, $value: ident) => {
         startup::on_startup! {
             let qualified_name = if $group == "" {
