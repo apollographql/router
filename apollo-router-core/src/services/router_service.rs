@@ -145,7 +145,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
-                            &schema,
+                            schema.api_schema(),
                         )
                     });
                 }

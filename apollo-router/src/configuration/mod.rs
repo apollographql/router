@@ -553,6 +553,20 @@ mod tests {
             .build();
 
         let schema: graphql::Schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        
+        type Query {
+          me: String
+        }
+        
+        directive @core(feature: String!) repeatable on SCHEMA
+        
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")

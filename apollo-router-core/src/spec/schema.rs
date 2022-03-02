@@ -1,5 +1,7 @@
 use crate::*;
 use apollo_parser::ast;
+use itertools::Itertools;
+use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -12,141 +14,169 @@ pub struct Schema {
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) fragments: Fragments,
     pub(crate) enums: HashMap<String, HashSet<String>>,
+    api_schema: Option<Box<Schema>>,
 }
 
 impl std::str::FromStr for Schema {
     type Err = SchemaError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parser = apollo_parser::Parser::new(s);
-        let tree = parser.parse();
-        let errors = tree.errors().cloned().collect::<Vec<_>>();
+        let mut schema = parse(s)?;
+        schema.api_schema = Some(Box::new(api_schema(s)?));
+        return Ok(schema);
 
-        if !errors.is_empty() {
-            let errors = ParseErrors {
-                raw_schema: s.to_string(),
-                errors,
-            };
-            errors.print();
-            return Err(SchemaError::Parse(errors));
+        fn api_schema(schema: &str) -> Result<Schema, SchemaError> {
+            let api_schema = api_schema::api_schema(schema)
+                .map_err(|e| SchemaError::Api(e.to_string()))?
+                .map_err(|e| {
+                    SchemaError::Api(
+                        e.iter()
+                            .filter_map(|e| e.message.as_ref())
+                            .join(", ")
+                            .to_string(),
+                    )
+                })?;
+
+            parse(&api_schema)
         }
 
-        let document = tree.document();
-        let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
-        let mut subgraphs = HashMap::new();
+        fn parse(schema: &str) -> Result<Schema, SchemaError> {
+            let parser = apollo_parser::Parser::new(schema);
+            let tree = parser.parse();
+            let errors = tree.errors().cloned().collect::<Vec<_>>();
 
-        // the logic of this algorithm is inspired from the npm package graphql:
-        // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
-        // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
-        // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
-        for definition in document.definitions() {
-            macro_rules! implements_interfaces {
-                ($definition:expr) => {{
-                    let name = $definition
-                        .name()
-                        .expect("never optional according to spec; qed")
-                        .text()
-                        .to_string();
+            if !errors.is_empty() {
+                let errors = ParseErrors {
+                    raw_schema: schema.to_string(),
+                    errors,
+                };
+                errors.print();
+                return Err(SchemaError::Parse(errors));
+            }
 
-                    for key in $definition
-                        .implements_interfaces()
-                        .iter()
-                        .flat_map(|member_types| member_types.named_types().flat_map(|x| x.name()))
-                    {
-                        let key = key.text().to_string();
+            let document = tree.document();
+            let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
+            let mut subgraphs = HashMap::new();
+
+            // the logic of this algorithm is inspired from the npm package graphql:
+            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
+            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
+            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
+            for definition in document.definitions() {
+                macro_rules! implements_interfaces {
+                    ($definition:expr) => {{
+                        let name = $definition
+                            .name()
+                            .expect("never optional according to spec; qed")
+                            .text()
+                            .to_string();
+
+                        for key in
+                            $definition
+                                .implements_interfaces()
+                                .iter()
+                                .flat_map(|member_types| {
+                                    member_types.named_types().flat_map(|x| x.name())
+                                })
+                        {
+                            let key = key.text().to_string();
+                            let set = subtype_map.entry(key).or_default();
+                            set.insert(name.clone());
+                        }
+                    }};
+                }
+
+                macro_rules! union_member_types {
+                    ($definition:expr) => {{
+                        let key = $definition
+                            .name()
+                            .expect("never optional according to spec; qed")
+                            .text()
+                            .to_string();
                         let set = subtype_map.entry(key).or_default();
-                        set.insert(name.clone());
-                    }
-                }};
-            }
 
-            macro_rules! union_member_types {
-                ($definition:expr) => {{
-                    let key = $definition
-                        .name()
-                        .expect("never optional according to spec; qed")
-                        .text()
-                        .to_string();
-                    let set = subtype_map.entry(key).or_default();
-
-                    for name in $definition
-                        .union_member_types()
-                        .iter()
-                        .flat_map(|member_types| member_types.named_types().flat_map(|x| x.name()))
-                    {
-                        set.insert(name.text().to_string());
-                    }
-                }};
-            }
-
-            match definition {
-                // Spec: https://spec.graphql.org/draft/#ObjectTypeDefinition
-                ast::Definition::ObjectTypeDefinition(object) => implements_interfaces!(object),
-                // Spec: https://spec.graphql.org/draft/#InterfaceTypeDefinition
-                ast::Definition::InterfaceTypeDefinition(interface) => {
-                    implements_interfaces!(interface)
+                        for name in
+                            $definition
+                                .union_member_types()
+                                .iter()
+                                .flat_map(|member_types| {
+                                    member_types.named_types().flat_map(|x| x.name())
+                                })
+                        {
+                            set.insert(name.text().to_string());
+                        }
+                    }};
                 }
-                // Spec: https://spec.graphql.org/draft/#UnionTypeDefinition
-                ast::Definition::UnionTypeDefinition(union) => union_member_types!(union),
-                // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-                ast::Definition::ObjectTypeExtension(object) => implements_interfaces!(object),
-                // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-                ast::Definition::InterfaceTypeExtension(interface) => {
-                    implements_interfaces!(interface)
-                }
-                // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
-                ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
-                // Spec: https://spec.graphql.org/draft/#sec-Enums
-                ast::Definition::EnumTypeDefinition(enum_type) => {
-                    if enum_type
-                        .name()
-                        .and_then(|n| n.ident_token())
-                        .as_ref()
-                        .map(|id| id.text())
-                        == Some("join__Graph")
-                    {
-                        if let Some(enums) = enum_type.enum_values_definition() {
-                            for enum_kind in enums.enum_value_definitions() {
-                                if let Some(directives) = enum_kind.directives() {
-                                    for directive in directives.directives() {
-                                        if directive
-                                            .name()
-                                            .and_then(|n| n.ident_token())
-                                            .as_ref()
-                                            .map(|id| id.text())
-                                            == Some("join__graph")
-                                        {
-                                            let mut name = None;
-                                            let mut url = None;
 
-                                            if let Some(arguments) = directive.arguments() {
-                                                for argument in arguments.arguments() {
-                                                    let arg_name = argument
-                                                        .name()
-                                                        .and_then(|n| n.ident_token())
-                                                        .as_ref()
-                                                        .map(|id| id.text().to_owned());
+                match definition {
+                    // Spec: https://spec.graphql.org/draft/#ObjectTypeDefinition
+                    ast::Definition::ObjectTypeDefinition(object) => implements_interfaces!(object),
+                    // Spec: https://spec.graphql.org/draft/#InterfaceTypeDefinition
+                    ast::Definition::InterfaceTypeDefinition(interface) => {
+                        implements_interfaces!(interface)
+                    }
+                    // Spec: https://spec.graphql.org/draft/#UnionTypeDefinition
+                    ast::Definition::UnionTypeDefinition(union) => union_member_types!(union),
+                    // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
+                    ast::Definition::ObjectTypeExtension(object) => implements_interfaces!(object),
+                    // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
+                    ast::Definition::InterfaceTypeExtension(interface) => {
+                        implements_interfaces!(interface)
+                    }
+                    // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
+                    ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
+                    // Spec: https://spec.graphql.org/draft/#sec-Enums
+                    ast::Definition::EnumTypeDefinition(enum_type) => {
+                        if enum_type
+                            .name()
+                            .and_then(|n| n.ident_token())
+                            .as_ref()
+                            .map(|id| id.text())
+                            == Some("join__Graph")
+                        {
+                            if let Some(enums) = enum_type.enum_values_definition() {
+                                for enum_kind in enums.enum_value_definitions() {
+                                    if let Some(directives) = enum_kind.directives() {
+                                        for directive in directives.directives() {
+                                            if directive
+                                                .name()
+                                                .and_then(|n| n.ident_token())
+                                                .as_ref()
+                                                .map(|id| id.text())
+                                                == Some("join__graph")
+                                            {
+                                                let mut name = None;
+                                                let mut url = None;
 
-                                                    let arg_value: Option<String> =
-                                                        match argument.value() {
-                                                            // We are currently parsing name or url.
-                                                            // Both have to be strings.
-                                                            Some(ast::Value::StringValue(sv)) => {
-                                                                Some(sv.into())
-                                                            }
-                                                            _ => None,
+                                                if let Some(arguments) = directive.arguments() {
+                                                    for argument in arguments.arguments() {
+                                                        let arg_name = argument
+                                                            .name()
+                                                            .and_then(|n| n.ident_token())
+                                                            .as_ref()
+                                                            .map(|id| id.text().to_owned());
+
+                                                        let arg_value: Option<String> =
+                                                            match argument.value() {
+                                                                // We are currently parsing name or url.
+                                                                // Both have to be strings.
+                                                                Some(ast::Value::StringValue(
+                                                                    sv,
+                                                                )) => Some(sv.into()),
+                                                                _ => None,
+                                                            };
+
+                                                        match arg_name.as_deref() {
+                                                            Some("name") => name = arg_value,
+                                                            Some("url") => url = arg_value,
+                                                            _ => {}
                                                         };
-
-                                                    match arg_name.as_deref() {
-                                                        Some("name") => name = arg_value,
-                                                        Some("url") => url = arg_value,
-                                                        _ => {}
-                                                    };
+                                                    }
                                                 }
-                                            }
-                                            if let (Some(name), Some(url)) = (name, url) {
-                                                // FIXME: return an error on name collisions
-                                                subgraphs.insert(name, url);
+                                                if let (Some(name), Some(url)) = (name, url) {
+                                                    // FIXME: return an error on name collisions
+                                                    subgraphs.insert(name, url);
+                                                }
                                             }
                                         }
                                     }
@@ -154,145 +184,148 @@ impl std::str::FromStr for Schema {
                             }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
 
-        macro_rules! implement_object_type_or_interface_map {
-            ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                let mut map = document
-                    .definitions()
-                    .filter_map(|definition| {
-                        if let $ast_ty(definition) = definition {
-                            let instance = <$ty>::from(definition);
-                            Some((instance.name.clone(), instance))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<HashMap<String, $ty>>();
-
-                document
-                    .definitions()
-                    .filter_map(|definition| {
-                        if let $ast_extension_ty(extension) = definition {
-                            Some(<$ty>::from(extension))
-                        } else {
-                            None
-                        }
-                    })
-                    .for_each(|extension| {
-                        if let Some(instance) = map.get_mut(&extension.name) {
-                            instance.fields.extend(extension.fields);
-                            instance.interfaces.extend(extension.interfaces);
-                        } else {
-                            failfast_debug!(
-                                concat!(
-                                    "Extension exists for {:?} but ",
-                                    stringify!($ty),
-                                    " could not be found."
-                                ),
-                                extension.name,
-                            );
-                        }
-                    });
-
-                map
-            }};
-        }
-
-        let object_types = implement_object_type_or_interface_map!(
-            ObjectType,
-            ast::Definition::ObjectTypeDefinition,
-            ast::Definition::ObjectTypeExtension,
-        );
-
-        let interfaces = implement_object_type_or_interface_map!(
-            Interface,
-            ast::Definition::InterfaceTypeDefinition,
-            ast::Definition::InterfaceTypeExtension,
-        );
-
-        let custom_scalars = document
-            .definitions()
-            .filter_map(|definition| match definition {
-                // Spec: https://spec.graphql.org/draft/#sec-Scalars
-                // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
-                ast::Definition::ScalarTypeDefinition(definition) => Some(
-                    definition
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string(),
-                ),
-                ast::Definition::ScalarTypeExtension(extension) => Some(
-                    extension
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string(),
-                ),
-                _ => None,
-            })
-            .collect();
-
-        let enums: HashMap<String, HashSet<String>> = document
-            .definitions()
-            .filter_map(|definition| match definition {
-                // Spec: https://spec.graphql.org/draft/#sec-Enums
-                ast::Definition::EnumTypeDefinition(definition) => {
-                    let name = definition
-                        .name()
-                        .expect("the node Name is not optional in the spec; qed")
-                        .text()
-                        .to_string();
-
-                    let enum_values: HashSet<String> = definition
-                        .enum_values_definition()
-                        .expect("the node EnumValuesDefinition is not optional in the spec; qed")
-                        .enum_value_definitions()
-                        .filter_map(|value| {
-                            value.enum_value().map(|val| {
-                                //FIXME: should we check for true/false/null here
-                                // https://spec.graphql.org/draft/#EnumValue
-                                val.name()
-                                    .expect("the node Name is not optional in the spec; qed")
-                                    .text()
-                                    .to_string()
-                            })
+            macro_rules! implement_object_type_or_interface_map {
+                ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+                    let mut map = document
+                        .definitions()
+                        .filter_map(|definition| {
+                            if let $ast_ty(definition) = definition {
+                                let instance = <$ty>::from(definition);
+                                Some((instance.name.clone(), instance))
+                            } else {
+                                None
+                            }
                         })
-                        .collect();
+                        .collect::<HashMap<String, $ty>>();
 
-                    Some((name, enum_values))
-                }
+                    document
+                        .definitions()
+                        .filter_map(|definition| {
+                            if let $ast_extension_ty(extension) = definition {
+                                Some(<$ty>::from(extension))
+                            } else {
+                                None
+                            }
+                        })
+                        .for_each(|extension| {
+                            if let Some(instance) = map.get_mut(&extension.name) {
+                                instance.fields.extend(extension.fields);
+                                instance.interfaces.extend(extension.interfaces);
+                            } else {
+                                failfast_debug!(
+                                    concat!(
+                                        "Extension exists for {:?} but ",
+                                        stringify!($ty),
+                                        " could not be found."
+                                    ),
+                                    extension.name,
+                                );
+                            }
+                        });
 
-                _ => None,
-            })
-            .collect();
+                    map
+                }};
+            }
 
-        let mut schema = Self {
-            subtype_map,
-            string: s.to_owned(),
-            subgraphs,
-            object_types,
-            interfaces,
-            custom_scalars,
-            fragments: Fragments::default(),
-            enums,
-        };
-        if let Some(fragments) = Fragments::from_ast(&document, &schema) {
-            schema.fragments = fragments;
+            let object_types = implement_object_type_or_interface_map!(
+                ObjectType,
+                ast::Definition::ObjectTypeDefinition,
+                ast::Definition::ObjectTypeExtension,
+            );
 
-            Ok(schema)
-        } else {
-            // empty error here, waiting for apollo-rs semantic analysis to provide meaningful
-            // errors when parsing Fragments
-            let errors = ParseErrors {
-                raw_schema: s.to_string(),
-                errors: vec![],
+            let interfaces = implement_object_type_or_interface_map!(
+                Interface,
+                ast::Definition::InterfaceTypeDefinition,
+                ast::Definition::InterfaceTypeExtension,
+            );
+
+            let custom_scalars = document
+                .definitions()
+                .filter_map(|definition| match definition {
+                    // Spec: https://spec.graphql.org/draft/#sec-Scalars
+                    // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
+                    ast::Definition::ScalarTypeDefinition(definition) => Some(
+                        definition
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string(),
+                    ),
+                    ast::Definition::ScalarTypeExtension(extension) => Some(
+                        extension
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string(),
+                    ),
+                    _ => None,
+                })
+                .collect();
+
+            let enums: HashMap<String, HashSet<String>> = document
+                .definitions()
+                .filter_map(|definition| match definition {
+                    // Spec: https://spec.graphql.org/draft/#sec-Enums
+                    ast::Definition::EnumTypeDefinition(definition) => {
+                        let name = definition
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string();
+
+                        let enum_values: HashSet<String> = definition
+                            .enum_values_definition()
+                            .expect(
+                                "the node EnumValuesDefinition is not optional in the spec; qed",
+                            )
+                            .enum_value_definitions()
+                            .filter_map(|value| {
+                                value.enum_value().map(|val| {
+                                    //FIXME: should we check for true/false/null here
+                                    // https://spec.graphql.org/draft/#EnumValue
+                                    val.name()
+                                        .expect("the node Name is not optional in the spec; qed")
+                                        .text()
+                                        .to_string()
+                                })
+                            })
+                            .collect();
+
+                        Some((name, enum_values))
+                    }
+
+                    _ => None,
+                })
+                .collect();
+
+            let mut schema = Schema {
+                subtype_map,
+                string: schema.to_owned(),
+                subgraphs,
+                object_types,
+                interfaces,
+                custom_scalars,
+                fragments: Fragments::default(),
+                enums,
+                api_schema: None,
             };
-            Err(SchemaError::Parse(errors))
+            if let Some(fragments) = Fragments::from_ast(&document, &schema) {
+                schema.fragments = fragments;
+
+                Ok(schema)
+            } else {
+                // empty error here, waiting for apollo-rs semantic analysis to provide meaningful
+                // errors when parsing Fragments
+                let errors = ParseErrors {
+                    raw_schema: schema.string.clone(),
+                    errors: vec![],
+                };
+                Err(SchemaError::Parse(errors))
+            }
         }
     }
 }
@@ -318,6 +351,27 @@ impl Schema {
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
         self.subgraphs.iter()
+    }
+
+    pub fn api_schema(&self) -> &Schema {
+        match &self.api_schema {
+            Some(schema) => schema,
+            None => self,
+        }
+    }
+
+    pub fn empty() -> Schema {
+        Schema {
+            string: "".to_string(),
+            subtype_map: Default::default(),
+            subgraphs: Default::default(),
+            object_types: Default::default(),
+            interfaces: Default::default(),
+            custom_scalars: Default::default(),
+            fragments: Default::default(),
+            enums: Default::default(),
+            api_schema: None,
+        }
     }
 }
 
@@ -426,61 +480,104 @@ implement_object_type_or_interface!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn is_subtype() {
-        let schema: Schema = "union UnionType = Foo | Bar | Baz".parse().unwrap();
+        fn gen_schema_types(schema: &str) -> Schema {
+            let base_schema = r#"
+            type Query {
+              me: String
+            }
+            type Foo {
+              me: String
+            }
+            type Bar {
+              me: String
+            }
+            type Baz {
+              me: String
+            }
+            
+            union UnionType2 = Foo | Bar
+            "#;
+            format!("{}\n{}", base_schema, schema).parse().unwrap()
+        }
+
+        fn gen_schema_interfaces(schema: &str) -> Schema {
+            let base_schema = r#"
+            type Query {
+              me: String
+            }
+            interface Foo {
+              me: String
+            }
+            interface Bar {
+              me: String
+            }
+            interface Baz {
+              me: String,
+            }
+
+            type ObjectType2 implements Foo & Bar { me: String }
+            interface InterfaceType2 implements Foo & Bar { me: String }
+            "#;
+            format!("{}\n{}", base_schema, schema).parse().unwrap()
+        }
+        let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
         assert!(schema.is_subtype("UnionType", "Bar"));
         assert!(schema.is_subtype("UnionType", "Baz"));
-        let schema: Schema = "type ObjectType implements Foo & Bar & Baz { }"
-            .parse()
-            .unwrap();
+        let schema =
+            gen_schema_interfaces("type ObjectType implements Foo & Bar & Baz { me: String }");
         assert!(schema.is_subtype("Foo", "ObjectType"));
         assert!(schema.is_subtype("Bar", "ObjectType"));
         assert!(schema.is_subtype("Baz", "ObjectType"));
-        let schema: Schema = "interface InterfaceType implements Foo & Bar & Baz { }"
-            .parse()
-            .unwrap();
+        let schema = gen_schema_interfaces(
+            "interface InterfaceType implements Foo & Bar & Baz { me: String }",
+        );
         assert!(schema.is_subtype("Foo", "InterfaceType"));
         assert!(schema.is_subtype("Bar", "InterfaceType"));
         assert!(schema.is_subtype("Baz", "InterfaceType"));
-        let schema: Schema = "extend union UnionType = Foo | Bar | Baz".parse().unwrap();
-        assert!(schema.is_subtype("UnionType", "Foo"));
-        assert!(schema.is_subtype("UnionType", "Bar"));
-        assert!(schema.is_subtype("UnionType", "Baz"));
-        let schema: Schema = "extend type ObjectType implements Foo & Bar & Baz { }"
-            .parse()
-            .unwrap();
-        assert!(schema.is_subtype("Foo", "ObjectType"));
-        assert!(schema.is_subtype("Bar", "ObjectType"));
-        assert!(schema.is_subtype("Baz", "ObjectType"));
-        let schema: Schema = "extend interface InterfaceType implements Foo & Bar & Baz { }"
-            .parse()
-            .unwrap();
-        assert!(schema.is_subtype("Foo", "InterfaceType"));
-        assert!(schema.is_subtype("Bar", "InterfaceType"));
-        assert!(schema.is_subtype("Baz", "InterfaceType"));
+        let schema = gen_schema_types("extend union UnionType2 = Baz");
+        assert!(schema.is_subtype("UnionType2", "Foo"));
+        assert!(schema.is_subtype("UnionType2", "Bar"));
+        assert!(schema.is_subtype("UnionType2", "Baz"));
+        let schema =
+            gen_schema_interfaces("extend type ObjectType2 implements Baz { me2: String }");
+        assert!(schema.is_subtype("Foo", "ObjectType2"));
+        assert!(schema.is_subtype("Bar", "ObjectType2"));
+        assert!(schema.is_subtype("Baz", "ObjectType2"));
+        let schema =
+            gen_schema_interfaces("extend interface InterfaceType2 implements Baz { me2: String }");
+        assert!(schema.is_subtype("Foo", "InterfaceType2"));
+        assert!(schema.is_subtype("Bar", "InterfaceType2"));
+        assert!(schema.is_subtype("Baz", "InterfaceType2"));
     }
 
     #[test]
     fn routing_urls() {
-        let schema: Schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-      {
-        query: Query
-        mutation: Mutation
-      }
+        let schema: Schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        type Query {
+          me: String
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
-      enum join__Graph {
-        ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
-        INVENTORY
-          @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-        PRODUCTS
-        @join__graph(name: "products" url: "http://localhost:4003/graphql")
-        REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
-      }"#
+        enum join__Graph {
+            ACCOUNTS @join__graph(name:"accounts" url: "http://localhost:4001/graphql")
+            INVENTORY
+              @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+            PRODUCTS
+            @join__graph(name: "products" url: "http://localhost:4003/graphql")
+            REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
+        }"#
         .parse()
         .unwrap();
 
@@ -511,5 +608,18 @@ mod tests {
         );
 
         assert_eq!(schema.subgraphs.get("test"), None);
+    }
+
+    #[test]
+    fn api_schema() {
+        let schema = Schema::from_str(include_str!("../testdata/contract_schema.graphql")).unwrap();
+        assert!(schema.object_types["Product"]
+            .fields
+            .get("inStock")
+            .is_some());
+        assert!(schema.api_schema.unwrap().object_types["Product"]
+            .fields
+            .get("inStock")
+            .is_none());
     }
 }

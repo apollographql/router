@@ -492,15 +492,7 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-        query: Query
-        mutation: Mutation
-        }"#
-        .parse()
-        .unwrap();
+        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
 
         let service = YamlRouterServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None)
