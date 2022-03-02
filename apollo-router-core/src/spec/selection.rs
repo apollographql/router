@@ -88,13 +88,18 @@ impl Selection {
             ast::Selection::InlineFragment(inline_fragment) => {
                 let type_condition = inline_fragment
                     .type_condition()
-                    .expect("Fragments must specify the type they apply to; qed")
-                    .named_type()
-                    .expect("Fragments must specify the type they apply to; qed")
-                    .name()
-                    .expect("the node Name is not optional in the spec; qed")
-                    .text()
-                    .to_string();
+                    .map(|condition| {
+                        condition
+                            .named_type()
+                            .expect("TypeCondition must specify the NamedType it applies to; qed")
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string()
+                    })
+                    // if we can't get a type name from the current type, that means we're applying
+                    // a fragment onto a scalar
+                    .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))?;
 
                 let fragment_type = FieldType::Named(type_condition.clone());
 
@@ -132,11 +137,7 @@ impl Selection {
 
                 Some(Self::FragmentSpread {
                     name,
-                    known_type: if let FieldType::Named(type_name) = current_type {
-                        Some(type_name.clone())
-                    } else {
-                        None
-                    },
+                    known_type: current_type.inner_type_name().map(|s| s.to_string()),
                 })
             }
         }
