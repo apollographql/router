@@ -274,10 +274,8 @@ impl Query {
                     // from the input value and should already be of the right type (mandated
                     // by the schema) so we do not need to validate it again
                     // if it is not present in input and is non null, we have an invalid value
-                    } else if !output.contains_key(name.as_str()) {
-                        if field_type.is_non_null() {
-                            return Err(InvalidValue);
-                        }
+                    } else if !output.contains_key(name.as_str()) && field_type.is_non_null() {
+                        return Err(InvalidValue);
                     }
                 }
                 Selection::InlineFragment {
