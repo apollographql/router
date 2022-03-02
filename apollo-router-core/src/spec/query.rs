@@ -269,8 +269,15 @@ impl Query {
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
                         output.insert(field_name, value);
-                    } else if field_type.is_non_null() {
-                        return Err(InvalidValue);
+
+                    // if a field was already equested by a previous selection, it was removed
+                    // from the input valur and should already be of the right type (mandated
+                    // by the schema) so we do not need to validate it again
+                    // if it is not present in input and is non null, we have an invalid value
+                    } else if !output.contains_key(name.as_str()) {
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     }
                 }
                 Selection::InlineFragment {
@@ -2079,12 +2086,12 @@ mod tests {
 
         type User implements NamedEntity {
             name: String
-            surname: String!
+            name2: String!
         }
 
         type User2 implements NamedEntity {
             name: String
-            surname: String!
+            name2: String!
         }
         ";
 
@@ -2205,6 +2212,26 @@ mod tests {
             None,
             json! {{
                 "me": null,
+            }},
+        );
+
+        // we should be able to handle duplicate fields even across fragments and interfaces
+        let query3 = "query  { me { ... on User { name2 } name2 } }";
+
+        assert_format_response!(
+            schema,
+            query3,
+            json! {{
+                "me": {
+                    "__typename": "User",
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
             }},
         );
     }
