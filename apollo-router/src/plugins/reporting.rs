@@ -7,7 +7,7 @@ use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
-use crate::set_subscriber;
+use crate::set_dispatcher;
 use crate::GLOBAL_ENV_FILTER;
 
 use apollo_router_core::ConfigurableLayer;
@@ -202,7 +202,7 @@ impl Plugin for Reporting {
 
     async fn startup(&mut self) -> Result<(), BoxError> {
         tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
-        set_subscriber(self.try_initialize_subscriber()?);
+        set_dispatcher(self.try_initialize_subscriber()?);
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {

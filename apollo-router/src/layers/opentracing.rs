@@ -85,7 +85,7 @@ where
             current_span_ctx.trace_flags(),
         );
 
-        let new_span = span!(parent: current_span, Level::INFO, "subgraph_request");
+        let new_span = span!(parent: current_span, Level::TRACE, "subgraph_request");
         let new_span_context = new_span.context();
         let new_span_ref = new_span_context.span();
         let span_id = new_span_ref.span_context().span_id();
