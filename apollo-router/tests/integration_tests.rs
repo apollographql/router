@@ -169,6 +169,36 @@ async fn queries_should_work_over_get() {
 }
 
 #[tokio::test]
+async fn service_errors_should_be_propagated() {
+    let expected_error =apollo_router_core::Error {
+        message :"Value retrieval failed: Query planning had errors: Planning errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
+        ..Default::default()
+    };
+
+    let request = graphql::Request::builder()
+        .query(r#"{ topProducts { name } }"#)
+        .operation_name(Some("invalidOperationName".to_string()))
+        .build();
+
+    let expected_service_hits = hashmap! {};
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(expected_error, actual.errors[0]);
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
 async fn mutation_should_not_work_over_get() {
     let request = graphql::Request::builder()
         .query(

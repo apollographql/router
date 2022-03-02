@@ -5,8 +5,14 @@ use crate::apollo_telemetry::new_pipeline;
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
-use crate::set_subscriber;
+use crate::layers::opentracing::OpenTracingConfig;
+use crate::layers::opentracing::OpenTracingLayer;
+use crate::set_dispatcher;
 use crate::GLOBAL_ENV_FILTER;
+
+use apollo_router_core::ConfigurableLayer;
+use apollo_router_core::SubgraphRequest;
+use apollo_router_core::SubgraphResponse;
 use apollo_router_core::{register_plugin, Plugin};
 use apollo_spaceport::server::ReportSpaceport;
 use derivative::Derivative;
@@ -28,7 +34,9 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use tower::BoxError;
+use tower::util::BoxService;
+use tower::Layer;
+use tower::{BoxError, ServiceExt};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
@@ -159,6 +167,7 @@ impl std::error::Error for ReportingError {}
 struct Reporting {
     config: Conf,
     tx: tokio::sync::mpsc::Sender<SpaceportConfig>,
+    opentracing_layer: Option<OpenTracingLayer>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -168,6 +177,8 @@ struct Conf {
     pub graph: Option<StudioGraph>,
 
     pub opentelemetry: Option<OpenTelemetry>,
+
+    pub opentracing: Option<OpenTracingConfig>,
 }
 
 fn studio_graph() -> Option<StudioGraph> {
@@ -191,7 +202,7 @@ impl Plugin for Reporting {
 
     async fn startup(&mut self) -> Result<(), BoxError> {
         tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
-        set_subscriber(self.try_initialize_subscriber()?);
+        set_dispatcher(self.try_initialize_subscriber()?);
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {
@@ -254,10 +265,28 @@ impl Plugin for Reporting {
             }
             tracing::debug!("terminating spaceport loop");
         });
+
+        let mut opentracing_layer = None;
+        if let Some(opentracing_conf) = &configuration.opentracing {
+            opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone())?.into();
+        }
+
         Ok(Reporting {
             config: configuration,
             tx,
+            opentracing_layer,
         })
+    }
+
+    fn subgraph_service(
+        &mut self,
+        _name: &str,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        match &self.opentracing_layer {
+            Some(opentracing_layer) => opentracing_layer.layer(service).boxed(),
+            None => service,
+        }
     }
 }
 

@@ -41,22 +41,19 @@ type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
-static SUBSCRIBER: Lazy<Mutex<Option<Arc<dyn Subscriber + Send + Sync + 'static>>>> =
-    Lazy::new(|| Mutex::new(None));
+static DISPATCHER: Lazy<Mutex<Dispatch>> = Lazy::new(|| Mutex::new(Default::default()));
 
 /// Retrieve a new dispatcher which uses the global subscriber
 pub fn get_dispatcher() -> Dispatch {
-    let sub_guard = SUBSCRIBER.lock().unwrap();
-
-    sub_guard
-        .clone()
-        .map(tracing::Dispatch::new)
-        .unwrap_or_default()
+    DISPATCHER.lock().unwrap().clone()
 }
 
 /// Update our subscriber. Should only be invoked from OTEL plugin.
-pub fn set_subscriber(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
-    SUBSCRIBER.lock().unwrap().replace(new_sub);
+pub fn set_dispatcher(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
+    let mut sub_guard = DISPATCHER.lock().unwrap();
+
+    let new_dispatch = tracing::Dispatch::new(new_sub);
+    *sub_guard = new_dispatch;
 }
 
 /// Error types for FederatedServer.
