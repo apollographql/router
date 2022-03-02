@@ -10,7 +10,7 @@ use apollo_router_core::{
 };
 use futures::executor::block_on;
 use futures::future::{AndThen, BoxFuture};
-use futures::TryFutureExt;
+use futures::{SinkExt, TryFutureExt};
 use http::HeaderMap;
 use http::{header::HeaderName, HeaderValue};
 use rhai::serde::{from_dynamic, to_dynamic};
@@ -141,29 +141,35 @@ where
         let mut this = self.clone();
 
         Box::pin(async move {
-            let extensions = req.context.cloned_extensions().await;
-            let (headers, extensions) = match this.run_rhai_script(
-                FUNCTION_NAME_REQUEST,
-                req.context.request.headers(),
-                extensions,
-            ) {
-                Ok(res) => res,
-                Err(err) => {
-                    return Ok(plugin_utils::SubgraphResponse::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!("RHAI plugin error: {}", err.as_str()))
-                            .build()])
-                        .context(req.context)
-                        .build()
-                        .into());
-                }
-            };
-            *req.context.extensions().write().await = extensions;
+            let function_found = this
+                .ast
+                .iter_fn_def()
+                .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST);
+            if function_found {
+                let extensions = req.context.cloned_extensions().await;
+                let (headers, extensions) = match this.run_rhai_script(
+                    FUNCTION_NAME_REQUEST,
+                    req.context.request.headers(),
+                    extensions,
+                ) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        return Ok(plugin_utils::SubgraphResponse::builder()
+                            .errors(vec![Error::builder()
+                                .message(format!("RHAI plugin error: {}", err.as_str()))
+                                .build()])
+                            .context(req.context)
+                            .build()
+                            .into());
+                    }
+                };
+                *req.context.extensions().write().await = extensions;
 
-            for (header_name, header_value) in &headers {
-                req.http_request
-                    .headers_mut()
-                    .insert(header_name, header_value.clone());
+                for (header_name, header_value) in &headers {
+                    req.http_request
+                        .headers_mut()
+                        .insert(header_name, header_value.clone());
+                }
             }
 
             this.inner
@@ -224,40 +230,46 @@ where
     }
 
     fn call(&mut self, mut req: RouterRequest) -> Self::Future {
-        const FUNCTION_NAME_REQUEST: &str = "map_subgraph_service_request";
+        const FUNCTION_NAME_REQUEST: &str = "map_router_service_request";
         let mut this = self.clone();
 
         Box::pin(async move {
-            let extensions = req.context.cloned_extensions().await;
-            let (headers, extensions) = match this.run_rhai_script(
-                FUNCTION_NAME_REQUEST,
-                req.context.request.headers(),
-                extensions,
-            ) {
-                Ok(res) => res,
-                Err(err) => {
-                    return Ok(plugin_utils::RouterResponse::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!("RHAI plugin error: {}", err.as_str()))
-                            .build()])
-                        .context(req.context.into())
-                        .build()
-                        .into());
-                }
-            };
-            *req.context.extensions().write().await = extensions;
+            let function_found = this
+                .ast
+                .iter_fn_def()
+                .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST);
+            if function_found {
+                let extensions = req.context.cloned_extensions().await;
+                let (headers, extensions) = match this.run_rhai_script(
+                    FUNCTION_NAME_REQUEST,
+                    req.context.request.headers(),
+                    extensions,
+                ) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        return Ok(plugin_utils::RouterResponse::builder()
+                            .errors(vec![Error::builder()
+                                .message(format!("RHAI plugin error: {}", err.as_str()))
+                                .build()])
+                            .context(req.context.into())
+                            .build()
+                            .into());
+                    }
+                };
+                *req.context.extensions().write().await = extensions;
 
-            for (header_name, header_value) in &headers {
-                req.context
-                    .request
-                    .headers_mut()
-                    .insert(header_name, header_value.clone());
+                for (header_name, header_value) in &headers {
+                    req.context
+                        .request
+                        .headers_mut()
+                        .insert(header_name, header_value.clone());
+                }
             }
 
             this.inner
                 .call(req)
                 .and_then(|mut response| async move {
-                    const FUNCTION_NAME_RESPONSE: &str = "map_subgraph_service_response";
+                    const FUNCTION_NAME_RESPONSE: &str = "map_router_service_response";
 
                     let function_found = this
                         .ast
@@ -412,7 +424,11 @@ impl Plugin for Rhai {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        self.layer.layer(service).boxed()
+        ServiceBuilder::new()
+            .layer(self.layer.clone())
+            .buffer(100)
+            .service(service)
+            .boxed()
     }
 
     fn query_planning_service(
@@ -739,7 +755,9 @@ mod tests {
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
             )
             .unwrap();
-        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
+        let mut mock_service = BoxService::new(mock_service.build());
+        mock_service.ready().await.unwrap();
+        let mut router_service = dyn_plugin.router_service(mock_service);
         let fake_req = http_compat::Request::from(
             Request::builder()
                 .header("X-CUSTOM-HEADER", "CUSTOM_VALUE")
