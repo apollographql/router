@@ -1,7 +1,13 @@
+directive @tag(name: String!) repeatable on
+  | FIELD_DEFINITION
+  | INTERFACE
+  | OBJECT
+  | UNION
+
 extend type Product @key(fields: "upc") {
   upc: String! @external
   weight: Int @external
   price: Int @external
-  inStock: Boolean
+  inStock: Boolean @tag(name: "private")
   shippingEstimate: Int @requires(fields: "price weight")
 }

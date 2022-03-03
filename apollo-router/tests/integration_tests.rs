@@ -81,6 +81,38 @@ async fn basic_composition() {
     );
 }
 
+#[tokio::test]
+async fn api_schema_hides_field() {
+    let request = graphql::Request::builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let http_request = http::Request::builder()
+        .method("POST")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, _) = query_rust(request).await;
+
+    assert!(actual.errors[0]
+        .message
+        .as_str()
+        .contains("Cannot query field \"inStock\" on type \"Product\"."));
+}
+
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]

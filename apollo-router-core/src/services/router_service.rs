@@ -333,6 +333,7 @@ impl PluggableRouterServiceBuilder {
         let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
         // NaiveIntrospection instantiation can potentially block for some time
+        // We don't need to use the api schema here because on the deno side we always convert to API schema
         let naive_introspection = {
             let schema = self.schema.clone();
             tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
