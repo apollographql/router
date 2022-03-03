@@ -5,7 +5,7 @@ use apollo_parser::ast;
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FieldType {
     Named(String),
     List(Box<FieldType>),
@@ -83,6 +83,36 @@ impl FieldType {
             (_, Value::Null) => Ok(()),
             _ => Err(InvalidValue),
         }
+    }
+
+    /// return the name of the type on which selections happen
+    ///
+    /// Example if we get the field `list: [User!]!`, it will return "User"
+    pub fn inner_type_name(&self) -> Option<&str> {
+        match self {
+            FieldType::Named(name) => Some(name.as_str()),
+            FieldType::List(inner) | FieldType::NonNull(inner) => inner.inner_type_name(),
+            FieldType::String
+            | FieldType::Int
+            | FieldType::Float
+            | FieldType::Id
+            | FieldType::Boolean => None,
+        }
+    }
+
+    pub fn is_builtin_scalar(&self) -> bool {
+        match self {
+            FieldType::Named(_) | FieldType::List(_) | FieldType::NonNull(_) => false,
+            FieldType::String
+            | FieldType::Int
+            | FieldType::Float
+            | FieldType::Id
+            | FieldType::Boolean => true,
+        }
+    }
+
+    pub fn is_non_null(&self) -> bool {
+        matches!(self, FieldType::NonNull(_))
     }
 }
 

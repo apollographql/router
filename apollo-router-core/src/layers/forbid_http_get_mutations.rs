@@ -1,66 +1,46 @@
-use crate::{plugin_utils, ExecutionRequest, ExecutionResponse};
-use futures::future::BoxFuture;
+use crate::{
+    checkpoint::{CheckpointService, Step},
+    plugin_utils, ExecutionRequest, ExecutionResponse,
+};
 use http::{Method, StatusCode};
-use std::task::Poll;
-use tower::{Layer, Service};
-
-pub struct ForbidHttpGetMutations {}
-
-pub struct ForbidHttpGetMutationsService<S>
-where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
-    <S as Service<ExecutionRequest>>::Future: Send + 'static,
-{
-    service: S,
-}
+use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
 pub struct ForbidHttpGetMutationsLayer {}
 
 impl<S> Layer<S> for ForbidHttpGetMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
+    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
-    type Service = ForbidHttpGetMutationsService<S>;
+    type Service = CheckpointService<S, ExecutionRequest>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ForbidHttpGetMutationsService { service }
-    }
-}
-
-impl<S> Service<ExecutionRequest> for ForbidHttpGetMutationsService<S>
-where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
-    <S as Service<ExecutionRequest>>::Future: Send,
-{
-    type Response = ExecutionResponse;
-    type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: ExecutionRequest) -> Self::Future {
-        if req.context.request.method() == Method::GET && req.query_plan.contains_mutations() {
-            let res = plugin_utils::ExecutionResponse::builder()
-                .errors(vec![crate::Error {
-                    message: "GET supports only query operation".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                }])
-                .status(StatusCode::METHOD_NOT_ALLOWED)
-                .headers(vec![("Allow".to_string(), "POST".to_string())])
-                .context(req.context)
-                .build()
-                .into();
-
-            Box::pin(async { Ok(res) })
-        } else {
-            Box::pin(self.service.call(req))
-        }
+        CheckpointService::new(
+            |req: ExecutionRequest| {
+                if req.context.request.method() == Method::GET
+                    && req.query_plan.contains_mutations()
+                {
+                    let res = plugin_utils::ExecutionResponse::builder()
+                        .errors(vec![crate::Error {
+                            message: "GET supports only query operation".to_string(),
+                            locations: Default::default(),
+                            path: Default::default(),
+                            extensions: Default::default(),
+                        }])
+                        .status(StatusCode::METHOD_NOT_ALLOWED)
+                        .headers(vec![("Allow".to_string(), "POST".to_string())])
+                        .context(req.context)
+                        .build()
+                        .into();
+                    Ok(Step::Return(res))
+                } else {
+                    Ok(Step::Continue(req))
+                }
+            },
+            service,
+        )
     }
 }
 
@@ -89,7 +69,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
@@ -108,7 +88,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
@@ -127,7 +107,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
@@ -147,7 +127,7 @@ mod forbid_http_get_mutations_tests {
         let expected_allow_header = "POST";
 
         let mock = MockExecutionService::new().build();
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Mutation);
 
