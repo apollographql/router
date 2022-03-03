@@ -48,12 +48,36 @@ register_plugin!(
 
 #[cfg(test)]
 mod tests {
+    use apollo_router_core::{
+        plugin_utils::{self, MockSubgraphService},
+        Context, DynPlugin, SubgraphRequest,
+    };
+    use http::Uri;
     use serde_json::Value;
     use std::str::FromStr;
+    use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test]
     async fn plugin_registered() {
-        apollo_router_core::plugins()
+        let mut mock_service = MockSubgraphService::new();
+        mock_service
+            .expect_call()
+            .withf(|req| {
+                assert_eq!(
+                    req.http_request.inner.uri(),
+                    &Uri::from_static("http://localhost:8001")
+                );
+                true
+            })
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                Ok(plugin_utils::SubgraphResponse::builder()
+                    .context(req.context)
+                    .build()
+                    .into())
+            });
+
+        let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
             .get("com.apollographql.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(
@@ -65,6 +89,21 @@ mod tests {
                 )
                 .unwrap(),
             )
+            .unwrap();
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
+        let context = Context::new();
+        context
+            .insert_extension("test".to_string(), 5i64.into())
+            .await;
+        let subgraph_req = plugin_utils::SubgraphRequest::builder().context(context);
+
+        let _subgraph_resp = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req.build().into())
+            .await
             .unwrap();
     }
 }
