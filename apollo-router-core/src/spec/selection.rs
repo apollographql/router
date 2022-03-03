@@ -103,12 +103,13 @@ impl Selection {
                     .map(|selection| Selection::from_ast(selection, &fragment_type, schema))
                     .collect::<Option<_>>()?;
 
+                let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
                 Some(Self::InlineFragment {
                     fragment: Fragment {
                         type_condition,
                         selection_set,
                     },
-                    known_type: current_type == &fragment_type,
+                    known_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
