@@ -69,13 +69,13 @@ where
                                 "apq: graphql request doesn't match provided sha256Hash"
                             );
                         }
-                        Ok(Step::Forward(req))
+                        Ok(Step::Continue(req))
                     }
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
                             tracing::trace!("apq: cache hit");
                             req.context.request.body_mut().query = Some(cached_query);
-                            Ok(Step::Forward(req))
+                            Ok(Step::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
                             let res = plugin_utils::RouterResponse::builder()
@@ -100,7 +100,7 @@ where
                             Ok(Step::Return(res))
                         }
                     }
-                    _ => Ok(Step::Forward(req)),
+                    _ => Ok(Step::Continue(req)),
                 }
             },
             service,

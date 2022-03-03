@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use tracing::instrument::WithSubscriber;
 use tracing::{Dispatch, Instrument};
@@ -290,17 +290,16 @@ impl PluggableRouterServiceBuilder {
 
         // ExecutionService takes a PlannedRequest and outputs a RouterResponse
         let (execution_service, execution_worker) = Buffer::pair(
-            ForbidHttpGetMutationsLayer::default()
-                .layer(
-                    ServiceBuilder::new().service(
-                        self.plugins.iter_mut().rev().fold(
-                            ExecutionService::builder()
-                                .schema(self.schema.clone())
-                                .subgraph_services(subgraphs)
-                                .build()
-                                .boxed(),
-                            |acc, e| e.execution_service(acc),
-                        ),
+            ServiceBuilder::new()
+                .layer(ForbidHttpGetMutationsLayer::default())
+                .service(
+                    self.plugins.iter_mut().rev().fold(
+                        ExecutionService::builder()
+                            .schema(self.schema.clone())
+                            .subgraph_services(subgraphs)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.execution_service(acc),
                     ),
                 )
                 .boxed(),

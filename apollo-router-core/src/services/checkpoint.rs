@@ -10,8 +10,8 @@ where
     Response: Send + 'static,
 {
     /// `CheckpointService` should
-    /// Forward the call to the next service
-    Forward(Request),
+    /// Continue and call the next service
+    Continue(Request),
     /// `CheckpointService` should not call the next service.
     /// Return the provided Response instead
     Return(Response),
@@ -158,7 +158,7 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         match (self.checkpoint_fn)(req) {
             Ok(Step::Return(response)) => Box::pin(async move { Ok(response) }),
-            Ok(Step::Forward(request)) => Box::pin(self.inner.call(request)),
+            Ok(Step::Continue(request)) => Box::pin(self.inner.call(request)),
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
@@ -194,7 +194,7 @@ mod checkpoint_tests {
         let service = execution_service.build();
 
         let service_stack = ServiceBuilder::new()
-            .with_checkpoint(|req: crate::ExecutionRequest| Ok(Step::Forward(req)))
+            .with_checkpoint(|req: crate::ExecutionRequest| Ok(Step::Continue(req)))
             .service(service);
 
         let request = ExecutionRequest::builder().build().into();
@@ -212,7 +212,7 @@ mod checkpoint_tests {
     }
 
     #[tokio::test]
-    async fn test_forward() {
+    async fn test_continue() {
         let expected_label = "from_mock_service";
         let mut router_service = MockExecutionService::new();
 
@@ -228,7 +228,7 @@ mod checkpoint_tests {
 
         let service = router_service.build();
 
-        let service_stack = CheckpointLayer::new(|req| Ok(Step::Forward(req))).layer(service);
+        let service_stack = CheckpointLayer::new(|req| Ok(Step::Continue(req))).layer(service);
 
         let request = ExecutionRequest::builder().build().into();
 

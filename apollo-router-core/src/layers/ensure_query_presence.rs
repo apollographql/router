@@ -32,7 +32,7 @@ where
                         .with_status(StatusCode::BAD_REQUEST);
                     Ok(Step::Return(res))
                 } else {
-                    Ok(Step::Forward(req))
+                    Ok(Step::Continue(req))
                 }
             },
             service,

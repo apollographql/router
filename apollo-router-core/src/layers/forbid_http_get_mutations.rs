@@ -36,7 +36,7 @@ where
                         .into();
                     Ok(Step::Return(res))
                 } else {
-                    Ok(Step::Forward(req))
+                    Ok(Step::Continue(req))
                 }
             },
             service,
