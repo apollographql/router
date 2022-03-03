@@ -193,7 +193,7 @@ mod tests {
     fn test_selection() {
         assert_eq!(
             select!(
-                "",
+                include_str!("testdata/schema.graphql"),
                 bjson!({"__typename": "User", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
@@ -211,7 +211,8 @@ mod tests {
     fn test_selection_subtype() {
         assert_eq!(
             select!(
-                "union User = Author | Reviewer",
+                "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
+                union User = Author | Reviewer",
                 bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
@@ -229,7 +230,7 @@ mod tests {
     fn test_selection_missing_field() {
         assert!(matches!(
             select!(
-                "",
+                include_str!("testdata/schema.graphql"),
                 json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
             )
                 .unwrap_err(),

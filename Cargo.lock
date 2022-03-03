@@ -68,6 +68,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
 
 [[package]]
+name = "apollo-encoder"
+version = "0.2.2"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+
+[[package]]
 name = "apollo-parser"
 version = "0.2.2"
 source = "git+https://github.com/apollographql/apollo-rs.git?rev=9a14371f3e5352920c74dcae85fa4e71b24f0449#9a14371f3e5352920c74dcae85fa4e71b24f0449"
@@ -80,6 +85,14 @@ name = "apollo-parser"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b735c4f88c6c86bab0e4b122e2c9eb306c54cb1d1d4c8b8d2460d1df572e5b9a"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
+name = "apollo-parser"
+version = "0.2.3"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
 dependencies = [
  "rowan",
 ]
@@ -165,7 +178,7 @@ dependencies = [
 name = "apollo-router-core"
 version = "0.1.0-alpha.7"
 dependencies = [
- "apollo-parser 0.2.3",
+ "apollo-parser 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait",
  "atty",
  "bytes",
@@ -176,6 +189,7 @@ dependencies = [
  "http",
  "include_dir",
  "insta",
+ "itertools",
  "lru",
  "miette",
  "mockall",
@@ -203,6 +217,17 @@ dependencies = [
  "typed-builder",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "apollo-smith"
+version = "0.1.0"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+dependencies = [
+ "apollo-encoder",
+ "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
+ "arbitrary",
+ "once_cell",
 ]
 
 [[package]]
@@ -238,6 +263,15 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "which",
+]
+
+[[package]]
+name = "arbitrary"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c38b6b6b79f671c25e1a3e785b7b82d7562ffc9cd3efdc98627e5668a2472490"
+dependencies = [
+ "derive_arbitrary",
 ]
 
 [[package]]
@@ -1054,6 +1088,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_arbitrary"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98e23c06c035dac87bd802d98f368df73a7f2cb05a66ffbd1f377e821fac4af9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1195,6 +1240,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7896dc8abb250ffdda33912550faa54c88ec8b998dec0b2c55ab224921ce11df"
 dependencies = [
  "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
 ]
 
 [[package]]
@@ -1785,6 +1843,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "humantime"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
 name = "hyper"
 version = "0.14.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2092,6 +2156,17 @@ name = "libc"
 version = "0.2.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bf2e165bb3457c8e098ea76f3e3bc9db55f87aa90d52d0e6be741470916aaa4"
+
+[[package]]
+name = "libfuzzer-sys"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36a9a84a6e8b55dfefb04235e55edb2b9a2a18488fcae777a6bdaa6f06f1deb3"
+dependencies = [
+ "arbitrary",
+ "cc",
+ "once_cell",
+]
 
 [[package]]
 name = "libnghttp2-sys"
@@ -3237,7 +3312,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=cf87257b9d58701cd9e09e8b5992f809147a2165#cf87257b9d58701cd9e09e8b5992f809147a2165"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=ce38b4d7ba8ebba43a713e4b5b2a617249d05db4#ce38b4d7ba8ebba43a713e4b5b2a617249d05db4"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3245,6 +3320,20 @@ dependencies = [
  "serde_json",
  "thiserror",
  "which",
+]
+
+[[package]]
+name = "router-fuzz"
+version = "0.0.0"
+dependencies = [
+ "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
+ "apollo-router-core",
+ "apollo-smith",
+ "env_logger",
+ "libfuzzer-sys",
+ "log",
+ "reqwest",
+ "serde_json",
 ]
 
 [[package]]

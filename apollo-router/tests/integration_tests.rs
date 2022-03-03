@@ -1,17 +1,19 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::get_dispatcher;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
-use apollo_router_core::prelude::*;
 use apollo_router_core::{
-    Context, PluggableRouterServiceBuilder, ResponseBody, SubgraphRequest, ValueExt,
+    prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+    RouterResponse, SubgraphRequest, ValueExt,
 };
 use maplit::hashmap;
 use serde_json::to_string_pretty;
+use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
-use tower::Service;
+use tower::util::BoxCloneService;
+use tower::BoxError;
 use tower::ServiceExt;
 
 macro_rules! assert_federated_response {
@@ -79,6 +81,38 @@ async fn basic_composition() {
             "accounts".to_string()=>1,
         },
     );
+}
+
+#[tokio::test]
+async fn api_schema_hides_field() {
+    let request = graphql::Request::builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let http_request = http::Request::builder()
+        .method("POST")
+        .body(request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let (actual, _) = query_rust(request).await;
+
+    assert!(actual.errors[0]
+        .message
+        .as_str()
+        .contains("Cannot query field \"inStock\" on type \"Product\"."));
 }
 
 #[test_span(tokio::test)]
@@ -245,6 +279,107 @@ async fn mutation_should_not_work_over_get() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
+#[tokio::test]
+async fn automated_persisted_queries() {
+    let (router, registry) = setup_router_and_registry().await;
+
+    let mut extensions: Object = Default::default();
+    extensions.insert("code", "PERSISTED_QUERY_NOT_FOUND".into());
+    extensions.insert(
+        "exception",
+        json!(
+                {"stacktrace":["PersistedQueryNotFoundError: PersistedQueryNotFound"]
+        }),
+    );
+    let expected_apq_miss_error = apollo_router_core::Error {
+        message: "PersistedQueryNotFound".to_string(),
+        extensions,
+        ..Default::default()
+    };
+
+    let mut request_extensions: Object = Default::default();
+    request_extensions.insert(
+        "persistedQuery",
+        json!({
+            "version" : 1u8,
+            "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
+        }),
+    );
+    let request_builder = graphql::Request::builder().extensions(request_extensions.clone());
+    let apq_only_request = request_builder.clone().build();
+
+    // First query, apq hash but no query, it will be a cache miss.
+
+    // No services should be queried
+    let expected_service_hits = hashmap! {};
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(apq_only_request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let actual = query_with_router(router.clone(), request).await;
+
+    assert_eq!(expected_apq_miss_error, actual.errors[0]);
+    assert_eq!(1, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+
+    // Second query, apq hash with corresponding query, it will be inserted into the cache.
+
+    let apq_request_with_query = request_builder
+        .clone()
+        .query("query Query { me { name } }")
+        .build();
+
+    // Services should have been queried once
+    let expected_service_hits = hashmap! {
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(apq_request_with_query)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let actual = query_with_router(router.clone(), request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+
+    // Third and last query, apq hash without query, it will trigger an apq cache hit.
+    let apq_only_request = request_builder.build();
+
+    // Services should have been queried twice
+    let expected_service_hits = hashmap! {
+        "accounts".to_string()=>2,
+    };
+
+    let http_request = http::Request::builder()
+        .method("GET")
+        .body(apq_only_request)
+        .unwrap()
+        .into();
+
+    let request = graphql::RouterRequest {
+        context: graphql::Context::new().with_request(http_request),
+    };
+
+    let actual = query_with_router(router, request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
 #[test_span(tokio::test)]
 async fn variables() {
     assert_federated_response!(
@@ -334,6 +469,14 @@ async fn query_node(request: &graphql::Request) -> Result<graphql::Response, gra
 async fn query_rust(
     request: graphql::RouterRequest,
 ) -> (graphql::Response, CountingServiceRegistry) {
+    let (router, counting_registry) = setup_router_and_registry().await;
+    (query_with_router(router, request).await, counting_registry)
+}
+
+async fn setup_router_and_registry() -> (
+    BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+    CountingServiceRegistry,
+) {
     let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let config =
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
@@ -356,13 +499,20 @@ async fn query_rust(
     }
 
     builder = builder.with_dispatcher(get_dispatcher());
-    let (mut router, _) = builder.build().await;
+    let (router, _) = builder.build().await;
 
-    let stream = router.ready().await.unwrap().call(request).await.unwrap();
+    (router, counting_registry)
+}
+
+async fn query_with_router(
+    router: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+    request: graphql::RouterRequest,
+) -> graphql::Response {
+    let stream = router.oneshot(request).await.unwrap();
     let (_, response) = stream.response.into_parts();
 
     match response {
-        ResponseBody::GraphQL(response) => (response, counting_registry),
+        ResponseBody::GraphQL(response) => response,
         _ => {
             panic!("Expected graphql response")
         }
