@@ -29,12 +29,7 @@ impl std::str::FromStr for Schema {
             let api_schema = api_schema::api_schema(schema)
                 .map_err(|e| SchemaError::Api(e.to_string()))?
                 .map_err(|e| {
-                    SchemaError::Api(
-                        e.iter()
-                            .filter_map(|e| e.message.as_ref())
-                            .join(", ")
-                            .to_string(),
-                    )
+                    SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
                 })?;
 
             parse(&api_schema)
