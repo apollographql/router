@@ -265,6 +265,15 @@ impl Query {
                     field_type,
                 } => {
                     if let Some(input_value) = input.get_mut(name.as_str()) {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was moved into output using take(), replacing
+                        // the input value with Null
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
+                        if input_value.is_null() && output.contains_key(name.as_str()) {
+                            continue;
+                        }
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
@@ -347,6 +356,16 @@ impl Query {
                     field_type,
                 } => {
                     if let Some(input_value) = input.get_mut(name.as_str()) {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was moved into output using take(), replacing
+                        // the input value with Null
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
+                        if input_value.is_null() && output.contains_key(name.as_str()) {
+                            continue;
+                        }
+
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
