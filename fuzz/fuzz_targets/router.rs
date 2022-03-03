@@ -74,9 +74,12 @@ fuzz_target!(|data: &[u8]| {
         );
         debug!("{errors}");
         file.write_all(errors.as_bytes()).unwrap();
+        file.flush().unwrap();
+
+        panic!()
     } else if router_response.is_ok() {
-        let router_response = router_response.unwrap();
-        let gateway_response = gateway_response.unwrap();
+        let router_response = serde_json::to_string_pretty(&router_response.unwrap()).unwrap();
+        let gateway_response = serde_json::to_string_pretty(&gateway_response.unwrap()).unwrap();
         if router_response != gateway_response {
             let mut file = OpenOptions::new()
                 .read(true)
@@ -94,16 +97,19 @@ fuzz_target!(|data: &[u8]| {
 {generated_operation}
 
 ====GATEWAY====
-{gateway_response:?}
+{gateway_response}
 
 ====ROUTER====
-{router_response:?}
+{router_response}
 
 
 "#
             );
             debug!("{errors}");
             file.write_all(errors.as_bytes()).unwrap();
+            file.flush().unwrap();
+
+            panic!();
         }
     }
     debug!("========================");
