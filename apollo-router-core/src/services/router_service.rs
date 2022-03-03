@@ -8,15 +8,12 @@ use crate::{
     SubgraphResponse,
 };
 use futures::future::BoxFuture;
-use futures::TryFutureExt;
 use std::sync::Arc;
 use std::task::Poll;
-use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-use tracing::instrument::WithSubscriber;
-use tracing::{Dispatch, Instrument};
+use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
@@ -131,40 +128,37 @@ where
                     .call(QueryPlannerRequest {
                         context: req.context.into(),
                     })
-                    .await?;
+                    .await;
+                let mut response = match planned_query {
+                    Ok(planned_query) => {
+                        execution
+                            .call(ExecutionRequest {
+                                query_plan: planned_query.query_plan,
+                                context: planned_query.context,
+                            })
+                            .await
+                    }
+                    Err(err) => Err(err),
+                };
 
-                let mut response = execution
-                    .call(ExecutionRequest {
-                        query_plan: planned_query.query_plan,
-                        context: planned_query.context,
-                    })
-                    .await?;
-
-                if let Some(query) = query {
-                    tracing::debug_span!("format_response").in_scope(|| {
-                        query.format_response(
-                            response.response.body_mut(),
-                            operation_name.as_deref(),
-                            &schema,
-                        )
-                    });
+                if let Ok(response) = &mut response {
+                    if let Some(query) = query {
+                        tracing::debug_span!("format_response").in_scope(move || {
+                            query.format_response(
+                                response.response.body_mut(),
+                                operation_name.as_deref(),
+                                &schema,
+                            )
+                        });
+                    }
                 }
 
-                Ok(RouterResponse {
-                    context: response.context,
-                    response: response.response.map(ResponseBody::GraphQL),
+                response.map(|execution_response| RouterResponse {
+                    response: execution_response.response.map(ResponseBody::GraphQL),
+                    context: execution_response.context,
                 })
             }
-        }
-        .or_else(|error: BoxError| async move {
-            Ok(plugin_utils::RouterResponse::builder()
-                .errors(vec![crate::Error {
-                    message: error.to_string(),
-                    ..Default::default()
-                }])
-                .build()
-                .into())
-        });
+        };
 
         Box::pin(fut)
     }
@@ -178,7 +172,6 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
-    dispatcher: Option<Dispatch>,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -188,7 +181,6 @@ impl PluggableRouterServiceBuilder {
             buffer,
             plugins: Default::default(),
             services: Default::default(),
-            dispatcher: Default::default(),
         }
     }
 
@@ -202,11 +194,6 @@ impl PluggableRouterServiceBuilder {
 
     pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
         self.plugins.push(plugin);
-        self
-    }
-
-    pub fn with_dispatcher(mut self, dispatcher: Dispatch) -> PluggableRouterServiceBuilder {
-        self.dispatcher = Some(dispatcher);
         self
     }
 
@@ -254,25 +241,14 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let (query_planner_service, query_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
-                self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(
-                        RouterBridgeQueryPlanner::new(self.schema.clone()),
-                        plan_cache_limit,
-                    )
-                    .boxed(),
-                    |acc, e| e.query_planning_service(acc),
-                ),
-            ),
-            self.buffer,
-        );
-        tokio::spawn(
-            query_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
+        let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(
+                    RouterBridgeQueryPlanner::new(self.schema.clone()),
+                    plan_cache_limit,
+                )
+                .boxed(),
+                |acc, e| e.query_planning_service(acc),
             ),
         );
 
@@ -287,44 +263,26 @@ impl PluggableRouterServiceBuilder {
                     .rev()
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
-                let (service, worker) = Buffer::pair(service, self.buffer);
-                tokio::spawn(
-                    worker.with_subscriber(
-                        self.dispatcher
-                            .as_ref()
-                            .expect("safe to assume dispatcher is some")
-                            .clone(),
-                    ),
-                );
+                let service = ServiceBuilder::new().buffer(self.buffer).service(service);
 
                 (name.clone(), service)
             })
             .collect();
 
         // ExecutionService takes a PlannedRequest and outputs a RouterResponse
-        let (execution_service, execution_worker) = Buffer::pair(
-            ServiceBuilder::new()
-                .layer(ForbidHttpGetMutationsLayer::default())
-                .service(
-                    self.plugins.iter_mut().rev().fold(
-                        ExecutionService::builder()
-                            .schema(self.schema.clone())
-                            .subgraph_services(subgraphs)
-                            .build()
-                            .boxed(),
-                        |acc, e| e.execution_service(acc),
-                    ),
+        let execution_service = ServiceBuilder::new()
+            .buffer(self.buffer)
+            .layer(ForbidHttpGetMutationsLayer::default())
+            .service(
+                self.plugins.iter_mut().rev().fold(
+                    ExecutionService::builder()
+                        .schema(self.schema.clone())
+                        .subgraph_services(subgraphs)
+                        .build()
+                        .boxed(),
+                    |acc, e| e.execution_service(acc),
                 ),
-            self.buffer,
-        );
-        tokio::spawn(
-            execution_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+            );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -360,8 +318,10 @@ impl PluggableRouterServiceBuilder {
         */
 
         // Router service takes a graphql::Request and outputs a graphql::Response
-        let (router_service, router_worker) = Buffer::pair(
-            ServiceBuilder::new().layer(APQ::default()).service(
+        let router_service = ServiceBuilder::new()
+            .buffer(self.buffer)
+            .layer(APQ::default())
+            .service(
                 self.plugins.iter_mut().rev().fold(
                     RouterService::builder()
                         .query_planner_service(query_planner_service)
@@ -373,17 +333,7 @@ impl PluggableRouterServiceBuilder {
                         .boxed(),
                     |acc, e| e.router_service(acc),
                 ),
-            ),
-            self.buffer,
-        );
-        tokio::spawn(
-            router_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+            );
 
         (router_service.boxed_clone(), self.plugins)
     }

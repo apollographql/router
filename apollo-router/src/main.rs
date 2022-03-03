@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
+use apollo_router::{set_global_subscriber, ApolloRouterBuilder, GLOBAL_ENV_FILTER};
 use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
@@ -11,6 +11,7 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 use structopt::StructOpt;
+use tracing::Subscriber;
 use tracing_subscriber::EnvFilter;
 
 /// Options for the router
@@ -106,11 +107,15 @@ async fn rt_main() -> Result<()> {
 
     let builder = tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
-    if atty::is(atty::Stream::Stdout) {
-        builder.init();
+
+    let subscriber: Box<dyn Subscriber + Send + Sync + 'static> = if atty::is(atty::Stream::Stdout)
+    {
+        Box::new(builder.finish())
     } else {
-        builder.json().init();
-    }
+        Box::new(builder.json().finish())
+    };
+
+    set_global_subscriber(subscriber);
 
     GLOBAL_ENV_FILTER.set(env_filter).unwrap();
 

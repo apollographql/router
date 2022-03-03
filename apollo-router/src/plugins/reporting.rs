@@ -7,8 +7,7 @@ use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
-use crate::set_dispatcher;
-use crate::GLOBAL_ENV_FILTER;
+use crate::{set_global_subscriber, BoxedSubscriber, GLOBAL_ENV_FILTER};
 
 use apollo_router_core::ConfigurableLayer;
 use apollo_router_core::SubgraphRequest;
@@ -33,7 +32,6 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::Arc;
 use tower::util::BoxService;
 use tower::Layer;
 use tower::{BoxError, ServiceExt};
@@ -202,7 +200,7 @@ impl Plugin for Reporting {
 
     async fn startup(&mut self) -> Result<(), BoxError> {
         tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
-        set_dispatcher(self.try_initialize_subscriber()?);
+        set_global_subscriber(self.try_initialize_subscriber()?);
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {
@@ -291,9 +289,7 @@ impl Plugin for Reporting {
 }
 
 impl Reporting {
-    fn try_initialize_subscriber(
-        &self,
-    ) -> Result<Arc<dyn tracing::Subscriber + Send + Sync + 'static>, BoxError> {
+    fn try_initialize_subscriber(&self) -> Result<BoxedSubscriber, BoxError> {
         let subscriber = tracing_subscriber::fmt::fmt()
             .with_env_filter(EnvFilter::new(
                 GLOBAL_ENV_FILTER
@@ -395,7 +391,7 @@ impl Reporting {
 
                 opentelemetry::global::set_error_handler(handle_error)?;
 
-                Ok(Arc::new(subscriber.with(telemetry)))
+                Ok(Box::new(subscriber.with(telemetry)))
             }
             #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
             Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
@@ -425,9 +421,9 @@ impl Reporting {
                     };
                     let agent = tracing_opentelemetry::layer().with_tracer(tracer);
                     tracing::debug!("Adding agent telemetry");
-                    Ok(Arc::new(subscriber.with(agent)))
+                    Ok(Box::new(subscriber.with(agent)))
                 } else {
-                    Ok(Arc::new(subscriber))
+                    Ok(Box::new(subscriber))
                 }
             }
             None => {
@@ -446,9 +442,9 @@ impl Reporting {
                     };
                     let agent = tracing_opentelemetry::layer().with_tracer(tracer);
                     tracing::debug!("Adding agent telemetry");
-                    Ok(Arc::new(subscriber.with(agent)))
+                    Ok(Box::new(subscriber.with(agent)))
                 } else {
-                    Ok(Arc::new(subscriber))
+                    Ok(Box::new(subscriber))
                 }
             }
         }

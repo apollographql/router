@@ -29,31 +29,100 @@ use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::{Dispatch, Subscriber};
+use tracing::span::{Attributes, Id};
+use tracing::{Metadata, Subscriber};
+use tracing_subscriber::layer::Layered;
+use tracing_subscriber::reload::{Handle, Layer as ReloadLayer};
+use tracing_subscriber::Layer;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
-static DISPATCHER: Lazy<Mutex<Dispatch>> = Lazy::new(|| Mutex::new(Default::default()));
+type BoxedSubscriber = Box<dyn Subscriber + Send + Sync + 'static>;
 
-/// Retrieve a new dispatcher which uses the global subscriber
-pub fn get_dispatcher() -> Dispatch {
-    DISPATCHER.lock().unwrap().clone()
+pub struct CustomLayer {
+    subscriber: Option<BoxedSubscriber>,
 }
 
-/// Update our subscriber. Should only be invoked from OTEL plugin.
-pub fn set_dispatcher(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
-    let mut sub_guard = DISPATCHER.lock().unwrap();
+impl<S> Layer<S> for CustomLayer
+where
+    S: Subscriber,
+{
+    fn enabled(
+        &self,
+        metadata: &Metadata<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        println!("enabled metadata {:?}", metadata);
+        self.subscriber.is_some()
+    }
 
-    let new_dispatch = tracing::Dispatch::new(new_sub);
-    *sub_guard = new_dispatch;
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        println!("on_event: {:?}, context: {:p}", event, &ctx);
+        if let Some(subscriber) = &self.subscriber {
+            subscriber.event(event);
+        }
+    }
+
+    fn on_new_span(
+        &self,
+        attrs: &Attributes<'_>,
+        id: &Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        println!("new_span: {:?}, context: {:p}", id, &ctx);
+        if let Some(subscriber) = &self.subscriber {
+            subscriber.new_span(attrs);
+        }
+    }
+
+    fn on_close(&self, id: Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        println!("on_close: {:?}, context: {:p}", id, &ctx);
+        if let Some(subscriber) = &self.subscriber {
+            subscriber.try_close(id);
+        }
+    }
+}
+
+impl From<BoxedSubscriber> for CustomLayer {
+    fn from(src: BoxedSubscriber) -> Self {
+        println!("Would like to convert src into a CustomLayer");
+        CustomLayer {
+            subscriber: Some(src),
+        }
+    }
+}
+
+static HANDLE: Lazy<Mutex<Option<Handle<CustomLayer, BoxedSubscriber>>>> =
+    Lazy::new(|| Mutex::new(Default::default()));
+
+/// TODO
+pub fn set_global_subscriber(new_sub: BoxedSubscriber) {
+    let mut hdl_guard = HANDLE.lock().unwrap();
+
+    match &*hdl_guard {
+        Some(hdl) => {
+            tracing::info!("already configured");
+            let new_layer: CustomLayer = new_sub.into();
+            hdl.reload(new_layer).expect("yikes!");
+        }
+        None => {
+            let custom = CustomLayer { subscriber: None };
+            let (reloading_layer, handle) = ReloadLayer::new(custom);
+            *hdl_guard = Some(handle);
+            let layered: Layered<ReloadLayer<CustomLayer, BoxedSubscriber>, BoxedSubscriber> =
+                reloading_layer.with_subscriber(new_sub);
+            tracing::subscriber::set_global_default(layered).expect("yikes!");
+            tracing::info!("configured");
+        }
+    }
 }
 
 /// Error types for FederatedServer.

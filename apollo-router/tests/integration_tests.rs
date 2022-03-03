@@ -1,5 +1,4 @@
 use apollo_router::configuration::Configuration;
-use apollo_router::get_dispatcher;
 use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
@@ -354,7 +353,6 @@ async fn query_rust(
         builder = builder.with_subgraph_service(name, service);
     }
 
-    builder = builder.with_dispatcher(get_dispatcher());
     let (mut router, _) = builder.build().await;
 
     let stream = router.ready().await.unwrap().call(request).await.unwrap();

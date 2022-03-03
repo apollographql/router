@@ -1,5 +1,4 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::get_dispatcher;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
@@ -18,7 +17,6 @@ use tokio::sync::Notify;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
-use tracing::instrument::WithSubscriber;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::{
@@ -59,8 +57,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
         <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
-        let dispatcher = get_dispatcher();
-
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -203,7 +199,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 };
 
 
-                            }.with_subscriber(dispatcher.clone()));
+                            });
                         }
                     }
                 }
