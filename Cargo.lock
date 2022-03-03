@@ -189,6 +189,7 @@ dependencies = [
  "http",
  "include_dir",
  "insta",
+ "itertools",
  "lru",
  "miette",
  "mockall",
@@ -3311,7 +3312,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=cf87257b9d58701cd9e09e8b5992f809147a2165#cf87257b9d58701cd9e09e8b5992f809147a2165"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=ce38b4d7ba8ebba43a713e4b5b2a617249d05db4#ce38b4d7ba8ebba43a713e4b5b2a617249d05db4"
 dependencies = [
  "anyhow",
  "deno_core",
