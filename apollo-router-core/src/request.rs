@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Request {
     /// The graphql query.
-    #[builder(setter(strip_option))]
+    #[builder(default, setter(strip_option))]
     pub query: Option<String>,
 
     /// The optional graphql operation.
@@ -65,21 +65,27 @@ impl Request {
 
         let operation_name = get_from_urldecoded(&urldecoded, "operationName")?;
         let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
-            query.as_str()
+            Some(query.as_str())
         } else {
-            ""
+            None
         };
         let variables =
             Arc::new(get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default());
         let extensions: Object =
             get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
 
-        Ok(Self::builder()
-            .query(query.to_string())
+        let request_builder = Self::builder()
             .variables(variables)
             .operation_name(operation_name)
-            .extensions(extensions)
-            .build())
+            .extensions(extensions);
+
+        let request = if let Some(query_str) = query {
+            request_builder.query(query_str).build()
+        } else {
+            request_builder.build()
+        };
+
+        Ok(request)
     }
 
     pub fn from_bytes(b: Bytes) -> Result<Request, serde_json::error::Error> {

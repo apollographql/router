@@ -78,24 +78,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             errors.append(&mut e);
         }
 
-        // Because studio usage reporting requires the Reporting plugin,
-        // we must force the addition of the Reporting plugin if APOLLO_KEY
-        // is set.
-        if std::env::var("APOLLO_KEY").is_ok() {
-            // If the user has not specified Reporting configuration, then
-            // insert a valid "minimal" configuration which allows
-            // studio usage reporting to function
-            if !configuration
-                .plugins
-                .plugins
-                .contains_key(REPORTING_MODULE_NAME)
-            {
-                configuration.plugins.plugins.insert(
-                    REPORTING_MODULE_NAME.to_string(),
-                    serde_json::json!({ "opentelemetry": null }),
-                );
-            }
-        }
+        let configuration = add_default_plugins(configuration);
 
         let buffer = 20_000;
         let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
@@ -242,6 +225,29 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
         Ok(service)
     }
+}
+
+fn add_default_plugins(mut configuration: Configuration) -> Configuration {
+    // Because studio usage reporting requires the Reporting plugin,
+    // we must force the addition of the Reporting plugin if APOLLO_KEY
+    // is set.
+    if std::env::var("APOLLO_KEY").is_ok() {
+        // If the user has not specified Reporting configuration, then
+        // insert a valid "minimal" configuration which allows
+        // studio usage reporting to function
+        if !configuration
+            .plugins
+            .plugins
+            .contains_key(REPORTING_MODULE_NAME)
+        {
+            configuration.plugins.plugins.insert(
+                REPORTING_MODULE_NAME.to_string(),
+                serde_json::json!({ "opentelemetry": null }),
+            );
+        }
+    }
+
+    configuration
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use crate::prelude::graphql::*;
+use crate::{fetch::OperationKind, prelude::graphql::*};
 use apollo_parser::ast;
 use derivative::Derivative;
 use std::collections::{HashMap, HashSet};
@@ -34,32 +34,35 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        match data {
-            Value::Object(init) => {
-                let output = self.operations.iter().fold(init, |mut input, operation| {
-                    if operation_name.is_none() || operation.name.as_deref() == operation_name {
-                        let mut output = Object::default();
-                        self.apply_selection_set(
-                            &operation.selection_set,
-                            &mut input,
-                            &mut output,
-                            schema,
-                        );
-                        output
-                    } else {
-                        input
+        if let Value::Object(mut input) = data {
+            let operation = match operation_name {
+                Some(name) => self
+                    .operations
+                    .iter()
+                    // we should have an error if the only operation is anonymous but the query specifies a name
+                    .find(|op| op.name.is_some() && op.name.as_deref().unwrap() == name),
+                None => self.operations.get(0),
+            };
+
+            if let Some(operation) = operation {
+                let mut output = Object::default();
+
+                response.data =
+                    match self.apply_root_selection_set(operation, &mut input, &mut output, schema)
+                    {
+                        Ok(()) => output.into(),
+                        Err(InvalidValue) => Value::Null,
                     }
-                });
-                response.data = output.into();
+            } else {
+                failfast_debug!("can't find operation for {:?}", operation_name);
             }
-            _ => {
-                failfast_debug!("Invalid type for data in response.");
-            }
+        } else {
+            failfast_debug!("Invalid type for data in response.");
         }
     }
 
     #[tracing::instrument(skip_all, level = "trace")]
-    pub fn parse(query: impl Into<String>) -> Option<Self> {
+    pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
         let parser = apollo_parser::Parser::new(string.as_str());
@@ -75,13 +78,13 @@ impl Query {
         }
 
         let document = tree.document();
-        let fragments = Fragments::from(&document);
+        let fragments = Fragments::from_ast(&document, schema)?;
 
         let operations = document
             .definitions()
             .filter_map(|definition| {
                 if let ast::Definition::OperationDefinition(operation) = definition {
-                    Some(operation.into())
+                    Operation::from_ast(operation, schema)
                 } else {
                     None
                 }
@@ -126,71 +129,153 @@ impl Query {
         })
     }
 
+    fn format_value(
+        &self,
+        field_type: &FieldType,
+        input: Value,
+        selection_set: &[Selection],
+        schema: &Schema,
+    ) -> Result<Value, InvalidValue> {
+        // for every type, if we have an invalid value, we will replace it with null
+        // and return Ok(()), because values are optional by default
+        match field_type {
+            // for non null types, we validate with the inner type, then if we get an InvalidValue
+            // we set it to null and immediately return an error instead of Ok(()), because we
+            // want the error to go up until the next nullable parent
+            FieldType::NonNull(inner_type) => {
+                match self.format_value(inner_type, input, selection_set, schema) {
+                    Err(_) => Err(InvalidValue),
+                    Ok(Value::Null) => Err(InvalidValue),
+                    Ok(value) => Ok(value),
+                }
+            }
+
+            // if the list contains nonnullable types, we will receive a Err(InvalidValue)
+            // and should replace the entire list with null
+            // if the types are nullable, the inner call to filter_errors will take care
+            // of setting the current entry to null
+            FieldType::List(inner_type) => match input {
+                Value::Array(input_array) => {
+                    match input_array
+                        .into_iter()
+                        .map(|element| {
+                            self.format_value(inner_type, element, selection_set, schema)
+                        })
+                        .collect()
+                    {
+                        Err(InvalidValue) => Ok(Value::Null),
+                        Ok(value) => Ok(value),
+                    }
+                }
+                _ => Ok(Value::Null),
+            },
+
+            FieldType::Named(type_name) => {
+                // we cannot know about the expected format of custom scalars
+                // so we must pass them directly to the client
+                if schema.custom_scalars.contains(type_name) {
+                    return Ok(input);
+                } else if let Some(enum_type) = schema.enums.get(type_name) {
+                    return match input.as_str() {
+                        Some(s) => {
+                            if enum_type.contains(s) {
+                                Ok(input)
+                            } else {
+                                Ok(Value::Null)
+                            }
+                        }
+                        None => Ok(Value::Null),
+                    };
+                }
+
+                match input {
+                    Value::Object(mut input_object) => {
+                        let mut output_object = Object::default();
+
+                        match self.apply_selection_set(
+                            selection_set,
+                            &mut input_object,
+                            &mut output_object,
+                            schema,
+                        ) {
+                            Ok(()) => Ok(Value::Object(output_object)),
+                            Err(InvalidValue) => Ok(Value::Null),
+                        }
+                    }
+                    _ => Ok(Value::Null),
+                }
+            }
+
+            // the rest of the possible types just need to validate the expected value
+            FieldType::Int => {
+                let opt = if input.is_i64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else if input.is_u64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else {
+                    None
+                };
+
+                // if the value is invalid, we do not insert it in the output object
+                // which is equivalent to inserting null
+                if opt.is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Float => {
+                if input.as_f64().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Boolean => {
+                if input.as_bool().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::String => {
+                if input.as_str().is_some() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+            FieldType::Id => {
+                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+                    return Ok(input);
+                }
+                Ok(Value::Null)
+            }
+        }
+    }
+
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
         input: &mut Object,
         output: &mut Object,
         schema: &Schema,
-    ) {
+    ) -> Result<(), InvalidValue> {
         for selection in selection_set {
             match selection {
                 Selection::Field {
                     name,
                     selection_set,
+                    field_type,
                 } => {
                     if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
-                        if let Some(selection_set) = selection_set {
-                            match input_value {
-                                Value::Object(mut input_object) => {
-                                    let mut output_object = Object::default();
-                                    self.apply_selection_set(
-                                        selection_set,
-                                        &mut input_object,
-                                        &mut output_object,
-                                        schema,
-                                    );
-                                    output.insert(field_name, output_object.into());
-                                }
-                                Value::Array(input_array) => {
-                                    let output_array = input_array
-                                        .into_iter()
-                                        .enumerate()
-                                        .map(|(i, mut element)| {
-                                            if let Some(input_object) = element.as_object_mut() {
-                                                let mut output_object = Object::default();
-                                                self.apply_selection_set(
-                                                    selection_set,
-                                                    input_object,
-                                                    &mut output_object,
-                                                    schema,
-                                                );
-                                                output_object.into()
-                                            } else {
-                                                failfast_debug!(
-                                                    "Array element is not an object: {}[{}]",
-                                                    name,
-                                                    i,
-                                                );
-                                                element
-                                            }
-                                        })
-                                        .collect::<Value>();
-                                    output.insert(field_name, output_array);
-                                }
-                                _ => {
-                                    output.insert(field_name, input_value);
-                                    failfast_debug!(
-                                        "Field is not an object nor an array of object: {}",
-                                        name,
-                                    );
-                                }
-                            }
-                        } else {
-                            output.insert(field_name, input_value);
-                        }
-                    } else {
-                        failfast_debug!("Missing field: {}", name);
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let value =
+                            self.format_value(field_type, input_value, selection_set, schema)?;
+                        output.insert(field_name, value);
+
+                    // if a field was already requested by a previous selection, it was removed
+                    // from the input value and should already be of the right type (mandated
+                    // by the schema) so we do not need to validate it again
+                    // if it is not present in input and is non null, we have an invalid value
+                    } else if !output.contains_key(name.as_str()) && field_type.is_non_null() {
+                        return Err(InvalidValue);
                     }
                 }
                 Selection::InlineFragment {
@@ -199,35 +284,119 @@ impl Query {
                             type_condition,
                             selection_set,
                         },
+                    known_type,
                 } => {
-                    if let Some(typename) = input.get("__typename") {
-                        if typename.as_str() == Some(type_condition.as_str()) {
-                            self.apply_selection_set(selection_set, input, output, schema);
-                        }
+                    // known_type = true means that from the query's shape, we know
+                    // we should get the right type here. But in the case we get a
+                    // __typename field and it does not match, we should not apply
+                    // that fragment
+                    if input
+                        .get("__typename")
+                        .map(|val| val.as_str() == Some(type_condition.as_str()))
+                        .unwrap_or(*known_type)
+                    {
+                        self.apply_selection_set(selection_set, input, output, schema)?;
                     }
                 }
-                Selection::FragmentSpread { name } => {
+                Selection::FragmentSpread { name, known_type } => {
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
-                        if let Some(typename) = input.get("__typename") {
-                            if typename.as_str() == Some(fragment.type_condition.as_str()) {
-                                self.apply_selection_set(
-                                    &fragment.selection_set,
-                                    input,
-                                    output,
-                                    schema,
-                                );
-                            }
+                        if input
+                            .get("__typename")
+                            .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
+                            .unwrap_or_else(|| {
+                                known_type.as_deref() == Some(fragment.type_condition.as_str())
+                            })
+                        {
+                            self.apply_selection_set(
+                                &fragment.selection_set,
+                                input,
+                                output,
+                                schema,
+                            )?;
                         }
                     } else {
+                        // the fragment should have been already checked with the schema
                         failfast_debug!("Missing fragment named: {}", name);
                     }
                 }
             }
         }
+
+        Ok(())
+    }
+
+    fn apply_root_selection_set(
+        &self,
+        operation: &Operation,
+        input: &mut Object,
+        output: &mut Object,
+        schema: &Schema,
+    ) -> Result<(), InvalidValue> {
+        for selection in &operation.selection_set {
+            match selection {
+                Selection::Field {
+                    name,
+                    selection_set,
+                    field_type,
+                } => {
+                    if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
+                        let selection_set = selection_set.as_deref().unwrap_or_default();
+                        let value =
+                            self.format_value(field_type, input_value, selection_set, schema)?;
+                        output.insert(field_name, value);
+                    } else if field_type.is_non_null() {
+                        return Err(InvalidValue);
+                    }
+                }
+                Selection::InlineFragment {
+                    fragment:
+                        Fragment {
+                            type_condition,
+                            selection_set,
+                        },
+                    known_type: _,
+                } => {
+                    // top level objects will not provide a __typename field
+                    match (type_condition.as_str(), operation.kind) {
+                        ("Query", OperationKind::Query) | ("Mutation", OperationKind::Mutation) => {
+                        }
+                        _ => {
+                            return Err(InvalidValue);
+                        }
+                    }
+                    self.apply_selection_set(selection_set, input, output, schema)?;
+                }
+                Selection::FragmentSpread {
+                    name,
+                    known_type: _,
+                } => {
+                    if let Some(fragment) = self
+                        .fragments
+                        .get(name)
+                        .or_else(|| schema.fragments.get(name))
+                    {
+                        // top level objects will not provide a __typename field
+                        match (fragment.type_condition.as_str(), operation.kind) {
+                            ("Query", OperationKind::Query)
+                            | ("Mutation", OperationKind::Mutation) => {}
+                            _ => {
+                                return Err(InvalidValue);
+                            }
+                        }
+                        self.apply_selection_set(&fragment.selection_set, input, output, schema)?;
+                    } else {
+                        // the fragment should have been already checked with the schema
+                        failfast_debug!("Missing fragment named: {}", name);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
@@ -286,20 +455,46 @@ impl Query {
 #[derive(Debug)]
 struct Operation {
     name: Option<String>,
+    kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<String, FieldType>,
 }
 
-impl From<ast::OperationDefinition> for Operation {
+impl Operation {
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from(operation: ast::OperationDefinition) -> Self {
+    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
         let name = operation.name().map(|x| x.text().to_string());
-        let selection_set = operation
+
+        let kind = operation
+            .operation_type()
+            .and_then(|op| {
+                op.query_token()
+                    .map(|_| OperationKind::Query)
+                    .or_else(|| op.mutation_token().map(|_| OperationKind::Mutation))
+                    .or_else(|| op.subscription_token().map(|_| OperationKind::Subscription))
+            })
+            .unwrap_or(OperationKind::Query);
+
+        let current_field_type = match kind {
+            OperationKind::Query => FieldType::Named("Query".to_string()),
+            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
+            OperationKind::Subscription => return None,
+        };
+
+        let mut known_selections = HashSet::new();
+        let mut selection_set = Vec::new();
+        for selection in operation
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(Into::into)
-            .collect();
+        {
+            let selection = Selection::from_ast(selection, &current_field_type, schema)?;
+            if !known_selections.contains(&selection) {
+                known_selections.insert(selection.clone());
+                selection_set.push(selection);
+            }
+        }
+
         let variables = operation
             .variable_definitions()
             .iter()
@@ -322,11 +517,12 @@ impl From<ast::OperationDefinition> for Operation {
             })
             .collect();
 
-        Operation {
+        Some(Operation {
             selection_set,
             name,
             variables,
-        }
+            kind,
+        })
     }
 }
 
@@ -377,7 +573,7 @@ mod tests {
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
             let schema: Schema = $schema.parse().expect("could not parse schema");
-            let query = Query::parse($query).expect("could not parse query");
+            let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
             query.format_response(&mut response, $operation, &schema);
             assert_eq_and_ordered!(response.data, $expected);
@@ -387,19 +583,28 @@ mod tests {
     #[test]
     fn reformat_response_data_field() {
         assert_format_response!(
-            "",
-            "{
+            "type Query {
+                foo: String
+                stuff: Bar
+                array: [Bar]
+                baz: String
+            }
+            type Bar {
+                bar: String
+                baz: String
+            }",
+            "query Test {
                 foo
-                stuff{bar}
+                stuff{bar __typename }
                 array{bar}
                 baz
                 alias:baz
-                alias_obj:baz_obj{bar}
-                alias_array:baz_array{bar}
+                alias_obj:stuff{bar}
+                alias_array:array{bar}
             }",
             json! {{
                 "foo": "1",
-                "stuff": {"bar": "2"},
+                "stuff": {"bar": "2", "__typename": "Bar"},
                 "array": [{"bar": "3", "baz": "4"}, {"bar": "5", "baz": "6"}],
                 "baz": "7",
                 "alias": "7",
@@ -407,11 +612,12 @@ mod tests {
                 "alias_array": [{"bar": "9", "baz": "10"}, {"bar": "11", "baz": "12"}],
                 "other": "13",
             }},
-            None,
+            Some("Test"),
             json! {{
                 "foo": "1",
                 "stuff": {
                     "bar": "2",
+                    "__typename": "Bar",
                 },
                 "array": [
                     {"bar": "3"},
@@ -432,67 +638,144 @@ mod tests {
 
     #[test]
     fn reformat_response_data_inline_fragment() {
+        let schema = "type Query {
+            get: Test
+            getStuff: Stuff
+          }
+  
+          type Stuff {
+              stuff: Bar
+          }
+          type Bar {
+              bar: String
+          }
+          type Thing {
+              id: String
+          }
+          union Test = Stuff | Thing";
+        let query = "{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }";
         assert_format_response!(
-            "",
-            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            schema,
+            query,
             json! {
-                {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}
+                {"get": {"__typename": "Stuff", "id": "1", "stuff": {"bar": "2"}}}
             },
             None,
             json! {{
-                "stuff": {
-                    "bar": "2",
-                },
+                "get": {
+                    "stuff": {
+                        "bar": "2",
+                    },
+                }
             }},
         );
 
         assert_format_response!(
-            "",
-            "{... on Stuff { stuff{bar}} ... on Thing { id }}",
+            schema,
+            query,
             json! {
-                {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}
+                {"get": {"__typename": "Thing", "id": "1", "stuff": {"bar": "2"}}}
             },
             None,
             json! {{
-                "id": "1",
+                "get": {
+                    "id": "1",
+                }
+            }},
+        );
+    }
 
+    #[test]
+    fn inline_fragment_on_top_level_operation() {
+        let schema = "type Query {
+            get: Test
+            getStuff: Stuff
+          }
+
+          type Stuff {
+              stuff: Bar
+          }
+          type Bar {
+              bar: String
+          }
+          type Thing {
+              id: String
+          }
+          union Test = Stuff | Thing";
+
+        // when using a fragment on an operation exported by a subgraph,
+        // we might not get a __typename field, we should instead be able
+        // to know the type in advance
+        assert_format_response!(
+            schema,
+            "{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }",
+            json! {
+                {"getStuff": { "stuff": {"bar": "2"}}}
+            },
+            None,
+            json! {{
+                "getStuff": {
+                    "stuff": {"bar": "2"},
+                }
             }},
         );
     }
 
     #[test]
     fn reformat_response_data_fragment_spread() {
+        let schema = "type Query {
+          thing: Thing    
+        }
+
+        type Foo {
+            foo: String
+        }
+        type Bar {
+            bar: String
+        }
+        type Baz {
+            baz: String
+        }
+        union Thing = Foo
+        extend union Thing = Bar | Baz
+
+        fragment baz on Baz {baz}";
+        let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar}";
+
+        // should only select fields from Foo
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Foo", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"foo": "1"}
+                {"thing": {"foo": "1"}}
             },
         );
+        // should only select fields from Bar
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Bar", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"bar": "2"}
+                {"thing": {"bar": "2"} }
             },
         );
+        // should only select fields from Baz
         assert_format_response!(
-            "fragment baz on Baz {baz}",
-            "{...foo ...bar ...baz} fragment foo on Foo {foo} fragment bar on Bar {bar}",
+            schema,
+            query,
             json! {
-            {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}
+                {"thing": {"__typename": "Baz", "foo": "1", "bar": "2", "baz": "3"}}
             },
             None,
             json! {
-                {"baz": "3"}
+                {"thing": {"baz": "3"} }
             },
         );
     }
@@ -500,52 +783,76 @@ mod tests {
     #[test]
     fn reformat_response_data_best_effort() {
         assert_format_response!(
-            "",
-            "{foo stuff{bar baz} ...fragment array{bar baz} other{bar}}",
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                foo: String
+                stuff: Baz
+                array: [Element]
+                other: Bar
+            }
+
+            type Baz {
+                bar: String
+                baz: String
+            }
+
+            type Bar {
+                bar: String
+            }
+
+            union Element = Baz | Bar | String
+            ",
+            "{get {foo stuff{bar baz} ...fragment array{bar baz} other{bar}}}",
             json! {{
-                "foo": "1",
-                "stuff": {"baz": "2"},
-                "array": [
-                    {"baz": "3"},
-                    "4",
-                    {"bar": "5"},
-                ],
-                "other": "6",
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {"baz": "3"},
+                        "4",
+                        {"bar": "5"},
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
             }},
             None,
             json! {{
-                "foo": "1",
-                "stuff": {
-                    "baz": "2",
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "baz": "2",
+                    },
+                    "array": [
+                        {},
+                        null,
+                        {},
+                    ],
+                    "other": null,
                 },
-                "array": [
-                    {"baz": "3"},
-                    "4",
-                    {"bar": "5"},
-                ],
-                "other": "6",
             }},
         );
     }
 
     #[test]
     fn reformat_matching_operation() {
-        let schema = "";
+        let schema = "
+        type Query {
+            foo: String
+            other: String
+        }
+        ";
         let query = "query MyOperation { foo }";
         let response = json! {{
             "foo": "1",
             "other": "2",
         }};
-        assert_format_response!(
-            schema,
-            query,
-            response,
-            Some("OtherOperation"),
-            json! {{
-                "foo": "1",
-                "other": "2",
-            }},
-        );
+        // an invalid operation name should fail
+        assert_format_response!(schema, query, response, Some("OtherOperation"), Value::Null,);
         assert_format_response!(
             schema,
             query,
@@ -573,6 +880,7 @@ mod tests {
                     .query
                     .as_ref()
                     .expect("query has been added right above; qed"),
+                &schema,
             )
             .expect("could not parse query");
             query.validate_variables(&request, &schema)
@@ -595,85 +903,1661 @@ mod tests {
 
     #[test]
     fn variable_validation() {
-        assert_validation!("", "query($foo:Boolean){x}", json!({}));
-        assert_validation_error!("", "query($foo:Boolean!){x}", json!({}));
-        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":true}));
-        assert_validation!("", "query($foo:Boolean!){x}", json!({"foo":"true"}));
-        assert_validation_error!("", "query($foo:Boolean!){x}", json!({"foo":"str"}));
-        assert_validation!("", "query($foo:Int){x}", json!({}));
-        assert_validation!("", "query($foo:Int){x}", json!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":2.0}));
-        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":"str"}));
-        assert_validation!("", "query($foo:Int){x}", json!({"foo":"2"}));
-        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":true}));
-        assert_validation_error!("", "query($foo:Int){x}", json!({"foo":{}}));
+        let schema = "type Query { x: String }";
+        assert_validation!(schema, "query($foo:Boolean){x}", json!({}));
+        assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({}));
+        assert_validation!(schema, "query($foo:Boolean!){x}", json!({"foo":true}));
+        assert_validation!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
+        assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"str"}));
+        assert_validation!(schema, "query($foo:Int){x}", json!({}));
+        assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
+        assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":2.0}));
+        assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":"str"}));
+        assert_validation!(schema, "query($foo:Int){x}", json!({"foo":"2"}));
+        assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":true}));
+        assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":{}}));
         assert_validation_error!(
-            "",
+            schema,
             "query($foo:Int){x}",
             json!({ "foo": i32::MAX as i64 + 1 })
         );
         assert_validation_error!(
-            "",
+            schema,
             "query($foo:Int){x}",
             json!({ "foo": i32::MIN as i64 - 1 })
         );
-        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MAX }));
-        assert_validation!("", "query($foo:Int){x}", json!({ "foo": i32::MIN }));
-        assert_validation!("", "query($foo:ID){x}", json!({"foo": "1"}));
-        assert_validation!("", "query($foo:ID){x}", json!({"foo": 1}));
-        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": true}));
-        assert_validation_error!("", "query($foo:ID){x}", json!({"foo": {}}));
-        assert_validation!("", "query($foo:String){x}", json!({"foo": "str"}));
-        assert_validation!("", "query($foo:Float){x}", json!({"foo":2.0}));
-        assert_validation!("", "query($foo:Float){x}", json!({"foo":"2.0"}));
-        assert_validation_error!("", "query($foo:Float){x}", json!({"foo":2}));
-        assert_validation_error!("", "query($foo:Int!){x}", json!({}));
-        assert_validation!("", "query($foo:[Int]){x}", json!({}));
-        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":1}));
-        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":"str"}));
-        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":{}}));
-        assert_validation_error!("", "query($foo:[Int]!){x}", json!({}));
-        assert_validation!("", "query($foo:[Int]!){x}", json!({"foo":[]}));
-        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
-        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
-        assert_validation!("", "query($foo:[String]){x}", json!({"foo":["1","2","3"]}));
-        assert_validation_error!("", "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
-        assert_validation!("", "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
-        assert_validation_error!("", "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
-        assert_validation!("", "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
-        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({}));
-        assert_validation!("type Foo{}", "query($foo:Foo){x}", json!({"foo":{}}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":1}));
-        assert_validation_error!("type Foo{}", "query($foo:Foo){x}", json!({"foo":"str"}));
-        assert_validation_error!("type Foo{x:Int!}", "query($foo:Foo){x}", json!({"foo":{}}));
+        assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
+        assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MIN }));
+        assert_validation!(schema, "query($foo:ID){x}", json!({"foo": "1"}));
+        assert_validation!(schema, "query($foo:ID){x}", json!({"foo": 1}));
+        assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": true}));
+        assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": {}}));
+        assert_validation!(schema, "query($foo:String){x}", json!({"foo": "str"}));
+        assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+        assert_validation!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
+        assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":2}));
+        assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
+        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
+        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
+        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
+        assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
+        assert_validation!(schema, "query($foo:[Int]!){x}", json!({"foo":[]}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
         assert_validation!(
-            "type Foo{x:Int!}",
+            schema,
+            "query($foo:[String]){x}",
+            json!({"foo":["1","2","3"]})
+        );
+        assert_validation_error!(schema, "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
+        assert_validation!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
+        assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
+        assert_validation!(
+            "type Foo{} type Query { x: String }",
+            "query($foo:Foo){x}",
+            json!({})
+        );
+        assert_validation!(
+            "type Foo{} type Query { x: String }",
+            "query($foo:Foo){x}",
+            json!({"foo":{}})
+        );
+        assert_validation_error!(
+            "type Foo{} type Query { x: String }",
+            "query($foo:Foo){x}",
+            json!({"foo":1})
+        );
+        assert_validation_error!(
+            "type Foo{} type Query { x: String }",
+            "query($foo:Foo){x}",
+            json!({"foo":"str"})
+        );
+        assert_validation_error!(
+            "type Foo{x:Int!} type Query { x: String }",
+            "query($foo:Foo){x}",
+            json!({"foo":{}})
+        );
+        assert_validation!(
+            "type Foo{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":1}})
         );
         assert_validation!(
-            "type Foo implements Bar interface Bar{x:Int!}",
+            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":1}}),
         );
         assert_validation_error!(
-            "type Foo implements Bar interface Bar{x:Int!}",
+            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":"str"}}),
         );
         assert_validation_error!(
-            "type Foo implements Bar interface Bar{x:Int!}",
+            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{}}),
         );
-        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":{}}));
-        assert_validation!("scalar Foo", "query($foo:Foo!){x}", json!({"foo":1}));
-        assert_validation_error!("scalar Foo", "query($foo:Foo!){x}", json!({}));
         assert_validation!(
-            "type Foo{bar:Bar!} type Bar{x:Int!}",
+            "scalar Foo type Query { x: String }",
+            "query($foo:Foo!){x}",
+            json!({"foo":{}})
+        );
+        assert_validation!(
+            "scalar Foo type Query { x: String }",
+            "query($foo:Foo!){x}",
+            json!({"foo":1})
+        );
+        assert_validation_error!(
+            "scalar Foo type Query { x: String }",
+            "query($foo:Foo!){x}",
+            json!({})
+        );
+        assert_validation!(
+            "type Foo{bar:Bar!} type Bar{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"bar":{"x":1}}})
+        );
+    }
+
+    #[test]
+    fn filter_root_errors() {
+        let schema = "type Query {
+            getInt: Int
+            getNonNullString: String!
+        }";
+        assert_format_response!(
+            schema,
+            "query MyOperation { getInt }",
+            json! {{
+                "getInt": "not_an_int",
+                "other": "2",
+            }},
+            Some("MyOperation"),
+            json! {{
+                "getInt": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { getNonNullString }",
+            json! {{
+                "getNonNullString": 1,
+            }},
+            None,
+            Value::Null,
+        );
+    }
+
+    #[test]
+    fn filter_object_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            name: String
+        }";
+        let query = "query  { me { id name } }";
+
+        // name expected a string, got an int
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": null,
+                },
+            }},
+        );
+
+        // non null id expected a string, got an int
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": 1,
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null id got a null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null id was absent
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null id was absent
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // a non null field not present in the query should not be an error
+        assert_format_response!(
+            schema,
+            "query  { me { name } }",
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+        );
+
+        // if a field appears multiple times, selection should be deduplicated
+        assert_format_response!(
+            schema,
+            "query  { me { id id } }",
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        // duplicate id field
+        assert_format_response!(
+            schema,
+            "query  { me { id ...on User { id } } }",
+            json! {{
+                "me": {
+                    "__typename": "User",
+                    "id": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_list_errors() {
+        let schema = "type Query {
+            list: TestList
+        }
+
+        type TestList {
+            l1: [String]
+            l2: [String!]
+            l3: [String]!
+            l4: [String!]!
+        }";
+
+        // l1: nullable list of nullable elements
+        // any error should stop at the list elements
+        assert_format_response!(
+            schema,
+            "query { list { l1 } }",
+            json! {{
+                "list": {
+                    "l1": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l1": ["abc", null, null, null, "def"],
+                },
+            }},
+        );
+
+        // l1 expected a list, got a string
+        assert_format_response!(
+            schema,
+            "query { list { l1 } }",
+            json! {{
+                "list": {
+                    "l1": "abc",
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l1": null,
+                },
+            }},
+        );
+
+        // l2: nullable list of non nullable elements
+        // any element error should nullify the entire list
+        assert_format_response!(
+            schema,
+            "query { list { l2 } }",
+            json! {{
+                "list": {
+                    "l2": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l2": null,
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l2 } }",
+            json! {{
+                "list": {
+                    "l2": ["abc", "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l2": ["abc", "def"],
+                },
+            }},
+        );
+
+        // l3: nullable list of nullable elements
+        // any element error should stop at the list elements
+        assert_format_response!(
+            schema,
+            "query { list { l3 } }",
+            json! {{
+                "list": {
+                    "l3": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l3": ["abc", null, null, null, "def"],
+                },
+            }},
+        );
+
+        // non null l3 expected a list, got an int, parrent element should be null
+        assert_format_response!(
+            schema,
+            "query { list { l3 } }",
+            json! {{
+                "list": {
+                    "l3": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list":null,
+            }},
+        );
+
+        // l4: non nullable list of non nullable elements
+        // any element error should nullify the entire list,
+        // which will nullify the parent element
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": ["abc", 1, { "foo": "bar"}, ["aaa"], "def"],
+                },
+            }},
+            None,
+            json! {{
+                "list": null,
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": ["abc", "def"],
+                },
+            }},
+            None,
+            json! {{
+                "list": {
+                    "l4": ["abc", "def"],
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query { list { l4 } }",
+            json! {{
+                "list": {
+                    "l4": 1,
+                },
+            }},
+            None,
+            json! {{
+                "list": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_nested_object_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            name: String
+            reviews1: [Review]
+            reviews2: [Review!]
+            reviews3: [Review!]!
+        }
+        
+        type Review {
+            text1: String
+            text2: String!
+        }
+        ";
+
+        // nullable parent and child elements
+        // child errors should stop at the child's level
+        let query_review1_text1 = "query  { me { id reviews1 { text1 } } }";
+        // nullable text1 was absent, should we keep the empty object, or put a text1: null here?
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { } ],
+                },
+            }},
+        );
+
+        // nullable text1 was null
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // nullable text1 expected a string, got an int, so text1 is nullified
+        assert_format_response!(
+            schema,
+            query_review1_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // text2 is non null so errors should nullify reviews1 element
+        let query_review1_text2 = "query  { me { id reviews1 { text2 } } }";
+        // text2 was absent, reviews1 element should be nullified
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        // text2 was null, reviews1 element should be nullified
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        // text2 expected a string, got an int, text2 is nullified, reviews1 element should be nullified
+        assert_format_response!(
+            schema,
+            query_review1_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews1": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews1": [ null ],
+                },
+            }},
+        );
+
+        // reviews2: [Review!]
+        // reviews2 elements are non null, so any error there should nullify the entire list
+        let query_review2_text1 = "query  { me { id reviews2 { text1 } } }";
+        // nullable text1 was absent
+        assert_format_response!(
+            schema,
+            query_review2_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": [ { } ],
+                },
+            }},
+        );
+
+        // nullable text1 was null
+        assert_format_response!(
+            schema,
+            query_review2_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // nullable text1 expected a string, got an int
+        assert_format_response!(
+            schema,
+            query_review2_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // text2 is non null
+        let query_review2_text2 = "query  { me { id reviews2 { text2 } } }";
+        // text2 was absent, so the reviews2 element is nullified, so reviews2 is nullified
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+        // text2 was null, so the reviews2 element is nullified, so reviews2 is nullified
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+        // text2 expected a string, got an int, so the reviews2 element is nullified, so reviews2 is nullified
+        assert_format_response!(
+            schema,
+            query_review2_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews2": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews2": null,
+                },
+            }},
+        );
+
+        //reviews3: [Review!]!
+        // reviews3 is non null, and its elements are non null
+        let query_review3_text1 = "query  { me { id reviews3 { text1 } } }";
+        // nullable text1 was absent
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { } ],
+                },
+            }},
+        );
+
+        // nullable text1 was null
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // nullable text1 expected a string, got an int
+        assert_format_response!(
+            schema,
+            query_review3_text1,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text1": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "reviews3": [ { "text1": null } ],
+                },
+            }},
+        );
+
+        // reviews3 is non null, and its elements are non null, text2 is  on null
+        let query_review3_text2 = "query  { me { id reviews3 { text2 } } }";
+        // text2 was absent, nulls should propagate up to the operation
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+        // text2 was null, nulls should propagate up to the operation
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text2": null } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+        // text2 expected a string, got an int, nulls should propagate up to the operation
+        assert_format_response!(
+            schema,
+            query_review3_text2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "name": 1,
+                    "reviews3": [ { "text2": 1 } ],
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_alias_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            name: String
+        }";
+        let query = "query  { me { id identifiant:id } }";
+
+        // both aliases got valid values
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "identifiant": "b",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "identifiant": "b",
+                },
+            }},
+        );
+
+        // non null identifiant expected a string, got an int, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "identifiant": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null identifiant was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "identifiant": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null identifiant was absent, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        let query2 = "query  { me { name name2:name } }";
+
+        // both aliases got valid values
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": "b",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": "b",
+                },
+            }},
+        );
+
+        // nullable name2 expected a string, got an int, name2 should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": null,
+                },
+            }},
+        );
+
+        // nullable name2 was null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                    "name2": null,
+                },
+            }},
+        );
+
+        // nullable name2 was absent
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_scalar_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            a: A
+            b: A!
+        }
+        
+        scalar A
+        ";
+
+        let query = "query  { me { id a } }";
+
+        // scalar a is present, no further validation
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                },
+            }},
+        );
+
+        // scalar a is present, no further validation
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": {
+                        "field": 1234,
+                    },
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": {
+                        "field": 1234,
+                    },
+                },
+            }},
+        );
+
+        let query2 = "query  { me { id b } }";
+
+        // non null scalar b is present, no further validation
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                },
+            }},
+        );
+
+        // non null scalar b is present, no further validation
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": {
+                        "field": 1234,
+                    },
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": {
+                        "field": 1234,
+                    },
+                },
+            }},
+        );
+
+        // non null scalar b was null, the operatiuon should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": null,
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non null scalar b was absent, the operatiuon should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "id": "a",
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_enum_errors() {
+        let schema = "type Query {
+            me: User
+        }
+
+        type User {
+            id: String!
+            a: A
+            b: A!
+        }
+
+        enum A {
+            X
+            Y
+            Z
+        }";
+
+        let query_a = "query  { me { id a } }";
+
+        // enum a got a correct value
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "X",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "X",
+                },
+            }},
+        );
+
+        // nullable enum a expected "X", "Y" or "Z", got another string, a should be null
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                },
+            }},
+        );
+
+        // nullable enum a was null
+        assert_format_response!(
+            schema,
+            query_a,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "a": null,
+                },
+            }},
+        );
+
+        let query_b = "query  { me { id b } }";
+
+        // non nullable enum b got a correct value
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "X",
+                }
+            }},
+            None,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "X",
+                },
+            }},
+        );
+        // non nullable enum b expected "X", "Y" or "Z", got another string, b and the operation should be null
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": "hello",
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non nullable enum b was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query_b,
+            json! {{
+                "me": {
+                    "id": "a",
+                    "b": null,
+                }
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_interface_errors() {
+        let schema = "type Query {
+            me: NamedEntity
+        }
+
+        interface NamedEntity {
+            name: String
+            name2: String!
+        }
+
+        type User implements NamedEntity {
+            name: String
+            name2: String!
+        }
+
+        type User2 implements NamedEntity {
+            name: String
+            name2: String!
+        }
+        ";
+
+        let query = "query  { me { name } }";
+
+        // nullable name field got a correct value
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": "a",
+                },
+            }},
+        );
+
+        // nullable name field was absent
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": { },
+            }},
+        );
+
+        // nullable name field was null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+        );
+
+        // nullable name field expected a string, got an int
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name": null,
+                },
+            }},
+        );
+
+        let query2 = "query  { me { name2 } }";
+
+        // non nullable name2 field got a correct value
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+        );
+
+        // non nullable name2 field was absent, the operation should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non nullable name2 field was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non nullable name2 field expected a string, got an int, name2 and the operation should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {{
+                "me": {
+                    "name2": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // we should be able to handle duplicate fields even across fragments and interfaces
+        assert_format_response!(
+            schema,
+            "query  { me { ... on User { name2 } name2 } }",
+            json! {{
+                "me": {
+                    "__typename": "User",
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_extended_interface_errors() {
+        let schema = "type Query {
+            me: NamedEntity
+        }
+
+        interface NamedEntity {
+            name: String
+        }
+
+        type User implements NamedEntity {
+            name: String
+        }
+
+        type User2 implements NamedEntity {
+            name: String
+        }
+
+        extend interface NamedEntity {
+            name2: String!
+        }
+
+        extend type User {
+            name2: String!
+        }
+
+        extend type User2 {
+            name2: String!
+        }
+        ";
+
+        let query = "query  { me { name2 } }";
+
+        // non nullable name2 got a correct value
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+            None,
+            json! {{
+                "me": {
+                    "name2": "a",
+                },
+            }},
+        );
+
+        // non nullable name2 was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": null,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non nullable name2 was absent, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": { },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+
+        // non nullable name2 expected a string, got an int, the operation should be null
+        assert_format_response!(
+            schema,
+            query,
+            json! {{
+                "me": {
+                    "name2": 1,
+                },
+            }},
+            None,
+            json! {{
+                "me": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn filter_errors_top_level_fragment() {
+        let schema = "type Query {
+            get: Thing   
+          }
+  
+          type Thing {
+              name: String
+              name2: String!
+          }";
+
+        // fragments can appear on top level queries
+        let query = "{ ...frag } fragment frag on Query { __typename get { name } }";
+        // nullable name got a correct value
+        assert_format_response!(
+            schema,
+            query,
+            json! {
+                { "get": {"name": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": "a",
+                }
+            }},
+        );
+
+        // nullable name was null
+        assert_format_response!(
+            schema,
+            query,
+            json! {
+                { "get": {"name": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": null,
+                }
+            }},
+        );
+
+        let query2 = "{ ...frag2 } fragment frag2 on Query { __typename get { name2 } }";
+        // non nullable name2 got a correct value
+        assert_format_response!(
+            schema,
+            query2,
+            json! {
+                { "get": {"name2": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name2": "a",
+                }
+            }},
+        );
+
+        // non nullable name2 was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query2,
+            json! {
+                { "get": {"name2": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": null
+            }},
+        );
+
+        let query3 = "{ ... on Query { __typename get { name } } }";
+        // nullable name got a correct value
+        assert_format_response!(
+            schema,
+            query3,
+            json! {
+                { "get": {"name": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": "a",
+                }
+            }},
+        );
+
+        // nullable name was null
+        assert_format_response!(
+            schema,
+            query3,
+            json! {
+                { "get": {"name": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name": null,
+                }
+            }},
+        );
+
+        let query4 = "{ ... on Query { __typename get { name2 } } }";
+        // non nullable name2 got a correct value
+        assert_format_response!(
+            schema,
+            query4,
+            json! {
+                { "get": {"name2": "a", "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": {
+                    "name2": "a",
+                }
+            }},
+        );
+
+        // non nullable name2 was null, the operation should be null
+        assert_format_response!(
+            schema,
+            query4,
+            json! {
+                { "get": {"name2": null, "other": "b"} }
+            },
+            None,
+            json! {{
+                "get": null,
+            }},
         );
     }
 }
