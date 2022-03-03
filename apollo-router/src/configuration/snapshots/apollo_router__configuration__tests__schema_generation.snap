@@ -135,16 +135,12 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-<<<<<<< HEAD
             "apollographql.com.rhai"
           ]
         },
         {
           "required": [
-            "com.apollo.test.always_fails_to_start"
-=======
             "com.apollographql.reporting"
->>>>>>> 7bc68788ebca2884e996c84e3d33054b9cefd13e
           ]
         },
         {
@@ -174,17 +170,13 @@ expression: "&schema"
         }
       ],
       "properties": {
-<<<<<<< HEAD
         "apollographql.com.rhai": {
           "$ref": "#/definitions/Conf"
         },
-        "com.apollo.test.always_fails_to_start": {
-=======
         "com.apollographql.reporting": {
           "$ref": "#/definitions/Conf"
         },
         "com.apollographql.test.always_fails_to_start": {
->>>>>>> 7bc68788ebca2884e996c84e3d33054b9cefd13e
           "$ref": "#/definitions/Conf"
         },
         "com.apollographql.test.always_fails_to_start_and_stop": {
