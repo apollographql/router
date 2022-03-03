@@ -135,11 +135,6 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-            "com.apollographql.override_subgraph_url"
-          ]
-        },
-        {
-          "required": [
             "com.apollographql.reporting"
           ]
         },
@@ -167,16 +162,14 @@ expression: "&schema"
           "required": [
             "com.example.hello"
           ]
+        },
+        {
+          "required": [
+            "override_subgraph_url"
+          ]
         }
       ],
       "properties": {
-        "com.apollographql.override_subgraph_url": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "format": "uri"
-          }
-        },
         "com.apollographql.reporting": {
           "$ref": "#/definitions/Conf"
         },
@@ -194,6 +187,13 @@ expression: "&schema"
         },
         "com.example.hello": {
           "$ref": "#/definitions/Conf"
+        },
+        "override_subgraph_url": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       }
     },
