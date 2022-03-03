@@ -193,7 +193,7 @@ mod tests {
                     // we would not do this in actual code
                     req.context.request.body().operation_name.as_ref().unwrap()
                 );
-                // let's return an empty response
+                // let's return the expected data
                 Ok(plugin_utils::RouterResponse::builder()
                     .data(expected_mock_response_data.into())
                     .build()
