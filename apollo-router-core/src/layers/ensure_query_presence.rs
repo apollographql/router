@@ -1,7 +1,7 @@
 use crate::checkpoint::{CheckpointService, Step};
 use crate::{plugin_utils, RouterRequest, RouterResponse};
 use http::StatusCode;
-use tower::{Layer, Service};
+use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
 pub struct EnsureQueryPresence {}
@@ -10,7 +10,7 @@ impl<S> Layer<S> for EnsureQueryPresence
 where
     S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
     type Service = CheckpointService<S, RouterRequest>;
 

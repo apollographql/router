@@ -3,7 +3,7 @@ use crate::{
     plugin_utils, ExecutionRequest, ExecutionResponse,
 };
 use http::{Method, StatusCode};
-use tower::{Layer, Service};
+use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
 pub struct ForbidHttpGetMutationsLayer {}
@@ -12,7 +12,7 @@ impl<S> Layer<S> for ForbidHttpGetMutationsLayer
 where
     S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
-    <S as Service<ExecutionRequest>>::Error: Send + 'static,
+    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
     type Service = CheckpointService<S, ExecutionRequest>;
 

@@ -6,7 +6,7 @@ use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
-use tower::{Layer, Service};
+use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
@@ -36,7 +36,7 @@ impl<S> Layer<S> for APQLayer
 where
     S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
     type Service = CheckpointService<S, RouterRequest>;
 

@@ -170,7 +170,7 @@ pub trait ServiceBuilderExt<L> {
         Request: Send + 'static,
         S::Future: Send,
         S::Response: Send + 'static,
-        S::Error: Send + 'static;
+        S::Error: Into<BoxError> + Send + 'static;
 }
 
 #[allow(clippy::type_complexity)]
@@ -240,7 +240,7 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         Request: Send + 'static,
         S::Future: Send,
         S::Response: Send + 'static,
-        S::Error: Send + 'static,
+        S::Error: Into<BoxError> + Send + 'static,
     {
         self.layer(CheckpointLayer::new(checkpoint_fn))
     }
