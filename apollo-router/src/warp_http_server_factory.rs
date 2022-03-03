@@ -355,7 +355,7 @@ where
 
     async move {
         match service.ready_oneshot().await {
-            Ok(service) => {
+            Ok(mut service) => {
                 let mut http_request = http::Request::builder()
                     .method(method)
                     .body(request)
@@ -365,7 +365,7 @@ where
                 let span = Span::current();
 
                 let response = service
-                    .oneshot(http_request.into())
+                    .call(http_request.into())
                     .await
                     .map(|response| {
                         tracing::trace_span!(parent: &span, "serialize_response")

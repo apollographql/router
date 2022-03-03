@@ -75,8 +75,8 @@ where
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let planning = self.ready_query_planner_service.take().unwrap();
-        let execution = self.ready_query_execution_service.take().unwrap();
+        let mut planning = self.ready_query_planner_service.take().unwrap();
+        let mut execution = self.ready_query_execution_service.take().unwrap();
 
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
@@ -115,13 +115,13 @@ where
             } else {
                 let operation_name = body.operation_name.clone();
                 let planned_query = planning
-                    .oneshot(QueryPlannerRequest {
+                    .call(QueryPlannerRequest {
                         context: context.into(),
                     })
                     .await?;
 
                 let mut response = execution
-                    .oneshot(ExecutionRequest {
+                    .call(ExecutionRequest {
                         query_plan: planned_query.query_plan,
                         context: planned_query.context,
                     })
