@@ -340,14 +340,6 @@ impl Query {
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in &operation.selection_set {
-            println!(
-                "apply_root_selection_set[{}], selection={:?}, input={:?}, output={:?}",
-                line!(),
-                selection,
-                input,
-                output
-            );
-
             match selection {
                 Selection::Field {
                     name,
