@@ -24,7 +24,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
