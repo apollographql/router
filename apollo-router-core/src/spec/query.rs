@@ -132,7 +132,7 @@ impl Query {
     fn format_value(
         &self,
         field_type: &FieldType,
-        input: &Value,
+        input: &mut Value,
         selection_set: &[Selection],
         schema: &Schema,
     ) -> Result<Value, InvalidValue> {
@@ -157,7 +157,7 @@ impl Query {
             FieldType::List(inner_type) => match input {
                 Value::Array(input_array) => {
                     match input_array
-                        .iter()
+                        .iter_mut()
                         .map(|element| {
                             self.format_value(inner_type, element, selection_set, schema)
                         })
@@ -174,12 +174,12 @@ impl Query {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 } else if let Some(enum_type) = schema.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                Ok(input.clone())
+                                Ok(input.take())
                             } else {
                                 Ok(Value::Null)
                             }
@@ -189,7 +189,7 @@ impl Query {
                 }
 
                 match input {
-                    Value::Object(ref input_object) => {
+                    Value::Object(ref mut input_object) => {
                         let mut output_object = Object::default();
 
                         match self.apply_selection_set(
@@ -219,31 +219,31 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 }
                 Ok(Value::Null)
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 }
                 Ok(Value::Null)
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 }
                 Ok(Value::Null)
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 }
                 Ok(Value::Null)
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    return Ok(input.clone());
+                    return Ok(input.take());
                 }
                 Ok(Value::Null)
             }
@@ -253,7 +253,7 @@ impl Query {
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
-        input: &Object,
+        input: &mut Object,
         output: &mut Object,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
@@ -264,11 +264,11 @@ impl Query {
                     selection_set,
                     field_type,
                 } => {
-                    if let Some((field_name, input_value)) = input.get_key_value(name.as_str()) {
+                    if let Some(input_value) = input.get_mut(name.as_str()) {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
-                        match output.entry(field_name.clone()) {
+                        match output.entry((*name).clone()) {
                             serde_json_bytes::Entry::Vacant(entry) => {
                                 entry.insert(value);
                             }
@@ -346,11 +346,11 @@ impl Query {
                     selection_set,
                     field_type,
                 } => {
-                    if let Some((field_name, input_value)) = input.get_key_value(name.as_str()) {
+                    if let Some(input_value) = input.get_mut(name.as_str()) {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
-                        match output.entry(field_name.clone()) {
+                        match output.entry((*name).clone()) {
                             serde_json_bytes::Entry::Vacant(entry) => {
                                 entry.insert(value);
                             }

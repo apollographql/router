@@ -2,11 +2,12 @@ use std::collections::HashSet;
 
 use crate::{FieldType, Fragment, Schema};
 use apollo_parser::ast;
+use serde_json_bytes::ByteString;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {
     Field {
-        name: String,
+        name: ByteString,
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
     },
@@ -79,7 +80,7 @@ impl Selection {
                 };
 
                 Some(Self::Field {
-                    name,
+                    name: name.into(),
                     selection_set,
                     field_type,
                 })
