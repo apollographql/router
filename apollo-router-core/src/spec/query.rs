@@ -132,7 +132,7 @@ impl Query {
     fn format_value(
         &self,
         field_type: &FieldType,
-        input: Value,
+        input: &Value,
         selection_set: &[Selection],
         schema: &Schema,
     ) -> Result<Value, InvalidValue> {
@@ -174,12 +174,12 @@ impl Query {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
-                    return Ok(input);
+                    return Ok(input.clone());
                 } else if let Some(enum_type) = schema.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                Ok(input)
+                                Ok(input.clone())
                             } else {
                                 Ok(Value::Null)
                             }
@@ -189,12 +189,12 @@ impl Query {
                 }
 
                 match input {
-                    Value::Object(mut input_object) => {
+                    Value::Object(ref input_object) => {
                         let mut output_object = Object::default();
 
                         match self.apply_selection_set(
                             selection_set,
-                            &mut input_object,
+                            input_object,
                             &mut output_object,
                             schema,
                         ) {
@@ -219,31 +219,31 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    return Ok(input);
+                    return Ok(input.clone());
                 }
                 Ok(Value::Null)
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    return Ok(input);
+                    return Ok(input.clone());
                 }
                 Ok(Value::Null)
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    return Ok(input);
+                    return Ok(input.clone());
                 }
                 Ok(Value::Null)
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    return Ok(input);
+                    return Ok(input.clone());
                 }
                 Ok(Value::Null)
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    return Ok(input);
+                    return Ok(input.clone());
                 }
                 Ok(Value::Null)
             }
@@ -253,7 +253,7 @@ impl Query {
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
-        input: &mut Object,
+        input: &Object,
         output: &mut Object,
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
@@ -264,17 +264,20 @@ impl Query {
                     selection_set,
                     field_type,
                 } => {
-                    if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
+                    if let Some((field_name, input_value)) = input.get_key_value(name.as_str()) {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
-                        output.insert(field_name, value);
-
-                    // if a field was already requested by a previous selection, it was removed
-                    // from the input value and should already be of the right type (mandated
-                    // by the schema) so we do not need to validate it again
-                    // if it is not present in input and is non null, we have an invalid value
-                    } else if !output.contains_key(name.as_str()) && field_type.is_non_null() {
+                        match output.entry(field_name.clone()) {
+                            serde_json_bytes::Entry::Vacant(entry) => {
+                                entry.insert(value);
+                            }
+                            serde_json_bytes::Entry::Occupied(mut entry) => {
+                                let previous = entry.get_mut();
+                                previous.deep_merge(value);
+                            }
+                        }
+                    } else if field_type.is_non_null() {
                         return Err(InvalidValue);
                     }
                 }
@@ -337,17 +340,33 @@ impl Query {
         schema: &Schema,
     ) -> Result<(), InvalidValue> {
         for selection in &operation.selection_set {
+            println!(
+                "apply_root_selection_set[{}], selection={:?}, input={:?}, output={:?}",
+                line!(),
+                selection,
+                input,
+                output
+            );
+
             match selection {
                 Selection::Field {
                     name,
                     selection_set,
                     field_type,
                 } => {
-                    if let Some((field_name, input_value)) = input.remove_entry(name.as_str()) {
+                    if let Some((field_name, input_value)) = input.get_key_value(name.as_str()) {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let value =
                             self.format_value(field_type, input_value, selection_set, schema)?;
-                        output.insert(field_name, value);
+                        match output.entry(field_name.clone()) {
+                            serde_json_bytes::Entry::Vacant(entry) => {
+                                entry.insert(value);
+                            }
+                            serde_json_bytes::Entry::Occupied(mut entry) => {
+                                let previous = entry.get_mut();
+                                previous.deep_merge(value);
+                            }
+                        }
                     } else if field_type.is_non_null() {
                         return Err(InvalidValue);
                     }
@@ -2557,6 +2576,92 @@ mod tests {
             None,
             json! {{
                 "get": null,
+            }},
+        );
+    }
+
+    #[test]
+    fn merge_selections() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+            review: Review
+        }
+        
+        type Review {
+            id: String!
+            body: String
+        }";
+
+        // duplicate operation name
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                }
+                get {
+                    name
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // merge nested selection
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    review {
+                        id
+                    }
+
+                    ... on Product {
+                        review {
+                            body
+                        }
+                    }
+                }
+                get {
+                    name
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "review": {
+                        "__typename": "Review",
+                        "id": "b",
+                        "body": "hello",
+                    }
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "review": {
+                        "id": "b",
+                        "body": "hello",
+                    }
+                },
             }},
         );
     }
