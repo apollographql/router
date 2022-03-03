@@ -760,10 +760,8 @@ mod tests {
             baz: String
         }
         union Thing = Foo
-        extend union Thing = Bar | Baz
-
-        fragment baz on Baz {baz}";
-        let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar}";
+        extend union Thing = Bar | Baz";
+        let query = "query { thing {...foo ...bar ...baz} } fragment foo on Foo {foo} fragment bar on Bar {bar} fragment baz on Baz {baz}";
 
         // should only select fields from Foo
         assert_format_response!(
@@ -825,7 +823,7 @@ mod tests {
                 bar: String
             }
 
-            union Element = Baz | Bar | String
+            union Element = Baz | Bar
             ",
             "{get {foo stuff{bar baz} ...fragment array{bar baz} other{bar}}}",
             json! {{
@@ -979,22 +977,22 @@ mod tests {
         assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
         assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
         assert_validation!(
-            "type Foo{} type Query { x: String }",
+            "type Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({})
         );
         assert_validation!(
-            "type Foo{} type Query { x: String }",
+            "type Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{}})
         );
         assert_validation_error!(
-            "type Foo{} type Query { x: String }",
+            "type Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":1})
         );
         assert_validation_error!(
-            "type Foo{} type Query { x: String }",
+            "type Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":"str"})
         );
@@ -1009,17 +1007,17 @@ mod tests {
             json!({"foo":{"x":1}})
         );
         assert_validation!(
-            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
+            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":1}}),
         );
         assert_validation_error!(
-            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
+            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":"str"}}),
         );
         assert_validation_error!(
-            "type Foo implements Bar interface Bar{x:Int!} type Query { x: String }",
+            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{}}),
         );

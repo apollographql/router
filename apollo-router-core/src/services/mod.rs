@@ -1,3 +1,4 @@
+use self::checkpoint::{CheckpointLayer, Step};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
+pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
 mod router_service;
@@ -24,7 +26,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
@@ -153,6 +155,22 @@ pub trait ServiceBuilderExt<L> {
         <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
         <S as Service<QueryPlannerRequest>>::Response: Send,
         <S as Service<QueryPlannerRequest>>::Future: Send;
+
+    fn with_checkpoint<S, Request>(
+        self,
+        checkpoint_fn: fn(
+            Request,
+        ) -> Result<
+            Step<Request, <S as Service<Request>>::Response>,
+            <S as Service<Request>>::Error,
+        >,
+    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
+    where
+        S: Service<Request> + Send + 'static,
+        Request: Send + 'static,
+        S::Future: Send,
+        S::Response: Send + 'static,
+        S::Error: Into<BoxError> + Send + 'static;
 }
 
 #[allow(clippy::type_complexity)]
@@ -206,5 +224,24 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
                 context: r.context,
             },
         )
+    }
+
+    fn with_checkpoint<S, Request>(
+        self,
+        checkpoint_fn: fn(
+            Request,
+        ) -> Result<
+            Step<Request, <S as Service<Request>>::Response>,
+            <S as Service<Request>>::Error,
+        >,
+    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
+    where
+        S: Service<Request> + Send + 'static,
+        Request: Send + 'static,
+        S::Future: Send,
+        S::Response: Send + 'static,
+        S::Error: Into<BoxError> + Send + 'static,
+    {
+        self.layer(CheckpointLayer::new(checkpoint_fn))
     }
 }
