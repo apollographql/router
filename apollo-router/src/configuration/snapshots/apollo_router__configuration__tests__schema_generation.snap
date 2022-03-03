@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 474
+assertion_line: 487
 expression: "&schema"
 
 ---
@@ -135,6 +135,11 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
+            "com.apollographql.override_subgraph_url"
+          ]
+        },
+        {
+          "required": [
             "com.apollographql.reporting"
           ]
         },
@@ -165,6 +170,13 @@ expression: "&schema"
         }
       ],
       "properties": {
+        "com.apollographql.override_subgraph_url": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
         "com.apollographql.reporting": {
           "$ref": "#/definitions/Conf"
         },
