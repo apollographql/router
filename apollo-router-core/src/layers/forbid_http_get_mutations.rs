@@ -1,9 +1,8 @@
 use crate::{
-    checkpoint::{CheckpointService, Step},
-    plugin_utils, ExecutionRequest, ExecutionResponse,
+    checkpoint::Step, plugin_utils, ExecutionRequest, ExecutionResponse, ServiceBuilderExt,
 };
 use http::{Method, StatusCode};
-use tower::{BoxError, Layer, Service};
+use tower::{util::BoxService, BoxError, Layer, Service, ServiceBuilder, ServiceExt};
 
 #[derive(Default)]
 pub struct ForbidHttpGetMutationsLayer {}
@@ -12,13 +11,14 @@ impl<S> Layer<S> for ForbidHttpGetMutationsLayer
 where
     S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
-    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send,
 {
-    type Service = CheckpointService<S, ExecutionRequest>;
+    type Service =
+        BoxService<ExecutionRequest, ExecutionResponse, <S as Service<ExecutionRequest>>::Error>;
 
     fn layer(&self, service: S) -> Self::Service {
-        CheckpointService::new(
-            |req: ExecutionRequest| {
+        ServiceBuilder::new()
+            .with_checkpoint(|req: ExecutionRequest| {
                 if req.context.request.method() == Method::GET
                     && req.query_plan.contains_mutations()
                 {
@@ -38,9 +38,9 @@ where
                 } else {
                     Ok(Step::Continue(req))
                 }
-            },
-            service,
-        )
+            })
+            .service(service)
+            .boxed()
     }
 }
 

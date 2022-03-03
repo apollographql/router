@@ -45,7 +45,7 @@ where
     Request: Send + 'static,
     S::Future: Send,
     S::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send,
 {
     /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `Step`
     pub fn new(
@@ -70,7 +70,7 @@ where
     <S as Service<Request>>::Future: Send,
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send,
 {
     type Service = CheckpointService<S, Request>;
 
@@ -88,7 +88,7 @@ pub struct CheckpointService<S, Request>
 where
     Request: Send + 'static,
     S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -110,7 +110,7 @@ impl<S, Request> CheckpointService<S, Request>
 where
     Request: Send + 'static,
     S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -140,7 +140,7 @@ where
     S::Future: Send,
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send,
 {
     type Response = <S as Service<Request>>::Response;
 

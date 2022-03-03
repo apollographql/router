@@ -10,7 +10,7 @@ impl<S> Layer<S> for EnsureQueryPresence
 where
     S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send,
 {
     type Service = CheckpointService<S, RouterRequest>;
 

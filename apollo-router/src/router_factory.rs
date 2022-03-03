@@ -1,12 +1,12 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
-use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
+use apollo_router_core::{DynPlugin, RouterResponse};
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -201,7 +201,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         //
         // This is because our global SUBSCRIBER is initialized by
         // the startup() method of our Reporting plugin.
-        let (pluggable_router_service, plugins) = builder.build().await;
+        let (pluggable_router_service, plugins): (
+            BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+            Vec<Box<dyn DynPlugin>>,
+        ) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let service = ServiceBuilder::new().buffer(buffer).service(
             pluggable_router_service

@@ -36,7 +36,7 @@ impl<S> Layer<S> for APQLayer
 where
     S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
     <S as Service<RouterRequest>>::Future: Send + 'static,
-    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send,
 {
     type Service = CheckpointService<S, RouterRequest>;
 
