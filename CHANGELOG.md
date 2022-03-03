@@ -16,23 +16,66 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
 
-  Description! And a link to a [reference]
-
-  [reference]: http://link
+  Description! And a link to a [reference](http://url)
 
  -->
+ 
+# [v0.1.0-alpha.8] Not yet released
 
+## :sparkles: Features
+
+- **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
+  Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
+
+## :bug: Fixes
+
+- **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
+  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (for instance, Reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the router lifecycle. This change now ensures that Reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration. 
+
+- **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
+  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
+
+# [v0.1.0-alpha.7] 2022-02-25
+
+## :sparkles: Features
+
+- **Apollo Studio Explorer landing page** ([PR #526](https://github.com/apollographql/router/pull/526))
+
+  We've replaced the _redirect_ to Apollo Studio with a statically rendered landing page.  This supersedes the previous redirect approach was merely introduced as a short-cut.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
+
+  It is also possible to _save_ the redirect preference and make the behavior sticky for future visits.  As a bonus, this also resolves the failure to preserve the correct HTTP scheme (e.g., `https://`) in the event that the Apollo Router was operating behind a TLS-terminating proxy, since the redirect is now handled client-side.
+
+  Overall, this should be a more durable and more transparent experience for the user.
+
+- **Display Apollo Router version on startup** ([PR #543](https://github.com/apollographql/router/pull/543))
+  The Apollo Router displays its version on startup from now on, which will come in handy when debugging/observing how your application behaves.
+
+## :bug: Fixes
+
+- **Passing a `--supergraph` file supersedes Managed Federation** ([PR #535](https://github.com/apollographql/router/pull/535))
+
+  The `--supergraph` flag will no longer be silently ignored when the Supergraph is already being provided through [Managed Federation](https://www.apollographql.com/docs/federation/managed-federation/overview) (i.e., when the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables are set).  This allows temporarily overriding the Supergraph schema that is fetched from Apollo Studio's Uplink endpoint, while still reporting metrics to Apollo Studio reporting ingress.
+
+- **Anonymous operation names are now empty in tracing** ([PR #525](https://github.com/apollographql/router/pull/525))
+
+  When GraphQL operation names are not necessary to execute an operation (i.e., when there is only a single operation in a GraphQL document) and the GraphQL operation is _not_ named (i.e., it is anonymous), the `operation_name` attribute on the trace spans that are associated with the request will no longer contain a single hyphen character (`-`) but will instead be an empty string.  This matches the way that these operations are represented during the GraphQL operation's life-cycle as well.
+
+- **Resolved missing documentation in Apollo Explorer** ([PR #540](https://github.com/apollographql/router/pull/540))
+
+   We've resolved a scenario that prevented Apollo Explorer from displaying documentation by adding support for a new introspection query which also queries for deprecation (i.e., `includeDeprecated`) on `input` arguments.
+  
 # [v0.1.0-alpha.6] 2022-02-18
 
 ## :sparkles: Features
 
 - **Apollo Studio Managed Federation support** ([PR #498](https://github.com/apollographql/router/pull/498))
 
+  [Managed Federation]: https://www.apollographql.com/docs/federation/managed-federation/overview/
+
   The Router can now automatically download and check for updates on its schema from Studio (via [Uplink])'s free, [Managed Federation] service.  This is configured in the same way as Apollo Gateway via the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables, in the same way as was true in Apollo Gateway ([seen here](https://www.apollographql.com/docs/federation/managed-federation/setup/#4-connect-the-gateway-to-studio)). This will also enable operation usage reporting.
 
   > **Note:** It is not yet possible to configure the Router with [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`].  If you need this behavior, please open a feature request with your use case.
 
-  [Managed Federation]: https://www.apollographql.com/docs/federation/managed-federation/overview/
   [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`]: https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable
   [Uplink]: https://www.apollographql.com/docs/federation/managed-federation/uplink/
   [operation usage reporting]: https://www.apollographql.com/docs/studio/metrics/usage-reporting/#pushing-metrics-from-apollo-server

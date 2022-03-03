@@ -266,7 +266,7 @@ where
         let headers = req.http_request.headers_mut();
         if let Some(name) = &self.name {
             let value = req.context.request.headers().get(name);
-            if let Some(value) = value.or_else(|| self.default_value.as_ref()) {
+            if let Some(value) = value.or(self.default_value.as_ref()) {
                 headers.insert(self.rename.as_ref().unwrap_or(name), value.clone());
             }
         } else if let Some(regex) = &self.regex {

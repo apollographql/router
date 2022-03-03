@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -55,8 +55,8 @@ reqwest-middleware = "0.1.5"
 reqwest-tracing = { version = "0.2.1", features = ["opentelemetry_0_17"] }
 schemars = { version="0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
-serde_json = "1.0.79"
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
+serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_yaml = "0.8.23"
 startup = "0.1.1"
 static_assertions = "1.1.0"
@@ -66,7 +66,7 @@ thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["net", "codec"] }
 tonic = { version = "0.6.2", optional = true }
-tower = { version="0.4.12", features = ["util"] }
+tower = { version="0.4.12", features = ["full"] }
 tower-http = { version = "0.2.3", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.31"

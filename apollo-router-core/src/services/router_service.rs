@@ -8,6 +8,7 @@ use crate::{
     SubgraphResponse,
 };
 use futures::future::BoxFuture;
+use futures::TryFutureExt;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -130,37 +131,40 @@ where
                     .call(QueryPlannerRequest {
                         context: req.context.into(),
                     })
-                    .await;
-                let mut response = match planned_query {
-                    Ok(planned_query) => {
-                        execution
-                            .call(ExecutionRequest {
-                                query_plan: planned_query.query_plan,
-                                context: planned_query.context,
-                            })
-                            .await
-                    }
-                    Err(err) => Err(err),
-                };
+                    .await?;
 
-                if let Ok(response) = &mut response {
-                    if let Some(query) = query {
-                        tracing::debug_span!("format_response").in_scope(move || {
-                            query.format_response(
-                                response.response.body_mut(),
-                                operation_name.as_deref(),
-                                &schema,
-                            )
-                        });
-                    }
+                let mut response = execution
+                    .call(ExecutionRequest {
+                        query_plan: planned_query.query_plan,
+                        context: planned_query.context,
+                    })
+                    .await?;
+
+                if let Some(query) = query {
+                    tracing::debug_span!("format_response").in_scope(|| {
+                        query.format_response(
+                            response.response.body_mut(),
+                            operation_name.as_deref(),
+                            &schema,
+                        )
+                    });
                 }
 
-                response.map(|execution_response| RouterResponse {
-                    response: execution_response.response.map(ResponseBody::GraphQL),
-                    context: execution_response.context,
+                Ok(RouterResponse {
+                    context: response.context,
+                    response: response.response.map(ResponseBody::GraphQL),
                 })
             }
-        };
+        }
+        .or_else(|error: BoxError| async move {
+            Ok(plugin_utils::RouterResponse::builder()
+                .errors(vec![crate::Error {
+                    message: error.to_string(),
+                    ..Default::default()
+                }])
+                .build()
+                .into())
+        });
 
         Box::pin(fut)
     }
@@ -174,17 +178,17 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
-    dispatcher: Dispatch,
+    dispatcher: Option<Dispatch>,
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, buffer: usize, dispatcher: Dispatch) -> Self {
+    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
         Self {
             schema,
             buffer,
             plugins: Default::default(),
             services: Default::default(),
-            dispatcher,
+            dispatcher: Default::default(),
         }
     }
 
@@ -198,6 +202,11 @@ impl PluggableRouterServiceBuilder {
 
     pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
         self.plugins.push(plugin);
+        self
+    }
+
+    pub fn with_dispatcher(mut self, dispatcher: Dispatch) -> PluggableRouterServiceBuilder {
+        self.dispatcher = Some(dispatcher);
         self
     }
 
@@ -258,7 +267,14 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(query_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            query_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -272,7 +288,14 @@ impl PluggableRouterServiceBuilder {
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
                 let (service, worker) = Buffer::pair(service, self.buffer);
-                tokio::spawn(worker.with_subscriber(self.dispatcher.clone()));
+                tokio::spawn(
+                    worker.with_subscriber(
+                        self.dispatcher
+                            .as_ref()
+                            .expect("safe to assume dispatcher is some")
+                            .clone(),
+                    ),
+                );
 
                 (name.clone(), service)
             })
@@ -294,7 +317,14 @@ impl PluggableRouterServiceBuilder {
                 ),
             self.buffer,
         );
-        tokio::spawn(execution_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            execution_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -346,7 +376,14 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(router_worker.with_subscriber(self.dispatcher.clone()));
+        tokio::spawn(
+            router_worker.with_subscriber(
+                self.dispatcher
+                    .as_ref()
+                    .expect("safe to assume dispatcher is some")
+                    .clone(),
+            ),
+        );
 
         (router_service.boxed_clone(), self.plugins)
     }

@@ -192,7 +192,7 @@ where
 
 /// Register a plugin with a group and a name
 /// Grouping prevent name clashes for plugins, so choose something unique, like your domain name.
-/// Plugins will appear in the configuration as a layer property called: {group}_{name}
+/// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $value: ident) => {

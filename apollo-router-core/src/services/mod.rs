@@ -25,6 +25,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),

@@ -2,12 +2,11 @@ use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
     plugin_utils, Context, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse,
 };
 use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
-use futures::executor::block_on;
 use http::HeaderMap;
 use http::{header::HeaderName, HeaderValue};
 use rhai::serde::{from_dynamic, to_dynamic};
@@ -15,10 +14,96 @@ use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
-
 use tower::{util::BoxService, BoxError, ServiceExt};
 
 const CONTEXT_ERROR: &str = "__rhai_error";
+
+macro_rules! service_handle_response {
+    ($self: expr, $service: expr, $function_name: expr, $response_ty: ident) => {
+        let this = $self.clone();
+        let function_found = $self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == $function_name);
+        $service = $service
+            .map_response(move |mut response: $response_ty| {
+                let previous_err = response
+                    .context
+                    .extensions()
+                    .try_read()
+                    .expect("must have the read lock because it's not locked anywhere else")
+                    .get(CONTEXT_ERROR)
+                    .cloned();
+                if let Some(err) = previous_err {
+                    return plugin_utils::$response_ty::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!(
+                                "RHAI plugin error: {}",
+                                err.as_str().expect("previous error must be a string")
+                            ))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
+                if function_found {
+                    let extensions = response
+                        .context
+                        .extensions()
+                        .try_read()
+                        .expect("must have the read lock because it's not locked anywhere else")
+                        .clone();
+                    let (headers, returned_extensions) = match this.run_rhai_script(
+                        $function_name,
+                        response.context.request.headers(),
+                        extensions.clone(),
+                    ) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            return plugin_utils::$response_ty::builder()
+                                .errors(vec![Error::builder()
+                                    .message(format!("RHAI plugin error: {}", err))
+                                    .build()])
+                                .context(response.context)
+                                .build()
+                                .into();
+                        }
+                    };
+                    if extensions != returned_extensions {
+                        *response.context.extensions().try_write().expect(
+                            "must have the write lock because it's not locked anywhere else",
+                        ) = returned_extensions;
+                    }
+
+                    for (header_name, header_value) in &headers {
+                        response
+                            .response
+                            .headers_mut()
+                            .append(header_name, header_value.clone());
+                    }
+                }
+
+                response
+            })
+            .boxed();
+    };
+}
+
+macro_rules! handle_error {
+    ($call: expr, $req: expr) => {
+        match $call {
+            Ok(res) => res,
+            Err(err) => {
+                $req.context
+                    .extensions()
+                    .try_write()
+                    .expect("must have the write lock because it's not locked anywhere else")
+                    .insert(CONTEXT_ERROR, err.into());
+                return $req;
+            }
+        }
+    };
+}
 
 #[derive(Default, Clone)]
 struct Rhai {
@@ -62,8 +147,7 @@ impl Headers {
         self.0
             .get(&name)
             .cloned()
-            .map(|h| Some(h.to_str().ok()?.to_string()))
-            .flatten()
+            .and_then(|h| Some(h.to_str().ok()?.to_string()))
             .unwrap_or_default()
     }
 }
@@ -83,7 +167,6 @@ impl Plugin for Rhai {
         mut service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const FUNCTION_NAME_REQUEST: &str = "map_router_service_request";
-
         if self
             .ast
             .iter_fn_def()
@@ -94,27 +177,26 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |mut request: RouterRequest| {
-                    let extensions =
-                        block_on(async { request.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_REQUEST,
-                        request.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            block_on(async {
-                                request
-                                    .context
-                                    .insert_extension(CONTEXT_ERROR, err.into())
-                                    .await
-                            });
-                            return request;
-                        }
-                    };
-                    block_on(async {
-                        *request.context.extensions().write().await = extensions;
-                    });
+                    let extensions = request
+                        .context
+                        .extensions()
+                        .try_read()
+                        .expect("must have the read lock because it's not locked anywhere else")
+                        .clone();
+                    let (headers, returned_extensions) = handle_error!(
+                        this.run_rhai_script(
+                            FUNCTION_NAME_REQUEST,
+                            request.context.request.headers(),
+                            extensions.clone(),
+                        ),
+                        request
+                    );
+
+                    if extensions != returned_extensions {
+                        *request.context.extensions().try_write().expect(
+                            "must have the write lock because it's not locked anywhere else",
+                        ) = returned_extensions;
+                    }
 
                     for (header_name, header_value) in &headers {
                         request
@@ -130,68 +212,7 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "map_router_service_response";
-
-        tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
-        let this = self.clone();
-        let function_found = self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
-        service = service
-            .map_response(move |mut response: RouterResponse| {
-                let previous_err = block_on(async {
-                    response
-                        .context
-                        .extensions()
-                        .read()
-                        .await
-                        .get(CONTEXT_ERROR)
-                        .cloned()
-                });
-                if let Some(err) = previous_err {
-                    return plugin_utils::RouterResponse::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!(
-                                "RHAI plugin error: {}",
-                                err.as_str().expect("previous error must be a string")
-                            ))
-                            .build()])
-                        .context(response.context)
-                        .build()
-                        .into();
-                }
-                if function_found {
-                    let extensions =
-                        block_on(async { response.context.extensions().read().await.clone() });
-                    let (headers, context) = match this.run_rhai_script(
-                        FUNCTION_NAME_RESPONSE,
-                        response.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            return plugin_utils::RouterResponse::builder()
-                                .errors(vec![Error::builder()
-                                    .message(format!("RHAI plugin error: {}", err))
-                                    .build()])
-                                .context(response.context)
-                                .build()
-                                .into();
-                        }
-                    };
-                    block_on(async { *response.context.extensions().write().await = context });
-
-                    for (header_name, header_value) in &headers {
-                        response
-                            .response
-                            .headers_mut()
-                            .append(header_name, header_value.clone());
-                    }
-                }
-
-                response
-            })
-            .boxed();
+        service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, RouterResponse);
 
         service
     }
@@ -211,27 +232,25 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |request: QueryPlannerRequest| {
-                    let extensions =
-                        block_on(async { request.context.extensions().read().await.clone() });
-                    let (_headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_REQUEST,
-                        request.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            block_on(async {
-                                request
-                                    .context
-                                    .insert_extension(CONTEXT_ERROR, err.into())
-                                    .await
-                            });
-                            return request;
-                        }
-                    };
-                    block_on(async {
-                        *request.context.extensions().write().await = extensions;
-                    });
+                    let extensions = request
+                        .context
+                        .extensions()
+                        .try_read()
+                        .expect("must have the read lock because it's not locked anywhere else")
+                        .clone();
+                    let (_headers, returned_extensions) = handle_error!(
+                        this.run_rhai_script(
+                            FUNCTION_NAME_REQUEST,
+                            request.context.request.headers(),
+                            extensions.clone(),
+                        ),
+                        request
+                    );
+                    if extensions != returned_extensions {
+                        *request.context.extensions().try_write().expect(
+                            "must have the write lock because it's not locked anywhere else",
+                        ) = returned_extensions;
+                    }
 
                     request
                 })
@@ -248,22 +267,27 @@ impl Plugin for Rhai {
             let this = self.clone();
             service = service
                 .map_response(move |response: QueryPlannerResponse| {
-                    let extensions =
-                        block_on(async { response.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
+                    let extensions = response
+                        .context
+                        .extensions()
+                        .try_read()
+                        .expect("must have the read lock because it's not locked anywhere else")
+                        .clone();
+                    let (headers, returned_extensions) = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context.request.headers(),
-                        extensions,
+                        extensions.clone(),
                     ) {
                         Ok(res) => res,
                         Err(err) => {
-                            // there is no way to return an error properly
-                            block_on(async {
-                                response
-                                    .context
-                                    .insert_extension(CONTEXT_ERROR, err.into())
-                                    .await;
-                            });
+                            response
+                                .context
+                                .extensions()
+                                .try_write()
+                                .expect(
+                                    "must have the write lock because it's not locked anywhere else",
+                                )
+                                .insert(CONTEXT_ERROR, err.into());
                             return plugin_utils::QueryPlannerResponse::builder()
                                 .context(response.context)
                                 .build()
@@ -277,9 +301,11 @@ impl Plugin for Rhai {
                             .append(header_name, header_value.clone());
                     }
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    block_on(async {
-                        *ctx.extensions().write().await = extensions;
-                    });
+                    if extensions != returned_extensions {
+                        *ctx.extensions().try_write().expect(
+                            "must have the write lock because it's not locked anywhere else",
+                        ) = returned_extensions;
+                    }
 
                     plugin_utils::QueryPlannerResponse::builder()
                         .context(ctx)
@@ -307,24 +333,20 @@ impl Plugin for Rhai {
 
             service = service
                 .map_request(move |request: ExecutionRequest| {
-                    let extensions =
-                        block_on(async { request.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_REQUEST,
-                        request.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            block_on(async {
-                                request
-                                    .context
-                                    .insert_extension(CONTEXT_ERROR, err.into())
-                                    .await
-                            });
-                            return request;
-                        }
-                    };
+                    let extensions = request
+                        .context
+                        .extensions()
+                        .try_read()
+                        .expect("must have the read lock because it's not locked anywhere else")
+                        .clone();
+                    let (headers, returned_extensions) = handle_error!(
+                        this.run_rhai_script(
+                            FUNCTION_NAME_REQUEST,
+                            request.context.request.headers(),
+                            extensions.clone(),
+                        ),
+                        request
+                    );
                     let mut http_request = (&*request.context.request).clone();
                     for (header_name, header_value) in &headers {
                         http_request
@@ -333,9 +355,11 @@ impl Plugin for Rhai {
                     }
 
                     let ctx = Context::new().with_request(Arc::new(http_request));
-                    block_on(async {
-                        *ctx.extensions().write().await = extensions;
-                    });
+                    if extensions != returned_extensions {
+                        *ctx.extensions().try_write().expect(
+                            "must have the write lock because it's not locked anywhere else",
+                        ) = returned_extensions;
+                    }
 
                     plugin_utils::ExecutionRequest::builder()
                         .context(ctx)
@@ -346,186 +370,7 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "map_execution_service_response";
-
-        tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
-        let this = self.clone();
-        let function_found = self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
-        service = service
-            .map_response(move |mut response: ExecutionResponse| {
-                let previous_err = block_on(async {
-                    response
-                        .context
-                        .extensions()
-                        .read()
-                        .await
-                        .get(CONTEXT_ERROR)
-                        .cloned()
-                });
-                if let Some(err) = previous_err {
-                    return plugin_utils::ExecutionResponse::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!(
-                                "RHAI plugin error: {}",
-                                err.as_str().expect("previous error must be a string")
-                            ))
-                            .build()])
-                        .context(response.context)
-                        .build()
-                        .into();
-                }
-
-                if function_found {
-                    let extensions =
-                        block_on(async { response.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_RESPONSE,
-                        response.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            return plugin_utils::ExecutionResponse::builder()
-                                .errors(vec![Error::builder()
-                                    .message(format!("RHAI plugin error: {}", err))
-                                    .build()])
-                                .context(response.context)
-                                .build()
-                                .into();
-                        }
-                    };
-                    block_on(async { *response.context.extensions().write().await = extensions });
-
-                    for (header_name, header_value) in &headers {
-                        response
-                            .response
-                            .headers_mut()
-                            .insert(header_name, header_value.clone());
-                    }
-                }
-
-                response
-            })
-            .boxed();
-
-        service
-    }
-
-    fn subgraph_service(
-        &mut self,
-        _name: &str,
-        mut service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "map_subgraph_service_request";
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
-        {
-            let this = self.clone();
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
-            service = service
-                .map_request(move |mut request: SubgraphRequest| {
-                    let extensions =
-                        block_on(async { request.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_REQUEST,
-                        request.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            (block_on(async {
-                                request
-                                    .context
-                                    .insert_extension(CONTEXT_ERROR, err.into())
-                                    .await
-                            }));
-                            return request;
-                        }
-                    };
-                    block_on(async {
-                        *request.context.extensions().write().await = extensions;
-                    });
-
-                    for (header_name, header_value) in &headers {
-                        request
-                            .http_request
-                            .headers_mut()
-                            .insert(header_name, header_value.clone());
-                    }
-
-                    request
-                })
-                .boxed();
-        }
-
-        const FUNCTION_NAME_RESPONSE: &str = "map_subgraph_service_response";
-        let function_found = self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
-        let this = self.clone();
-        service = service
-            .map_response(move |mut response: SubgraphResponse| {
-                let previous_err = block_on(async {
-                    response
-                        .context
-                        .extensions()
-                        .read()
-                        .await
-                        .get(CONTEXT_ERROR)
-                        .cloned()
-                });
-                if let Some(err) = previous_err {
-                    return plugin_utils::SubgraphResponse::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!(
-                                "RHAI plugin error: {}",
-                                err.as_str().expect("previous error must be a string")
-                            ))
-                            .build()])
-                        .context(response.context)
-                        .build()
-                        .into();
-                }
-
-                if function_found {
-                    let extensions =
-                        block_on(async { response.context.extensions().read().await.clone() });
-                    let (headers, extensions) = match this.run_rhai_script(
-                        FUNCTION_NAME_RESPONSE,
-                        response.context.request.headers(),
-                        extensions,
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            return plugin_utils::SubgraphResponse::builder()
-                                .errors(vec![Error::builder()
-                                    .message(format!("RHAI plugin error: {}", err))
-                                    .build()])
-                                .context(response.context)
-                                .build()
-                                .into();
-                        }
-                    };
-                    block_on(async {
-                        *response.context.extensions().write().await = extensions;
-                    });
-
-                    for (header_name, header_value) in &headers {
-                        response
-                            .response
-                            .headers_mut()
-                            .insert(header_name, header_value.clone());
-                    }
-                }
-
-                response
-            })
-            .boxed();
+        service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, ExecutionResponse);
 
         service
     }

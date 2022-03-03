@@ -30,6 +30,7 @@ use apollo_parser::{ast, Parser};
 use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
+use derivative::Derivative;
 use opentelemetry::{
     global,
     runtime::Tokio,
@@ -41,17 +42,68 @@ use opentelemetry::{
     trace::{TraceError, TracerProvider},
     Value,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::task::JoinError;
 
-use crate::configuration::{SpaceportConfig, StudioGraph};
+const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
+const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
 
-pub(crate) const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
-pub(crate) const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
+fn default_collector() -> String {
+    DEFAULT_SERVER_URL.to_string()
+}
 
+fn default_listener() -> String {
+    DEFAULT_LISTEN.to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct SpaceportConfig {
+    pub(crate) external: bool,
+
+    #[serde(default = "default_collector")]
+    pub(crate) collector: String,
+
+    #[serde(default = "default_listener")]
+    pub(crate) listener: String,
+}
+
+#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
+#[derivative(Debug)]
+pub struct StudioGraph {
+    #[serde(skip, default = "apollo_graph_reference")]
+    pub(crate) reference: String,
+
+    #[serde(skip, default = "apollo_key")]
+    #[derivative(Debug = "ignore")]
+    pub(crate) key: String,
+}
+
+fn apollo_key() -> String {
+    std::env::var("APOLLO_KEY")
+        .expect("cannot set up usage reporting if the APOLLO_KEY environment variable is not set")
+}
+
+fn apollo_graph_reference() -> String {
+    std::env::var("APOLLO_GRAPH_REF").expect(
+        "cannot set up usage reporting if the APOLLO_GRAPH_REF environment variable is not set",
+    )
+}
+
+impl Default for SpaceportConfig {
+    fn default() -> Self {
+        Self {
+            collector: default_collector(),
+            listener: default_listener(),
+            external: false,
+        }
+    }
+}
 /// Pipeline builder
 #[derive(Debug)]
 pub struct PipelineBuilder {
@@ -307,6 +359,7 @@ impl SpanExporter for Exporter {
 
                 tracing::trace!(%span.name, %query, ?span.start_time, ?span.end_time);
                 let not_found = Value::String("not found".into());
+                let anonymous_or_optional_operation_name = Value::String("".into());
                 let client_name = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("client_name"))
@@ -319,7 +372,9 @@ impl SpanExporter for Exporter {
                     .to_string();
                 let operation_name = span
                     .attributes
-                    .get(&opentelemetry::Key::from_static_str("operation_name"));
+                    .get(&opentelemetry::Key::from_static_str("operation_name"))
+                    .unwrap_or(&anonymous_or_optional_operation_name);
+
                 // XXX Since normalization is expensive, try to reduce the
                 // amount of normalization by doing an exact string match
                 // on a query. This might not save a lot of work and may
@@ -385,19 +440,8 @@ static GRAPHQL_PARSE_FAILURE: &str = "## GraphQLParseFailure\n";
 static GRAPHQL_VALIDATION_FAILURE: &str = "## GraphQLValidationFailure\n";
 static GRAPHQL_UNKNOWN_OPERATION_NAME: &str = "## GraphQLUnknownOperationName\n";
 
-fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
-    // This represents a logic error in the router, since we should at
-    // least have "-" as the value for the name if no out of band name
-    // was specified with the query.
-    let mut op_name: String = match op {
-        Some(v) => v.as_str().into_owned(),
-        None => {
-            panic!(
-                "Could not identify out of band operation name in query: {}",
-                query
-            );
-        }
-    };
+fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
+    let mut op_name: String = op_name.as_str().into_owned();
 
     let parser = Parser::new(query);
     // compress *before* parsing to modify whitespaces/comments
@@ -417,7 +461,7 @@ fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
     // with the operation definition name.
     // If we find more than one match, then in either case we will
     // fail.
-    let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name == "-" {
+    let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name.is_empty() {
         Box::new(|x| {
             if let ast::Definition::OperationDefinition(op_def) = x {
                 if let Some(v) = op_def.name() {
@@ -446,9 +490,19 @@ fn stats_report_key(op: Option<&opentelemetry::Value>, query: &str) -> String {
         tracing::warn!("Could not find required definition: {}", query);
         return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
     }
-    tracing::debug!("looking for operation: {}", op_name);
+    tracing::debug!(
+        "looking for operation: {}",
+        if op_name.is_empty() { "-" } else { &op_name }
+    );
     let required_definition = required_definitions.pop().unwrap();
     tracing::debug!("required_definition: {:?}", required_definition);
+
+    // In the event of an operation that could be processed without an operation name,
+    // the stats key that our ingress expects demands a `-` be returned in that position.
+    if op_name.is_empty() {
+        op_name = "-".to_string()
+    }
+
     let def = required_definition.format();
     format!("# {}\n{}", op_name, def)
 }
@@ -632,20 +686,20 @@ mod test {
     // stats_report_key() testing
 
     #[test]
-    #[should_panic]
     fn it_handles_no_name() {
+        let op_name = Value::String("".into());
         let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
-        let _ = stats_report_key(None, query);
+        let _ = stats_report_key(&op_name, query);
     }
 
     #[test]
     fn it_handles_default_name() {
         let expected = "# -\nquery ($limit: Int!) { products(limit: $limit) { upc, name, price } }";
-        let op_name = Value::String("-".into());
+        let op_name = Value::String("".into());
         let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -655,7 +709,7 @@ mod test {
         let op_name = Value::String("OneProduct".into());
         let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -663,10 +717,10 @@ mod test {
     fn it_handles_query_specified_name() {
         let expected =
             "# OneProduct\nquery OneProduct($limit: Int!) { products(limit: $limit) { upc, name, price } }";
-        let op_name = Value::String("-".into());
+        let op_name = Value::String("".into());
         let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -677,7 +731,7 @@ mod test {
         let op_name = Value::String("OneProduct".into());
         let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -687,7 +741,7 @@ mod test {
         let op_name = Value::String("OneProduct".into());
         let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -697,17 +751,17 @@ mod test {
         let op_name = Value::String("YetAnotherProduct".into());
         let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
     #[test]
     fn it_handles_no_out_of_band_name_and_multiple_queries() {
         let expected = GRAPHQL_UNKNOWN_OPERATION_NAME;
-        let op_name = Value::String("-".into());
+        let op_name = Value::String("".into());
         let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 
@@ -721,7 +775,7 @@ mod test {
         let op_name = Value::String("anythingo r missing".into());
         let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
 
-        let key = stats_report_key(Some(&op_name), query);
+        let key = stats_report_key(&op_name, query);
         assert_eq!(expected, key);
     }
 }
