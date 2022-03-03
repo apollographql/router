@@ -157,7 +157,7 @@ impl Query {
             FieldType::List(inner_type) => match input {
                 Value::Array(input_array) => {
                     match input_array
-                        .into_iter()
+                        .iter()
                         .map(|element| {
                             self.format_value(inner_type, element, selection_set, schema)
                         })
