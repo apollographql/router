@@ -330,7 +330,7 @@ impl PluggableRouterServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
-        let query_cache = Arc::new(QueryCache::new(query_cache_limit));
+        let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
         // NaiveIntrospection instantiation can potentially block for some time
         let naive_introspection = {
