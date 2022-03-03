@@ -3,4 +3,6 @@ server:
     origins:
       - "https://studio.apollographql.com/"
 plugins:
+  # this plugin doesn't have any configuration
+  # mention it here and you're set!
   apollographql.forbid-anonymous-operations:
