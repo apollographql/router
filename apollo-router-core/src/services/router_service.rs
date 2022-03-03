@@ -8,8 +8,7 @@ use crate::{
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
 };
-use futures::future::BoxFuture;
-use futures::TryFutureExt;
+use futures::{future::BoxFuture, Future, TryFutureExt};
 use http::StatusCode;
 use std::sync::Arc;
 use std::task::Poll;
@@ -131,7 +130,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
-                            &schema,
+                            schema.api_schema(),
                         )
                     });
                 }
@@ -254,14 +253,8 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(
-            query_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+
+        spawn_with_maybe_dispatcher(query_worker, self.dispatcher.as_ref());
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -275,14 +268,8 @@ impl PluggableRouterServiceBuilder {
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
                 let (service, worker) = Buffer::pair(service, self.buffer);
-                tokio::spawn(
-                    worker.with_subscriber(
-                        self.dispatcher
-                            .as_ref()
-                            .expect("safe to assume dispatcher is some")
-                            .clone(),
-                    ),
-                );
+
+                spawn_with_maybe_dispatcher(worker, self.dispatcher.as_ref());
 
                 (name.clone(), service)
             })
@@ -305,14 +292,8 @@ impl PluggableRouterServiceBuilder {
                 .boxed(),
             self.buffer,
         );
-        tokio::spawn(
-            execution_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+
+        spawn_with_maybe_dispatcher(execution_worker, self.dispatcher.as_ref());
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -321,6 +302,7 @@ impl PluggableRouterServiceBuilder {
         let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
         // NaiveIntrospection instantiation can potentially block for some time
+        // We don't need to use the api schema here because on the deno side we always convert to API schema
         let naive_introspection = {
             let schema = self.schema.clone();
             tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
@@ -369,34 +351,21 @@ impl PluggableRouterServiceBuilder {
             self.buffer,
         );
 
-        let router_service = router_service
-            .map_result(|response: Result<RouterResponse, BoxError>| {
-                if let Err(error) = response {
-                    let response = crate::plugin_utils::RouterResponse::builder()
-                        .errors(vec![crate::Error {
-                            message: error.to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        }])
-                        .build()
-                        .into();
-                    Ok(response)
-                } else {
-                    response
-                }
-            })
-            .boxed_clone();
+        spawn_with_maybe_dispatcher(router_worker, self.dispatcher.as_ref());
 
-        tokio::spawn(
-            router_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+        (router_service.boxed_clone(), self.plugins)
+    }
+}
 
-        (router_service, self.plugins)
+fn spawn_with_maybe_dispatcher<F>(fut: F, maybe_dispatcher: Option<&Dispatch>)
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    if let Some(dispatcher) = maybe_dispatcher {
+        tokio::spawn(fut.with_subscriber(dispatcher.clone()));
+    } else {
+        tracing::warn!("router_service: no dispatcher found");
+        tokio::spawn(fut);
     }
 }
