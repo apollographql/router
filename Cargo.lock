@@ -171,6 +171,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
+ "tower",
  "tracing-subscriber",
 ]
 
@@ -187,6 +188,7 @@ dependencies = [
  "futures",
  "hex",
  "http",
+ "humantime",
  "include_dir",
  "insta",
  "itertools",

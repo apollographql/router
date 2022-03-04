@@ -26,3 +26,4 @@ harness = false
 
 [dependencies]
 async-trait = "0.1.52"
+tower = "0.4.12"
