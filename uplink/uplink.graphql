@@ -16,6 +16,8 @@ enum FetchErrorCode {
   "An internal server error occurred. Please retry with some backoff"
   RETRY_LATER
 }
+"Built-in Float"
+scalar Float
 type Message {
   level: MessageLevel!
   body: String!
