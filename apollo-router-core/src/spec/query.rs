@@ -173,7 +173,7 @@ impl Query {
                     match input_array
                         .iter_mut()
                         .enumerate()
-                        .map(|(i, element)| {
+                        .try_for_each(|(i, element)| {
                             self.format_value(
                                 inner_type,
                                 element,
@@ -181,9 +181,7 @@ impl Query {
                                 selection_set,
                                 schema,
                             )
-                        })
-                        .collect()
-                    {
+                        }) {
                         Err(InvalidValue) => {
                             *output = Value::Null;
                             Ok(())
