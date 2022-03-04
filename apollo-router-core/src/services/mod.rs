@@ -17,7 +17,9 @@ use tower_service::Service;
 pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
+mod reqwest_subgraph_service;
 mod router_service;
+pub use reqwest_subgraph_service::ReqwestSubgraphService;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -33,6 +35,54 @@ pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
     RawString(String),
+}
+
+impl TryFrom<ResponseBody> for Response {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::GraphQL(res) => Ok(res),
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawJSON")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawString")
+            }
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for String {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
+            }
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
+            }
+            ResponseBody::RawString(res) => Ok(res),
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for serde_json::Value {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(res) => Ok(res),
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found RawString")
+            }
+        }
+    }
 }
 
 impl From<Response> for ResponseBody {
@@ -142,7 +192,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
     }
 
-    fn with_checkpoint<S, Request>(
+    fn checkpoint<S, Request>(
         self,
         checkpoint_fn: fn(
             Request,

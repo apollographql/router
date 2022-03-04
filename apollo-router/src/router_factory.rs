@@ -1,11 +1,10 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::get_dispatcher;
-use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ReqwestSubgraphService, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
 use std::sync::Arc;
@@ -84,8 +83,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
         let configuration = add_default_plugins(configuration);
 
-        let buffer = 20000;
-        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
+        let mut builder = PluggableRouterServiceBuilder::new(schema);
 
         for (name, subgraph) in &subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
@@ -209,6 +207,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         builder = builder.with_dispatcher(dispatcher.clone());
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
+
+        // TODO [igni]: remove this once gary's refactoring has landed
+        let buffer = 20000;
         let (service, worker) = Buffer::pair(
             ServiceBuilder::new().service(
                 pluggable_router_service

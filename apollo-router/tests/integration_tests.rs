@@ -1,9 +1,8 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::get_dispatcher;
-use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::{
-    prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, ValueExt,
+    prelude::*, Context, Object, PluggableRouterServiceBuilder, ReqwestSubgraphService,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
 };
 use maplit::hashmap;
 use serde_json::to_string_pretty;
@@ -482,8 +481,8 @@ async fn setup_router_and_registry() -> (
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let mut builder = PluggableRouterServiceBuilder::new(Arc::clone(&schema), 10);
     let subgraphs = config.load_subgraphs(&schema).unwrap();
+    let mut builder = PluggableRouterServiceBuilder::new(schema);
     for (name, subgraph) in &subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

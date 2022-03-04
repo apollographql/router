@@ -1,6 +1,6 @@
 use crate::*;
 use apollo_parser::ast;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub(crate) struct Fragments {
@@ -32,23 +32,18 @@ impl Fragments {
                         .text()
                         .to_string();
 
-                    let mut known_selections = HashSet::new();
-                    let mut selection_set = Vec::new();
-                    for selection in fragment_definition
+                    let selection_set = fragment_definition
                         .selection_set()
                         .expect("the node SelectionSet is not optional in the spec; qed")
                         .selections()
-                    {
-                        let selection = Selection::from_ast(
-                            selection,
-                            &FieldType::Named(type_condition.clone()),
-                            schema,
-                        )?;
-                        if !known_selections.contains(&selection) {
-                            known_selections.insert(selection.clone());
-                            selection_set.push(selection);
-                        }
-                    }
+                        .map(|selection| {
+                            Selection::from_ast(
+                                selection,
+                                &FieldType::Named(type_condition.clone()),
+                                schema,
+                            )
+                        })
+                        .collect::<Option<_>>()?;
 
                     Some((
                         name,
