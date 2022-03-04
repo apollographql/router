@@ -196,7 +196,7 @@ where
 #[macro_export]
 macro_rules! register_plugin {
     ($group: literal, $name: literal, $value: ident) => {
-        startup::on_startup! {
+        $crate::reexports::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
             }

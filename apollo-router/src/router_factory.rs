@@ -1,10 +1,9 @@
 use crate::configuration::{Configuration, ConfigurationError};
-use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ReqwestSubgraphService, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
 use std::sync::Arc;
@@ -78,27 +77,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             errors.append(&mut e);
         }
 
-        // Because studio usage reporting requires the Reporting plugin,
-        // we must force the addition of the Reporting plugin if APOLLO_KEY
-        // is set.
-        if std::env::var("APOLLO_KEY").is_ok() {
-            // If the user has not specified Reporting configuration, then
-            // insert a valid "minimal" configuration which allows
-            // studio usage reporting to function
-            if !configuration
-                .plugins
-                .plugins
-                .contains_key(REPORTING_MODULE_NAME)
-            {
-                configuration.plugins.plugins.insert(
-                    REPORTING_MODULE_NAME.to_string(),
-                    serde_json::json!({ "opentelemetry": null }),
-                );
-            }
-        }
+        let configuration = add_default_plugins(configuration);
 
-        let buffer = 20_000;
-        let mut builder = PluggableRouterServiceBuilder::new(schema, buffer);
+        let mut builder = PluggableRouterServiceBuilder::new(schema);
 
         for (name, subgraph) in &configuration.subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
@@ -220,7 +201,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // the startup() method of our Reporting plugin.
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
-        let service = ServiceBuilder::new().buffer(buffer).service(
+        let service = ServiceBuilder::new().buffer(20_000).service(
             pluggable_router_service
                 .map_request(
                     |http_request: Request<apollo_router_core::Request>| RouterRequest {
@@ -242,6 +223,29 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
         Ok(service)
     }
+}
+
+fn add_default_plugins(mut configuration: Configuration) -> Configuration {
+    // Because studio usage reporting requires the Reporting plugin,
+    // we must force the addition of the Reporting plugin if APOLLO_KEY
+    // is set.
+    if std::env::var("APOLLO_KEY").is_ok() {
+        // If the user has not specified Reporting configuration, then
+        // insert a valid "minimal" configuration which allows
+        // studio usage reporting to function
+        if !configuration
+            .plugins
+            .plugins
+            .contains_key(REPORTING_MODULE_NAME)
+        {
+            configuration.plugins.plugins.insert(
+                REPORTING_MODULE_NAME.to_string(),
+                serde_json::json!({ "opentelemetry": null }),
+            );
+        }
+    }
+
+    configuration
 }
 
 #[cfg(test)]
@@ -484,15 +488,7 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1"),
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-        query: Query
-        mutation: Mutation
-        }"#
-        .parse()
-        .unwrap();
+        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
 
         let service = YamlRouterServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None)
