@@ -133,9 +133,10 @@ impl Query {
         &self,
         field_type: &FieldType,
         input: &mut Value,
+        output: &mut Value,
         selection_set: &[Selection],
         schema: &Schema,
-    ) -> Result<Value, InvalidValue> {
+    ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
@@ -143,10 +144,15 @@ impl Query {
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
             FieldType::NonNull(inner_type) => {
-                match self.format_value(inner_type, input, selection_set, schema) {
+                match self.format_value(inner_type, input, output, selection_set, schema) {
                     Err(_) => Err(InvalidValue),
-                    Ok(Value::Null) => Err(InvalidValue),
-                    Ok(value) => Ok(value),
+                    Ok(_) => {
+                        if output.is_null() {
+                            Err(InvalidValue)
+                        } else {
+                            Ok(())
+                        }
+                    }
                 }
             }
 
@@ -156,53 +162,86 @@ impl Query {
             // of setting the current entry to null
             FieldType::List(inner_type) => match input {
                 Value::Array(input_array) => {
+                    if output.is_null() {
+                        *output = Value::Array(
+                            std::iter::repeat(Value::Null)
+                                .take(input_array.len())
+                                .collect(),
+                        );
+                    }
+                    let output_array = output.as_array_mut().ok_or(InvalidValue)?;
                     match input_array
                         .iter_mut()
-                        .map(|element| {
-                            self.format_value(inner_type, element, selection_set, schema)
+                        .enumerate()
+                        .map(|(i, element)| {
+                            self.format_value(
+                                inner_type,
+                                element,
+                                &mut output_array[i],
+                                selection_set,
+                                schema,
+                            )
                         })
                         .collect()
                     {
-                        Err(InvalidValue) => Ok(Value::Null),
-                        Ok(value) => Ok(value),
+                        Err(InvalidValue) => {
+                            *output = Value::Null;
+                            Ok(())
+                        }
+                        Ok(()) => Ok(()),
                     }
                 }
-                _ => Ok(Value::Null),
+                _ => Ok(()),
             },
 
             FieldType::Named(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
-                    return Ok(input.take());
+                    *output = input.take();
+                    return Ok(());
                 } else if let Some(enum_type) = schema.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
                             if enum_type.contains(s) {
-                                Ok(input.take())
+                                *output = input.take();
+                                Ok(())
                             } else {
-                                Ok(Value::Null)
+                                *output = Value::Null;
+                                Ok(())
                             }
                         }
-                        None => Ok(Value::Null),
+                        None => {
+                            *output = Value::Null;
+                            Ok(())
+                        }
                     };
                 }
 
                 match input {
                     Value::Object(ref mut input_object) => {
-                        let mut output_object = Object::default();
+                        if output.is_null() {
+                            *output = Value::Object(Object::default());
+                        }
+                        let output_object = output.as_object_mut().ok_or(InvalidValue)?;
 
                         match self.apply_selection_set(
                             selection_set,
                             input_object,
-                            &mut output_object,
+                            output_object,
                             schema,
                         ) {
-                            Ok(()) => Ok(Value::Object(output_object)),
-                            Err(InvalidValue) => Ok(Value::Null),
+                            Ok(()) => Ok(()),
+                            Err(InvalidValue) => {
+                                *output = Value::Null;
+                                Ok(())
+                            }
                         }
                     }
-                    _ => Ok(Value::Null),
+                    _ => {
+                        *output = Value::Null;
+                        Ok(())
+                    }
                 }
             }
 
@@ -219,33 +258,43 @@ impl Query {
                 // if the value is invalid, we do not insert it in the output object
                 // which is equivalent to inserting null
                 if opt.is_some() {
-                    return Ok(input.take());
+                    *output = input.take();
+                } else {
+                    *output = Value::Null;
                 }
-                Ok(Value::Null)
+                Ok(())
             }
             FieldType::Float => {
                 if input.as_f64().is_some() {
-                    return Ok(input.take());
+                    *output = input.take();
+                } else {
+                    *output = Value::Null;
                 }
-                Ok(Value::Null)
+                Ok(())
             }
             FieldType::Boolean => {
                 if input.as_bool().is_some() {
-                    return Ok(input.take());
+                    *output = input.take();
+                } else {
+                    *output = Value::Null;
                 }
-                Ok(Value::Null)
+                Ok(())
             }
             FieldType::String => {
                 if input.as_str().is_some() {
-                    return Ok(input.take());
+                    *output = input.take();
+                } else {
+                    *output = Value::Null;
                 }
-                Ok(Value::Null)
+                Ok(())
             }
             FieldType::Id => {
                 if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    return Ok(input.take());
+                    *output = input.take();
+                } else {
+                    *output = Value::Null;
                 }
-                Ok(Value::Null)
+                Ok(())
             }
         }
     }
@@ -275,17 +324,14 @@ impl Query {
                             continue;
                         }
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let value =
-                            self.format_value(field_type, input_value, selection_set, schema)?;
-                        match output.entry((*name).clone()) {
-                            serde_json_bytes::Entry::Vacant(entry) => {
-                                entry.insert(value);
-                            }
-                            serde_json_bytes::Entry::Occupied(mut entry) => {
-                                let previous = entry.get_mut();
-                                previous.deep_merge(value);
-                            }
-                        }
+                        let output_value = output.entry((*name).clone()).or_insert(Value::Null);
+                        self.format_value(
+                            field_type,
+                            input_value,
+                            output_value,
+                            selection_set,
+                            schema,
+                        )?;
                     } else if field_type.is_non_null() {
                         return Err(InvalidValue);
                     }
@@ -367,17 +413,14 @@ impl Query {
                         }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let value =
-                            self.format_value(field_type, input_value, selection_set, schema)?;
-                        match output.entry((*name).clone()) {
-                            serde_json_bytes::Entry::Vacant(entry) => {
-                                entry.insert(value);
-                            }
-                            serde_json_bytes::Entry::Occupied(mut entry) => {
-                                let previous = entry.get_mut();
-                                previous.deep_merge(value);
-                            }
-                        }
+                        let output_value = output.entry((*name).clone()).or_insert(Value::Null);
+                        self.format_value(
+                            field_type,
+                            input_value,
+                            output_value,
+                            selection_set,
+                            schema,
+                        )?;
                     } else if field_type.is_non_null() {
                         return Err(InvalidValue);
                     }
