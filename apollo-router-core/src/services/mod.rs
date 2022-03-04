@@ -10,6 +10,7 @@ use static_assertions::assert_impl_all;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
@@ -175,103 +176,18 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 }
 
 #[allow(clippy::type_complexity)]
-pub trait ServiceBuilderExt<L> {
-    fn cache<S, Request, Key, Value>(
+pub trait ServiceBuilderExt<L>: Sized {
+    fn cache<Request, Response, Key, Value>(
         self,
-        cache: Cache<Key, Result<Value, String>>,
-        key_fn: fn(&Request) -> Key,
-        value_fn: fn(&S::Response) -> Value,
-        response_fn: fn(Request, Value) -> S::Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
+        cache: Cache<Key, Arc<RwLock<Option<Result<Value, String>>>>>,
+        key_fn: fn(&Request) -> Option<&Key>,
+        value_fn: fn(&Response) -> &Value,
+        response_fn: fn(Request, Value) -> Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
     where
         Request: Send,
-        S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<Request>>::Response: Send,
-        <S as Service<Request>>::Future: Send;
-
-    fn cache_query_plan<S>(
-        self,
-    ) -> ServiceBuilder<
-        Stack<
-            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
-            L,
-        >,
-    >
-    where
-        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
-        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<QueryPlannerRequest>>::Response: Send,
-        <S as Service<QueryPlannerRequest>>::Future: Send;
-
-    fn with_checkpoint<S, Request>(
-        self,
-        checkpoint_fn: fn(
-            Request,
-        ) -> Result<
-            Step<Request, <S as Service<Request>>::Response>,
-            <S as Service<Request>>::Error,
-        >,
-    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
-    where
-        S: Service<Request> + Send + 'static,
-        Request: Send + 'static,
-        S::Future: Send,
-        S::Response: Send + 'static,
-        S::Error: Into<BoxError> + Send + 'static;
-}
-
-#[allow(clippy::type_complexity)]
-impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn cache<S, Request, Key, Value>(
-        self,
-        cache: Cache<Key, Result<Value, String>>,
-        key_fn: fn(&Request) -> Key,
-        value_fn: fn(&S::Response) -> Value,
-        response_fn: fn(Request, Value) -> S::Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
-    where
-        Request: Send,
-        S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<Request>>::Response: Send,
-        <S as Service<Request>>::Future: Send,
     {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
-    }
-
-    fn cache_query_plan<S>(
-        self,
-    ) -> ServiceBuilder<
-        Stack<
-            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
-            L,
-        >,
-    >
-    where
-        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
-        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<QueryPlannerRequest>>::Response: Send,
-        <S as Service<QueryPlannerRequest>>::Future: Send,
-    {
-        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-        self.cache(
-            moka::sync::CacheBuilder::new(plan_cache_limit).build(),
-            |r: &QueryPlannerRequest| {
-                (
-                    r.context.request.body().query.clone(),
-                    r.context.request.body().operation_name.clone(),
-                )
-            },
-            |r: &QueryPlannerResponse| r.query_plan.clone(),
-            |r: QueryPlannerRequest, v: Arc<QueryPlan>| QueryPlannerResponse {
-                query_plan: v,
-                context: r.context,
-            },
-        )
     }
 
     fn with_checkpoint<S, Request>(
@@ -291,5 +207,14 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         S::Error: Into<BoxError> + Send + 'static,
     {
         self.layer(CheckpointLayer::new(checkpoint_fn))
+    }
+
+    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
+}
+
+#[allow(clippy::type_complexity)]
+impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
+    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
+        ServiceBuilder::layer(self, layer)
     }
 }
