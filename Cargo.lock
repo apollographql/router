@@ -3324,7 +3324,6 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
- "apollo-router-core",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
