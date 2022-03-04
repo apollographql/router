@@ -22,7 +22,6 @@ impl ReqwestSubgraphService {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
     pub fn new(service: impl Into<String>, url: reqwest::Url) -> Self {
         let service = service.into();
-
         Self {
             http_client: reqwest_middleware::ClientBuilder::new(
                 reqwest::Client::builder()
@@ -57,11 +56,16 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         } = request;
 
         let http_client = self.http_client.clone();
+        println!("=======> {:?}", http_request);
+        println!("===!!!SELF!!====> {:?}", self.url);
         let target_url = if http_request.uri() == "/" {
             self.url.clone()
         } else {
             reqwest::Url::parse(&http_request.uri().to_string()).expect("todo")
         };
+
+        println!("===!!!TARGET!!====> {:?}", target_url);
+
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {

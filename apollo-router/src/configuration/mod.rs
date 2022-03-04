@@ -95,6 +95,7 @@ impl Configuration {
                 errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
                 continue;
             }
+            println!("schema url {schema_url}");
             match Url::parse(schema_url) {
                 Err(_e) => {
                     errors.push(ConfigurationError::InvalidSubgraphUrl {
@@ -103,6 +104,7 @@ impl Configuration {
                     });
                 }
                 Ok(routing_url) => {
+                    println!("routing_url {:?}", routing_url);
                     subgraphs.insert(
                         name.to_owned(),
                         Subgraph {

@@ -368,10 +368,16 @@ pub(crate) mod fetch {
                 schema,
             )
             .await?;
-
+            println!("SERVICE NAME {service_name}");
             let subgraph_request = SubgraphRequest {
                 http_request: http::Request::builder()
                     .method(http::Method::POST)
+                    .uri(
+                        schema
+                            .subgraphs()
+                            .find_map(|(name, url)| (name == service_name).then(|| url))
+                            .unwrap(),
+                    )
                     .body(
                         Request::builder()
                             .query(operation)
