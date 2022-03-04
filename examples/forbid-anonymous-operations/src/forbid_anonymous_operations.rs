@@ -70,8 +70,12 @@ impl Plugin for ForbidAnonymousOperations {
 }
 
 // This macro allows us to use it in our plugin registry!
+// register_plugin takes a group name, and a plugin name.
+//
+// In order to keep the plugin names consistent,
+// we use using the `Reverse domain name notation`
 register_plugin!(
-    "com.apollographql",
+    "com.acme",
     "forbid-anonymous-operations",
     ForbidAnonymousOperations
 );
@@ -95,7 +99,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.apollographql.forbid-anonymous-operations")
+            .get("com.acme.forbid-anonymous-operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
             .unwrap();
