@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.55"
 apollo-parser = "0.2.3"
-apollo-router = { path = "../../apollo-router" }
 apollo-router-core = { path = "../../apollo-router-core" }
 futures = "0.3.21"
 serde = "1.0.136"

@@ -1,11 +1,10 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use crate::get_dispatcher;
-use crate::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ReqwestSubgraphService, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
 use std::sync::Arc;

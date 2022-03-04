@@ -1,9 +1,8 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::get_dispatcher;
-use apollo_router::reqwest_subgraph_service::ReqwestSubgraphService;
 use apollo_router_core::{
-    prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, ValueExt,
+    prelude::*, Context, Object, PluggableRouterServiceBuilder, ReqwestSubgraphService,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
 };
 use maplit::hashmap;
 use serde_json::to_string_pretty;

@@ -28,12 +28,10 @@ async fn main() -> Result<()> {
 
     let mut router_builder = PluggableRouterServiceBuilder::new(schema, buffer);
 
-    let subgraph_service = BoxService::new(
-        apollo_router::reqwest_subgraph_service::ReqwestSubgraphService::new(
-            "accounts".to_string(),
-            "https://accounts.demo.starstuff.dev".parse()?,
-        ),
-    );
+    let subgraph_service = BoxService::new(apollo_router_core::ReqwestSubgraphService::new(
+        "accounts".to_string(),
+        "https://accounts.demo.starstuff.dev".parse()?,
+    ));
 
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
     let (router_service, _) = router_builder.build().await;
