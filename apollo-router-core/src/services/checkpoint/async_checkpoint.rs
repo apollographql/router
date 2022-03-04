@@ -36,7 +36,7 @@ where
     S::Response: Send + 'static,
     <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
 {
-    /// Create a `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
@@ -109,7 +109,7 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    /// Create a `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
