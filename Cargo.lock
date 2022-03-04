@@ -70,7 +70,7 @@ checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
 [[package]]
 name = "apollo-encoder"
 version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 
 [[package]]
 name = "apollo-parser"
@@ -92,7 +92,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.3"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "rowan",
 ]
@@ -223,7 +223,7 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "apollo-encoder",
  "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
