@@ -92,7 +92,7 @@ macro_rules! register_layer {
             };
 
             $crate::register_layer(qualified_name, $crate::LayerFactory::new(|configuration| {
-                let layer = $value::new(serde_json::from_value(configuration.clone())?)?;
+                let layer = <$value as $crate::ConfigurableLayer>::new(serde_json::from_value(configuration.clone())?)?;
                 Ok(tower::util::BoxLayer::new(layer))
             }, |gen| gen.subschema_for::<<$value as $crate::ConfigurableLayer>::Config>()));
         }

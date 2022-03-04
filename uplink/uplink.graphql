@@ -3,6 +3,8 @@ directive @specifiedBy("The URL that specifies the behaviour of this scalar." ur
 type FetchError {
   code: FetchErrorCode!
   message: String!
+  "Minimum delay before the next fetch should occur, in seconds."
+  minDelaySeconds: Float!
 }
 enum FetchErrorCode {
   "This token provided is not a valid graph token. Do not retry"
@@ -25,16 +27,23 @@ enum MessageLevel {
 }
 type Query {
   "Fetch the configuration for a router. If a valid configuration is available, it will be readable as cSDL."
-  routerConfig("The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)." ref: String!, apiKey: String!, "If specified and the ID of the result is lower than or equal to it, Unchanged will be returned rather RouterConfigResult" ifAfterId: ID): RouterConfigResponse!
+  routerConfig("The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)." ref: String!, apiKey: String!, "When specified and the result is not newer, `Unchanged` is returned rather `RouterConfigResult`." ifAfterId: ID): RouterConfigResponse!
 }
 union RouterConfigResponse = RouterConfigResult | Unchanged | FetchError
 type RouterConfigResult {
+  "Variant-unique identifier."
   id: ID!
-  "The configuration as core schema"
+  "The configuration as core schema."
   supergraphSDL: String!
   "Messages that should be reported back to the operators of this router, eg through logs and/or monitoring."
   messages: [Message!]!
+  "Minimum delay before the next fetch should occur, in seconds."
+  minDelaySeconds: Float!
 }
+"Response indicating the router configuration available is not newer than the one passed in `ifAfterId`."
 type Unchanged {
+  "Variant-unique identifier for the configuration that remains in place."
   id: ID!
+  "Minimum delay before the next fetch should occur, in seconds."
+  minDelaySeconds: Float!
 }
