@@ -20,6 +20,8 @@ use tracing::instrument::WithSubscriber;
 use tracing::{Dispatch, Instrument};
 use typed_builder::TypedBuilder;
 
+static DEFAULT_BUFFER_SIZE: usize = 20_000;
+
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
@@ -167,10 +169,10 @@ pub struct PluggableRouterServiceBuilder {
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
+    pub fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
-            buffer,
+            buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
             dispatcher: Default::default(),
             subgraph_services: Default::default(),

@@ -481,7 +481,7 @@ async fn setup_router_and_registry() -> (
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let mut builder = PluggableRouterServiceBuilder::new(schema, 10);
+    let mut builder = PluggableRouterServiceBuilder::new(schema);
     for (name, subgraph) in &config.subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

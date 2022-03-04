@@ -119,7 +119,7 @@ fn from_elem(c: &mut Criterion) {
     c.bench_function("basic_composition_benchmark", move |b| {
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
-        let builder = PluggableRouterServiceBuilder::new(schema.clone(), 2305843009213693951);
+        let builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         let builder = builder
             .with_subgraph_service("accounts", account_service.clone())
