@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v6-{{ checksum "rust-toolchain.toml" }}
+    default: v7-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -69,7 +69,7 @@ commands:
           command: test "$(npm --version)" = "${NPM_VERSION}"
       - run:
           name: Install rover
-          command:  npm i -g @apollo/rover
+          command: npm i -g @apollo/rover
   linux_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
@@ -92,7 +92,7 @@ commands:
           command: test "$(npm --version)" = "${NPM_VERSION}"
       - run:
           name: Install rover
-          command:  npm i -g @apollo/rover
+          command: npm i -g @apollo/rover
 
   windows_prepare_node_env:
     #TODO[igni]: check for node version before we try to install it
