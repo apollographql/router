@@ -484,17 +484,18 @@ async fn setup_router_and_registry() -> (
     let counting_registry = CountingServiceRegistry::new();
     let mut builder = PluggableRouterServiceBuilder::new(Arc::clone(&schema), 10);
     let subgraphs = config.load_subgraphs(&schema).unwrap();
-    for (name, subgraph) in &subgraphs {
+    for (name, _subgraph) in &subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = ReqwestSubgraphService::new(name.to_owned(), subgraph.routing_url.to_owned())
-            .map_request(move |request: SubgraphRequest| {
+        let service = ReqwestSubgraphService::new(name.to_owned()).map_request(
+            move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
 
                 request
-            });
+            },
+        );
         builder = builder.with_subgraph_service(name, service);
     }
 
