@@ -9,33 +9,48 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // We don't need any in this example
 struct ContextData {}
 
+// Passing information via context is useful for storing things like authentication data or other
+// collecting cache control information.
+// Services are structured in a hierarchy:
+// ```
+// Router Service +-> Query Planning Service
+//                |-> Execution Service +------> Subgraph Service
+//                                      |------> Subgraph Service
+//                                      |------> Subgraph Service
+//                                      |------> ........
+// ```
+//
+// For each request a single instance of context is created and passed to all services.
+//
+// In this example we:
+// 1. Place some information in context at the incoming request of the router service. (world!)
+// 2. Pick up and print it out at subgraph request. (Hello world!)
+// 3. For each subgraph response merge the some information into the context. (response_count)
+// 4. Pick up and print it out at router response. (response_count)
+//
 impl Plugin for ContextData {
-    // We either forbid anonymous operations,
-    // Or we don't. This is the reason why we don't need
-    // to deserialize any configuration from a .yml file.
-    //
-    // Config is a unit, and `ForbidAnonymousOperation` derives default.
+    // Config is a unit, and `ContextData` derives default.
     type Config = ();
 
     fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
-    // Forbidding anonymous operations can happen at the very beginning of our GraphQL request lifecycle.
-    // We will thus put the logic it in the `router_service` section of our plugin.
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        // `ServiceBuilder` provides us with a `checkpoint` method.
+        // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
-        // This method allows us to return Step::Continue(request) if we want to let the request through,
-        // or Step::Return(response) with a crafted response if we don't want the request to go through.
+        // These allow basic interception and transformation of request and response messages.
         ServiceBuilder::new()
             .map_request(|req: RouterRequest| {
                 // Populate a value in context for use later.
+                // Context values must be serializable to serde_json::Value.
                 if let Err(e) = req.context.insert("incoming_data", "world!".to_string()) {
                     // This can only happen if the value could not be serialized.
+                    // In this case we will never fail because we are storing a string which we
+                    // know can be stored as Json.
                     tracing::info!("Failed to set context data {}", e);
                 }
                 req
@@ -72,6 +87,8 @@ impl Plugin for ContextData {
                 match &resp.context.upsert("response_count", |v| v + 1, || 0) {
                     Ok(_) => (),
                     Err(_) => {
+                        // This code will never be executed because we know that an integer can be
+                        // stored as a serde_json::Value.
                         *resp.response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                     }
                 }
