@@ -1,4 +1,5 @@
-use crate::apq::APQ;
+use crate::apq::APQLayer;
+use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
@@ -7,8 +8,8 @@ use crate::{
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
 };
-use futures::future::BoxFuture;
-use futures::TryFutureExt;
+use futures::{future::BoxFuture, Future, TryFutureExt};
+use http::StatusCode;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -79,29 +80,13 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        let query = &req.context.request.body().query.as_ref();
-
-        if query.is_none() || query.expect("checked before; qed").is_empty() {
-            let res = plugin_utils::RouterResponse::builder()
-                .context(req.context.into())
-                .errors(vec![crate::Error {
-                    message: "Must provide query string.".to_string(),
-                    ..Default::default()
-                }])
-                .build()
-                .into();
-            return Box::pin(async move { Ok(res) });
-        };
-
-        let query = req
-            .context
-            .request
-            .body()
-            .query
-            .clone()
-            .expect("checked above; qed");
-
-        if let Some(response) = self.naive_introspection.get(query.as_str()) {
+        if let Some(response) =
+            self.naive_introspection.get(
+                req.context.request.body().query.as_ref().expect(
+                    "com.apollographql.ensure-query-is-present has checked this already; qed",
+                ),
+            )
+        {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
@@ -111,9 +96,10 @@ where
         }
 
         let fut = async move {
-            let body = req.context.request.body();
+            let context = req.context;
+            let body = context.request.body();
             let query = query_cache
-                .get_query(query.as_str())
+                .get_query(body.query.as_ref().expect("com.apollographql.ensure-query-is-present has checked this already; qed").as_str())
                 .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
@@ -123,13 +109,13 @@ where
             {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: req.context.into(),
+                    context: context.into(),
                 })
             } else {
                 let operation_name = body.operation_name.clone();
                 let planned_query = planning
                     .call(QueryPlannerRequest {
-                        context: req.context.into(),
+                        context: context.into(),
                     })
                     .await?;
 
@@ -145,7 +131,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
-                            &schema,
+                            schema.api_schema(),
                         )
                     });
                 }
@@ -163,7 +149,7 @@ where
                     ..Default::default()
                 }])
                 .build()
-                .into())
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR))
         });
 
         Box::pin(fut)
@@ -267,14 +253,8 @@ impl PluggableRouterServiceBuilder {
             ),
             self.buffer,
         );
-        tokio::spawn(
-            query_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+
+        spawn_with_maybe_dispatcher(query_worker, self.dispatcher.as_ref());
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -288,14 +268,8 @@ impl PluggableRouterServiceBuilder {
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
                 let (service, worker) = Buffer::pair(service, self.buffer);
-                tokio::spawn(
-                    worker.with_subscriber(
-                        self.dispatcher
-                            .as_ref()
-                            .expect("safe to assume dispatcher is some")
-                            .clone(),
-                    ),
-                );
+
+                spawn_with_maybe_dispatcher(worker, self.dispatcher.as_ref());
 
                 (name.clone(), service)
             })
@@ -314,25 +288,21 @@ impl PluggableRouterServiceBuilder {
                             .boxed(),
                         |acc, e| e.execution_service(acc),
                     ),
-                ),
+                )
+                .boxed(),
             self.buffer,
         );
-        tokio::spawn(
-            execution_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+
+        spawn_with_maybe_dispatcher(execution_worker, self.dispatcher.as_ref());
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
-        let query_cache = Arc::new(QueryCache::new(query_cache_limit));
+        let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
         // NaiveIntrospection instantiation can potentially block for some time
+        // We don't need to use the api schema here because on the deno side we always convert to API schema
         let naive_introspection = {
             let schema = self.schema.clone();
             tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
@@ -361,30 +331,41 @@ impl PluggableRouterServiceBuilder {
 
         // Router service takes a graphql::Request and outputs a graphql::Response
         let (router_service, router_worker) = Buffer::pair(
-            ServiceBuilder::new().layer(APQ::default()).service(
-                self.plugins.iter_mut().rev().fold(
-                    RouterService::builder()
-                        .query_planner_service(query_planner_service)
-                        .query_execution_service(execution_service)
-                        .schema(self.schema)
-                        .query_cache(query_cache)
-                        .naive_introspection(naive_introspection)
-                        .build()
-                        .boxed(),
-                    |acc, e| e.router_service(acc),
-                ),
-            ),
+            ServiceBuilder::new()
+                .layer(APQLayer::default())
+                .layer(EnsureQueryPresence::default())
+                .service(
+                    self.plugins.iter_mut().rev().fold(
+                        RouterService::builder()
+                            .query_planner_service(query_planner_service)
+                            .query_execution_service(execution_service)
+                            .schema(self.schema)
+                            .query_cache(query_cache)
+                            .naive_introspection(naive_introspection)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.router_service(acc),
+                    ),
+                )
+                .boxed(),
             self.buffer,
         );
-        tokio::spawn(
-            router_worker.with_subscriber(
-                self.dispatcher
-                    .as_ref()
-                    .expect("safe to assume dispatcher is some")
-                    .clone(),
-            ),
-        );
+
+        spawn_with_maybe_dispatcher(router_worker, self.dispatcher.as_ref());
 
         (router_service.boxed_clone(), self.plugins)
+    }
+}
+
+fn spawn_with_maybe_dispatcher<F>(fut: F, maybe_dispatcher: Option<&Dispatch>)
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    if let Some(dispatcher) = maybe_dispatcher {
+        tokio::spawn(fut.with_subscriber(dispatcher.clone()));
+    } else {
+        tracing::warn!("router_service: no dispatcher found");
+        tokio::spawn(fut);
     }
 }

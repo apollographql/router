@@ -5,6 +5,7 @@ members = [
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
+    "fuzz",
     "uplink",
     "xtask",
 ]
