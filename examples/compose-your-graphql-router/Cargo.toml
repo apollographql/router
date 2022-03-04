@@ -6,17 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.54"
+anyhow = "1.0.55"
+apollo-parser = "0.2.3"
 apollo-router = { path = "../../apollo-router" }
 apollo-router-core = { path = "../../apollo-router-core" }
 futures = "0.3.21"
-tokio = { version = "1.16.1", features = ["full"] }
-tracing = "0.1.31"
-tokio-util = { version = "0.7.0", features = ["net", "codec"] }
-tracing-subscriber = { version = "0.3.9", features = ["json", "env-filter"] }
-tower = "0.4.12"
-serde_json = "1.0.79"
 serde = "1.0.136"
+serde_json = "1.0.79"
 serde_json_bytes = "0.2.0"
-apollo-parser = "0.2.3"
-axum = "0.4.6"
+tokio = { version = "1.17.0", features = ["full"] }
+tokio-util = { version = "0.7.0", features = ["net", "codec"] }
+tower = "0.4.12"
+tracing = "0.1.31"
+tracing-subscriber = { version = "0.3.9", features = ["json", "env-filter"] }

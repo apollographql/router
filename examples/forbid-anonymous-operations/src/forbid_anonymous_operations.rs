@@ -71,7 +71,7 @@ impl Plugin for ForbidAnonymousOperations {
 
 // This macro allows us to use it in our plugin registry!
 register_plugin!(
-    "apollographql",
+    "com.apollographql",
     "forbid-anonymous-operations",
     ForbidAnonymousOperations
 );
@@ -95,7 +95,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("apollographql.forbid-anonymous-operations")
+            .get("com.apollographql.forbid-anonymous-operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
             .unwrap();

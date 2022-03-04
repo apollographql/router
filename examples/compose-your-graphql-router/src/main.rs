@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use apollo_router_core::{plugin_utils, PluggableRouterServiceBuilder};
 use std::sync::Arc;
-use tower::{util::BoxService, Service, ServiceExt};
+use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -16,27 +16,27 @@ async fn main() -> Result<()> {
         std::fs::read_to_string(
             current_directory
                 .parent()
-                .unwrap()
+                .ok_or(anyhow!("no parent"))?
                 .parent()
-                .unwrap()
+                .ok_or(anyhow!("no parent"))?
                 .join("examples/supergraph.graphql"),
         )?
         .parse()?,
     );
 
-    let buffer = 20000;
+    let buffer = 20_000;
 
     let mut router_builder = PluggableRouterServiceBuilder::new(schema, buffer);
 
     let subgraph_service = BoxService::new(
         apollo_router::reqwest_subgraph_service::ReqwestSubgraphService::new(
             "accounts".to_string(),
-            "https://accounts.demo.starstuff.dev".parse().unwrap(),
+            "https://accounts.demo.starstuff.dev".parse()?,
         ),
     );
 
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
-    let (mut router_service, _) = router_builder.build().await;
+    let (router_service, _) = router_builder.build().await;
 
     let request = plugin_utils::RouterRequest::builder()
         .query(r#"query Query { me { name } }"#.to_string())
@@ -44,12 +44,9 @@ async fn main() -> Result<()> {
         .into();
 
     let res = router_service
-        .ready()
+        .oneshot(request)
         .await
-        .unwrap()
-        .call(request)
-        .await
-        .unwrap();
+        .map_err(|e| anyhow!("router_service call failed: {}", e))?;
 
     // {
     //   "data": {
@@ -58,9 +55,6 @@ async fn main() -> Result<()> {
     //     }
     //   }
     // }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(res.response.body()).unwrap()
-    );
+    println!("{}", serde_json::to_string_pretty(res.response.body())?);
     Ok(())
 }
