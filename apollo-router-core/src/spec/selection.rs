@@ -1,12 +1,11 @@
-use std::collections::HashSet;
-
 use crate::{FieldType, Fragment, Schema};
 use apollo_parser::ast;
+use serde_json_bytes::ByteString;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Selection {
     Field {
-        name: String,
+        name: ByteString,
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
     },
@@ -64,22 +63,15 @@ impl Selection {
                     None
                 } else {
                     field.selection_set().and_then(|x| {
-                        let mut known_selections = HashSet::new();
-                        let mut selection_set = Vec::new();
-                        for selection in x.selections() {
-                            let selection = Selection::from_ast(selection, &field_type, schema)?;
-                            if !known_selections.contains(&selection) {
-                                known_selections.insert(selection.clone());
-                                selection_set.push(selection);
-                            }
-                        }
-
-                        Some(selection_set)
+                        x.selections()
+                            .into_iter()
+                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .collect()
                     })
                 };
 
                 Some(Self::Field {
-                    name,
+                    name: name.into(),
                     selection_set,
                     field_type,
                 })
@@ -103,26 +95,21 @@ impl Selection {
 
                 let fragment_type = FieldType::Named(type_condition.clone());
 
-                let mut known_selections = HashSet::new();
-                let mut selection_set = Vec::new();
-                for selection in inline_fragment
+                let selection_set = inline_fragment
                     .selection_set()
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
-                {
-                    let selection = Selection::from_ast(selection, &fragment_type, schema)?;
-                    if !known_selections.contains(&selection) {
-                        known_selections.insert(selection.clone());
-                        selection_set.push(selection);
-                    }
-                }
+                    .into_iter()
+                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema))
+                    .collect::<Option<_>>()?;
 
+                let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
                 Some(Self::InlineFragment {
                     fragment: Fragment {
                         type_condition,
                         selection_set,
                     },
-                    known_type: current_type == &fragment_type,
+                    known_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
