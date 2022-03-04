@@ -194,7 +194,7 @@ mod checkpoint_tests {
         let service = execution_service.build();
 
         let service_stack = ServiceBuilder::new()
-            .with_checkpoint(|req: crate::ExecutionRequest| Ok(Step::Continue(req)))
+            .checkpoint(|req: crate::ExecutionRequest| Ok(Step::Continue(req)))
             .service(service);
 
         let request = ExecutionRequest::builder().build().into();

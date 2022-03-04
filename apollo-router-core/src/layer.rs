@@ -83,7 +83,7 @@ macro_rules! register_layer {
         }
     };
     ($group: literal, $name: literal, $value: ident) => {
-        startup::on_startup! {
+        $crate::reexports::startup::on_startup! {
             let qualified_name = if $group == "" {
                 $name.to_string()
             }
