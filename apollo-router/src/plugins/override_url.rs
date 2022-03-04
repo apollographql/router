@@ -26,9 +26,14 @@ impl Plugin for OverrideSubgraphUrl {
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         let mut new_url = self.urls.get(subgraph_name).cloned();
+        println!("Request for subgraph '{subgraph_name}'");
         service
             .map_request(move |mut req: SubgraphRequest| {
+                println!("  with URL '{}'", req.http_request.inner.uri());
+
                 if let Some(new_url) = new_url.take() {
+                    println!("  replaced by '{}'", new_url);
+
                     req.http_request
                         .set_url(new_url)
                         .expect("url has been checked when we configured the plugin");
