@@ -80,7 +80,7 @@ register_plugin!(
     ForbidAnonymousOperations
 );
 
-// Writing a plugin means writing tests that make sure they behave as expected!
+// Writing plugins means writing tests that make sure they behave as expected!
 //
 // apollo_router_core provides a lot of utilities that will allow you to craft requests, responses,
 // and test your plugins in isolation:
