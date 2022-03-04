@@ -1,6 +1,6 @@
 //! Main entry point for CLI command to start server.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use apollo_router::ApolloRouterBuilder;
 use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use futures::prelude::*;
@@ -30,9 +30,9 @@ async fn main() -> Result<()> {
     let schema = SchemaKind::File {
         path: current_directory
             .parent()
-            .unwrap()
+            .ok_or(anyhow!("no parent"))?
             .parent()
-            .unwrap()
+            .ok_or(anyhow!("no parent"))?
             .join("examples/supergraph.graphql"),
         watch: false,
         delay: None,
