@@ -50,6 +50,7 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         } = request;
 
         let http_client = self.http_client.clone();
+        tracing::error!("Making request to {}", http_request.uri().to_string());
         let target_url = reqwest::Url::parse(&http_request.uri().to_string()).expect("todo");
         tracing::error!("Making request to {}", target_url);
         let service_name = (*self.service).to_owned();
