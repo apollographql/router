@@ -376,7 +376,9 @@ pub(crate) mod fetch {
                         schema
                             .subgraphs()
                             .find_map(|(name, url)| (name == service_name).then(|| url))
-                            .unwrap(),
+                            .expect(
+                                "we can unwrap here because we already checked the subgraph url",
+                            ),
                     )
                     .body(
                         Request::builder()
@@ -385,7 +387,8 @@ pub(crate) mod fetch {
                             .build(),
                     )
                     .unwrap()
-                    .into(),
+                    .try_into()
+                    .expect("we can unwrap here because we already checked the subgraph url"),
                 context: context.clone(),
                 operation_kind: *operation_kind,
             };

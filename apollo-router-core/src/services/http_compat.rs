@@ -6,14 +6,20 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-#[derive(Debug, Default)]
+use url::{ParseError, Url};
+
+#[derive(Debug)]
 pub struct Request<T> {
+    // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
+    // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
+    pub(super) url: Url,
     pub inner: http::Request<T>,
 }
 
 impl<T> Request<T> {
     pub fn set_url(&mut self, url: url::Url) -> Result<(), http::Error> {
         *self.inner.uri_mut() = http::Uri::try_from(url.as_str())?;
+        self.url = url;
         Ok(())
     }
 
@@ -21,11 +27,24 @@ impl<T> Request<T> {
         self.inner.into_parts()
     }
 
-    pub fn map<F, U>(self, f: F) -> Request<U>
+    pub fn map<F, U>(self, f: F) -> Result<Request<U>, ParseError>
     where
         F: FnOnce(T) -> U,
     {
-        self.inner.map(f).into()
+        self.inner.map(f).try_into()
+    }
+}
+
+impl<T> Request<T>
+where
+    T: Default,
+{
+    // Only used for plugin_utils and tests
+    pub fn mock() -> Request<T> {
+        Request {
+            url: Url::parse("http://default").unwrap(),
+            inner: http::Request::default(),
+        }
     }
 }
 
@@ -55,7 +74,10 @@ impl<T: Clone> Clone for Request<T> {
         let req = req
             .body(self.inner.body().clone())
             .expect("cloning a valid request creates a valid request");
-        Self { inner: req }
+        Self {
+            inner: req,
+            url: self.url.clone(),
+        }
     }
 }
 
@@ -111,9 +133,14 @@ impl<T: PartialEq> PartialEq for Request<T> {
 
 impl<T: PartialEq> Eq for Request<T> {}
 
-impl<T> From<http::Request<T>> for Request<T> {
-    fn from(inner: http::Request<T>) -> Self {
-        Request { inner }
+impl<T> TryFrom<http::Request<T>> for Request<T> {
+    type Error = url::ParseError;
+
+    fn try_from(inner: http::Request<T>) -> Result<Self, Self::Error> {
+        Ok(Request {
+            url: Url::parse(&inner.uri().to_string())?,
+            inner,
+        })
     }
 }
 

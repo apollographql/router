@@ -25,7 +25,11 @@ impl From<SubgraphRequest> for crate::SubgraphRequest {
             variables: request.variables.unwrap_or_default(),
             extensions: request.extensions.unwrap_or_default(),
         };
-        let req_compat = http_compat::Request::from(Request::new(gql_req));
+        let req = Request::builder()
+            .uri("http://default")
+            .body(gql_req)
+            .unwrap();
+        let req_compat = http_compat::Request::try_from(req).unwrap();
         crate::SubgraphRequest {
             context: request
                 .context

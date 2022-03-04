@@ -476,6 +476,7 @@ mod test {
     fn example_originating_request() -> Context {
         Context::new().with_request(Arc::new(
             http::Request::builder()
+                .uri("http://test")
                 .method("GET")
                 .header("da", "vda")
                 .header("db", "vdb")
@@ -485,13 +486,15 @@ mod test {
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
-                .into(),
+                .try_into()
+                .unwrap(),
         ))
     }
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             http_request: http::Request::builder()
+                .uri("http://test")
                 .method("GET")
                 .header("aa", "vaa")
                 .header("ab", "vab")
@@ -501,7 +504,8 @@ mod test {
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
                 .unwrap()
-                .into(),
+                .try_into()
+                .unwrap(),
             operation_kind: OperationKind::Query,
             context: example_originating_request(),
         }

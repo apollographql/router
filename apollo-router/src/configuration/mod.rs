@@ -86,7 +86,7 @@ impl Configuration {
     pub fn load_subgraphs(
         &self,
         schema: &graphql::Schema,
-    ) -> Result<HashMap<String, Subgraph>, Vec<ConfigurationError>> {
+    ) -> Result<HashMap<String, SubgraphConf>, Vec<ConfigurationError>> {
         let mut errors = Vec::new();
         let mut subgraphs = HashMap::new();
 
@@ -95,7 +95,7 @@ impl Configuration {
                 errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
                 continue;
             }
-            println!("schema url {schema_url}");
+
             match Url::parse(schema_url) {
                 Err(_e) => {
                     errors.push(ConfigurationError::InvalidSubgraphUrl {
@@ -103,12 +103,10 @@ impl Configuration {
                         url: schema_url.to_owned(),
                     });
                 }
-                Ok(routing_url) => {
-                    println!("routing_url {:?}", routing_url);
+                Ok(_routing_url) => {
                     subgraphs.insert(
                         name.to_owned(),
-                        Subgraph {
-                            routing_url,
+                        SubgraphConf {
                             layers: self
                                 .subgraphs
                                 .get(name)
@@ -177,27 +175,6 @@ impl JsonSchema for Plugins {
         };
 
         Schema::Object(plugins_object)
-    }
-}
-
-/// Configuration for a subgraph.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
-pub struct Subgraph {
-    /// The url for the subgraph.
-    pub routing_url: Url,
-
-    /// Layer configuration
-    #[serde(default)]
-    #[builder(default)]
-    pub layers: Vec<Value>,
-}
-
-impl Subgraph {
-    pub fn new(routing_url: Url, layers: Vec<Value>) -> Self {
-        Self {
-            routing_url,
-            layers,
-        }
     }
 }
 
@@ -579,28 +556,29 @@ mod tests {
         .parse()
         .unwrap();
 
-        let subgraphs = configuration.load_subgraphs(&schema).unwrap();
+        let _subgraphs = configuration.load_subgraphs(&schema).unwrap();
+        let subgraphs: HashMap<&String, &String> = schema.subgraphs().collect();
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            subgraphs.get("accounts").unwrap().routing_url.as_str(),
+            subgraphs.get(&"accounts".to_string()).unwrap().as_str(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
         // this should show a warning in logs
         assert_eq!(
-            subgraphs.get("inventory").unwrap().routing_url.as_str(),
+            subgraphs.get(&"inventory".to_string()).unwrap().as_str(),
             "http://localhost:4002/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            subgraphs.get("products").unwrap().routing_url.as_str(),
+            subgraphs.get(&"products".to_string()).unwrap().as_str(),
             "http://localhost:4003/graphql"
         );
 
         assert_eq!(
-            subgraphs.get("reviews").unwrap().routing_url.as_str(),
+            subgraphs.get(&"reviews".to_string()).unwrap().as_str(),
             "http://localhost:4004/graphql"
         );
     }

@@ -29,7 +29,6 @@ impl Plugin for OverrideSubgraphUrl {
         println!("Request for subgraph '{subgraph_name}'");
         service
             .map_request(move |mut req: SubgraphRequest| {
-                println!("  with URL '{:?}'", req.http_request.inner);
                 println!("  with URL '{}'", req.http_request.inner.uri());
 
                 if let Some(new_url) = new_url.take() {

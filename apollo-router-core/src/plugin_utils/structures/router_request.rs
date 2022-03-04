@@ -1,5 +1,5 @@
 use super::from_names_and_values;
-use crate::{Context, Object};
+use crate::{http_compat, Context, Object};
 use http::Request;
 use serde_json_bytes::Value;
 use std::sync::Arc;
@@ -18,14 +18,18 @@ pub struct RouterRequest {
 
 impl From<RouterRequest> for crate::RouterRequest {
     fn from(request: RouterRequest) -> Self {
-        let req = Request::new(crate::Request {
+        let req = crate::Request {
             query: request.query,
             operation_name: request.operation_name,
             variables: request.variables.unwrap_or_default(),
             extensions: request.extensions.unwrap_or_default(),
-        });
+        };
+
+        let req = Request::builder().uri("http://default").body(req).unwrap();
+        let req_compat = http_compat::Request::try_from(req).unwrap();
+
         crate::RouterRequest {
-            context: request.context.unwrap_or_default().with_request(req.into()),
+            context: request.context.unwrap_or_default().with_request(req_compat),
         }
     }
 }

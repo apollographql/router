@@ -87,9 +87,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
         for (name, subgraph) in &subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
-            let mut subgraph_service = BoxService::new(dedup_layer.layer(
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            ));
+            let mut subgraph_service =
+                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {

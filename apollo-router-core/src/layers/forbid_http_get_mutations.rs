@@ -182,10 +182,12 @@ mod forbid_http_get_mutations_tests {
             .context(
                 Context::new().with_request(Arc::new(
                     Request::builder()
+                        .uri("http://test")
                         .method(method)
                         .body(crate::Request::default())
                         .unwrap()
-                        .into(),
+                        .try_into()
+                        .unwrap(),
                 )),
             )
             .build()
