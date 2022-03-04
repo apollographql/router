@@ -75,7 +75,7 @@ impl Plugin for ForbidAnonymousOperations {
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_plugin!(
-    "com.acme",
+    "com.example",
     "forbid-anonymous-operations",
     ForbidAnonymousOperations
 );
@@ -99,7 +99,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.acme.forbid-anonymous-operations")
+            .get("com.example.forbid-anonymous-operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
             .unwrap();
