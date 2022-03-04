@@ -192,7 +192,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
     }
 
-    fn with_checkpoint<S, Request>(
+    fn checkpoint<S, Request>(
         self,
         checkpoint_fn: fn(
             Request,

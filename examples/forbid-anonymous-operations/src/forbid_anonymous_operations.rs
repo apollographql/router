@@ -28,12 +28,12 @@ impl Plugin for ForbidAnonymousOperations {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        // `ServiceBuilder` provides us with a `with_checkpoint` method.
+        // `ServiceBuilder` provides us with a `checkpoint` method.
         //
         // This method allows us to return Step::Continue(request) if we want to let the request through,
         // or Step::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .with_checkpoint(|req: RouterRequest| {
+            .checkpoint(|req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
                 // Its `body()` is an `apollo_router_core::Request`, that contains:
                 // - Zero or one query
