@@ -19,111 +19,81 @@ use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
-use derive_more::Display;
-use derive_more::From;
+use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::span::{Attributes, Id};
+use tracing::span::{Attributes, Id, Record};
+use tracing::subscriber::SetGlobalDefaultError;
 use tracing::{Metadata, Subscriber};
-use tracing_subscriber::layer::Layered;
-use tracing_subscriber::reload::{Handle, Layer as ReloadLayer};
-use tracing_subscriber::Layer;
+use tracing_subscriber::fmt::format::{DefaultFields, Format};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
+use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
+type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
 
-pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 
-type BoxedSubscriber = Box<dyn Subscriber + Send + Sync + 'static>;
+pub struct CustomLayer;
 
-pub struct CustomLayer {
-    subscriber: Option<BoxedSubscriber>,
+// We don't actually need our layer to do anything. It just exists as a holder
+// for the layers set by the reporting.rs plugin
+impl<S> Layer<S> for CustomLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
+
+static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, FmtSubscriberEnv>> = OnceCell::new();
+
+pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), FederatedServerError> {
+    RELOAD_HANDLE
+        .get_or_try_init(move || {
+            // First create a boxed CustomLayer
+            let cl: BoxedLayer = Box::new(CustomLayer {});
+
+            // Now create a reloading layer from that
+            let (reloading_layer, handle) = ReloadLayer::new(cl);
+
+            // Box up our reloading layer
+            let rl: BoxedLayer = Box::new(reloading_layer);
+
+            // Compose that with our subscriber
+            // let composed: Layered<BoxedLayer, FmtSubscriber> = rl.with_subscriber(subscriber);
+            let composed = rl.with_subscriber(subscriber);
+
+            // Set our subscriber as the global subscriber
+            tracing::subscriber::set_global_default(composed)?;
+
+            tracing::info!("Global subscriber configured successfully");
+
+            // Return our handle to store in OnceCell
+            Ok(handle)
+        })
+        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
+    Ok(())
 }
 
-impl<S> Layer<S> for CustomLayer
-where
-    S: Subscriber,
-{
-    fn enabled(
-        &self,
-        metadata: &Metadata<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) -> bool {
-        println!("enabled metadata {:?}", metadata);
-        self.subscriber.is_some()
-    }
-
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        println!("on_event: {:?}, context: {:p}", event, &ctx);
-        if let Some(subscriber) = &self.subscriber {
-            subscriber.event(event);
-        }
-    }
-
-    fn on_new_span(
-        &self,
-        attrs: &Attributes<'_>,
-        id: &Id,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        println!("new_span: {:?}, context: {:p}", id, &ctx);
-        if let Some(subscriber) = &self.subscriber {
-            subscriber.new_span(attrs);
-        }
-    }
-
-    fn on_close(&self, id: Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        println!("on_close: {:?}, context: {:p}", id, &ctx);
-        if let Some(subscriber) = &self.subscriber {
-            subscriber.try_close(id);
-        }
-    }
-}
-
-impl From<BoxedSubscriber> for CustomLayer {
-    fn from(src: BoxedSubscriber) -> Self {
-        println!("Would like to convert src into a CustomLayer");
-        CustomLayer {
-            subscriber: Some(src),
-        }
-    }
-}
-
-static HANDLE: Lazy<Mutex<Option<Handle<CustomLayer, BoxedSubscriber>>>> =
-    Lazy::new(|| Mutex::new(Default::default()));
-
-/// TODO
-pub fn set_global_subscriber(new_sub: BoxedSubscriber) {
-    let mut hdl_guard = HANDLE.lock().unwrap();
-
-    match &*hdl_guard {
+pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
+    match RELOAD_HANDLE.get() {
         Some(hdl) => {
-            tracing::info!("already configured");
-            let new_layer: CustomLayer = new_sub.into();
-            hdl.reload(new_layer).expect("yikes!");
+            hdl.reload(new_layer)
+                .map_err(FederatedServerError::ReloadTracingLayerError)?;
         }
         None => {
-            let custom = CustomLayer { subscriber: None };
-            let (reloading_layer, handle) = ReloadLayer::new(custom);
-            *hdl_guard = Some(handle);
-            let layered: Layered<ReloadLayer<CustomLayer, BoxedSubscriber>, BoxedSubscriber> =
-                reloading_layer.with_subscriber(new_sub);
-            tracing::subscriber::set_global_default(layered).expect("yikes!");
-            tracing::info!("configured");
+            return Err(FederatedServerError::NoReloadTracingHandleError);
         }
     }
+    Ok(())
 }
+
+type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -157,6 +127,15 @@ pub enum FederatedServerError {
 
     /// Could not configure spaceport: {0}
     ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
+
+    /// No reload handle available
+    NoReloadTracingHandleError,
+
+    /// Could not set global subscriber: {0}
+    SetGlobalSubscriberError(SetGlobalDefaultError),
+
+    /// Could not reload tracing layer: {0}
+    ReloadTracingLayerError(ReloadError),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -871,4 +850,31 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
+}
+
+pub struct NoSubscriber;
+
+impl Subscriber for NoSubscriber {
+    #[inline]
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> tracing::subscriber::Interest {
+        tracing::subscriber::Interest::never()
+    }
+
+    fn new_span(&self, _: &Attributes<'_>) -> Id {
+        Id::from_u64(0xDEAD)
+    }
+
+    fn event(&self, _event: &tracing::Event<'_>) {}
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    #[inline]
+    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+        false
+    }
+
+    fn enter(&self, _span: &Id) {}
+    fn exit(&self, _span: &Id) {}
 }

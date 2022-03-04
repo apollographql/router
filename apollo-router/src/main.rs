@@ -2,17 +2,19 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{set_global_subscriber, ApolloRouterBuilder, GLOBAL_ENV_FILTER};
+use apollo_router::{set_global_subscriber, ApolloRouterBuilder};
 use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
+use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use tracing::Subscriber;
 use tracing_subscriber::EnvFilter;
+
+static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(StructOpt, Debug)]
@@ -103,19 +105,26 @@ async fn rt_main() -> Result<()> {
         return Ok(());
     }
 
+    // This is more complex than I'd like it to be. Really, we just want to pass
+    // a FmtSubscriber to set_global_subscriber(), but we can't because of the
+    // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
+    // for more details.
     let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
 
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?)
+        .finish();
 
-    let subscriber: Box<dyn Subscriber + Send + Sync + 'static> = if atty::is(atty::Stream::Stdout)
-    {
-        Box::new(builder.finish())
+    /*
+     * XXX: Choice no longer possible because of the limitations in FmtSubscriber definition
+     * see above...
+    if atty::is(atty::Stream::Stdout) {
+        set_global_subscriber(builder, filter)?;
     } else {
-        Box::new(builder.json().finish())
+        set_global_subscriber(builder, filter)?;
     };
-
-    set_global_subscriber(subscriber);
+    */
+    set_global_subscriber(subscriber)?;
 
     GLOBAL_ENV_FILTER.set(env_filter).unwrap();
 
