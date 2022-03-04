@@ -1,9 +1,9 @@
 #![no_main]
-use apollo_router_core::Response;
+
 use libfuzzer_sys::fuzz_target;
 use log::debug;
 use router_fuzz::generate_valid_operation;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -24,13 +24,13 @@ fuzz_target!(|data: &[u8]| {
         .json(&json!({ "query": generated_operation }))
         .send()
         .unwrap()
-        .json::<Response>();
+        .json::<Value>();
     let gateway_response = http_client
         .post(GATEWAY_URL)
         .json(&json!({ "query": generated_operation }))
         .send()
         .unwrap()
-        .json::<Response>();
+        .json::<Value>();
 
     debug!("======= DOCUMENT =======");
     debug!("{}", generated_operation);

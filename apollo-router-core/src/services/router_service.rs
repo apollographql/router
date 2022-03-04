@@ -20,6 +20,8 @@ use tracing::instrument::WithSubscriber;
 use tracing::{Dispatch, Instrument};
 use typed_builder::TypedBuilder;
 
+static DEFAULT_BUFFER_SIZE: usize = 20_000;
+
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
@@ -118,7 +120,6 @@ where
                         context: context.into(),
                     })
                     .await?;
-
                 let mut response = execution
                     .call(ExecutionRequest {
                         query_plan: planned_query.query_plan,
@@ -160,7 +161,7 @@ pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     buffer: usize,
     plugins: Vec<Box<dyn DynPlugin>>,
-    services: Vec<(
+    subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
@@ -168,13 +169,13 @@ pub struct PluggableRouterServiceBuilder {
 }
 
 impl PluggableRouterServiceBuilder {
-    pub fn new(schema: Arc<Schema>, buffer: usize) -> Self {
+    pub fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
-            buffer,
+            buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
-            services: Default::default(),
             dispatcher: Default::default(),
+            subgraph_services: Default::default(),
         }
     }
 
@@ -216,7 +217,8 @@ impl PluggableRouterServiceBuilder {
     where
         <S as Service<SubgraphRequest>>::Future: Send,
     {
-        self.services.push((name.to_string(), service.boxed()));
+        self.subgraph_services
+            .push((name.to_string(), service.boxed()));
         self
     }
 
@@ -258,7 +260,7 @@ impl PluggableRouterServiceBuilder {
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
-            .services
+            .subgraph_services
             .into_iter()
             .map(|(name, s)| {
                 let service = self
