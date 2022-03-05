@@ -40,7 +40,7 @@ use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
 
-type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 
 struct BaseLayer;
 
