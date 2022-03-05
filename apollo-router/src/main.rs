@@ -21,7 +21,11 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 #[structopt(name = "router", about = "Apollo federation router")]
 struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
-    #[structopt(long = "log", default_value = "info", alias = "loglevel")]
+    #[structopt(
+        long = "log",
+        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info",
+        alias = "loglevel"
+    )]
     env_filter: String,
 
     /// Reload configuration and schema files automatically.

@@ -16,7 +16,6 @@ use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
 static DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -101,7 +100,6 @@ where
             let body = context.request.body();
             let query = query_cache
                 .get_query(body.query.as_ref().expect("com.apollographql.ensure-query-is-present has checked this already; qed").as_str())
-                .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
             if let Some(err) = query

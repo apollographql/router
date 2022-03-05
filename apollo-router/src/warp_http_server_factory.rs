@@ -310,14 +310,14 @@ where
 
 // graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
 #[tracing::instrument(skip_all,
+    level = "info"
     name = "graphql_request",
     fields(
         query = %request.query.clone().unwrap_or_default(),
         operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()),
         client_name,
         client_version
-    ),
-    level = "info"
+    )
 )]
 fn run_graphql_request<RS>(
     service: RS,
@@ -358,13 +358,11 @@ where
                     .unwrap();
                 *http_request.headers_mut() = header_map;
 
-                let span = Span::current();
-
                 let response = service
                     .call(http_request.into())
                     .await
                     .map(|response| {
-                        tracing::trace_span!(parent: &span, "serialize_response")
+                        tracing::trace_span!("serialize_response")
                             .in_scope(|| {
                                 response.map(|body| {
                                     Bytes::from(
