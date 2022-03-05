@@ -154,7 +154,7 @@ where
             match (checkpoint_fn)(req).await {
                 Ok(Step::Return(response)) => Ok(response),
                 Ok(Step::Continue(request)) => inner.oneshot(request).await,
-                Err(error) => Err(BoxError::from(error)),
+                Err(error) => Err(error),
             }
         })
     }
