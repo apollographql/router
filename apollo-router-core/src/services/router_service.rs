@@ -12,6 +12,7 @@ use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
 use std::sync::Arc;
 use std::task::Poll;
+use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
@@ -135,9 +136,9 @@ where
                     });
                 }
 
-                response.map(|execution_response| RouterResponse {
-                    response: execution_response.response.map(ResponseBody::GraphQL),
-                    context: execution_response.context,
+                Ok(RouterResponse {
+                    context: response.context,
+                    response: response.response.map(ResponseBody::GraphQL),
                 })
             }
         }
@@ -262,20 +263,23 @@ impl PluggableRouterServiceBuilder {
             .collect();
 
         // ExecutionService takes a PlannedRequest and outputs a RouterResponse
-        let execution_service = ServiceBuilder::new()
-            .buffer(self.buffer)
-            .layer(ForbidHttpGetMutationsLayer::default())
-            .service(
-                self.plugins.iter_mut().rev().fold(
-                    ExecutionService::builder()
-                        .schema(self.schema.clone())
-                        .subgraph_services(subgraphs)
-                        .build()
-                        .boxed(),
-                    |acc, e| e.execution_service(acc),
-                ),
-            )
-            .boxed();
+        // NB: Cannot use .buffer() here or the code won't compile...
+        let execution_service = Buffer::new(
+            ServiceBuilder::new()
+                .layer(ForbidHttpGetMutationsLayer::default())
+                .service(
+                    self.plugins.iter_mut().rev().fold(
+                        ExecutionService::builder()
+                            .schema(self.schema.clone())
+                            .subgraph_services(subgraphs)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.execution_service(acc),
+                    ),
+                )
+                .boxed(),
+            self.buffer,
+        );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -312,24 +316,27 @@ impl PluggableRouterServiceBuilder {
         */
 
         // Router service takes a graphql::Request and outputs a graphql::Response
-        let router_service = ServiceBuilder::new()
-            .buffer(self.buffer)
-            .layer(APQLayer::default())
-            .layer(EnsureQueryPresence::default())
-            .service(
-                self.plugins.iter_mut().rev().fold(
-                    RouterService::builder()
-                        .query_planner_service(query_planner_service)
-                        .query_execution_service(execution_service)
-                        .schema(self.schema)
-                        .query_cache(query_cache)
-                        .naive_introspection(naive_introspection)
-                        .build()
-                        .boxed(),
-                    |acc, e| e.router_service(acc),
-                ),
-            )
-            .boxed();
+        // NB: Cannot use .buffer() here or the code won't compile...
+        let router_service = Buffer::new(
+            ServiceBuilder::new()
+                .layer(APQLayer::default())
+                .layer(EnsureQueryPresence::default())
+                .service(
+                    self.plugins.iter_mut().rev().fold(
+                        RouterService::builder()
+                            .query_planner_service(query_planner_service)
+                            .query_execution_service(execution_service)
+                            .schema(self.schema)
+                            .query_cache(query_cache)
+                            .naive_introspection(naive_introspection)
+                            .build()
+                            .boxed(),
+                        |acc, e| e.router_service(acc),
+                    ),
+                )
+                .boxed(),
+            self.buffer,
+        );
 
         (router_service.boxed_clone(), self.plugins)
     }
