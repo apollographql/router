@@ -30,9 +30,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::span::{Attributes, Id, Record};
 use tracing::subscriber::SetGlobalDefaultError;
-use tracing::{Metadata, Subscriber};
+use tracing::Subscriber;
 use tracing_subscriber::fmt::format::{DefaultFields, Format};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
@@ -41,21 +40,21 @@ use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
 
-pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 
-pub struct CustomLayer;
+struct BaseLayer;
 
-// We don't actually need our layer to do anything. It just exists as a holder
+// We don't actually need our BaseLayer to do anything. It exists as a holder
 // for the layers set by the reporting.rs plugin
-impl<S> Layer<S> for CustomLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
+impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
 
 static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, FmtSubscriberEnv>> = OnceCell::new();
 
 pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), FederatedServerError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {
-            // First create a boxed CustomLayer
-            let cl: BoxedLayer = Box::new(CustomLayer {});
+            // First create a boxed BaseLayer
+            let cl: BoxedLayer = Box::new(BaseLayer {});
 
             // Now create a reloading layer from that
             let (reloading_layer, handle) = ReloadLayer::new(cl);
@@ -849,31 +848,4 @@ mod tests {
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
     }
-}
-
-pub struct NoSubscriber;
-
-impl Subscriber for NoSubscriber {
-    #[inline]
-    fn register_callsite(&self, _: &'static Metadata<'static>) -> tracing::subscriber::Interest {
-        tracing::subscriber::Interest::never()
-    }
-
-    fn new_span(&self, _: &Attributes<'_>) -> Id {
-        Id::from_u64(0xDEAD)
-    }
-
-    fn event(&self, _event: &tracing::Event<'_>) {}
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    #[inline]
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        false
-    }
-
-    fn enter(&self, _span: &Id) {}
-    fn exit(&self, _span: &Id) {}
 }

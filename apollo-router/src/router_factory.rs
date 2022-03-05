@@ -197,7 +197,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         //  - all configuration errors are checked
         // and **before** build() is called.
         //
-        // This is because our global SUBSCRIBER is initialized by
+        // This is because our tracing configuration is initialized by
         // the startup() method of our Reporting plugin.
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
