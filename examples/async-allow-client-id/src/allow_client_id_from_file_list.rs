@@ -11,10 +11,12 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // This structure is the one we'll deserialize the yml configuration into
 #[derive(Deserialize, JsonSchema)]
 struct AllowClientIdConfig {
+    header: String,
     path: String,
 }
 
 struct AllowClientIdFromFileList {
+    header: String,
     allowed_ids_path: PathBuf,
 }
 
@@ -22,8 +24,12 @@ impl Plugin for AllowClientIdFromFileList {
     type Config = AllowClientIdConfig;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        let allowed_ids_path = PathBuf::from(configuration.path.as_str());
-        Ok(Self { allowed_ids_path })
+        let AllowClientIdConfig { path, header } = configuration;
+        let allowed_ids_path = PathBuf::from(path.as_str());
+        Ok(Self {
+            allowed_ids_path,
+            header,
+        })
     }
 
     // On each request, this plugin will extract a x-client-id header, and check against a file
@@ -36,6 +42,7 @@ impl Plugin for AllowClientIdFromFileList {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        let header_key = self.header.clone();
         // async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
         // given we're getting a mutable reference to self,
@@ -53,13 +60,12 @@ impl Plugin for AllowClientIdFromFileList {
         ServiceBuilder::new()
             .async_checkpoint(move |req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
-                // We are going to check the headers for the presence of x-client-id
-
-                if !req.context.request.headers().contains_key("x-client-id") {
+                // We are going to check the headers for the presence of the header we're looking for
+                if !req.context.request.headers().contains_key(&header_key) {
                     // Prepare an HTTP 401 response with a GraphQL error message
                     let res = plugin_utils::RouterResponse::builder()
                         .errors(vec![apollo_router_core::Error {
-                            message: "Missing 'x-client-id' header".to_string(),
+                            message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         }])
                         .build()
@@ -84,7 +90,7 @@ impl Plugin for AllowClientIdFromFileList {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         let res = plugin_utils::RouterResponse::builder()
                             .errors(vec![apollo_router_core::Error {
-                                message: "'x-client-id' value is not a string".to_string(),
+                                message: format!("'{header_key}' value is not a string"),
                                 ..Default::default()
                             }])
                             .build()
@@ -165,7 +171,7 @@ mod tests {
         apollo_router_core::plugins()
             .get("com.example.allow-client-id-from-file")
             .expect("Plugin not found")
-            .create_instance(&json!({"path": "allowedClientIds.json"}))
+            .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))
             .unwrap();
     }
 
@@ -180,6 +186,7 @@ mod tests {
         // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
+            header: "x-client-id".to_string(),
         })
         .expect("couldn't create AllowClientIdFromFileList")
         .router_service(mock_service.boxed());
@@ -217,6 +224,7 @@ mod tests {
         // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
+            header: "x-client-id".to_string(),
         })
         .expect("couldn't create AllowClientIdFromFileList")
         .router_service(mock_service.boxed());
@@ -288,6 +296,7 @@ mod tests {
         // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
+            header: "x-client-id".to_string(),
         })
         .expect("couldn't create AllowClientIdFromFileList")
         .router_service(mock_service.boxed());
