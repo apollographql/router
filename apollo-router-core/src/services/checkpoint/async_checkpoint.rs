@@ -1,26 +1,25 @@
 use super::Step;
 use futures::future::BoxFuture;
 use std::sync::Arc;
-use tower::{BoxError, Layer, Service, ServiceExt};
+use tower::{
+    buffer::Buffer, util::BoxCloneService, BoxError, Layer, Service, ServiceBuilder, ServiceExt,
+};
 
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Clone + Send + 'static,
+    S: Service<Request> + Send + 'static,
     Request: Send + 'static,
     S::Future: Send,
     S::Response: Send + 'static,
-    S::Error: Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
     checkpoint_fn: Arc<
         dyn Fn(
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<
-                    Step<Request, <S as Service<Request>>::Response>,
-                    <S as Service<Request>>::Error,
-                >,
+                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -30,11 +29,11 @@ where
 #[allow(clippy::type_complexity)]
 impl<S, Request> AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Clone + Send + 'static,
+    S: Service<Request> + Send + 'static,
     Request: Send + 'static,
     S::Future: Send,
     S::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
     /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
     pub fn new(
@@ -42,10 +41,7 @@ where
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<
-                    Step<Request, <S as Service<Request>>::Response>,
-                    <S as Service<Request>>::Error,
-                >,
+                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -58,18 +54,22 @@ where
 
 impl<S, Request> Layer<S> for AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Clone + Send + 'static,
+    S: Service<Request> + Send + 'static,
     <S as Service<Request>>::Future: Send,
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
-    type Service = AsyncCheckpointService<S, Request>;
+    type Service = AsyncCheckpointService<
+        BoxCloneService<Request, <S as Service<Request>>::Response, BoxError>,
+        Request,
+    >;
 
     fn layer(&self, service: S) -> Self::Service {
+        let inner = Buffer::new(service, 20_000);
         AsyncCheckpointService {
             checkpoint_fn: Arc::clone(&self.checkpoint_fn),
-            inner: service,
+            inner: ServiceBuilder::new().service(inner).boxed_clone(),
         }
     }
 }
@@ -79,21 +79,18 @@ where
 pub struct AsyncCheckpointService<S, Request>
 where
     Request: Send + 'static,
-    S: Service<Request> + Clone + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    S: Service<Request> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    inner: S,
+    inner: BoxCloneService<Request, <S as Service<Request>>::Response, BoxError>,
     checkpoint_fn: Arc<
         dyn Fn(
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<
-                    Step<Request, <S as Service<Request>>::Response>,
-                    <S as Service<Request>>::Error,
-                >,
+                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -104,8 +101,8 @@ where
 impl<S, Request> AsyncCheckpointService<S, Request>
 where
     Request: Send + 'static,
-    S: Service<Request> + Clone + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    S: Service<Request> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -115,34 +112,31 @@ where
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<
-                    Step<Request, <S as Service<Request>>::Response>,
-                    <S as Service<Request>>::Error,
-                >,
+                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
             > + Send
             + Sync
             + 'static,
-        inner: S,
+        service: S,
     ) -> Self {
+        let inner = Buffer::new(service, 20_000);
         Self {
             checkpoint_fn: Arc::new(checkpoint_fn),
-            inner,
+            inner: ServiceBuilder::new().service(inner).boxed_clone(),
         }
     }
 }
 
 impl<S, Request> Service<Request> for AsyncCheckpointService<S, Request>
 where
-    S: Service<Request> + Clone,
-    S: Send + 'static,
-    S::Future: Send,
     Request: Send + 'static,
+    S: Service<Request> + Send + 'static,
+    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static,
 {
     type Response = <S as Service<Request>>::Response;
 
-    type Error = <S as Service<Request>>::Error;
+    type Error = BoxError;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -160,7 +154,7 @@ where
             match (checkpoint_fn)(req).await {
                 Ok(Step::Return(response)) => Ok(response),
                 Ok(Step::Continue(request)) => inner.oneshot(request).await,
-                Err(error) => Err(error),
+                Err(error) => Err(BoxError::from(error)),
             }
         })
     }
