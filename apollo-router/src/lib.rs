@@ -38,7 +38,7 @@ use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLa
 use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
+pub(crate) type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
 
 pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
 

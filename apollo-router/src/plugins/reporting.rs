@@ -35,7 +35,8 @@ use std::str::FromStr;
 use tower::util::BoxService;
 use tower::Layer;
 use tower::{BoxError, ServiceExt};
-use tracing_subscriber::prelude::*;
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+use tracing_subscriber::Layer as TracingLayer;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
