@@ -3,9 +3,8 @@
 use anyhow::Result;
 use apollo_router::configuration::Configuration;
 use apollo_router::ApolloRouterBuilder;
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 use apollo_router_core::Schema;
-use futures::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 mod forbid_anonymous_operations;
@@ -46,26 +45,7 @@ async fn main() -> Result<()> {
         .build();
 
     let mut server_handle = server.serve();
-    server_handle
-        .state_receiver()
-        .for_each(|state| {
-            match state {
-                State::Startup => {
-                    tracing::info!(r#"Starting Apollo Router"#)
-                }
-                State::Running { address, .. } => {
-                    tracing::info!("Listening on {} 🚀", address)
-                }
-                State::Stopped => {
-                    tracing::info!("Stopped")
-                }
-                State::Errored => {
-                    tracing::info!("Stopped with error")
-                }
-            }
-            future::ready(())
-        })
-        .await;
+    server_handle.with_defualt_state_receiver().await;
 
     if let Err(err) = server_handle.await {
         tracing::error!("{}", err);
