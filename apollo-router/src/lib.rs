@@ -598,7 +598,7 @@ impl FederatedServerHandle {
     }
 
     /// State receiver that prints out basic lifecycle events.
-    pub async fn with_defualt_state_receiver(&mut self) {
+    pub async fn with_default_state_receiver(&mut self) {
         self.state_receiver()
             .for_each(|state| {
                 match state {

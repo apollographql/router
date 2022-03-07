@@ -45,10 +45,11 @@ impl From<Context<http_compat::Request<Request>>> for Context<Arc<http_compat::R
 }
 
 impl<T> Context<T> {
-    pub fn get<K: Into<String>, V: for<'de> serde::Deserialize<'de>>(
-        &self,
-        key: K,
-    ) -> Result<Option<V>, BoxError> {
+    pub fn get<K, V>(&self, key: K) -> Result<Option<V>, BoxError>
+    where
+        K: Into<String>,
+        V: for<'de> serde::Deserialize<'de>,
+    {
         self.extensions
             .get(&key.into())
             .map(|v| serde_json_bytes::from_value(v.value().clone()))
@@ -56,11 +57,11 @@ impl<T> Context<T> {
             .map_err(|e| e.into())
     }
 
-    pub fn insert<K: Into<String>, V: for<'de> serde::Deserialize<'de> + Serialize>(
-        &self,
-        key: K,
-        value: V,
-    ) -> Result<Option<V>, BoxError> {
+    pub fn insert<K, V>(&self, key: K, value: V) -> Result<Option<V>, BoxError>
+    where
+        K: Into<String>,
+        V: for<'de> serde::Deserialize<'de> + Serialize,
+    {
         match serde_json_bytes::to_value(value) {
             Ok(value) => self
                 .extensions
@@ -72,12 +73,16 @@ impl<T> Context<T> {
         }
     }
 
-    pub fn upsert<K: Into<String>, V: for<'de> serde::Deserialize<'de> + Serialize>(
+    pub fn upsert<K, V>(
         &self,
         key: K,
         upsert: impl Fn(V) -> V,
         default: impl Fn() -> V,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), BoxError>
+    where
+        K: Into<String>,
+        V: for<'de> serde::Deserialize<'de> + Serialize,
+    {
         let key = key.into();
         self.extensions
             .entry(key.clone())

@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
         .build();
 
     let mut server_handle = server.serve();
-    server_handle.with_defualt_state_receiver().await;
+    server_handle.with_default_state_receiver().await;
 
     if let Err(err) = server_handle.await {
         tracing::error!("{}", err);
