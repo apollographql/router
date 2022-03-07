@@ -146,6 +146,7 @@ dependencies = [
  "tower-service",
  "tower-test",
  "tracing",
+ "tracing-core",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "typed-builder",

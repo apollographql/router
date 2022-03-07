@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{set_global_subscriber, ApolloRouterBuilder};
+use apollo_router::{set_global_subscriber, ApolloRouterBuilder, RouterSubscriber};
 use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use directories::ProjectDirs;
 use futures::prelude::*;
@@ -115,9 +115,14 @@ async fn rt_main() -> Result<()> {
     // for more details.
     let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
 
-    let subscriber = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?)
-        .finish();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
+
+    let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
+        RouterSubscriber::TextSubscriber(builder.finish())
+    } else {
+        RouterSubscriber::JsonSubscriber(builder.json().finish())
+    };
 
     set_global_subscriber(subscriber)?;
 
