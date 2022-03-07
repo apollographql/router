@@ -27,6 +27,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
   Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
 
+- **Sync and async checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
+  You can now write plugins that can act as check points in the services! Checkpoints allow you to make checks, and either return early with a Response, or forward a Request down the query pipeline.
+
 ## :bug: Fixes
 
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
