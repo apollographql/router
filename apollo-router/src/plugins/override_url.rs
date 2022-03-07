@@ -15,6 +15,7 @@ impl Plugin for OverrideSubgraphUrl {
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("OverrideSubgraphUrl {:#?}!", configuration);
+        println!("OverrideSubgraphUrl {:#?}!", configuration);
         Ok(OverrideSubgraphUrl {
             urls: configuration,
         })
@@ -94,9 +95,7 @@ mod tests {
         let mut subgraph_service =
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
-        context
-            .insert_extension("test".to_string(), 5i64.into())
-            .await;
+        context.insert("test".to_string(), 5i64).unwrap();
         let subgraph_req = plugin_utils::SubgraphRequest::builder().context(context);
 
         let _subgraph_resp = subgraph_service
