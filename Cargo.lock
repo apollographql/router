@@ -179,6 +179,7 @@ dependencies = [
  "async-trait",
  "atty",
  "bytes",
+ "dashmap",
  "derivative",
  "displaydoc",
  "futures",
@@ -642,6 +643,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "context-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-parser 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-router",
+ "apollo-router-core",
+ "futures",
+ "http",
+ "serde",
+ "serde_json",
+ "serde_json_bytes",
+ "tokio",
+ "tokio-util 0.7.0",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,6 +856,17 @@ checksum = "91a9304e55e9d601a39ae4deaba85406d5c0980e106f65afcf0460e9af1e7602"
 dependencies = [
  "petgraph",
  "serde",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0834a35a3fce649144119e18da2a4d8ed12ef3862f47183fd46f625d072d96c"
+dependencies = [
+ "cfg-if 1.0.0",
+ "num_cpus",
+ "parking_lot 0.12.0",
 ]
 
 [[package]]

@@ -596,6 +596,29 @@ impl FederatedServerHandle {
             state_receiver.close();
         }
     }
+
+    /// State receiver that prints out basic lifecycle events.
+    pub async fn with_default_state_receiver(&mut self) {
+        self.state_receiver()
+            .for_each(|state| {
+                match state {
+                    State::Startup => {
+                        tracing::info!(r#"Starting Apollo Router"#)
+                    }
+                    State::Running { address, .. } => {
+                        tracing::info!("Listening on {} 🚀", address)
+                    }
+                    State::Stopped => {
+                        tracing::info!("Stopped")
+                    }
+                    State::Errored => {
+                        tracing::info!("Stopped with error")
+                    }
+                }
+                future::ready(())
+            })
+            .await
+    }
 }
 
 impl Future for FederatedServerHandle {
