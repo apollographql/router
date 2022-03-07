@@ -2,12 +2,10 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{set_global_subscriber, ApolloRouterBuilder};
-use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{
+    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
+};
 use directories::ProjectDirs;
-use futures::prelude::*;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
