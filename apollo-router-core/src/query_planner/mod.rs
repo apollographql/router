@@ -368,7 +368,7 @@ pub(crate) mod fetch {
                 schema,
             )
             .await?;
-            println!("SERVICE NAME {service_name}");
+
             let subgraph_request = SubgraphRequest {
                 http_request: http_compat::RequestBuilder::new(
                     http::Method::POST,
@@ -384,7 +384,7 @@ pub(crate) mod fetch {
                         .variables(Arc::new(variables.clone()))
                         .build(),
                 )
-                .unwrap(),
+                .expect("it won't fail because the url is correct and already checked; qed"),
                 context: context.clone(),
                 operation_kind: *operation_kind,
             };

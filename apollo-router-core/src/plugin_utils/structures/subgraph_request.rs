@@ -29,7 +29,7 @@ impl From<SubgraphRequest> for crate::SubgraphRequest {
         let req_compat: http_compat::Request<Request> =
             http_compat::RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
                 .body(gql_req)
-                .unwrap();
+                .expect("won't fail because our url is valid; qed");
         crate::SubgraphRequest {
             context: request
                 .context

@@ -28,7 +28,7 @@ impl From<RouterRequest> for crate::RouterRequest {
 
         let req = RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
             .body(req)
-            .unwrap();
+            .expect("won't fail because our url is valid; qed");
 
         crate::RouterRequest {
             context: request.context.unwrap_or_default().with_request(req),
