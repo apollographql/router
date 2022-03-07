@@ -1,9 +1,7 @@
 use super::Step;
 use futures::future::BoxFuture;
 use std::sync::Arc;
-use tower::{
-    buffer::Buffer, util::BoxCloneService, BoxError, Layer, Service, ServiceBuilder, ServiceExt,
-};
+use tower::{BoxError, Layer, Service, ServiceExt};
 
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Request>
@@ -57,16 +55,12 @@ where
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
 {
-    type Service = AsyncCheckpointService<
-        BoxCloneService<Request, <S as Service<Request>>::Response, BoxError>,
-        Request,
-    >;
+    type Service = AsyncCheckpointService<S, Request>;
 
     fn layer(&self, service: S) -> Self::Service {
-        let inner = Buffer::new(service, 20_000);
         AsyncCheckpointService {
             checkpoint_fn: Arc::clone(&self.checkpoint_fn),
-            inner: ServiceBuilder::new().service(inner).boxed_clone(),
+            inner: service,
         }
     }
 }
@@ -80,7 +74,7 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    inner: BoxCloneService<Request, <S as Service<Request>>::Response, BoxError>,
+    inner: S,
     checkpoint_fn: Arc<
         dyn Fn(
                 Request,
@@ -115,7 +109,7 @@ where
     ) -> Self {
         Self {
             checkpoint_fn: Arc::new(checkpoint_fn),
-            inner: service.boxed_clone(),
+            inner: service,
         }
     }
 }
