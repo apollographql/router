@@ -733,6 +733,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-router",
  "apollo-router-core",
  "futures",
  "serde",

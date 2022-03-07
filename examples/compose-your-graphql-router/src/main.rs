@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use apollo_router::{set_global_subscriber, RouterSubscriber};
 use apollo_router_core::{plugin_utils, PluggableRouterServiceBuilder};
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
@@ -7,9 +8,10 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> Result<()> {
     // set up console logs
-    let _ = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"))
-        .init();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"));
+
+    set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
 
     // get the supergraph from ../../examples/supergraph.graphql
     let schema = Arc::new(include_str!("../../supergraph.graphql").parse()?);

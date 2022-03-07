@@ -1,8 +1,10 @@
 //! Main entry point for CLI command to start server.
 
 use anyhow::{anyhow, Result};
-use apollo_router::ApolloRouterBuilder;
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{
+    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, RouterSubscriber, SchemaKind,
+    ShutdownKind, State,
+};
 use futures::prelude::*;
 use tracing_subscriber::EnvFilter;
 
@@ -34,9 +36,10 @@ mod allow_client_id_from_file;
 // {"data":{"me":{"name":"Ada Lovelace"}}}
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"))
-        .init();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"));
+
+    set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
 
     let current_directory = std::env::current_dir()?;
 
