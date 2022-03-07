@@ -1,0 +1,8 @@
+server:
+  cors:
+    origins:
+      - "https://studio.apollographql.com/"
+plugins:
+  # this plugin doesn't have any configuration
+  # mention it here and you're set!
+  com.example.context_data:

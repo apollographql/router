@@ -35,7 +35,7 @@ impl Service<ExecutionRequest> for ExecutionService {
         Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument(name = "execute", level = "debug", skip_all)]
+    #[tracing::instrument(skip_all, level = "info", name = "execute")]
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
@@ -43,7 +43,6 @@ impl Service<ExecutionRequest> for ExecutionService {
             let response = req
                 .query_plan
                 .execute(&context, &this.subgraph_services, &this.schema)
-                .instrument(tracing::info_span!("execution"))
                 .await;
 
             // Note that request context is not propagated from downstream.

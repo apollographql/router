@@ -8,7 +8,7 @@ use crate::{
     ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
 };
-use futures::{future::BoxFuture, Future, TryFutureExt};
+use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
 use std::sync::Arc;
 use std::task::Poll;
@@ -16,8 +16,6 @@ use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-use tracing::instrument::WithSubscriber;
-use tracing::{Dispatch, Instrument};
 use typed_builder::TypedBuilder;
 
 static DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -102,7 +100,6 @@ where
             let body = context.request.body();
             let query = query_cache
                 .get_query(body.query.as_ref().expect("com.apollographql.ensure-query-is-present has checked this already; qed").as_str())
-                .instrument(tracing::info_span!("query_parsing"))
                 .await;
 
             if let Some(err) = query
@@ -165,7 +162,6 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
-    dispatcher: Option<Dispatch>,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -174,7 +170,6 @@ impl PluggableRouterServiceBuilder {
             schema,
             buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
-            dispatcher: Default::default(),
             subgraph_services: Default::default(),
         }
     }
@@ -189,11 +184,6 @@ impl PluggableRouterServiceBuilder {
 
     pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
         self.plugins.push(plugin);
-        self
-    }
-
-    pub fn with_dispatcher(mut self, dispatcher: Dispatch) -> PluggableRouterServiceBuilder {
-        self.dispatcher = Some(dispatcher);
         self
     }
 
@@ -242,21 +232,16 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let (query_planner_service, query_worker) = Buffer::pair(
-            ServiceBuilder::new().service(
-                self.plugins.iter_mut().rev().fold(
-                    CachingQueryPlanner::new(
-                        RouterBridgeQueryPlanner::new(self.schema.clone()),
-                        plan_cache_limit,
-                    )
-                    .boxed(),
-                    |acc, e| e.query_planning_service(acc),
-                ),
+        let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
+            self.plugins.iter_mut().rev().fold(
+                CachingQueryPlanner::new(
+                    RouterBridgeQueryPlanner::new(self.schema.clone()),
+                    plan_cache_limit,
+                )
+                .boxed(),
+                |acc, e| e.query_planning_service(acc),
             ),
-            self.buffer,
         );
-
-        spawn_with_maybe_dispatcher(query_worker, self.dispatcher.as_ref());
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -269,16 +254,15 @@ impl PluggableRouterServiceBuilder {
                     .rev()
                     .fold(s, |acc, e| e.subgraph_service(&name, acc));
 
-                let (service, worker) = Buffer::pair(service, self.buffer);
-
-                spawn_with_maybe_dispatcher(worker, self.dispatcher.as_ref());
+                let service = ServiceBuilder::new().buffer(self.buffer).service(service);
 
                 (name.clone(), service)
             })
             .collect();
 
         // ExecutionService takes a PlannedRequest and outputs a RouterResponse
-        let (execution_service, execution_worker) = Buffer::pair(
+        // NB: Cannot use .buffer() here or the code won't compile...
+        let execution_service = Buffer::new(
             ServiceBuilder::new()
                 .layer(ForbidHttpGetMutationsLayer::default())
                 .service(
@@ -294,8 +278,6 @@ impl PluggableRouterServiceBuilder {
                 .boxed(),
             self.buffer,
         );
-
-        spawn_with_maybe_dispatcher(execution_worker, self.dispatcher.as_ref());
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
             .ok()
@@ -332,7 +314,8 @@ impl PluggableRouterServiceBuilder {
         */
 
         // Router service takes a graphql::Request and outputs a graphql::Response
-        let (router_service, router_worker) = Buffer::pair(
+        // NB: Cannot use .buffer() here or the code won't compile...
+        let router_service = Buffer::new(
             ServiceBuilder::new()
                 .layer(APQLayer::default())
                 .layer(EnsureQueryPresence::default())
@@ -353,21 +336,6 @@ impl PluggableRouterServiceBuilder {
             self.buffer,
         );
 
-        spawn_with_maybe_dispatcher(router_worker, self.dispatcher.as_ref());
-
         (router_service.boxed_clone(), self.plugins)
-    }
-}
-
-fn spawn_with_maybe_dispatcher<F>(fut: F, maybe_dispatcher: Option<&Dispatch>)
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    if let Some(dispatcher) = maybe_dispatcher {
-        tokio::spawn(fut.with_subscriber(dispatcher.clone()));
-    } else {
-        tracing::warn!("router_service: no dispatcher found");
-        tokio::spawn(fut);
     }
 }

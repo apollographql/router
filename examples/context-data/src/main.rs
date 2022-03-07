@@ -7,19 +7,14 @@ use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
 use apollo_router_core::Schema;
 use tracing_subscriber::EnvFilter;
 
-mod forbid_anonymous_operations;
+mod context_data;
 
 // curl -v \
 //     --header 'content-type: application/json' \
 //     --url 'http://127.0.0.1:4000' \
-//     --data '{"query":"query Query {\n  me {\n    name\n  }\n}"}'
+//     --data '{"query":"query { topProducts { reviews { author { name } } name } }"}'
 // [...]
-// < HTTP/1.1 400 Bad Request
-// < content-length: 90
-// < date: Thu, 03 Mar 2022 14:31:50 GMT
-// <
-// * Connection #0 to host 127.0.0.1 left intact
-// {"errors":[{"message":"Anonymous operations are not allowed","locations":[],"path":null}]}
+// {"data":{"topProducts":[{"reviews":[{"author":{"name":"Ada Lovelace"}},{"author":{"name":"Alan Turing"}}],"name":"Table"},{"reviews":[{"author":{"name":"Ada Lovelace"}}],"name":"Couch"},{"reviews":[{"author":{"name":"Alan Turing"}}],"name":"Chair"}]}}
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = tracing_subscriber::fmt::fmt()

@@ -12,18 +12,7 @@ async fn main() -> Result<()> {
         .init();
 
     // get the supergraph from ../../examples/supergraph.graphql
-    let current_directory = std::env::current_dir()?;
-    let schema = Arc::new(
-        std::fs::read_to_string(
-            current_directory
-                .parent()
-                .ok_or(anyhow!("no parent"))?
-                .parent()
-                .ok_or(anyhow!("no parent"))?
-                .join("examples/supergraph.graphql"),
-        )?
-        .parse()?,
-    );
+    let schema = Arc::new(include_str!("../../supergraph.graphql").parse()?);
 
     // PluggableRouterServiceBuilder creates a GraphQL pipeline to process queries against a supergraph Schema
     // The whole pipeline is set up...

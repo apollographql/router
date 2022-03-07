@@ -36,7 +36,6 @@ fuzz_target!(|data: &[u8]| {
     debug!("{}", generated_operation);
     debug!("========================");
     debug!("======= RESPONSE =======");
-    assert_eq!(router_response.is_ok(), gateway_response.is_ok());
     if router_response.is_ok() != gateway_response.is_ok() {
         let router_error = if let Err(err) = &router_response {
             Some(err)

@@ -70,7 +70,7 @@ checksum = "159bb86af3a200e19a068f4224eae4c8bb2d0fa054c7e5d1cacd5cef95e684cd"
 [[package]]
 name = "apollo-encoder"
 version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 
 [[package]]
 name = "apollo-parser"
@@ -92,7 +92,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.3"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "rowan",
 ]
@@ -179,6 +179,7 @@ dependencies = [
  "async-trait",
  "atty",
  "bytes",
+ "dashmap",
  "derivative",
  "displaydoc",
  "futures",
@@ -223,7 +224,7 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#d7121c93503563506acc17cfa75a85fcddfe76de"
+source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "apollo-encoder",
  "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
@@ -664,6 +665,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "context-data"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-parser 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-router",
+ "apollo-router-core",
+ "futures",
+ "http",
+ "serde",
+ "serde_json",
+ "serde_json_bytes",
+ "tokio",
+ "tokio-util 0.7.0",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -857,6 +878,17 @@ checksum = "91a9304e55e9d601a39ae4deaba85406d5c0980e106f65afcf0460e9af1e7602"
 dependencies = [
  "petgraph",
  "serde",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0834a35a3fce649144119e18da2a4d8ed12ef3862f47183fd46f625d072d96c"
+dependencies = [
+ "cfg-if 1.0.0",
+ "num_cpus",
+ "parking_lot 0.12.0",
 ]
 
 [[package]]

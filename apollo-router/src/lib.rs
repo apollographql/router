@@ -18,42 +18,80 @@ use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
-use derive_more::Display;
-use derive_more::From;
+use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::{Dispatch, Subscriber};
+use tracing::subscriber::SetGlobalDefaultError;
+use tracing::Subscriber;
+use tracing_subscriber::fmt::format::{DefaultFields, Format};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
+use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
+pub(crate) type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
+
+pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+
+struct BaseLayer;
+
+// We don't actually need our BaseLayer to do anything. It exists as a holder
+// for the layers set by the reporting.rs plugin
+impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
+
+static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, FmtSubscriberEnv>> = OnceCell::new();
+
+pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), FederatedServerError> {
+    RELOAD_HANDLE
+        .get_or_try_init(move || {
+            // First create a boxed BaseLayer
+            let cl: BoxedLayer = Box::new(BaseLayer {});
+
+            // Now create a reloading layer from that
+            let (reloading_layer, handle) = ReloadLayer::new(cl);
+
+            // Box up our reloading layer
+            let rl: BoxedLayer = Box::new(reloading_layer);
+
+            // Compose that with our subscriber
+            // let composed: Layered<BoxedLayer, FmtSubscriber> = rl.with_subscriber(subscriber);
+            let composed = rl.with_subscriber(subscriber);
+
+            // Set our subscriber as the global subscriber
+            tracing::subscriber::set_global_default(composed)?;
+
+            tracing::info!("Global subscriber configured successfully");
+
+            // Return our handle to store in OnceCell
+            Ok(handle)
+        })
+        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
+    Ok(())
+}
+
+pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
+    match RELOAD_HANDLE.get() {
+        Some(hdl) => {
+            hdl.reload(new_layer)
+                .map_err(FederatedServerError::ReloadTracingLayerError)?;
+        }
+        None => {
+            return Err(FederatedServerError::NoReloadTracingHandleError);
+        }
+    }
+    Ok(())
+}
+
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
-
-pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
-
-static DISPATCHER: Lazy<Mutex<Dispatch>> = Lazy::new(|| Mutex::new(Default::default()));
-
-/// Retrieve a new dispatcher which uses the global subscriber
-pub fn get_dispatcher() -> Dispatch {
-    DISPATCHER.lock().unwrap().clone()
-}
-
-/// Update our subscriber. Should only be invoked from OTEL plugin.
-pub fn set_dispatcher(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
-    let mut sub_guard = DISPATCHER.lock().unwrap();
-
-    let new_dispatch = tracing::Dispatch::new(new_sub);
-    *sub_guard = new_dispatch;
-}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -87,6 +125,15 @@ pub enum FederatedServerError {
 
     /// Could not configure spaceport: {0}
     ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
+
+    /// No reload handle available
+    NoReloadTracingHandleError,
+
+    /// Could not set global subscriber: {0}
+    SetGlobalSubscriberError(SetGlobalDefaultError),
+
+    /// Could not reload tracing layer: {0}
+    ReloadTracingLayerError(ReloadError),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -548,6 +595,29 @@ impl FederatedServerHandle {
         if let Some(mut state_receiver) = self.state_receiver.take() {
             state_receiver.close();
         }
+    }
+
+    /// State receiver that prints out basic lifecycle events.
+    pub async fn with_default_state_receiver(&mut self) {
+        self.state_receiver()
+            .for_each(|state| {
+                match state {
+                    State::Startup => {
+                        tracing::info!(r#"Starting Apollo Router"#)
+                    }
+                    State::Running { address, .. } => {
+                        tracing::info!("Listening on {} 🚀", address)
+                    }
+                    State::Stopped => {
+                        tracing::info!("Stopped")
+                    }
+                    State::Errored => {
+                        tracing::info!("Stopped with error")
+                    }
+                }
+                future::ready(())
+            })
+            .await
     }
 }
 
