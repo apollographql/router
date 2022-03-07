@@ -119,15 +119,6 @@ async fn rt_main() -> Result<()> {
         .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?)
         .finish();
 
-    /*
-     * XXX: Choice no longer possible because of the limitations in FmtSubscriber definition
-     * see above...
-    if atty::is(atty::Stream::Stdout) {
-        set_global_subscriber(builder, filter)?;
-    } else {
-        set_global_subscriber(builder, filter)?;
-    };
-    */
     set_global_subscriber(subscriber)?;
 
     GLOBAL_ENV_FILTER.set(env_filter).unwrap();
