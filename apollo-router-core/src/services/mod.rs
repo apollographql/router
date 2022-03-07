@@ -1,9 +1,10 @@
-use self::checkpoint::{CheckpointLayer, Step};
+pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer, Step};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
+use futures::future::BoxFuture;
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
@@ -14,6 +15,7 @@ use tokio::sync::RwLock;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
+
 pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
@@ -211,6 +213,25 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(CheckpointLayer::new(checkpoint_fn))
     }
 
+    fn async_checkpoint<S, Request>(
+        self,
+        async_checkpoint_fn: impl Fn(
+                Request,
+            ) -> BoxFuture<
+                'static,
+                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+            > + Send
+            + Sync
+            + 'static,
+    ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Request>, L>>
+    where
+        S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+        Request: Send + 'static,
+        S::Future: Send,
+        S::Response: Send + 'static,
+    {
+        self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
+    }
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 
