@@ -76,7 +76,7 @@ checksum = "c1da9c412262c1dd533a84c9b867dcb4e68ab852a0936e235d75242585dda631"
 [[package]]
 name = "apollo-encoder"
 version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#bfbc756a38c5275b572b7765663ef72925f37472"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 
 [[package]]
 name = "apollo-federation-types"
@@ -107,7 +107,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.3"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#bfbc756a38c5275b572b7765663ef72925f37472"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "rowan",
 ]
@@ -239,10 +239,10 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic#bfbc756a38c5275b572b7765663ef72925f37472"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
 dependencies = [
  "apollo-encoder 0.2.2",
- "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
+ "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe)",
  "arbitrary",
  "once_cell",
 ]
@@ -3245,7 +3245,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?branch=bnjjj/apollo_smith_semantic)",
+ "apollo-parser 0.2.3 (git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe)",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
