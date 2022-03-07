@@ -368,6 +368,10 @@ impl Schema {
             api_schema: None,
         }
     }
+
+    pub fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
 }
 
 #[derive(Debug)]
