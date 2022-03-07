@@ -15,7 +15,6 @@ impl Plugin for OverrideSubgraphUrl {
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::info!("OverrideSubgraphUrl {:#?}!", configuration);
-        println!("OverrideSubgraphUrl {:#?}!", configuration);
         Ok(OverrideSubgraphUrl {
             urls: configuration,
         })
@@ -27,15 +26,9 @@ impl Plugin for OverrideSubgraphUrl {
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         let new_url = self.urls.get(subgraph_name).cloned();
-
-        println!("Request for subgraph '{subgraph_name}'");
         service
             .map_request(move |mut req: SubgraphRequest| {
-                println!("  with URL '{}'", req.http_request.url());
-
                 if let Some(new_url) = new_url.clone() {
-                    println!("  replaced by '{}'", new_url);
-
                     req.http_request
                         .set_url(new_url)
                         .expect("url has been checked when we configured the plugin");
