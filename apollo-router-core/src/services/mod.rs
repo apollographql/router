@@ -225,11 +225,10 @@ pub trait ServiceBuilderExt<L>: Sized {
             + 'static,
     ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Request>, L>>
     where
-        S: Service<Request> + Send + 'static,
+        S: Service<Request, Error = BoxError> + Clone + Send + 'static,
         Request: Send + 'static,
         S::Future: Send,
         S::Response: Send + 'static,
-        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }

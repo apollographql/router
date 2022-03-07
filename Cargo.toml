@@ -5,8 +5,10 @@ members = [
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
+    "examples/async-allow-client-id",
+    "examples/compose-your-graphql-router",
+    "examples/forbid-anonymous-operations",
     "fuzz",
     "uplink",
     "xtask",
-    "examples/*",
 ]

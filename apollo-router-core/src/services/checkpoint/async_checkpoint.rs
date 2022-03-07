@@ -8,11 +8,10 @@ use tower::{
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     Request: Send + 'static,
     S::Future: Send,
     S::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
     checkpoint_fn: Arc<
         dyn Fn(
@@ -29,11 +28,10 @@ where
 #[allow(clippy::type_complexity)]
 impl<S, Request> AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     Request: Send + 'static,
     S::Future: Send,
     S::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
     /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
     pub fn new(
@@ -54,11 +52,10 @@ where
 
 impl<S, Request> Layer<S> for AsyncCheckpointLayer<S, Request>
 where
-    S: Service<Request> + Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     <S as Service<Request>>::Future: Send,
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
 {
     type Service = AsyncCheckpointService<
         BoxCloneService<Request, <S as Service<Request>>::Response, BoxError>,
@@ -79,8 +76,7 @@ where
 pub struct AsyncCheckpointService<S, Request>
 where
     Request: Send + 'static,
-    S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -101,8 +97,7 @@ where
 impl<S, Request> AsyncCheckpointService<S, Request>
 where
     Request: Send + 'static,
-    S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
@@ -118,10 +113,9 @@ where
             + 'static,
         service: S,
     ) -> Self {
-        let inner = Buffer::new(service, 20_000);
         Self {
             checkpoint_fn: Arc::new(checkpoint_fn),
-            inner: ServiceBuilder::new().service(inner).boxed_clone(),
+            inner: service.boxed_clone(),
         }
     }
 }
@@ -129,8 +123,7 @@ where
 impl<S, Request> Service<Request> for AsyncCheckpointService<S, Request>
 where
     Request: Send + 'static,
-    S: Service<Request> + Send + 'static,
-    <S as Service<Request>>::Error: Into<BoxError> + Send + Sync + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {

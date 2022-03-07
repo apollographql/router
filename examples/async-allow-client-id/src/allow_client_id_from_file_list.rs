@@ -132,6 +132,14 @@ impl Plugin for AllowClientIdFromFileList {
                     }
                 })
             })
+            // Given the async nature of our checkpoint, we need to make sure
+            // the underlying service will be available whenever the checkpoint
+            // returns Step::Continue.
+            // This is achieved by adding a buffer in front of the service,
+            // and (automatically) giving one `slot` to our async_checkpoint
+            //
+            // forgetting to add .buffer() here will trigger a compilation error.
+            .buffer(20_000)
             .service(service)
             .boxed()
     }
