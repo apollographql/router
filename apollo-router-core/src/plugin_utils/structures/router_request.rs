@@ -1,6 +1,7 @@
 use super::from_names_and_values;
-use crate::{http_compat, Context, Object};
-use http::Request;
+use crate::{http_compat::RequestBuilder, Context, Object};
+use http::Method;
+use reqwest::Url;
 use serde_json_bytes::Value;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -25,11 +26,12 @@ impl From<RouterRequest> for crate::RouterRequest {
             extensions: request.extensions.unwrap_or_default(),
         };
 
-        let req = Request::builder().uri("http://default").body(req).unwrap();
-        let req_compat = http_compat::Request::try_from(req).unwrap();
+        let req = RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
+            .body(req)
+            .unwrap();
 
         crate::RouterRequest {
-            context: request.context.unwrap_or_default().with_request(req_compat),
+            context: request.context.unwrap_or_default().with_request(req),
         }
     }
 }

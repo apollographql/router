@@ -2,16 +2,16 @@ use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::get_dispatcher;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, Response};
+use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::uri::Authority;
-use http::Uri;
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
+use reqwest::Url;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -382,27 +382,18 @@ where
         match service.ready_oneshot().await {
             Ok(mut service) => {
                 let uri = match authority {
-                    Some(authority) => Uri::try_from(format!("http://{}", authority.as_str()))
+                    Some(authority) => Url::parse(&format!("http://{}", authority.as_str()))
                         .expect("if the authority is some then the URL is valid; qed"),
-                    None => Uri::from_static("http://router"),
+                    None => Url::parse("http://router").unwrap(),
                 };
 
-                println!("uri {:?}", uri);
-                let mut http_request = http::Request::builder()
-                    .method(method)
-                    .uri(uri)
-                    .body(request)
-                    .unwrap();
+                let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
                 *http_request.headers_mut() = header_map;
 
                 let span = Span::current();
 
                 let response = service
-                    .call(
-                        http_request
-                            .try_into()
-                            .expect("we set the uri ourself; qed"),
-                    )
+                    .call(http_request)
                     .await
                     .map(|response| {
                         tracing::trace_span!(parent: &span, "serialize_response")

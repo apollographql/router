@@ -75,11 +75,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
         let configuration = (*configuration).clone();
-        let subgraphs = configuration.load_subgraphs(&schema).map_err(|err| {
-            err.into_iter().for_each(|err| tracing::error!("{:#}", err));
-
-            BoxError::from(ConfigurationError::InvalidConfiguration)
-        })?;
+        let subgraphs = configuration.load_subgraphs(&schema);
 
         let configuration = add_default_plugins(configuration);
 

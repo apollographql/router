@@ -29,7 +29,7 @@ impl Plugin for OverrideSubgraphUrl {
         println!("Request for subgraph '{subgraph_name}'");
         service
             .map_request(move |mut req: SubgraphRequest| {
-                println!("  with URL '{}'", req.http_request.inner.uri());
+                println!("  with URL '{}'", req.http_request.url());
 
                 if let Some(new_url) = new_url.take() {
                     println!("  replaced by '{}'", new_url);
@@ -53,7 +53,7 @@ mod tests {
         plugin_utils::{self, MockSubgraphService},
         Context, DynPlugin, SubgraphRequest,
     };
-    use http::Uri;
+    use reqwest::Url;
     use serde_json::Value;
     use std::str::FromStr;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -65,8 +65,8 @@ mod tests {
             .expect_call()
             .withf(|req| {
                 assert_eq!(
-                    req.http_request.inner.uri(),
-                    &Uri::from_static("http://localhost:8001")
+                    req.http_request.url(),
+                    &Url::parse("http://localhost:8001").unwrap()
                 );
                 true
             })

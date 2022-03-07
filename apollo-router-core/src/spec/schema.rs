@@ -1,6 +1,7 @@
 use crate::*;
 use apollo_parser::ast;
 use itertools::Itertools;
+use reqwest::Url;
 use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
@@ -8,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
-    subgraphs: HashMap<String, String>,
+    subgraphs: HashMap<String, Url>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) custom_scalars: HashSet<String>,
@@ -169,8 +170,25 @@ impl std::str::FromStr for Schema {
                                                     }
                                                 }
                                                 if let (Some(name), Some(url)) = (name, url) {
-                                                    // FIXME: return an error on name collisions
-                                                    subgraphs.insert(name, url);
+                                                    if url.is_empty() {
+                                                        return Err(
+                                                            SchemaError::MissingSubgraphUrl(name),
+                                                        );
+                                                    }
+                                                    if subgraphs
+                                                        .insert(
+                                                            name.clone(),
+                                                            Url::parse(&url).map_err(|err| {
+                                                                SchemaError::UrlParse(
+                                                                    name.clone(),
+                                                                    err,
+                                                                )
+                                                            })?,
+                                                        )
+                                                        .is_some()
+                                                    {
+                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{}'", name)));
+                                                    }
                                                 }
                                             }
                                         }
@@ -344,7 +362,7 @@ impl Schema {
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
-    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
+    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Url)> {
         self.subgraphs.iter()
     }
 

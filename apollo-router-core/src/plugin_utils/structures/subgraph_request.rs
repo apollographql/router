@@ -1,6 +1,7 @@
 use super::from_names_and_values;
-use crate::{fetch::OperationKind, http_compat, Context, Object};
-use http::Request;
+use crate::{fetch::OperationKind, http_compat, Context, Object, Request};
+use http::Method;
+use reqwest::Url;
 use serde_json_bytes::Value;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -25,11 +26,10 @@ impl From<SubgraphRequest> for crate::SubgraphRequest {
             variables: request.variables.unwrap_or_default(),
             extensions: request.extensions.unwrap_or_default(),
         };
-        let req = Request::builder()
-            .uri("http://default")
-            .body(gql_req)
-            .unwrap();
-        let req_compat = http_compat::Request::try_from(req).unwrap();
+        let req_compat: http_compat::Request<Request> =
+            http_compat::RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
+                .body(gql_req)
+                .unwrap();
         crate::SubgraphRequest {
             context: request
                 .context

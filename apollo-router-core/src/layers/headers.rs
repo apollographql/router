@@ -294,10 +294,13 @@ mod test {
     use crate::headers::{
         InsertConfig, InsertLayer, PropagateConfig, PropagateLayer, RemoveConfig, RemoveLayer,
     };
+    use crate::http_compat::RequestBuilder;
     use crate::layer::ConfigurableLayer;
     use crate::plugin_utils::MockSubgraphService;
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST};
+    use http::Method;
+    use reqwest::Url;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tower::{BoxError, Layer};
@@ -475,9 +478,7 @@ mod test {
 
     fn example_originating_request() -> Context {
         Context::new().with_request(Arc::new(
-            http::Request::builder()
-                .uri("http://test")
-                .method("GET")
+            RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
                 .header("da", "vda")
                 .header("db", "vdb")
                 .header("dc", "vdc")
@@ -485,17 +486,13 @@ mod test {
                 .header(CONTENT_LENGTH, "2")
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
-                .unwrap()
-                .try_into()
                 .unwrap(),
         ))
     }
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
-            http_request: http::Request::builder()
-                .uri("http://test")
-                .method("GET")
+            http_request: RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")
@@ -503,8 +500,6 @@ mod test {
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query("query").build())
-                .unwrap()
-                .try_into()
                 .unwrap(),
             operation_kind: OperationKind::Query,
             context: example_originating_request(),

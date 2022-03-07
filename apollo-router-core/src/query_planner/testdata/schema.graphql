@@ -104,12 +104,12 @@ url: String!
 scalar join__FieldSet
 
 enum join__Graph {
-ACCOUNTS @join__graph(name: "accounts" url: "")
-BOOKS @join__graph(name: "books" url: "")
-DOCUMENTS @join__graph(name: "documents" url: "")
-INVENTORY @join__graph(name: "inventory" url: "")
-PRODUCT @join__graph(name: "product" url: "")
-REVIEWS @join__graph(name: "reviews" url: "")
+ACCOUNTS @join__graph(name: "accounts" url: "http://accounts")
+BOOKS @join__graph(name: "books" url: "http://books")
+DOCUMENTS @join__graph(name: "documents" url: "http://documents")
+INVENTORY @join__graph(name: "inventory" url: "http://inventory")
+PRODUCT @join__graph(name: "product" url: "http://products")
+REVIEWS @join__graph(name: "reviews" url: "http://reviews")
 }
 
 type KeyValue {
