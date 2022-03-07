@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceExt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
     urls: HashMap<String, Url>,
 }
@@ -26,13 +26,14 @@ impl Plugin for OverrideSubgraphUrl {
         subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        let mut new_url = self.urls.get(subgraph_name).cloned();
+        let new_url = self.urls.get(subgraph_name).cloned();
+
         println!("Request for subgraph '{subgraph_name}'");
         service
             .map_request(move |mut req: SubgraphRequest| {
                 println!("  with URL '{}'", req.http_request.url());
 
-                if let Some(new_url) = new_url.take() {
+                if let Some(new_url) = new_url.clone() {
                     println!("  replaced by '{}'", new_url);
 
                     req.http_request
