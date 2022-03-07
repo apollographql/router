@@ -4,7 +4,6 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
-use reqwest::Url;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::{
     ArrayValidation, ObjectValidation, Schema, SchemaObject, SingleOrVec, SubschemaValidation,
@@ -36,10 +35,6 @@ pub enum ConfigurationError {
     OtlpTracing(opentelemetry::trace::TraceError),
     /// The configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
-    /// Could not find an URL for subgraph {0}
-    MissingSubgraphUrl(String),
-    /// Invalid URL for subgraph {subgraph}: {url}
-    InvalidSubgraphUrl { subgraph: String, url: String },
     /// Unknown plugin {0}
     PluginUnknown(String),
     /// Plugin {plugin} could not be configured: {error}
@@ -83,48 +78,22 @@ fn default_listen() -> ListenAddr {
 }
 
 impl Configuration {
-    pub fn load_subgraphs(
-        &self,
-        schema: &graphql::Schema,
-    ) -> Result<HashMap<String, Subgraph>, Vec<ConfigurationError>> {
-        let mut errors = Vec::new();
-        let mut subgraphs = HashMap::new();
-
-        for (name, schema_url) in schema.subgraphs() {
-            if schema_url.is_empty() {
-                errors.push(ConfigurationError::MissingSubgraphUrl(name.to_owned()));
-                continue;
-            }
-            println!("schema url {schema_url}");
-            match Url::parse(schema_url) {
-                Err(_e) => {
-                    errors.push(ConfigurationError::InvalidSubgraphUrl {
-                        subgraph: name.to_owned(),
-                        url: schema_url.to_owned(),
-                    });
-                }
-                Ok(routing_url) => {
-                    println!("routing_url {:?}", routing_url);
-                    subgraphs.insert(
-                        name.to_owned(),
-                        Subgraph {
-                            routing_url,
-                            layers: self
-                                .subgraphs
-                                .get(name)
-                                .map(|s| s.layers.clone())
-                                .unwrap_or_default(),
-                        },
-                    );
-                }
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(subgraphs)
-        } else {
-            Err(errors)
-        }
+    pub fn load_subgraphs(&self, schema: &graphql::Schema) -> HashMap<String, SubgraphConf> {
+        schema
+            .subgraphs()
+            .map(|(name, _subgraph_url)| {
+                (
+                    name.to_owned(),
+                    SubgraphConf {
+                        layers: self
+                            .subgraphs
+                            .get(name)
+                            .map(|s| s.layers.clone())
+                            .unwrap_or_default(),
+                    },
+                )
+            })
+            .collect()
     }
 
     pub fn boxed(self) -> Box<Self> {
@@ -177,27 +146,6 @@ impl JsonSchema for Plugins {
         };
 
         Schema::Object(plugins_object)
-    }
-}
-
-/// Configuration for a subgraph.
-#[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
-pub struct Subgraph {
-    /// The url for the subgraph.
-    pub routing_url: Url,
-
-    /// Layer configuration
-    #[serde(default)]
-    #[builder(default)]
-    pub layers: Vec<Value>,
-}
-
-impl Subgraph {
-    pub fn new(routing_url: Url, layers: Vec<Value>) -> Self {
-        Self {
-            routing_url,
-            layers,
-        }
     }
 }
 
@@ -465,7 +413,9 @@ impl TlsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apollo_router_core::SchemaError;
     use insta::assert_json_snapshot;
+    use reqwest::Url;
     use schemars::gen::SchemaSettings;
 
     macro_rules! assert_config_snapshot {
@@ -579,47 +529,36 @@ mod tests {
         .parse()
         .unwrap();
 
-        let subgraphs = configuration.load_subgraphs(&schema).unwrap();
+        let _subgraphs = configuration.load_subgraphs(&schema);
+        let subgraphs: HashMap<&String, &Url> = schema.subgraphs().collect();
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            subgraphs.get("accounts").unwrap().routing_url.as_str(),
+            subgraphs.get(&"accounts".to_string()).unwrap().as_str(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
         // this should show a warning in logs
         assert_eq!(
-            subgraphs.get("inventory").unwrap().routing_url.as_str(),
+            subgraphs.get(&"inventory".to_string()).unwrap().as_str(),
             "http://localhost:4002/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            subgraphs.get("products").unwrap().routing_url.as_str(),
+            subgraphs.get(&"products".to_string()).unwrap().as_str(),
             "http://localhost:4003/graphql"
         );
 
         assert_eq!(
-            subgraphs.get("reviews").unwrap().routing_url.as_str(),
+            subgraphs.get(&"reviews".to_string()).unwrap().as_str(),
             "http://localhost:4004/graphql"
         );
     }
 
     #[test]
     fn missing_subgraph_url() {
-        let configuration = Configuration::builder()
-            .subgraphs(
-                [
-                    ("inventory".to_string(), SubgraphConf { layers: Vec::new() }),
-                    ("products".to_string(), SubgraphConf { layers: Vec::new() }),
-                ]
-                .iter()
-                .cloned()
-                .collect(),
-            )
-            .build();
-
-        let schema: graphql::Schema = r#"
+        let schema_error = r#"
         schema
           @core(feature: "https://specs.apollo.dev/core/v0.1"),
           @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -641,21 +580,15 @@ mod tests {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#
-        .parse()
-        .unwrap();
+        .parse::<graphql::Schema>()
+        .expect_err("Must have an error because we have one missing subgraph routing url");
 
-        let res = configuration.load_subgraphs(&schema);
-        let errors =
-            res.expect_err("Must have an error because we have one missing subgraph routing url");
-
-        assert_eq!(errors.len(), 1);
-
-        if let Some(ConfigurationError::MissingSubgraphUrl(subgraph)) = errors.get(0) {
+        if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
             assert_eq!(subgraph, "reviews");
         } else {
             panic!(
                 "expected missing subgraph URL for 'reviews', got: {:?}",
-                errors
+                schema_error
             );
         }
     }

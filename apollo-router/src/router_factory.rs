@@ -75,11 +75,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
         let configuration = (*configuration).clone();
-        let subgraphs = configuration.load_subgraphs(&schema).map_err(|err| {
-            err.into_iter().for_each(|err| tracing::error!("{:#}", err));
-
-            BoxError::from(ConfigurationError::InvalidConfiguration)
-        })?;
+        let subgraphs = configuration.load_subgraphs(&schema);
 
         let configuration = add_default_plugins(configuration);
 
@@ -87,9 +83,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
         for (name, subgraph) in &subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
-            let mut subgraph_service = BoxService::new(dedup_layer.layer(
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            ));
+            let mut subgraph_service =
+                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {

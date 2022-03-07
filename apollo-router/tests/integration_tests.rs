@@ -1,10 +1,12 @@
 use apollo_router::configuration::Configuration;
 use apollo_router::get_dispatcher;
 use apollo_router_core::{
-    prelude::*, Context, Object, PluggableRouterServiceBuilder, ReqwestSubgraphService,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
+    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
+    ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
 };
+use http::Method;
 use maplit::hashmap;
+use reqwest::Url;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
@@ -33,10 +35,9 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let http_request = http::Request::builder()
-            .method("POST")
+        let http_request = http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
             .body(request)
-            .unwrap().into();
+            .unwrap();
 
         let request = graphql::RouterRequest {
             context: Context::new().with_request(http_request),
@@ -96,11 +97,10 @@ async fn api_schema_hides_field() {
         ))
         .build();
 
-    let http_request = http::Request::builder()
-        .method("POST")
-        .body(request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+            .body(request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -185,11 +185,10 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -215,11 +214,10 @@ async fn service_errors_should_be_propagated() {
 
     let expected_service_hits = hashmap! {};
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -262,11 +260,10 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -312,11 +309,10 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(apq_only_request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(apq_only_request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -340,11 +336,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(apq_request_with_query)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(apq_request_with_query)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -363,11 +358,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let http_request = http::Request::builder()
-        .method("GET")
-        .body(apq_only_request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            .body(apq_only_request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: graphql::Context::new().with_request(http_request),
@@ -426,11 +420,10 @@ async fn missing_variables() {
         )
         .build();
 
-    let http_request = http::Request::builder()
-        .method("POST")
-        .body(request)
-        .unwrap()
-        .into();
+    let http_request =
+        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+            .body(request)
+            .unwrap();
 
     let request = graphql::RouterRequest {
         context: Context::new().with_request(http_request),
@@ -481,19 +474,20 @@ async fn setup_router_and_registry() -> (
         serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
             .unwrap();
     let counting_registry = CountingServiceRegistry::new();
-    let subgraphs = config.load_subgraphs(&schema).unwrap();
+    let subgraphs = config.load_subgraphs(&schema);
     let mut builder = PluggableRouterServiceBuilder::new(schema);
-    for (name, subgraph) in &subgraphs {
+    for name in subgraphs.keys() {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = ReqwestSubgraphService::new(name.to_owned(), subgraph.routing_url.to_owned())
-            .map_request(move |request: SubgraphRequest| {
+        let service = ReqwestSubgraphService::new(name.to_owned()).map_request(
+            move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
 
                 request
-            });
+            },
+        );
         builder = builder.with_subgraph_service(name, service);
     }
 
