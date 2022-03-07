@@ -1,32 +1,37 @@
-use std::{
-    fs::File,
-    io::{Read, Write},
-    process::Command,
-};
-use which::which;
-
 #[cfg(not(windows))]
 fn main() {
+    use std::{
+        fs::File,
+        io::{Read, Write},
+    };
+
+    use rover_client::{
+        blocking::GraphQLClient,
+        operations::graph::introspect::{self, GraphIntrospectInput},
+    };
+    use std::collections::HashMap;
+
     if let Ok("debug") = std::env::var("PROFILE").as_deref() {
-        //~/.rover/bin/rover graph introspect https://uplink.api.apollographql.com/
-        which("rover")
-    .map_err(|_| "could not find path to rover executable, see installation instructions at https://github.com/apollographql/rover#installation-methods").unwrap();
+        let client = GraphQLClient::new(
+            "https://uplink.api.apollographql.com/",
+            reqwest::blocking::Client::new(),
+        )
+        .unwrap();
 
-        let output = Command::new("rover")
-            .args([
-                "graph",
-                "introspect",
-                "https://uplink.api.apollographql.com/",
-            ])
-            .output()
-            .expect("failed to execute process");
+        let introspection_response = introspect::run(
+            GraphIntrospectInput {
+                headers: HashMap::new(),
+            },
+            &client,
+        )
+        .unwrap();
 
-        let data = output.stdout;
+        let data = introspection_response.schema_sdl;
 
         match File::open("uplink.graphql") {
             Err(_) => File::create("uplink.graphql")
                 .expect("could not create uplink.graphql file")
-                .write_all(&data)
+                .write_all(data.as_bytes())
                 .expect("could not write downloaded uplink schema"),
             Ok(mut file) => {
                 let mut buf = Vec::new();
@@ -34,7 +39,7 @@ fn main() {
 
                 assert_eq!(
                     std::str::from_utf8(&buf).unwrap(),
-                    std::str::from_utf8(&data).unwrap(),
+                    data.as_str(),
                     "Uplink schema changed"
                 );
             }

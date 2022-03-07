@@ -2,10 +2,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{set_global_subscriber, ApolloRouterBuilder, RouterSubscriber};
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{
+    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, RouterSubscriber, SchemaKind,
+    ShutdownKind,
+};
 use directories::ProjectDirs;
-use futures::prelude::*;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
@@ -227,31 +228,7 @@ async fn rt_main() -> Result<()> {
         .shutdown(ShutdownKind::CtrlC)
         .build();
     let mut server_handle = server.serve();
-    server_handle
-        .state_receiver()
-        .for_each(|state| {
-            match state {
-                State::Startup => {
-                    tracing::info!(
-                        r#"Starting Apollo Router
-*******************************************************************
-⚠️  Experimental software, not YET recommended for production use ⚠️
-*******************************************************************"#
-                    )
-                }
-                State::Running { address, .. } => {
-                    tracing::info!("Listening on {} 🚀", address)
-                }
-                State::Stopped => {
-                    tracing::info!("Stopped")
-                }
-                State::Errored => {
-                    tracing::info!("Stopped with error")
-                }
-            }
-            future::ready(())
-        })
-        .await;
+    server_handle.with_default_state_receiver().await;
 
     if let Err(err) = server_handle.await {
         tracing::error!("{}", err);

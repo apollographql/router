@@ -330,8 +330,13 @@ impl Query {
                             selection_set,
                             schema,
                         )?;
-                    } else if field_type.is_non_null() {
-                        return Err(InvalidValue);
+                    } else {
+                        if !output.contains_key(name.as_str()) {
+                            output.insert((*name).clone(), Value::Null);
+                        }
+                        if field_type.is_non_null() {
+                            return Err(InvalidValue);
+                        }
                     }
                 }
                 Selection::InlineFragment {
@@ -887,6 +892,7 @@ mod tests {
                 "get": {
                     "foo": "1",
                     "stuff": {
+                        "bar": null,
                         "baz": "2",
                     },
                     "array": [
@@ -1462,7 +1468,9 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "reviews1": [ { } ],
+                    "reviews1": [ {
+                        "text1": null,
+                     } ],
                 },
             }},
         );
@@ -1587,7 +1595,9 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "reviews2": [ { } ],
+                    "reviews2": [ {
+                        "text1": null,
+                    } ],
                 },
             }},
         );
@@ -1710,7 +1720,9 @@ mod tests {
             json! {{
                 "me": {
                     "id": "a",
-                    "reviews3": [ { } ],
+                    "reviews3": [ {
+                        "text1": null,
+                    } ],
                 },
             }},
         );
@@ -1957,6 +1969,7 @@ mod tests {
             json! {{
                 "me": {
                     "name": "a",
+                    "name2": null,
                 },
             }},
         );
@@ -2277,7 +2290,9 @@ mod tests {
             }},
             None,
             json! {{
-                "me": { },
+                "me": {
+                    "name": null,
+                },
             }},
         );
 
@@ -2512,6 +2527,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name": "a",
                 }
@@ -2527,6 +2543,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name": null,
                 }
@@ -2543,6 +2560,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name2": "a",
                 }
@@ -2558,6 +2576,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": null
             }},
         );
@@ -2572,6 +2591,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name": "a",
                 }
@@ -2587,6 +2607,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name": null,
                 }
@@ -2603,6 +2624,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": {
                     "name2": "a",
                 }
@@ -2618,6 +2640,7 @@ mod tests {
             },
             None,
             json! {{
+                "__typename": null,
                 "get": null,
             }},
         );
@@ -2703,7 +2726,8 @@ mod tests {
                     "review": {
                         "id": "b",
                         "body": "hello",
-                    }
+                    },
+                    "name": null,
                 },
             }},
         );
