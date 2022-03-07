@@ -6,19 +6,32 @@ use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
 use futures::prelude::*;
 use tracing_subscriber::EnvFilter;
 
-mod allow_client_id_from_file_list;
+mod allow_client_id_from_file;
 
 // curl -v \
 //     --header 'content-type: application/json' \
+//     --header 'x-client-id: unknown' \
 //     --url 'http://127.0.0.1:4000' \
 //     --data '{"query":"query Query {\n  me {\n    name\n  }\n}"}'
 // [...]
-// < HTTP/1.1 400 Bad Request
-// < content-length: 90
-// < date: Thu, 03 Mar 2022 14:31:50 GMT
+// < HTTP/1.1 403 Forbidden
+// < content-length: 78
+// < date: Mon, 07 Mar 2022 12:08:21 GMT
 // <
 // * Connection #0 to host 127.0.0.1 left intact
-// {"errors":[{"message":"Anonymous operations are not allowed","locations":[],"path":null}]}
+// {"errors":[{"message":"client-id is not allowed","locations":[],"path":null}]}
+
+// curl -v \
+//     --header 'content-type: application/json' \
+//     --header 'x-client-id: jeremy' \
+//     --url 'http://127.0.0.1:4000' \
+//     --data '{"query":"query Query {\n  me {\n    name\n  }\n}"}'
+// < HTTP/1.1 200 OK
+// < content-length: 39
+// < date: Mon, 07 Mar 2022 12:09:08 GMT
+// <
+// * Connection #0 to host 127.0.0.1 left intact
+// {"data":{"me":{"name":"Ada Lovelace"}}}
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = tracing_subscriber::fmt::fmt()

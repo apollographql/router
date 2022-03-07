@@ -15,12 +15,12 @@ struct AllowClientIdConfig {
     path: String,
 }
 
-struct AllowClientIdFromFileList {
+struct AllowClientIdFromFile {
     header: String,
     allowed_ids_path: PathBuf,
 }
 
-impl Plugin for AllowClientIdFromFileList {
+impl Plugin for AllowClientIdFromFile {
     type Config = AllowClientIdConfig;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
@@ -153,7 +153,7 @@ impl Plugin for AllowClientIdFromFileList {
 register_plugin!(
     "com.example",
     "allow-client-id-from-file",
-    AllowClientIdFromFileList
+    AllowClientIdFromFile
 );
 
 // Writing plugins means writing tests that make sure they behave as expected!
@@ -162,9 +162,9 @@ register_plugin!(
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use crate::allow_client_id_from_file_list::AllowClientIdConfig;
+    use crate::allow_client_id_from_file::AllowClientIdConfig;
 
-    use super::AllowClientIdFromFileList;
+    use super::AllowClientIdFromFile;
     use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
     use http::StatusCode;
     use serde_json::json;
@@ -188,15 +188,15 @@ mod tests {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
-        // letting us know AllowClientIdFromFileList did not behave as expected.
+        // letting us know AllowClientIdFromFile did not behave as expected.
         let mock_service = plugin_utils::MockRouterService::new().build();
 
-        // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
+        // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
+        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
-        .expect("couldn't create AllowClientIdFromFileList")
+        .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
@@ -208,7 +208,7 @@ mod tests {
             .await
             .unwrap();
 
-        // AllowClientIdFromFileList should return a 401...
+        // AllowClientIdFromFile should return a 401...
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
 
         // with the expected error message
@@ -226,15 +226,15 @@ mod tests {
         // create a mock service we will use to test our plugin
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
-        // letting us know AllowClientIdFromFileList did not behave as expected.
+        // letting us know AllowClientIdFromFile did not behave as expected.
         let mock_service = plugin_utils::MockRouterService::new().build();
 
-        // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
+        // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
+        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
-        .expect("couldn't create AllowClientIdFromFileList")
+        .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 
         // Let's create a request with a not allowed client id...
@@ -252,7 +252,7 @@ mod tests {
             .await
             .unwrap();
 
-        // AllowClientIdFromFileList should return a 403...
+        // AllowClientIdFromFile should return a 403...
         assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
 
         // with the expected error message
@@ -301,12 +301,12 @@ mod tests {
         // The mock has been set up, we can now build a service from it
         let mock_service = mock.build();
 
-        // In this service_stack, AllowClientIdFromFileList is `decorating` or `wrapping` our mock_service.
-        let service_stack = AllowClientIdFromFileList::new(AllowClientIdConfig {
+        // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
+        let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
-        .expect("couldn't create AllowClientIdFromFileList")
+        .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 
         // Let's create a request with an valid client id...
