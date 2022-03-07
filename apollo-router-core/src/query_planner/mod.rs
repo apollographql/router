@@ -64,7 +64,7 @@ impl PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(skip_all, name = "validate", level = "debug")]
+    #[tracing::instrument(skip_all, level = "debug", name = "validate")]
     pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self.root.validate_services_against_plan(service_registry) {

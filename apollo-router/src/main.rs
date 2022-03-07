@@ -2,10 +2,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use apollo_router::configuration::Configuration;
-use apollo_router::{ApolloRouterBuilder, GLOBAL_ENV_FILTER};
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind, State};
+use apollo_router::{
+    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
+};
 use directories::ProjectDirs;
-use futures::prelude::*;
+use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::fmt;
@@ -13,12 +14,18 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 use tracing_subscriber::EnvFilter;
 
+static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
+
 /// Options for the router
 #[derive(StructOpt, Debug)]
 #[structopt(name = "router", about = "Apollo federation router")]
 struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
-    #[structopt(long = "log", default_value = "info", alias = "loglevel")]
+    #[structopt(
+        long = "log",
+        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info",
+        alias = "loglevel"
+    )]
     env_filter: String,
 
     /// Reload configuration and schema files automatically.
@@ -102,15 +109,17 @@ async fn rt_main() -> Result<()> {
         return Ok(());
     }
 
+    // This is more complex than I'd like it to be. Really, we just want to pass
+    // a FmtSubscriber to set_global_subscriber(), but we can't because of the
+    // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
+    // for more details.
     let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
 
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
-    if atty::is(atty::Stream::Stdout) {
-        builder.init();
-    } else {
-        builder.json().init();
-    }
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?)
+        .finish();
+
+    set_global_subscriber(subscriber)?;
 
     GLOBAL_ENV_FILTER.set(env_filter).unwrap();
 
@@ -213,31 +222,7 @@ async fn rt_main() -> Result<()> {
         .shutdown(ShutdownKind::CtrlC)
         .build();
     let mut server_handle = server.serve();
-    server_handle
-        .state_receiver()
-        .for_each(|state| {
-            match state {
-                State::Startup => {
-                    tracing::info!(
-                        r#"Starting Apollo Router
-*******************************************************************
-⚠️  Experimental software, not YET recommended for production use ⚠️
-*******************************************************************"#
-                    )
-                }
-                State::Running { address, .. } => {
-                    tracing::info!("Listening on {} 🚀", address)
-                }
-                State::Stopped => {
-                    tracing::info!("Stopped")
-                }
-                State::Errored => {
-                    tracing::info!("Stopped with error")
-                }
-            }
-            future::ready(())
-        })
-        .await;
+    server_handle.with_default_state_receiver().await;
 
     if let Err(err) = server_handle.await {
         tracing::error!("{}", err);

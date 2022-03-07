@@ -101,6 +101,16 @@ impl Configuration {
     }
 }
 
+impl FromStr for Configuration {
+    type Err = ConfigurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let config =
+            serde_yaml::from_str(s).map_err(|_| ConfigurationError::InvalidConfiguration)?;
+        Ok(config)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct Plugins {

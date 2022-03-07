@@ -1,5 +1,4 @@
 use apollo_router::configuration::Configuration;
-use apollo_router::get_dispatcher;
 use apollo_router_core::{
     http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
     ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
@@ -491,7 +490,6 @@ async fn setup_router_and_registry() -> (
         builder = builder.with_subgraph_service(name, service);
     }
 
-    builder = builder.with_dispatcher(get_dispatcher());
     let (router, _) = builder.build().await;
 
     (router, counting_registry)

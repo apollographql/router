@@ -1,5 +1,4 @@
 use crate::configuration::{Configuration, ConfigurationError};
-use crate::get_dispatcher;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::DynPlugin;
 use apollo_router_core::{
@@ -12,7 +11,6 @@ use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-use tracing::instrument::WithSubscriber;
 
 const REPORTING_MODULE_NAME: &str = "com.apollographql.reporting";
 
@@ -196,29 +194,20 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         //  - all configuration errors are checked
         // and **before** build() is called.
         //
-        // This is because our global SUBSCRIBER is initialized by
+        // This is because our tracing configuration is initialized by
         // the startup() method of our Reporting plugin.
-        let dispatcher = get_dispatcher();
-        builder = builder.with_dispatcher(dispatcher.clone());
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
-
-        // TODO [igni]: remove this once gary's refactoring has landed
-        let buffer = 20000;
-        let (service, worker) = Buffer::pair(
-            ServiceBuilder::new().service(
-                pluggable_router_service
-                    .map_request(|http_request: Request<apollo_router_core::Request>| {
-                        RouterRequest {
-                            context: Context::new().with_request(http_request),
-                        }
-                    })
-                    .map_response(|response| response.response)
-                    .boxed_clone(),
-            ),
-            buffer,
+        let service = ServiceBuilder::new().buffer(20_000).service(
+            pluggable_router_service
+                .map_request(
+                    |http_request: Request<apollo_router_core::Request>| RouterRequest {
+                        context: Context::new().with_request(http_request),
+                    },
+                )
+                .map_response(|response| response.response)
+                .boxed_clone(),
         );
-        tokio::spawn(worker.with_subscriber(dispatcher));
         // If we get here, everything is good so shutdown our previous plugins
         for mut plugin in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
