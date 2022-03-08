@@ -72,20 +72,17 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
-        let mut configuration = (*configuration).clone();
-        if let Err(mut e) = configuration.load_subgraphs(&schema) {
-            errors.append(&mut e);
-        }
+        let configuration = (*configuration).clone();
+        let subgraphs = configuration.load_subgraphs(&schema);
 
         let configuration = add_default_plugins(configuration);
 
         let mut builder = PluggableRouterServiceBuilder::new(schema);
 
-        for (name, subgraph) in &configuration.subgraphs {
+        for (name, subgraph) in &subgraphs {
             let dedup_layer = QueryDeduplicationLayer;
-            let mut subgraph_service = BoxService::new(dedup_layer.layer(
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            ));
+            let mut subgraph_service =
+                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
 
             for layer in &subgraph.layers {
                 match layer.as_object().and_then(|o| o.iter().next()) {

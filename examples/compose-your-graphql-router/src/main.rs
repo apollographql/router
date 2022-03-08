@@ -24,7 +24,6 @@ async fn main() -> Result<()> {
     // can be performed with an http client against the `https://accounts.demo.starstuff.dev` url
     let subgraph_service = BoxService::new(apollo_router_core::ReqwestSubgraphService::new(
         "accounts".to_string(),
-        "https://accounts.demo.starstuff.dev".parse()?,
     ));
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
 
