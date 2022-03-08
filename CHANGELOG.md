@@ -46,9 +46,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :bug: Fixes
 
-- **Managed Federation no longer requires `router_url`** ([PR #553](https://github.com/apollographql/router/pull/553))
+- **Configuration no longer requires `router_url`** ([PR #553](https://github.com/apollographql/router/pull/553))
 
-  When using Managed Federation, it is no longer necessary to provide a `routing_url` value.  Instead, the values provided by Studio will be used and the `routing_url` can be used only to override those URLs.
+  When using Managed Federation or directly providing a Supergraph file, it is no longer necessary to provide a `routing_url` value.  Instead, the values provided by the Supergraph or Studio will be used and the `routing_url` can be used only to override specific URLs for specific subgraphs.
 
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
 
