@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  remind_missing_changelog:
     runs-on: ubuntu-latest
     steps:
       - name: Missing Changelog Reminder
