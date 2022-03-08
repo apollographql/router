@@ -139,30 +139,30 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     tokio::task::spawn(async move{
                                         match res {
                                             NetworkStream::Tcp(stream) => {
-                                                    stream
-                                                        .set_nodelay(true)
-                                                        .expect(
-                                                            "this should not fail unless the socket is invalid",
-                                                        );
-                                                        let connection = Http::new()
-                                                        .http1_keep_alive(true)
-                                                        .serve_connection(stream, svc);
+                                                stream
+                                                    .set_nodelay(true)
+                                                    .expect(
+                                                        "this should not fail unless the socket is invalid",
+                                                    );
+                                                    let connection = Http::new()
+                                                    .http1_keep_alive(true)
+                                                    .serve_connection(stream, svc);
 
-                                                    tokio::pin!(connection);
-                                                    tokio::select! {
-                                                        // the connection finished first
-                                                        _res = &mut connection => {
-                                                        }
-                                                        // the shutdown receiver was triggered first,
-                                                        // so we tell the connection to do a graceful shutdown
-                                                        // on the next request, then we wait for it to finish
-                                                        _ = connection_shutdown.notified() => {
-                                                            let c = connection.as_mut();
-                                                            c.graceful_shutdown();
-
-                                                            let _= connection.await;
-                                                        }
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
                                                     }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
+
+                                                        let _= connection.await;
+                                                    }
+                                                }
                                             }
                                             #[cfg(unix)]
                                             NetworkStream::Unix(stream) => {
@@ -170,22 +170,21 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                                 .http1_keep_alive(true)
                                                 .serve_connection(stream, svc);
 
-                                            tokio::pin!(connection);
-                                            tokio::select! {
-                                                // the connection finished first
-                                                _res = &mut connection => {
-                                                }
-                                                // the shutdown receiver was triggered first,
-                                                // so we tell the connection to do a graceful shutdown
-                                                // on the next request, then we wait for it to finish
-                                                _ = connection_shutdown.notified() => {
-                                                    let c = connection.as_mut();
-                                                    c.graceful_shutdown();
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
+                                                    }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
 
-                                                    let _= connection.await;
+                                                        let _= connection.await;
+                                                    }
                                                 }
-
-                                            }
                                             }
                                         }
                                     });
