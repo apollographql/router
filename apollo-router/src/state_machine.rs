@@ -350,7 +350,7 @@ mod tests {
     use apollo_router_core::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
-    use mockall::{mock, predicate::*, Sequence};
+    use mockall::{mock, Sequence};
     use std::net::SocketAddr;
     use std::pin::Pin;
     use std::str::FromStr;
@@ -359,6 +359,10 @@ mod tests {
     use test_log::test;
     use tower::{BoxError, Service};
     use url::Url;
+
+    fn example_schema() -> Schema {
+        include_str!("testdata/supergraph.graphql").parse().unwrap()
+    }
 
     #[test(tokio::test)]
     async fn no_configuration() {
@@ -424,14 +428,14 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: String::new()
+                        schema: example_schema().as_str().to_string()
                     },
                     State::Stopped
                 ]
@@ -446,8 +450,10 @@ mod tests {
     async fn startup_reload_schema() {
         let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
-        let schema = include_str!("testdata/supergraph.graphql");
-
+        let minimal_schema = r#"       
+        type Query {
+          me: String
+        }"#;
         assert!(matches!(
             execute(
                 server_factory,
@@ -459,19 +465,19 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new("".parse().unwrap())),
-                    UpdateSchema(Box::new(schema.parse().unwrap())),
+                    UpdateSchema(Box::new(minimal_schema.parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: String::new()
+                        schema: minimal_schema.to_string()
                     },
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: schema.to_string(),
+                        schema: example_schema().as_str().to_string(),
                     },
                     State::Stopped
                 ]
@@ -498,7 +504,7 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
                     UpdateConfiguration(
                         Configuration::builder()
                             .server(
@@ -516,11 +522,11 @@ mod tests {
                     State::Startup,
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: String::new()
+                        schema: example_schema().as_str().to_string()
                     },
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4001").unwrap().into(),
-                        schema: String::new()
+                        schema: example_schema().as_str().to_string()
                     },
                     State::Stopped
                 ]
@@ -548,14 +554,16 @@ mod tests {
                                     (
                                         "accounts".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                            routing_url: Url::parse("http://accounts/graphql")
+                                                .unwrap(),
                                             layers: Vec::new(),
                                         }
                                     ),
                                     (
                                         "products".to_string(),
                                         Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql").unwrap(),
+                                            routing_url: Url::parse("http://accounts/graphql")
+                                                .unwrap(),
                                             layers: Vec::new(),
                                         }
                                     )
@@ -567,24 +575,14 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new(r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                            PRODUCTS @join__graph(name: "products" url: "")
-                            INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-                        }"#.parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: r#"
-                        enum join__Graph {
-                            ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-                            PRODUCTS @join__graph(name: "products" url: "")
-                            INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-                        }"#.to_string()
+                        schema: example_schema().as_str().to_string()
                     },
                     State::Stopped
                 ]
@@ -615,7 +613,7 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
                 ],
                 vec![State::Startup, State::Errored,]
             )
@@ -656,15 +654,15 @@ mod tests {
                             .build()
                             .boxed()
                     ),
-                    UpdateSchema(Box::new("".parse().unwrap())),
-                    UpdateSchema(Box::new("".parse().unwrap())),
+                    UpdateSchema(Box::new(example_schema())),
+                    UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
                 vec![
                     State::Startup,
                     State::Running {
                         address: SocketAddr::from_str("127.0.0.1:4000").unwrap().into(),
-                        schema: String::new()
+                        schema: example_schema().as_str().to_string()
                     },
                     State::Stopped
                 ]

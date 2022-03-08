@@ -135,6 +135,16 @@ impl Configuration {
     }
 }
 
+impl FromStr for Configuration {
+    type Err = ConfigurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let config =
+            serde_yaml::from_str(s).map_err(|_| ConfigurationError::InvalidConfiguration)?;
+        Ok(config)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct Plugins {
@@ -553,6 +563,20 @@ mod tests {
             .build();
 
         let schema: graphql::Schema = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+        
+        type Query {
+          me: String
+        }
+        
+        directive @core(feature: String!) repeatable on SCHEMA
+        
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
         enum join__Graph {
           ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
           INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")

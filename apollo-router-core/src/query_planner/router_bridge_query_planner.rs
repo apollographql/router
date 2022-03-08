@@ -25,7 +25,7 @@ impl RouterBridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for RouterBridgeQueryPlanner {
-    #[tracing::instrument(skip_all, name = "plan", level = "debug")]
+    #[tracing::instrument(skip_all, level = "info", name = "plan")]
     async fn get(
         &self,
         query: String,
@@ -121,9 +121,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = RouterBridgeQueryPlanner::new(Arc::new(
-            include_str!("testdata/schema.graphql").parse().unwrap(),
-        ));
+        let planner = RouterBridgeQueryPlanner::new(Arc::new(example_schema()));
         let result = planner
             .get(
                 include_str!("testdata/query.graphql").into(),
@@ -133,6 +131,10 @@ mod tests {
             .await
             .unwrap();
         insta::assert_debug_snapshot!("plan", result);
+    }
+
+    fn example_schema() -> Schema {
+        include_str!("testdata/schema.graphql").parse().unwrap()
     }
 
     #[test]
@@ -147,21 +149,19 @@ mod tests {
     async fn empty_query_plan_should_be_a_planner_error() {
         insta::assert_debug_snapshot!(
             "empty_query_plan_should_be_a_planner_error",
-            RouterBridgeQueryPlanner::new(Arc::new(
-                include_str!("testdata/schema.graphql").parse().unwrap(),
-            ))
-            .get(
-                include_str!("testdata/unknown_introspection_query.graphql").into(),
-                None,
-                Default::default(),
-            )
-            .await
+            RouterBridgeQueryPlanner::new(Arc::new(example_schema()))
+                .get(
+                    include_str!("testdata/unknown_introspection_query.graphql").into(),
+                    None,
+                    Default::default(),
+                )
+                .await
         )
     }
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = RouterBridgeQueryPlanner::new(Arc::new("".parse().unwrap()));
+        let planner = RouterBridgeQueryPlanner::new(Arc::new(example_schema()));
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(

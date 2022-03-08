@@ -51,9 +51,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
 ], optional = true }
 prost-types = "0.9.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
-reqwest-middleware = "0.1.5"
-reqwest-tracing = { version = "0.2.1", features = ["opentelemetry_0_17"] }
-schemars = { version="0.8.8", features = ["url"] }
+schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
@@ -61,18 +59,18 @@ serde_yaml = "0.8.23"
 startup = "0.1.1"
 static_assertions = "1.1.0"
 structopt = "0.3.26"
-task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["net", "codec"] }
 tonic = { version = "0.6.2", optional = true }
-tower = { version="0.4.12", features = ["full"] }
+tower = { version = "0.4.12", features = ["full"] }
 tower-http = { version = "0.2.3", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.31"
+tracing-core = "0.1.22"
 tracing-opentelemetry = "0.17.2"
 tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
-typed-builder = "0.9.1"
+typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
@@ -81,7 +79,6 @@ warp = { version = "0.3.2", default-features = false, features = [
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 
 [dev-dependencies]
-httpmock = "0.6.6"
 insta = "1.12.0"
 maplit = "1.0.2"
 mockall = "0.11.0"

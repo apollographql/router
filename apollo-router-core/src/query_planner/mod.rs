@@ -64,7 +64,7 @@ impl PlanNode {
 
 impl QueryPlan {
     /// Validate the entire request for variables and services used.
-    #[tracing::instrument(skip_all, name = "validate", level = "debug")]
+    #[tracing::instrument(skip_all, level = "debug", name = "validate")]
     pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
         let mut early_errors = Vec::new();
         for err in self.root.validate_services_against_plan(service_registry) {
@@ -112,11 +112,12 @@ impl PlanNode {
         Box::pin(async move {
             tracing::trace!("Executing plan:\n{:#?}", self);
             let mut value;
-            let mut errors = Vec::new();
+            let mut errors;
 
             match self {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
+                    errors = Vec::new();
                     let span = tracing::info_span!("sequence");
                     for node in nodes {
                         let (v, err) = node
@@ -136,6 +137,7 @@ impl PlanNode {
                 }
                 PlanNode::Parallel { nodes } => {
                     value = Value::default();
+                    errors = Vec::new();
 
                     let span = tracing::info_span!("parallel");
                     let mut stream: stream::FuturesUnordered<_> = nodes
@@ -176,7 +178,7 @@ impl PlanNode {
                         .await;
 
                     value = v;
-                    errors.extend(err.into_iter());
+                    errors = err;
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
@@ -184,10 +186,13 @@ impl PlanNode {
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
-                        Ok(v) => value = v,
+                        Ok((v, e)) => {
+                            value = v;
+                            errors = e;
+                        }
                         Err(err) => {
                             failfast_error!("Fetch error: {}", err);
-                            errors.push(err.to_graphql_error(Some(current_dir.to_owned())));
+                            errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
                             value = Value::default();
                         }
                     }
@@ -346,7 +351,7 @@ pub(crate) mod fetch {
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
             schema: &'a Schema,
-        ) -> Result<Value, FetchError> {
+        ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
                 operation,
                 operation_kind,
@@ -370,7 +375,7 @@ pub(crate) mod fetch {
                     .body(
                         Request::builder()
                             .query(operation)
-                            .variables(Arc::new(variables))
+                            .variables(Arc::new(variables.clone()))
                             .build(),
                     )
                     .unwrap()
@@ -401,7 +406,21 @@ pub(crate) mod fetch {
                 });
             }
 
-            self.response_at_path(current_dir, paths, response)
+            // fix error path and erase subgraph error messages (we cannot expose subgraph information
+            // to the client)
+            let errors = response
+                .errors
+                .into_iter()
+                .map(|error| Error {
+                    locations: error.locations,
+                    path: error.path.map(|path| current_dir.join(path)),
+                    message: String::new(),
+                    extensions: Object::default(),
+                })
+                .collect();
+
+            self.response_at_path(current_dir, paths, response.data)
+                .map(|value| (value, errors))
         }
 
         #[instrument(skip_all, level = "debug", name = "response_insert")]
@@ -409,10 +428,8 @@ pub(crate) mod fetch {
             &'a self,
             current_dir: &'a Path,
             paths: Vec<Path>,
-            subgraph_response: Response,
+            data: Value,
         ) -> Result<Value, FetchError> {
-            let Response { data, .. } = subgraph_response;
-
             if !self.requires.is_empty() {
                 // we have to nest conditions and do early returns here
                 // because we need to take ownership of the inner value

@@ -9,12 +9,15 @@ pub struct QueryCache {
 }
 
 /// A resolver for cache misses
-struct QueryCacheResolver;
+struct QueryCacheResolver {
+    schema: Arc<Schema>,
+}
 
 #[async_trait::async_trait]
 impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
     async fn retrieve(&self, key: String) -> Result<Option<Arc<Query>>, CacheResolverError> {
-        let query_parsing_future = tokio::task::spawn_blocking(|| Query::parse(key));
+        let schema = self.schema.clone();
+        let query_parsing_future = tokio::task::spawn_blocking(move || Query::parse(key, &schema));
         let parsed_query = match query_parsing_future.await {
             Ok(res) => res.map(Arc::new),
             // Silently ignore cancelled tasks (never happen for blocking tasks).
@@ -30,13 +33,14 @@ impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
 
 impl QueryCache {
     /// Instantiate a new cache for parsed GraphQL queries.
-    pub fn new(cache_limit: usize) -> Self {
-        let resolver = QueryCacheResolver;
+    pub fn new(cache_limit: usize, schema: Arc<Schema>) -> Self {
+        let resolver = QueryCacheResolver { schema };
         let cm = CachingMap::new(Box::new(resolver), cache_limit);
         Self { cm }
     }
 
     /// Attempt to parse a string to a [`Query`] using cache if possible.
+    #[tracing::instrument(skip_all, level = "info" name = "get_query")]
     pub async fn get_query(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
         let key = query.as_ref().to_string();
 

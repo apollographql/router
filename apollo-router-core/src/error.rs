@@ -273,6 +273,8 @@ pub enum SchemaError {
     IoError(#[from] std::io::Error),
     /// Parsing error(s).
     Parse(ParseErrors),
+    /// Api error(s): {0}
+    Api(String),
 }
 
 #[derive(Debug)]

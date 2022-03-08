@@ -1,10 +1,10 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::get_dispatcher;
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
+use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
@@ -18,12 +18,10 @@ use tokio::sync::Notify;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
-use tracing::instrument::WithSubscriber;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::{
     http::{header::HeaderMap, StatusCode},
-    hyper::Body,
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -59,8 +57,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
         <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
     {
-        let dispatcher = get_dispatcher();
-
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -203,7 +199,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                 };
 
 
-                            }.with_subscriber(dispatcher.clone()));
+                            });
                         }
                     }
                 }
@@ -314,19 +310,18 @@ where
 
 // graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
 #[tracing::instrument(skip_all,
+    level = "info"
     name = "graphql_request",
     fields(
         query = %request.query.clone().unwrap_or_default(),
         operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()),
         client_name,
         client_version
-    ),
-    level = "info"
+    )
 )]
 fn run_graphql_request<RS>(
     service: RS,
     method: http::Method,
-
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
@@ -356,47 +351,45 @@ where
 
     async move {
         match service.ready_oneshot().await {
-            Ok(service) => {
-                let service = service.clone();
+            Ok(mut service) => {
                 let mut http_request = http::Request::builder()
                     .method(method)
                     .body(request)
                     .unwrap();
                 *http_request.headers_mut() = header_map;
 
-                let response = stream_request(service, http_request.into()).await;
+                let response = service
+                    .call(http_request.into())
+                    .await
+                    .map(|response| {
+                        tracing::trace_span!("serialize_response")
+                            .in_scope(|| {
+                                response.map(|body| {
+                                    Bytes::from(
+                                        serde_json::to_vec(&body)
+                                            .expect("responsebody is serializable; qed"),
+                                    )
+                                })
+                            })
+                            .into()
+                    })
+                    .unwrap_or_else(|e| {
+                        tracing::error!("router serivce call failed: {}", e);
+                        http::Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Bytes::from_static(b"router service call failed"))
+                            .expect("static response building cannot fail; qed")
+                    });
 
-                Box::new(hyper::Response::new(Body::from(response))) as Box<dyn Reply>
+                Box::new(response) as Box<dyn Reply>
             }
-            Err(_) => Box::new(warp::reply::with_status(
-                "Invalid host to redirect to",
-                StatusCode::BAD_REQUEST,
-            )),
-        }
-    }
-}
-
-async fn stream_request<RS>(service: RS, request: Request<graphql::Request>) -> String
-where
-    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-{
-    match service.oneshot(request).await {
-        Err(_) => String::new(),
-        Ok(response) => {
-            let span = Span::current();
-            // TODO headers
-            tracing::trace_span!(parent: &span, "serialize_response").in_scope(|| {
-                match response.into_body() {
-                    ResponseBody::GraphQL(graphql) => serde_json::to_string(&graphql)
-                        .expect("serde_json::Value serialization will not fail"),
-                    ResponseBody::RawJSON(json) => serde_json::to_string(&json)
-                        .expect("serde_json::Value serialization will not fail"),
-                    ResponseBody::RawString(string) => string,
-                }
-            })
+            Err(e) => {
+                tracing::error!("router service is not available to process request: {}", e);
+                Box::new(warp::reply::with_status(
+                    "router service is not available to process request",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                ))
+            }
         }
     }
 }
