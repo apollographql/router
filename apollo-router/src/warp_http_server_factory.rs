@@ -91,16 +91,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listener
             } else {
                 match listen_address {
-                    #[cfg(unix)]
                     ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    #[cfg(not(unix))]
-                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
-                        .await
-                        .map_err(FederatedServerError::ServerCreationError)?,
                     #[cfg(unix)]
                     ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
                         UnixListener::bind(path)
@@ -176,8 +171,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
                                     tokio::task::spawn(async move{
                                         match res {
-                                            #[cfg(not(unix))]
-                                            (stream, addr) => {
+                                            tokio_util::either::Either::Left((stream, _addr)) => {
                                                 stream
                                                     .set_nodelay(true)
                                                     .expect(
@@ -186,17 +180,12 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                                 serve_connection!(stream)
                                             }
                                             #[cfg(unix)]
-                                            tokio_util::either::Either::Left((stream, _addr)) => {
-                                                    stream
-                                                        .set_nodelay(true)
-                                                        .expect(
-                                                            "this should not fail unless the socket is invalid",
-                                                        );
-                                                    serve_connection!(stream)
-                                            }
-                                            #[cfg(unix)]
                                             tokio_util::either::Either::Right((stream, _addr)) => {
-                                                    serve_connection!(stream);
+                                                serve_connection!(stream);
+                                            }
+                                            #[cfg(not(unix))]
+                                            tokio_util::either::Either::Right(_) => {
+                                                unreachable!()
                                             }
                                         }
                                     });
