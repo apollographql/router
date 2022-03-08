@@ -2,7 +2,7 @@ use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
     http_compat, plugin_utils, Context, ExecutionRequest, ExecutionResponse, Extensions,
-    QueryPlannerRequest, QueryPlannerResponse, Request,
+    QueryPlannerRequest, QueryPlannerResponse, Request, SubgraphRequest, SubgraphResponse,
 };
 use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
@@ -49,7 +49,7 @@ macro_rules! service_handle_response {
                         response
                             .response
                             .headers_mut()
-                            .append(header_name, header_value.clone());
+                            .insert(header_name, header_value.clone());
                     }
                 }
 
@@ -253,6 +253,80 @@ impl Plugin for Rhai {
 
         const FUNCTION_NAME_RESPONSE: &str = "map_execution_service_response";
         service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, ExecutionResponse);
+
+        service
+    }
+
+    fn subgraph_service(
+        &mut self,
+        _name: &str,
+        mut service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        const FUNCTION_NAME_REQUEST: &str = "map_subgraph_service_request";
+        if self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
+        {
+            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
+            let this = self.clone();
+
+            service = service
+                .map_request(move |mut request: SubgraphRequest| {
+                    request.context = handle_error!(
+                        this.run_rhai_script_arc(FUNCTION_NAME_REQUEST, request.context.clone()),
+                        request
+                    );
+
+                    for (header_name, header_value) in request.context.request.headers() {
+                        request
+                            .http_request
+                            .headers_mut()
+                            .insert(header_name.clone(), header_value.clone());
+                    }
+
+                    request
+                })
+                .boxed();
+        }
+
+        const FUNCTION_NAME_RESPONSE: &str = "map_subgraph_service_response";
+        let this = self.clone();
+        let function_found = self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
+        service = service
+            .map_response(move |mut response: SubgraphResponse| {
+                let previous_err: Option<String> = response
+                    .context
+                    .get(CONTEXT_ERROR)
+                    .expect("we put the context error ourself so it will be deserializable; qed");
+                if let Some(err) = previous_err {
+                    return plugin_utils::SubgraphResponse::builder()
+                        .errors(vec![Error::builder()
+                            .message(format!("RHAI plugin error: {}", err.as_str()))
+                            .build()])
+                        .context(response.context)
+                        .build()
+                        .into();
+                }
+                if function_found {
+                    response.context = this
+                        .run_rhai_script_arc(FUNCTION_NAME_RESPONSE, response.context)
+                        .unwrap();
+
+                    for (header_name, header_value) in response.context.request.headers() {
+                        response
+                            .response
+                            .headers_mut()
+                            .insert(header_name, header_value.clone());
+                    }
+                }
+
+                response
+            })
+            .boxed();
 
         service
     }
