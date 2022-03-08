@@ -57,7 +57,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Layers and extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fulfilled already and it can bail out. A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` in the event of a cache "miss".
 
-# [v0.1.0-alpha.8] 2022-02-25
+# [v0.1.0-alpha.7] 2022-02-25
 
 ## :sparkles: Features
 
