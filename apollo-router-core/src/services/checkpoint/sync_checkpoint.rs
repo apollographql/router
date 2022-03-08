@@ -1,21 +1,7 @@
+use super::Step;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use tower::{BoxError, Layer, Service};
-
-/// An enum representing the next step
-/// A service should follow
-pub enum Step<Request, Response>
-where
-    Request: Send + 'static,
-    Response: Send + 'static,
-{
-    /// `CheckpointService` should
-    /// Continue and call the next service
-    Continue(Request),
-    /// `CheckpointService` should not call the next service.
-    /// Return the provided Response instead
-    Return(Response),
-}
 
 #[allow(clippy::type_complexity)]
 pub struct CheckpointLayer<S, Request>
@@ -166,14 +152,12 @@ where
 
 #[cfg(test)]
 mod checkpoint_tests {
-
-    use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
-
+    use super::*;
     use crate::{
-        checkpoint::{CheckpointLayer, Step},
         plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
         ServiceBuilderExt,
     };
+    use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 
     #[tokio::test]
     async fn test_service_builder() {

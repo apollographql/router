@@ -2,8 +2,10 @@
 
 use anyhow::Result;
 use apollo_router::configuration::Configuration;
-use apollo_router::ApolloRouterBuilder;
-use apollo_router::{ConfigurationKind, SchemaKind, ShutdownKind};
+use apollo_router::{
+    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, RouterSubscriber, SchemaKind,
+    ShutdownKind,
+};
 use apollo_router_core::Schema;
 use tracing_subscriber::EnvFilter;
 
@@ -22,9 +24,10 @@ mod forbid_anonymous_operations;
 // {"errors":[{"message":"Anonymous operations are not allowed","locations":[],"path":null}]}
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"))
-        .init();
+    let builder = tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"));
+
+    set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
 
     let schema = SchemaKind::Instance(
         include_str!("../../supergraph.graphql")

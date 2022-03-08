@@ -343,7 +343,7 @@ impl<T> ResultExt<T> for Result<T, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::Subgraph;
+    use crate::configuration::SubgraphConf;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use apollo_router_core::http_compat::{Request, Response};
@@ -358,7 +358,6 @@ mod tests {
     use std::task::{Context, Poll};
     use test_log::test;
     use tower::{BoxError, Service};
-    use url::Url;
 
     fn example_schema() -> Schema {
         include_str!("testdata/supergraph.graphql").parse().unwrap()
@@ -551,22 +550,8 @@ mod tests {
                         Configuration::builder()
                             .subgraphs(
                                 [
-                                    (
-                                        "accounts".to_string(),
-                                        Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql")
-                                                .unwrap(),
-                                            layers: Vec::new(),
-                                        }
-                                    ),
-                                    (
-                                        "products".to_string(),
-                                        Subgraph {
-                                            routing_url: Url::parse("http://accounts/graphql")
-                                                .unwrap(),
-                                            layers: Vec::new(),
-                                        }
-                                    )
+                                    ("accounts".to_string(), SubgraphConf { layers: Vec::new() }),
+                                    ("products".to_string(), SubgraphConf { layers: Vec::new() })
                                 ]
                                 .iter()
                                 .cloned()

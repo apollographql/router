@@ -22,10 +22,10 @@ directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts", url: "http://accounts.demo.starstuff.dev/graphql")
-  INVENTORY @join__graph(name: "inventory", url: "http://inventory.demo.starstuff.dev/graphql")
-  PRODUCTS @join__graph(name: "products", url: "http://products.demo.starstuff.dev/graphql")
-  REVIEWS @join__graph(name: "reviews", url: "http://reviews.demo.starstuff.dev/graphql")
+  ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
+  INVENTORY @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
+  PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
+  REVIEWS @join__graph(name: "reviews", url: "http://localhost:4002/graphql")
 }
 
 type Mutation {
