@@ -75,6 +75,7 @@ apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
+libc = "0.2.119"
 
 [dev-dependencies]
 insta = "1.12.0"
