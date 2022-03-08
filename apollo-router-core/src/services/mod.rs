@@ -196,12 +196,14 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     fn checkpoint<S, Request>(
         self,
-        checkpoint_fn: fn(
-            Request,
-        ) -> Result<
-            Step<Request, <S as Service<Request>>::Response>,
-            <S as Service<Request>>::Error,
-        >,
+        checkpoint_fn: impl Fn(
+                Request,
+            ) -> Result<
+                Step<Request, <S as Service<Request>>::Response>,
+                <S as Service<Request>>::Error,
+            > + Send
+            + Sync
+            + 'static,
     ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
     where
         S: Service<Request> + Send + 'static,
