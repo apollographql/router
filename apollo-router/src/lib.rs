@@ -1,6 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
 mod apollo_telemetry;
+mod axum_http_server_factory;
 pub mod configuration;
 mod files;
 mod http_server_factory;
