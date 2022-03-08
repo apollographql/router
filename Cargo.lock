@@ -1000,6 +1000,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "num_cpus",
  "parking_lot 0.12.0",
+ "serde",
 ]
 
 [[package]]

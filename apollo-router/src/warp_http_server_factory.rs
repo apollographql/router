@@ -1,14 +1,16 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, Response};
+use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
+use http::uri::Authority;
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
+use reqwest::Url;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -244,14 +246,25 @@ where
                 .unify(),
         )
         .and(warp::header::headers_cloned())
+        .and(warp::host::optional())
         .and_then(
-            move |accept: Option<String>, query: String, header_map: HeaderMap| {
+            move |accept: Option<String>,
+                  query: String,
+                  header_map: HeaderMap,
+                  authority: Option<Authority>| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         display_home_page()
                     } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-                        run_graphql_request(service, http::Method::GET, request, header_map).await
+                        run_graphql_request(
+                            service,
+                            authority,
+                            http::Method::GET,
+                            request,
+                            header_map,
+                        )
+                        .await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -298,14 +311,25 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
-        .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let service = service.clone();
-            async move {
-                let reply =
-                    run_graphql_request(service, http::Method::POST, request, header_map).await;
-                Ok::<_, warp::reject::Rejection>(reply)
-            }
-        })
+        .and(warp::host::optional())
+        .and_then(
+            move |request: graphql::Request,
+                  header_map: HeaderMap,
+                  authority: Option<Authority>| {
+                let service = service.clone();
+                async move {
+                    let reply = run_graphql_request(
+                        service,
+                        authority,
+                        http::Method::POST,
+                        request,
+                        header_map,
+                    )
+                    .await;
+                    Ok::<_, warp::reject::Rejection>(reply)
+                }
+            },
+        )
 }
 
 // graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
@@ -321,6 +345,7 @@ where
 )]
 fn run_graphql_request<RS>(
     service: RS,
+    authority: Option<Authority>,
     method: http::Method,
     request: graphql::Request,
     header_map: HeaderMap,
@@ -352,14 +377,17 @@ where
     async move {
         match service.ready_oneshot().await {
             Ok(mut service) => {
-                let mut http_request = http::Request::builder()
-                    .method(method)
-                    .body(request)
-                    .unwrap();
+                let uri = match authority {
+                    Some(authority) => Url::parse(&format!("http://{}", authority.as_str()))
+                        .expect("if the authority is some then the URL is valid; qed"),
+                    None => Url::parse("http://router").unwrap(),
+                };
+
+                let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
                 *http_request.headers_mut() = header_map;
 
                 let response = service
-                    .call(http_request.into())
+                    .call(http_request)
                     .await
                     .map(|response| {
                         tracing::trace_span!("serialize_response")

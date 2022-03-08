@@ -1,6 +1,10 @@
 use super::from_names_and_values;
-use crate::{http_compat, Context, Object};
-use http::Request;
+use crate::{
+    http_compat::{self, RequestBuilder},
+    Context, Object,
+};
+use http::Method;
+use reqwest::Url;
 use serde_json_bytes::Value;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -19,22 +23,24 @@ pub struct RouterRequest {
 
 impl From<RouterRequest> for crate::RouterRequest {
     fn from(request: RouterRequest) -> Self {
-        let mut req = Request::builder();
+        let gql_request = crate::Request {
+            query: request.query,
+            operation_name: request.operation_name,
+            variables: request.variables.unwrap_or_default(),
+            extensions: request.extensions.unwrap_or_default(),
+        };
+
+        let mut req = RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap());
+
         for (key, value) in request.headers.unwrap_or_default() {
             req = req.header(key, value);
         }
-        let req = req
-            .body(crate::Request {
-                query: request.query,
-                operation_name: request.operation_name,
-                variables: request.variables.unwrap_or_default(),
-                extensions: request.extensions.unwrap_or_default(),
-            })
-            .expect("body is always valid; qed");
+        let req = req.body(gql_request).expect("body is always valid; qed");
+
         crate::RouterRequest {
             context: request
                 .context
-                .unwrap_or_else(|| Context::new().with_request(req.into())),
+                .unwrap_or_else(|| Context::new().with_request(req)),
         }
     }
 }

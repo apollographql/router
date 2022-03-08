@@ -195,6 +195,16 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
+    ($name: literal, $value: ident) => {
+        startup::on_startup! {
+            let qualified_name = $name.to_string();
+
+            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {
+                let plugin = $value::new(serde_json::from_value(configuration.clone())?)?;
+                Ok(Box::new(plugin))
+            }, |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
+        }
+    };
     ($group: literal, $name: literal, $value: ident) => {
         $crate::reexports::startup::on_startup! {
             let qualified_name = if $group == "" {

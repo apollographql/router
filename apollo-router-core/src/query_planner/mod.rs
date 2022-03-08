@@ -370,16 +370,21 @@ pub(crate) mod fetch {
             .await?;
 
             let subgraph_request = SubgraphRequest {
-                http_request: http::Request::builder()
-                    .method(http::Method::POST)
-                    .body(
-                        Request::builder()
-                            .query(operation)
-                            .variables(Arc::new(variables.clone()))
-                            .build(),
-                    )
-                    .unwrap()
-                    .into(),
+                http_request: http_compat::RequestBuilder::new(
+                    http::Method::POST,
+                    schema
+                        .subgraphs()
+                        .find_map(|(name, url)| (name == service_name).then(|| url))
+                        .expect("we can unwrap here because we already checked the subgraph url")
+                        .clone(),
+                )
+                .body(
+                    Request::builder()
+                        .query(operation)
+                        .variables(Arc::new(variables.clone()))
+                        .build(),
+                )
+                .expect("it won't fail because the url is correct and already checked; qed"),
                 context: context.clone(),
                 operation_kind: *operation_kind,
             };

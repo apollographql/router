@@ -1,5 +1,5 @@
 use super::CompatRequest;
-use crate::{Context, QueryPlan};
+use crate::{http_compat::Request, Context, QueryPlan};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -16,7 +16,7 @@ impl From<ExecutionRequest> for crate::ExecutionRequest {
             query_plan: execution_request.query_plan.unwrap_or_default(),
             context: execution_request
                 .context
-                .unwrap_or_else(|| Context::new().with_request(Arc::new(Default::default()))),
+                .unwrap_or_else(|| Context::new().with_request(Arc::new(Request::mock()))),
         }
     }
 }
