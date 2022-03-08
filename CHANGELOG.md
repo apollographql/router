@@ -58,8 +58,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occurred during query planning and query execution will be displayed as GraphQL errors instead of an empty payload.
 
-## :nail_care: Improvements
-
 
 # [v0.1.0-alpha.7] 2022-02-25
 
