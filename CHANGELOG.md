@@ -24,9 +24,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :sparkles: Features
 
-- **Sync and async checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
+- **Request lifecycle checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
 
-  You can now write plugins that can act as check points in services! Checkpoints allow you to make checks, and either return early with a `Response`, or forward a `Request` down the query pipeline.
+    Checkpoints in the request pipeline now allow plugin authors (which includes us!) to check conditions during a request's lifecycle and circumvent further execution if desired.
+    
+    Using `Step` return types within the checkpoint it's possible to influence what happens (including changing things like the HTTP status code, etc.).  A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` (to allow normal processing to continue) in the event of a cache "miss".
+    
+    These can be either synchronous or asynchronous.  To see examples, see:
+    
+    - A [synchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/forbid-anonymous-operations)
+    - An [asynchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/async-allow-client-id)
 
 - **Contracts support** ([PR #573](https://github.com/apollographql/router/pull/573))
 
@@ -53,9 +60,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## :nail_care: Improvements
 
-- **Introduce Checkpoint and Step** ([PR #558](https://github.com/apollographql/router/pull/558))
-
-  Layers and extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fulfilled already and it can bail out. A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` in the event of a cache "miss".
 
 # [v0.1.0-alpha.7] 2022-02-25
 
