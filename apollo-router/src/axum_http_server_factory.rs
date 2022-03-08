@@ -1,11 +1,12 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, Response};
+use apollo_router_core::http_compat;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
+use axum::body::{boxed, BoxBody};
 use axum::extract::{Extension, RawQuery, TypedHeader};
-use axum::response::IntoResponse;
+use axum::response::*;
 use axum::routing::get;
 use axum::{headers, Router};
 use bytes::Bytes;
@@ -54,13 +55,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
         listener: Option<Listener>,
     ) -> Self::Future
     where
-        RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-            + Send
+        RS: Service<
+                http_compat::Request<graphql::Request>,
+                Response = http_compat::Response<ResponseBody>,
+                Error = BoxError,
+            > + Send
             + Sync
             + Clone
             + 'static,
 
-        <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+        <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future:
+            std::marker::Send,
     {
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -240,26 +245,35 @@ async fn redirect_or_run_graphql_operation<RS>(
     headers: HeaderMap,
     RawQuery(query): RawQuery,
     Extension(service): Extension<RS>,
-) -> impl IntoResponse
+) -> http::Response<hyper::Body>
 where
-    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-        + Send
+    RS: Service<
+            http_compat::Request<graphql::Request>,
+            Response = http_compat::Response<ResponseBody>,
+            Error = BoxError,
+        > + Send
         + Sync
         + Clone
         + 'static,
 
-    <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     if headers.get("accept").map(prefers_html).unwrap_or_default() {
         return display_home_page();
     }
 
-    if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-        return run_graphql_request(service, http::Method::GET, request, headers).await;
+    if query.is_some() {
+        if let Ok(request) =
+            graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
+        {
+            return run_graphql_request(service, http::Method::GET, request, headers).await;
+        }
     }
-    Response::builder()
-        .status(StatusCode::BAD_REQUEST)
-        .body(Bytes::from_static(b"Invalid GraphQL request"))
+    todo!();
+    // Response::builder()
+    //     .status(StatusCode::BAD_REQUEST)
+    //     .body(Bytes::from_static(b"Invalid GraphQL request"))
+    //     .into_response()
 }
 async fn run_graphql_operation() -> impl IntoResponse {
     "coucou"
@@ -305,9 +319,18 @@ async fn run_graphql_operation() -> impl IntoResponse {
 //     //     )
 // }
 
-fn display_home_page() -> impl IntoResponse {
-    let html = include_str!("../resources/index.html");
-    axum::response::Html(html)
+fn display_home_page() -> http::Response<hyper::Body> {
+    let html = Bytes::from_static(include_bytes!("../resources/index.html"));
+    Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .body(html)
+        .unwrap_or_else(|_| {
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Bytes::from_static(b"router service call failed"))
+                .expect("static response should build;qed")
+        })
+        .into_response()
 }
 
 fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
@@ -364,13 +387,16 @@ async fn run_graphql_request<RS>(
     method: http::Method,
     request: graphql::Request,
     header_map: HeaderMap,
-) -> impl IntoResponse
+) -> http::Response<hyper::Body>
 where
-    RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-        + Send
+    RS: Service<
+            http_compat::Request<graphql::Request>,
+            Response = http_compat::Response<ResponseBody>,
+            Error = BoxError,
+        > + Send
         + Clone
         + 'static,
-    <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
+    <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
@@ -397,39 +423,35 @@ where
                 .unwrap();
             *http_request.headers_mut() = header_map;
 
-            let response = service
+            service
                 .call(http_request.into())
                 .await
                 .map(|response| {
-                    tracing::trace_span!("serialize_response")
-                        .in_scope(|| {
-                            response.map(|body| {
-                                Bytes::from(
-                                    serde_json::to_vec(&body)
-                                        .expect("responsebody is serializable; qed"),
-                                )
-                            })
-                        })
-                        .into_response()
+                    tracing::trace_span!("serialize_response").in_scope(|| {
+                        let (parts, body) = response.into_parts();
+                        Ok(Response::from_parts(
+                            parts,
+                            Bytes::from(
+                                serde_json::to_vec(&body).expect("body is serializable; qed"),
+                            ),
+                        ))
+                    })
                 })
                 .unwrap_or_else(|e| {
                     tracing::error!("router serivce call failed: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "router service call failed",
-                    )
-                        .into_response()
-                });
-
-            response
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Bytes::from_static(b"router service call failed"))
+                })
+                .into_response()
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
-
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "router service is not available to process request",
-            )
+            Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(Bytes::from_static(
+                    b"router service is not available to process request",
+                ))
                 .into_response()
         }
     }
@@ -527,7 +549,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
+            fn service_call(&mut self, req: http_compat::Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
         }
     }
 
