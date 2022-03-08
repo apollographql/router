@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, Response};
 use apollo_router_core::prelude::*;
@@ -91,18 +91,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listener
             } else {
                 match listen_address {
-                    #[cfg(unix)]
-                    ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
+                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    #[cfg(not(unix))]
-                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
-                        .await
-                        .map_err(FederatedServerError::ServerCreationError)?,
                     #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
+                    ListenAddr::UnixSocket(path) => Listener::Unix(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
@@ -132,41 +127,6 @@ impl HttpServerFactory for WarpHttpServerFactory {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
-                            macro_rules! serve_connection {
-                                ($stream:expr) => {{
-                                    let connection = Http::new()
-                                        .http1_keep_alive(true)
-                                        .serve_connection($stream, svc);
-
-                                    tokio::pin!(connection);
-                                    tokio::select! {
-                                        // the connection finished first
-                                        _res = &mut connection => {
-                                            /*if let Err(http_err) = res {
-                                                tracing::error!(
-                                                    "Error while serving HTTP connection: {}",
-                                                    http_err
-                                                );
-                                            }*/
-                                        }
-                                        // the shutdown receiver was triggered first,
-                                        // so we tell the connection to do a graceful shutdown
-                                        // on the next request, then we wait for it to finish
-                                        _ = connection_shutdown.notified() => {
-                                            let c = connection.as_mut();
-                                            c.graceful_shutdown();
-
-                                            if let Err(_http_err) = connection.await {
-                                                /*tracing::error!(
-                                                    "Error while serving HTTP connection: {}",
-                                                    http_err
-                                                );*/
-                                            }
-                                        }
-                                    }
-                                }};
-                            }
-
                             match res {
                                 Ok(res) => {
                                     if max_open_file_warning.is_some(){
@@ -176,27 +136,53 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
                                     tokio::task::spawn(async move{
                                         match res {
-                                            #[cfg(not(unix))]
-                                            (stream, addr) => {
-                                                stream
-                                                    .set_nodelay(true)
-                                                    .expect(
-                                                        "this should not fail unless the socket is invalid",
-                                                    );
-                                                serve_connection!(stream)
-                                            }
-                                            #[cfg(unix)]
-                                            tokio_util::either::Either::Left((stream, _addr)) => {
+                                            NetworkStream::Tcp(stream) => {
                                                     stream
                                                         .set_nodelay(true)
                                                         .expect(
                                                             "this should not fail unless the socket is invalid",
                                                         );
-                                                    serve_connection!(stream)
+                                                        let connection = Http::new()
+                                                        .http1_keep_alive(true)
+                                                        .serve_connection(stream, svc);
+
+                                                    tokio::pin!(connection);
+                                                    tokio::select! {
+                                                        // the connection finished first
+                                                        _res = &mut connection => {
+                                                        }
+                                                        // the shutdown receiver was triggered first,
+                                                        // so we tell the connection to do a graceful shutdown
+                                                        // on the next request, then we wait for it to finish
+                                                        _ = connection_shutdown.notified() => {
+                                                            let c = connection.as_mut();
+                                                            c.graceful_shutdown();
+
+                                                            let _= connection.await;
+                                                        }
+                                                    }
                                             }
                                             #[cfg(unix)]
-                                            tokio_util::either::Either::Right((stream, _addr)) => {
-                                                    serve_connection!(stream);
+                                            NetworkStream::Unix(stream) => {
+                                                let connection = Http::new()
+                                                .http1_keep_alive(true)
+                                                .serve_connection(stream, svc);
+
+                                            tokio::pin!(connection);
+                                            tokio::select! {
+                                                // the connection finished first
+                                                _res = &mut connection => {
+                                                }
+                                                // the shutdown receiver was triggered first,
+                                                // so we tell the connection to do a graceful shutdown
+                                                // on the next request, then we wait for it to finish
+                                                _ = connection_shutdown.notified() => {
+                                                    let c = connection.as_mut();
+                                                    c.graceful_shutdown();
+
+                                                    let _= connection.await;
+                                                }
+                                            }
                                             }
                                         }
                                     });
@@ -294,7 +280,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address.into(),
+                actual_listen_address,
             ))
         })
     }
