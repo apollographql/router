@@ -4,16 +4,15 @@ use crate::FederatedServerError;
 use apollo_router_core::http_compat;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
-use axum::body::{boxed, BoxBody};
-use axum::extract::{Extension, RawQuery, TypedHeader};
+use axum::extract::{Extension, RawQuery};
+use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
 use axum::routing::get;
-use axum::{headers, Router};
+use axum::Router;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::HeaderValue;
 use hyper::server::conn::Http;
-use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,16 +20,12 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use tower::MakeService;
+use tower::{BoxError, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use warp::{
-    http::{header::HeaderMap, StatusCode},
-    Filter,
-};
-use warp::{Rejection, Reply};
 
 /// A basic http server using warp.
 /// Uses streaming as primary method of response.
@@ -75,10 +70,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .server
                 .cors
                 .as_ref()
-                .map(|cors_configuration| cors_configuration.into_warp_middleware())
-                .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
+                .map(|cors_configuration| cors_configuration.into_layer())
+                .unwrap_or_else(|| Cors::builder().build().into_layer());
 
-            let app = Router::new()
+            let svc = Router::new()
                 .route(
                     "/",
                     get(redirect_or_run_graphql_operation).post(run_graphql_operation),
@@ -87,18 +82,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     "/graphql",
                     get(redirect_or_run_graphql_operation).post(run_graphql_operation),
                 )
-                // Add our `user_repo` to all request's extensions so handlers can access
-                // it.
-                .layer(Extension(service))
-                .into_make_service();
-
-            let svc = ServiceBuilder::new()
-                // generate a tracing span that covers request parsing and response serializing
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
                 )
-                .service(app);
+                .layer(Extension(service))
+                .into_make_service();
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -149,9 +138,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             tokio::task::spawn(async move {
                                 macro_rules! serve_connection {
                                     ($stream:expr) => {{
+                                        let app = svc.make_service($stream).await.unwrap();
                                         let connection = Http::new()
                                             .http1_keep_alive(true)
-                                            .serve_connection($stream, svc);
+                                            .serve_connection($stream, app);
 
                                         tokio::pin!(connection);
                                         tokio::select! {
@@ -333,19 +323,19 @@ fn display_home_page() -> http::Response<hyper::Body> {
         .into_response()
 }
 
-fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
-    warp::get()
-        .and(warp::path(".well-known"))
-        .and(warp::path("apollo"))
-        .and(warp::path("server-health"))
-        .and_then(move || async {
-            static RESULT: Lazy<serde_json::Value> =
-                Lazy::new(|| serde_json::json!({"status": "pass"}));
+// fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
+//     warp::get()
+//         .and(warp::path(".well-known"))
+//         .and(warp::path("apollo"))
+//         .and(warp::path("server-health"))
+//         .and_then(move || async {
+//             static RESULT: Lazy<serde_json::Value> =
+//                 Lazy::new(|| serde_json::json!({"status": "pass"}));
 
-            let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
-            Ok::<_, Rejection>(reply)
-        })
-}
+//             let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
+//             Ok::<_, Rejection>(reply)
+//         })
+// }
 
 // fn post_graphql_request<RS>(
 //     service: RS,

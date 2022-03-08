@@ -9,14 +9,15 @@ mod layers;
 mod plugins;
 pub mod router_factory;
 mod state_machine;
-mod warp_http_server_factory;
+// mod warp_http_server_factory;
 
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
-use crate::warp_http_server_factory::WarpHttpServerFactory;
+// use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
+use axum_http_server_factory::AxumHttpServerFactory;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
@@ -645,7 +646,7 @@ where
     ///
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
-        let server_factory = WarpHttpServerFactory::new();
+        let server_factory = AxumHttpServerFactory::new();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = Self::generate_event_stream(
             self.shutdown,
