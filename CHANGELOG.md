@@ -19,7 +19,47 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 
  -->
- 
+# [x.x.x] (unreleased) - 2021-mm-dd
+## ❗ BREAKING ❗
+- **Header propagation plugin** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  Header manipulation has been shifted to a plugin rather than service level layers. It now supports rules for all 
+  subgraphs as wel as individual subgraphs.
+
+  ```yaml
+  plugins:
+    headers:
+      all:
+      - propagate:
+        matching: "aaa.*"
+      - propagate:
+        named: "bbb"
+        default: "def"
+        rename: "ccc"
+      - insert:
+        name: "ddd"
+        value: "eee"
+      - remove:
+        matching: "fff.*"
+      - remove:
+        name: "ggg"
+      subgraphs:
+        products:
+        - propagate:
+          matching: ".*"
+    ```
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+
+## Example section entry format
+
+- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+
+  Description! And a link to a [reference](http://url)
+
+
 # [v0.1.0-alpha.8] 2022-03-08
 
 ## :sparkles: Features
