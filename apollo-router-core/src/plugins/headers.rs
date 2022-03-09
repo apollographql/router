@@ -21,7 +21,7 @@ use tower_service::Service;
 register_plugin!("", "headers", Headers);
 
 #[derive(Clone, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
     Insert(Insert),
     Remove(Remove),
@@ -41,6 +41,7 @@ enum Remove {
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Insert {
     #[schemars(schema_with = "string_schema")]
     #[serde(deserialize_with = "deserialize_header_name")]
@@ -51,7 +52,7 @@ struct Insert {
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 enum Propagate {
     Matching {
@@ -74,11 +75,12 @@ enum Propagate {
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     #[serde(default)]
     all: Vec<Operation>,
     #[serde(default)]
-    subgraph: HashMap<String, Vec<Operation>>,
+    subgraphs: HashMap<String, Vec<Operation>>,
 }
 
 struct Headers {
@@ -105,7 +107,7 @@ impl Plugin for Headers {
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         let mut operations = self.config.all.clone();
-        if let Some(subgraph_operations) = self.config.subgraph.get(name) {
+        if let Some(subgraph_operations) = self.config.subgraphs.get(name) {
             operations.append(&mut subgraph_operations.clone())
         }
 
@@ -375,6 +377,20 @@ mod test {
     use std::sync::Arc;
     use tower::BoxError;
     use url::Url;
+
+    #[test]
+    fn test_subgraph_config() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            - insert:
+                name: "test"
+                value: "test"
+        "#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn test_insert_config() {
