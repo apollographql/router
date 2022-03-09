@@ -1,5 +1,2 @@
 server:
   listen: 127.0.0.1:0
-subgraphs:
-  accounts:
-    routing_url: abcd

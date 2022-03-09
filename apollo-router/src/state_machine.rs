@@ -343,7 +343,6 @@ impl<T> ResultExt<T> for Result<T, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::SubgraphConf;
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use apollo_router_core::http_compat::{Request, Response};
@@ -421,12 +420,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(Default::default())
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
@@ -458,12 +452,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(Default::default())
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(minimal_schema.parse().unwrap())),
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
@@ -497,12 +486,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(Default::default())
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                     UpdateConfiguration(
                         Configuration::builder()
@@ -511,7 +495,6 @@ mod tests {
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
-                            .subgraphs(Default::default())
                             .build()
                             .boxed()
                     ),
@@ -546,20 +529,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(
-                                [
-                                    ("accounts".to_string(), SubgraphConf { layers: Vec::new() }),
-                                    ("products".to_string(), SubgraphConf { layers: Vec::new() })
-                                ]
-                                .iter()
-                                .cloned()
-                                .collect()
-                            )
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown
                 ],
@@ -592,12 +562,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(Default::default())
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                 ],
                 vec![State::Startup, State::Errored,]
@@ -633,12 +598,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(
-                        Configuration::builder()
-                            .subgraphs(Default::default())
-                            .build()
-                            .boxed()
-                    ),
+                    UpdateConfiguration(Configuration::builder().build().boxed()),
                     UpdateSchema(Box::new(example_schema())),
                     UpdateSchema(Box::new(example_schema())),
                     Shutdown

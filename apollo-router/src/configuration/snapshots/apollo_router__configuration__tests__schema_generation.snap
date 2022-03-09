@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 449
+assertion_line: 355
 expression: "&schema"
 
 ---
@@ -22,26 +22,28 @@ expression: "&schema"
         "cors": null
       },
       "$ref": "#/definitions/Server"
-    },
-    "subgraphs": {
-      "description": "Mapping of name to subgraph that the router may contact.",
-      "default": {},
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/definitions/Subgraph"
-      }
     }
   },
   "additionalProperties": false,
   "definitions": {
     "Conf": {
       "type": "object",
-      "required": [
-        "name"
-      ],
       "properties": {
-        "name": {
-          "type": "string"
+        "graph": {
+          "$ref": "#/definitions/StudioGraph",
+          "nullable": true
+        },
+        "opentelemetry": {
+          "$ref": "#/definitions/OpenTelemetry",
+          "nullable": true
+        },
+        "opentracing": {
+          "$ref": "#/definitions/OpenTracingConfig",
+          "nullable": true
+        },
+        "spaceport": {
+          "$ref": "#/definitions/SpaceportConfig",
+          "nullable": true
         }
       }
     },
@@ -152,6 +154,20 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "OpenTelemetry": {
+      "$ref": "#/definitions/OpenTelemetry"
+    },
+    "OpenTracingConfig": {
+      "type": "object",
+      "required": [
+        "format"
+      ],
+      "properties": {
+        "format": {
+          "$ref": "#/definitions/PropagationFormat"
+        }
+      }
     },
     "Operation": {
       "oneOf": [
@@ -305,6 +321,13 @@ expression: "&schema"
         }
       ]
     },
+    "PropagationFormat": {
+      "type": "string",
+      "enum": [
+        "jaeger",
+        "zipkin_b3"
+      ]
+    },
     "Remove": {
       "oneOf": [
         {
@@ -351,25 +374,28 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "Subgraph": {
+    "SpaceportConfig": {
+      "type": "object",
+      "required": [
+        "external"
+      ],
       "properties": {
-        "layers": {
-          "items": {
-            "oneOf": [
-              {
-                "required": [
-                  "example.com_hello"
-                ]
-              }
-            ],
-            "properties": {
-              "example.com_hello": {
-                "$ref": "#/definitions/Conf"
-              }
-            }
-          }
+        "collector": {
+          "default": "https://127.0.0.1:50051",
+          "type": "string"
+        },
+        "external": {
+          "type": "boolean"
+        },
+        "listener": {
+          "default": "127.0.0.1:50051",
+          "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "StudioGraph": {
+      "type": "object"
     }
   }
 }

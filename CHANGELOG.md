@@ -54,6 +54,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
         - propagate:
           matching: ".*"
     ```
+- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
+
+  Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
+use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
