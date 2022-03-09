@@ -76,7 +76,7 @@ checksum = "c1da9c412262c1dd533a84c9b867dcb4e68ab852a0936e235d75242585dda631"
 [[package]]
 name = "apollo-encoder"
 version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=b7de6738849eb9dd74d269dab3a9eeab54d8bd23#b7de6738849eb9dd74d269dab3a9eeab54d8bd23"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=a18408d4744136493ea13cebe5c845108eaf1bff#a18408d4744136493ea13cebe5c845108eaf1bff"
 
 [[package]]
 name = "apollo-federation-types"
@@ -107,7 +107,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.4"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=b7de6738849eb9dd74d269dab3a9eeab54d8bd23#b7de6738849eb9dd74d269dab3a9eeab54d8bd23"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=a18408d4744136493ea13cebe5c845108eaf1bff#a18408d4744136493ea13cebe5c845108eaf1bff"
 dependencies = [
  "rowan",
 ]
@@ -239,7 +239,7 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=b7de6738849eb9dd74d269dab3a9eeab54d8bd23#b7de6738849eb9dd74d269dab3a9eeab54d8bd23"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=a18408d4744136493ea13cebe5c845108eaf1bff#a18408d4744136493ea13cebe5c845108eaf1bff"
 dependencies = [
  "apollo-encoder 0.2.2",
  "apollo-parser 0.2.4",
