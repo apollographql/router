@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
 use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
 use apollo_router_core::prelude::*;
@@ -13,6 +13,7 @@ use opentelemetry::propagation::Extractor;
 use reqwest::Url;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -92,18 +93,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listener
             } else {
                 match listen_address {
-                    #[cfg(unix)]
-                    ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
+                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    #[cfg(not(unix))]
-                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
-                        .await
-                        .map_err(FederatedServerError::ServerCreationError)?,
                     #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
+                    ListenAddr::UnixSocket(path) => Listener::Unix(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
@@ -122,6 +118,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 tokio::pin!(shutdown_receiver);
 
                 let connection_shutdown = Arc::new(Notify::new());
+                let mut max_open_file_warning = None;
 
                 loop {
                     tokio::select! {
@@ -132,76 +129,140 @@ impl HttpServerFactory for WarpHttpServerFactory {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
-                            tokio::task::spawn(async move {
-                                macro_rules! serve_connection {
-                                    ($stream:expr) => {{
-                                        let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .serve_connection($stream, svc);
+                            match res {
+                                Ok(res) => {
+                                    if max_open_file_warning.is_some(){
+                                        tracing::info!("can accept connections again");
+                                        max_open_file_warning = None;
+                                    }
 
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                                /*if let Err(http_err) = res {
-                                                    tracing::error!(
-                                                        "Error while serving HTTP connection: {}",
-                                                        http_err
+                                    tokio::task::spawn(async move{
+                                        match res {
+                                            NetworkStream::Tcp(stream) => {
+                                                stream
+                                                    .set_nodelay(true)
+                                                    .expect(
+                                                        "this should not fail unless the socket is invalid",
                                                     );
-                                                }*/
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
+                                                    let connection = Http::new()
+                                                    .http1_keep_alive(true)
+                                                    .serve_connection(stream, svc);
 
-                                                if let Err(_http_err) = connection.await {
-                                                    /*tracing::error!(
-                                                        "Error while serving HTTP connection: {}",
-                                                        http_err
-                                                    );*/
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
+                                                    }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
+
+                                                        let _= connection.await;
+                                                    }
+                                                }
+                                            }
+                                            #[cfg(unix)]
+                                            NetworkStream::Unix(stream) => {
+                                                let connection = Http::new()
+                                                .http1_keep_alive(true)
+                                                .serve_connection(stream, svc);
+
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
+                                                    }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
+
+                                                        let _= connection.await;
+                                                    }
                                                 }
                                             }
                                         }
-                                    }};
+                                    });
                                 }
 
-                                // we unwrap the result of accept() here to avoid stopping
-                                // the entire server on an issue with that socket
-                                // Unfortunately, the error here could also be linked
-                                // to the listen socket (no RAM for kernel buffers, no
-                                // more file descriptors, network interface is down...)
-                                // ideally we'd want to handle the errors in the server task
-                                // with varying behaviours
-                                #[cfg(unix)]
-                                match res.unwrap() {
-                                    tokio_util::either::Either::Left((stream, _addr)) => {
-                                        stream
-                                            .set_nodelay(true)
-                                            .expect(
-                                                "this should not fail unless the socket is invalid",
-                                            );
-                                        serve_connection!(stream);
-                                    }
-                                    tokio_util::either::Either::Right((stream, _addr)) => {
-                                        serve_connection!(stream);
-                                    }
-                                };
-                                #[cfg(not(unix))]
-                                {
-                                    let (stream, _addr) = res.unwrap();
-                                    stream
-                                        .set_nodelay(true)
-                                        .expect(
-                                            "this should not fail unless the socket is invalid",
-                                        );
-                                    serve_connection!(stream);
-                                };
+                                Err(e) => match e.kind() {
+                                    // this is already handled by moi and tokio
+                                    //std::io::ErrorKind::WouldBlock => todo!(),
 
+                                    // should be treated as EAGAIN
+                                    // https://man7.org/linux/man-pages/man2/accept.2.html
+                                    // Linux accept() (and accept4()) passes already-pending network
+                                    // errors on the new socket as an error code from accept().  This
+                                    // behavior differs from other BSD socket implementations.  For
+                                    // reliable operation the application should detect the network
+                                    // errors defined for the protocol after accept() and treat them
+                                    // like EAGAIN by retrying.  In the case of TCP/IP, these are
+                                    // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
+                                    // EOPNOTSUPP, and ENETUNREACH.
+                                    //
+                                    // those errors are not supported though: needs the unstable io_error_more feature
+                                    // std::io::ErrorKind::NetworkDown => todo!(),
+                                    // std::io::ErrorKind::HostUnreachable => todo!(),
+                                    // std::io::ErrorKind::NetworkUnreachable => todo!(),
 
-                            });
+                                    //ECONNABORTED
+                                    std::io::ErrorKind::ConnectionAborted|
+                                    //EINTR
+                                    std::io::ErrorKind::Interrupted|
+                                    // EINVAL
+                                    std::io::ErrorKind::InvalidInput|
+                                    std::io::ErrorKind::PermissionDenied |
+                                    std::io::ErrorKind::TimedOut |
+                                    std::io::ErrorKind::ConnectionReset|
+                                    std::io::ErrorKind::NotConnected => {
+                                        // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
+                                        // we should ignore that and get to the next one
+                                        continue;
+                                    }
+
+                                    // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
+                                    std::io::ErrorKind::Other => {
+                                        match e.raw_os_error() {
+                                            Some(libc::EMFILE) | Some(libc::ENFILE) => {
+                                                match max_open_file_warning {
+                                                    None => {
+                                                        tracing::error!("reached the max open file limit, cannot accept any new connection");
+                                                        max_open_file_warning = Some(Instant::now());
+                                                    }
+                                                    Some(last) => if Instant::now() - last < Duration::from_secs(60) {
+                                                        tracing::error!("still at the max open file limit, cannot accept any new connection");
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        continue;
+                                    }
+
+                                    /* we should ignore the remaining errors as they're not supposed
+                                    to happen with the accept() call
+                                    std::io::ErrorKind::NotFound => todo!(),
+                                    std::io::ErrorKind::AddrInUse => todo!(),
+                                    std::io::ErrorKind::AddrNotAvailable => todo!(),
+                                    std::io::ErrorKind::BrokenPipe => todo!(),
+                                    std::io::ErrorKind::AlreadyExists => todo!(),
+                                    std::io::ErrorKind::InvalidData => todo!(),
+                                    std::io::ErrorKind::WriteZero => todo!(),
+
+                                    std::io::ErrorKind::Unsupported => todo!(),
+                                    std::io::ErrorKind::UnexpectedEof => todo!(),
+                                    std::io::ErrorKind::OutOfMemory => todo!(),*/
+                                    _ => {
+                                        continue;
+                                    }
+
+                                }
+                            }
                         }
                     }
                 }
@@ -221,7 +282,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address.into(),
+                actual_listen_address,
             ))
         })
     }

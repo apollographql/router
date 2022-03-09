@@ -777,16 +777,9 @@ mod tests {
                         Ok(if let Some(l) = listener {
                             l
                         } else {
-                            #[cfg(unix)]
-                            {
-                                tokio_util::either::Either::Left(
-                                    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
-                                )
-                            }
-                            #[cfg(not(unix))]
-                            {
-                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
-                            }
+                            Listener::Tcp(
+                                tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
+                            )
                         })
                     };
 

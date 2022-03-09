@@ -124,7 +124,7 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::info!("RHAI {:#?}!", configuration.filename);
+        tracing::debug!("RHAI {:#?}!", configuration.filename);
         let engine = Engine::new();
         let ast = engine.compile_file(configuration.filename)?;
         Ok(Self { ast })

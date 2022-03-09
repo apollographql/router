@@ -1,6 +1,5 @@
-use super::Step;
 use futures::future::BoxFuture;
-use std::sync::Arc;
+use std::{ops::ControlFlow, sync::Arc};
 use tower::{BoxError, Layer, Service};
 
 #[allow(clippy::type_complexity)]
@@ -16,7 +15,7 @@ where
         dyn Fn(
                 Request,
             ) -> Result<
-                Step<Request, <S as Service<Request>>::Response>,
+                ControlFlow<<S as Service<Request>>::Response, Request>,
                 <S as Service<Request>>::Error,
             > + Send
             + Sync
@@ -33,12 +32,12 @@ where
     S::Response: Send + 'static,
     <S as Service<Request>>::Error: Into<BoxError> + Send + 'static,
 {
-    /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
             ) -> Result<
-                Step<Request, <S as Service<Request>>::Response>,
+                ControlFlow<<S as Service<Request>>::Response, Request>,
                 <S as Service<Request>>::Error,
             > + Send
             + Sync
@@ -83,7 +82,7 @@ where
         dyn Fn(
                 Request,
             ) -> Result<
-                Step<Request, <S as Service<Request>>::Response>,
+                ControlFlow<<S as Service<Request>>::Response, Request>,
                 <S as Service<Request>>::Error,
             > + Send
             + Sync
@@ -100,12 +99,12 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
             ) -> Result<
-                Step<Request, <S as Service<Request>>::Response>,
+                ControlFlow<<S as Service<Request>>::Response, Request>,
                 <S as Service<Request>>::Error,
             > + Send
             + Sync
@@ -143,8 +142,8 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         match (self.checkpoint_fn)(req) {
-            Ok(Step::Return(response)) => Box::pin(async move { Ok(response) }),
-            Ok(Step::Continue(request)) => Box::pin(self.inner.call(request)),
+            Ok(ControlFlow::Break(response)) => Box::pin(async move { Ok(response) }),
+            Ok(ControlFlow::Continue(request)) => Box::pin(self.inner.call(request)),
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
@@ -178,7 +177,7 @@ mod checkpoint_tests {
         let service = execution_service.build();
 
         let service_stack = ServiceBuilder::new()
-            .checkpoint(|req: crate::ExecutionRequest| Ok(Step::Continue(req)))
+            .checkpoint(|req: crate::ExecutionRequest| Ok(ControlFlow::Continue(req)))
             .service(service);
 
         let request = ExecutionRequest::builder().build().into();
@@ -212,7 +211,8 @@ mod checkpoint_tests {
 
         let service = router_service.build();
 
-        let service_stack = CheckpointLayer::new(|req| Ok(Step::Continue(req))).layer(service);
+        let service_stack =
+            CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(service);
 
         let request = ExecutionRequest::builder().build().into();
 
@@ -236,7 +236,7 @@ mod checkpoint_tests {
         let service = router_service.build();
 
         let service_stack = CheckpointLayer::new(|_req| {
-            Ok(Step::Return(
+            Ok(ControlFlow::Break(
                 ExecutionResponse::builder()
                     .label("returned_before_mock_service".to_string())
                     .build()

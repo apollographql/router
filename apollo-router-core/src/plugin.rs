@@ -62,7 +62,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 pub trait Plugin: Send + Sync + 'static + Sized {
     type Config: JsonSchema + DeserializeOwned;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError>;
+    fn new(config: Self::Config) -> Result<Self, BoxError>;
 
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError> {
