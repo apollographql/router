@@ -5,12 +5,9 @@ server:
 plugins:
   # Authentication Mechanism
   # Must configure:
-  # algorithm: HS256 | HS384 | HS512 
-  # key: valid base64 encoded key
+  #  - algorithm: HS256 | HS384 | HS512 
+  #  - key: valid base64 encoded key
   #
-  # Custom Claims
-  # Any custom claims to be additionally verified. Falls back to
-  # default JWTClaims if not specified
   com.example.jwt:
     algorithm: HS256
     key: 629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba

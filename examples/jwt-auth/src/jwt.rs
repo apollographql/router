@@ -232,8 +232,7 @@ impl Plugin for JwtAuth {
                 // Now let's try to validate our token
                 // Default time tolerance is 15 mins. That's perhaps a bit generous,
                 // so we'll set that to 5 seconds.
-                let mut options = VerificationOptions::default();
-                options.time_tolerance = Some(Duration::from_secs(5));
+                let options = VerificationOptions { time_tolerance: Some(Duration::from_secs(5)), ..Default::default() };
                 if let Some(verifier) = &hmac_verifier {
                     match verifier.verify_token::<NoCustomClaims>(
                         jwt,
