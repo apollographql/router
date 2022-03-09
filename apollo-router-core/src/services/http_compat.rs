@@ -6,6 +6,11 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use axum_core::{body::boxed, response::IntoResponse};
+use bytes::Bytes;
+
+use crate::ResponseBody;
+
 #[derive(Debug, Default)]
 pub struct Request<T> {
     pub inner: http::Request<T>,
@@ -194,4 +199,18 @@ impl<T: Clone> Clone for Response<T> {
 
 pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
     url::Url::parse(&uri.to_string())
+}
+
+impl IntoResponse for Response<ResponseBody> {
+    fn into_response(self) -> axum_core::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+        let json_body_bytes =
+            Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
+
+        axum_core::response::Response::from_parts(
+            parts,
+            boxed(http_body::Full::new(json_body_bytes)),
+        )
+    }
 }
