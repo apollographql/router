@@ -209,7 +209,7 @@ where
                     let headers = req.http_request.headers_mut();
                     let value = req.context.request.headers().get(named);
                     if let Some(value) = value.or(default.as_ref()) {
-                        headers.insert(rename.as_ref().unwrap_or(&named), value.clone());
+                        headers.insert(rename.as_ref().unwrap_or(named), value.clone());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
