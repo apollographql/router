@@ -82,6 +82,11 @@ impl fmt::Display for ProjectDir {
     }
 }
 
+/// This is the main router entrypoint.
+///
+/// It effectively builds a tokio runtime and runs `rt_main()`.
+///
+/// Refer to the examples if you would like how to run your own router with plugins.
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
@@ -95,6 +100,14 @@ pub fn main() -> Result<()> {
     runtime.block_on(rt_main())
 }
 
+/// If you already have a tokio runtime, you can spawn the router like this:
+///
+/// ```no_run
+/// #[tokio::main]
+/// async fn main() -> anyhow::Result<()> {
+///   apollo_router::rt_main().await
+/// }
+/// ```
 pub async fn rt_main() -> Result<()> {
     let opt = Opt::from_args();
 

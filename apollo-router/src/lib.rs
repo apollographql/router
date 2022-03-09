@@ -21,7 +21,7 @@ use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
-pub use executable::main;
+pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
