@@ -1,13 +1,11 @@
 //! Logic for loading configuration in to an object model
 
+use apollo_router_core::plugins;
 use apollo_router_core::prelude::*;
-use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{
-    ArrayValidation, ObjectValidation, Schema, SchemaObject, SingleOrVec, SubschemaValidation,
-};
+use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
 use schemars::{JsonSchema, Set};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
@@ -81,18 +79,7 @@ impl Configuration {
     pub fn load_subgraphs(&self, schema: &graphql::Schema) -> HashMap<String, SubgraphConf> {
         schema
             .subgraphs()
-            .map(|(name, _subgraph_url)| {
-                (
-                    name.to_owned(),
-                    SubgraphConf {
-                        layers: self
-                            .subgraphs
-                            .get(name)
-                            .map(|s| s.layers.clone())
-                            .unwrap_or_default(),
-                    },
-                )
-            })
+            .map(|(name, _subgraph_url)| (name.to_owned(), SubgraphConf {}))
             .collect()
     }
 
@@ -161,69 +148,17 @@ impl JsonSchema for Plugins {
 
 /// Configuration for a subgraph.
 #[derive(Debug, Clone, Deserialize, Serialize, TypedBuilder)]
-pub struct SubgraphConf {
-    /// Layer configuration
-    #[serde(default)]
-    #[builder(default)]
-    pub layers: Vec<Value>,
-}
+pub struct SubgraphConf {}
 
 impl JsonSchema for SubgraphConf {
     fn schema_name() -> String {
         stringify!(Subgraph).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Subgraph schema to allow layers that have been registered at
         // compile time to be picked up.
-        let mut subgraph = SchemaObject::default();
-
-        let layers = layers()
-            .iter()
-            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
-            .collect::<schemars::Map<String, Schema>>();
-        let layer_refs = layers
-            .keys()
-            .map(|name| {
-                Schema::Object(SchemaObject {
-                    object: Some(Box::new(ObjectValidation {
-                        required: Set::from([name.to_string()]),
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let layer_object = SchemaObject {
-            object: Some(Box::new(ObjectValidation {
-                properties: layers,
-                ..Default::default()
-            })),
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: Some(layer_refs),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-
-        let layer_array = ArrayValidation {
-            items: Some(SingleOrVec::Single(Box::new(Schema::Object(layer_object)))),
-            ..Default::default()
-        };
-
-        let layers_property = SchemaObject {
-            array: Some(Box::new(layer_array)),
-            ..SchemaObject::default()
-        };
-
-        subgraph.object = Some(Box::new(ObjectValidation {
-            properties: schemars::Map::from([(
-                "layers".to_string(),
-                Schema::Object(layers_property),
-            )]),
-            ..Default::default()
-        }));
+        let subgraph = SchemaObject::default();
         Schema::Object(subgraph)
     }
 }
@@ -506,8 +441,8 @@ mod tests {
         let configuration = Configuration::builder()
             .subgraphs(
                 [
-                    ("inventory".to_string(), SubgraphConf { layers: Vec::new() }),
-                    ("products".to_string(), SubgraphConf { layers: Vec::new() }),
+                    ("inventory".to_string(), SubgraphConf {}),
+                    ("products".to_string(), SubgraphConf {}),
                 ]
                 .iter()
                 .cloned()

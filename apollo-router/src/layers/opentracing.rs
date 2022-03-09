@@ -1,12 +1,12 @@
 use std::fmt::Display;
 use std::task::{Context, Poll};
 
-use apollo_router_core::{ConfigurableLayer, SubgraphRequest};
+use apollo_router_core::SubgraphRequest;
 use http::HeaderValue;
 use opentelemetry::trace::TraceContextExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::{BoxError, Layer, Service};
+use tower::{Layer, Service};
 use tracing::instrument::Instrumented;
 use tracing::{span, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -37,12 +37,11 @@ pub struct OpenTracingLayer {
     format: PropagationFormat,
 }
 
-impl ConfigurableLayer for OpenTracingLayer {
-    type Config = OpenTracingConfig;
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        Ok(Self {
-            format: configuration.format,
-        })
+impl OpenTracingLayer {
+    pub(crate) fn new(config: OpenTracingConfig) -> Self {
+        Self {
+            format: config.format,
+        }
     }
 }
 

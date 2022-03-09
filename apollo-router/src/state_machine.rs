@@ -550,8 +550,8 @@ mod tests {
                         Configuration::builder()
                             .subgraphs(
                                 [
-                                    ("accounts".to_string(), SubgraphConf { layers: Vec::new() }),
-                                    ("products".to_string(), SubgraphConf { layers: Vec::new() })
+                                    ("accounts".to_string(), SubgraphConf {}),
+                                    ("products".to_string(), SubgraphConf {})
                                 ]
                                 .iter()
                                 .cloned()
