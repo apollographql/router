@@ -19,6 +19,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 
  -->
+
+ # [v0.1.0-alpha.next] not released yet
+
+ ## :bug: Fixes
+
+ - **❗ BREAKING ❗** **use ControlFlow in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+   `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow instead` of the `Step` enum. ControlFlow has two variants, `Continue` and `Break`.
  
 # [v0.1.0-alpha.8] 2022-03-08
 
