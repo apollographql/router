@@ -133,6 +133,7 @@ dependencies = [
  "http",
  "hyper",
  "insta",
+ "itertools",
  "libc",
  "maplit",
  "mockall",

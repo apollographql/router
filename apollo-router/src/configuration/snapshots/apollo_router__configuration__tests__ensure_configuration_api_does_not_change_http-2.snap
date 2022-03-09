@@ -7,8 +7,5 @@ expression: config
 server:
   listen: "1.2.3.4:5"
   cors: ~
-subgraphs:
-  example:
-    layers: []
 plugins: {}
 

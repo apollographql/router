@@ -1,7 +1,7 @@
-use apollo_router::configuration::Configuration;
 use apollo_router_core::{
     http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
-    ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, ValueExt,
+    ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -468,14 +468,12 @@ async fn setup_router_and_registry() -> (
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
-    let schema = Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
-    let config =
-        serde_yaml::from_str::<Configuration>(include_str!("fixtures/supergraph_config.yaml"))
-            .unwrap();
+    let schema: Arc<Schema> =
+        Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let counting_registry = CountingServiceRegistry::new();
-    let subgraphs = config.load_subgraphs(&schema);
-    let mut builder = PluggableRouterServiceBuilder::new(schema);
-    for name in subgraphs.keys() {
+    let subgraphs = schema.subgraphs();
+    let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+    for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 

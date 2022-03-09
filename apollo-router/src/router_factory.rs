@@ -1,11 +1,11 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
-use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ReqwestSubgraphService, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
+use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -73,13 +73,12 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
         let configuration = (*configuration).clone();
-        let subgraphs = configuration.load_subgraphs(&schema);
 
         let configuration = add_default_plugins(configuration);
 
-        let mut builder = PluggableRouterServiceBuilder::new(schema);
+        let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
 
-        for name in subgraphs.keys() {
+        for (name, _) in schema.subgraphs() {
             let dedup_layer = QueryDeduplicationLayer;
             let subgraph_service =
                 BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
@@ -383,26 +382,6 @@ mod test {
     #[tokio::test]
     async fn test_yaml_no_extras() {
         let config = Configuration::builder().build();
-        let service = create_service(config).await;
-        assert!(service.is_ok())
-    }
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_yaml_layers() {
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            subgraphs:
-                foo:
-                    routing_url: https://foo
-                    layers:
-                        - headers_insert:
-                              name: "foo"
-                              value: "foo"
-                            
-        "#,
-        )
-        .unwrap();
         let service = create_service(config).await;
         assert!(service.is_ok())
     }

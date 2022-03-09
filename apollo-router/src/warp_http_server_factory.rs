@@ -603,7 +603,6 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,
@@ -650,7 +649,6 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,

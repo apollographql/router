@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 389
+assertion_line: 360
 expression: config
 
 ---
@@ -17,10 +17,5 @@ server:
     methods:
       - GET
       - PUT
-subgraphs:
-  accounts: {}
-  inventory: {}
-  products: {}
-  reviews: {}
 plugins: {}
 
