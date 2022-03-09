@@ -20,6 +20,7 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
+use tower::util::BoxCloneService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
@@ -62,6 +63,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future:
             std::marker::Send,
     {
+        let boxed_service = service.boxed_clone();
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -69,24 +71,24 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let cors = configuration
                 .server
                 .cors
-                .as_ref()
+                .clone()
                 .map(|cors_configuration| cors_configuration.into_layer())
                 .unwrap_or_else(|| Cors::builder().build().into_layer());
 
             let svc = Router::new()
                 .route(
                     "/",
-                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
+                    get(redirect_or_run_graphql_operation), // .post(run_graphql_operation),
                 )
                 .route(
                     "/graphql",
-                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
+                    get(redirect_or_run_graphql_operation), // .post(run_graphql_operation),
                 )
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
                 )
-                .layer(Extension(service))
+                // .layer(Extension(boxed_service))
                 .into_make_service();
 
             // if we received a TCP listener, reuse it, otherwise create a new one
@@ -132,13 +134,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             break;
                         }
                         res = listener.accept() => {
-                            let svc = svc.clone();
+                            let mut svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
                             tokio::task::spawn(async move {
                                 macro_rules! serve_connection {
                                     ($stream:expr) => {{
-                                        let app = svc.make_service($stream).await.unwrap();
+                                        let app = svc.make_service(&$stream).await.unwrap();
                                         let connection = Http::new()
                                             .http1_keep_alive(true)
                                             .serve_connection($stream, app);
@@ -231,34 +233,31 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-async fn redirect_or_run_graphql_operation<RS>(
+async fn redirect_or_run_graphql_operation(
     headers: HeaderMap,
     RawQuery(query): RawQuery,
-    Extension(service): Extension<RS>,
-) -> http::Response<hyper::Body>
-where
-    RS: Service<
-            http_compat::Request<graphql::Request>,
-            Response = http_compat::Response<ResponseBody>,
-            Error = BoxError,
-        > + Send
-        + Sync
-        + Clone
-        + 'static,
+    // Extension(service): Extension<
+    //     BoxCloneService<
+    //         http_compat::Request<graphql::Request>,
+    //         http_compat::Response<ResponseBody>,
+    //         BoxError,
+    //     >,
+    // >,
+) -> impl IntoResponse {
+    todo!();
+    // if headers.get("accept").map(prefers_html).unwrap_or_default() {
+    //     return display_home_page().into_response();
+    // }
 
-    <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
-{
-    if headers.get("accept").map(prefers_html).unwrap_or_default() {
-        return display_home_page();
-    }
-
-    if query.is_some() {
-        if let Ok(request) =
-            graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
-        {
-            return run_graphql_request(service, http::Method::GET, request, headers).await;
-        }
-    }
+    // if query.is_some() {
+    //     if let Ok(request) =
+    //         graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
+    //     {
+    //         return run_graphql_request(service, http::Method::GET, request, headers)
+    //             .await
+    //             .into_response();
+    //     }
+    // }
     todo!();
     // Response::builder()
     //     .status(StatusCode::BAD_REQUEST)
@@ -309,18 +308,9 @@ async fn run_graphql_operation() -> impl IntoResponse {
 //     //     )
 // }
 
-fn display_home_page() -> http::Response<hyper::Body> {
+fn display_home_page() -> Html<Bytes> {
     let html = Bytes::from_static(include_bytes!("../resources/index.html"));
-    Response::builder()
-        .header("content-type", "text/html; charset=utf-8")
-        .body(html)
-        .unwrap_or_else(|_| {
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Bytes::from_static(b"router service call failed"))
-                .expect("static response should build;qed")
-        })
-        .into_response()
+    Html(html)
 }
 
 // fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
@@ -372,22 +362,16 @@ fn display_home_page() -> http::Response<hyper::Body> {
         client_version
     )
 )]
-async fn run_graphql_request<RS>(
-    service: RS,
+async fn run_graphql_request(
+    service: BoxCloneService<
+        http_compat::Request<graphql::Request>,
+        http_compat::Response<ResponseBody>,
+        BoxError,
+    >,
     method: http::Method,
     request: graphql::Request,
     header_map: HeaderMap,
-) -> http::Response<hyper::Body>
-where
-    RS: Service<
-            http_compat::Request<graphql::Request>,
-            Response = http_compat::Response<ResponseBody>,
-            Error = BoxError,
-        > + Send
-        + Clone
-        + 'static,
-    <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future: std::marker::Send,
-{
+) -> impl IntoResponse {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
         Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
@@ -417,31 +401,23 @@ where
                 .call(http_request.into())
                 .await
                 .map(|response| {
-                    tracing::trace_span!("serialize_response").in_scope(|| {
-                        let (parts, body) = response.into_parts();
-                        Ok(Response::from_parts(
-                            parts,
-                            Bytes::from(
-                                serde_json::to_vec(&body).expect("body is serializable; qed"),
-                            ),
-                        ))
-                    })
+                    tracing::trace_span!("serialize_response").in_scope(|| response.into_response())
                 })
                 .unwrap_or_else(|e| {
                     tracing::error!("router serivce call failed: {}", e);
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Bytes::from_static(b"router service call failed"))
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "router service call failed",
+                    )
+                        .into_response()
                 })
-                .into_response()
         }
         Err(e) => {
             tracing::error!("router service is not available to process request: {}", e);
-            Response::builder()
-                .status(StatusCode::SERVICE_UNAVAILABLE)
-                .body(Bytes::from_static(
-                    b"router service is not available to process request",
-                ))
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "router service is not available to process request",
+            )
                 .into_response()
         }
     }

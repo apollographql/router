@@ -4,7 +4,6 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::{layers, plugins};
 use derivative::Derivative;
 use displaydoc::Display;
-use http::HeaderValue;
 use reqwest::Url;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::{
@@ -384,7 +383,7 @@ impl Default for Server {
 }
 
 impl Cors {
-    pub fn into_layer(&self) -> CorsLayer {
+    pub fn into_layer(self) -> CorsLayer {
         // let cors =
         //         .allow_origin(Origin::exact("http://localhost:3000".parse().unwrap()))
         //         .allow_methods(vec![Method::GET]),
