@@ -7,10 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 <!--# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-## 🚀 Features
-## 🐛 Fixes
-## 🛠 Maintenance
-## 📚 Documentation
+## 🚀 Features ( :rocket: )
+## 🐛 Fixes ( :bug: )
+## 🛠 Maintenance ( :hammer_and_wrench: )
+## 📚 Documentation ( :books: )
 
 ## Example section entry format
 
@@ -93,6 +93,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
 
 ## 🛠 Maintenance
+
+- **Xtask improvements** ([PR ##604](https://github.com/apollographql/router/pull/604)) The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
 ## 📚 Documentation
 
 <!--# [v0.1.0-preview.1] - 2022-03-23
