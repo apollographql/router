@@ -338,7 +338,6 @@ dependencies = [
  "apollo-router-core",
  "futures",
  "http",
- "pin-project",
  "schemars",
  "serde",
  "serde_json",
