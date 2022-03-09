@@ -1,7 +1,6 @@
-use crate::{
-    checkpoint::{CheckpointService, Step},
-    plugin_utils, RouterRequest, RouterResponse,
-};
+use std::ops::ControlFlow;
+
+use crate::{checkpoint::CheckpointService, plugin_utils, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -69,13 +68,13 @@ where
                                 "apq: graphql request doesn't match provided sha256Hash"
                             );
                         }
-                        Ok(Step::Continue(req))
+                        Ok(ControlFlow::Continue(req))
                     }
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
                             tracing::trace!("apq: cache hit");
                             req.context.request.body_mut().query = Some(cached_query);
-                            Ok(Step::Continue(req))
+                            Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
                             let res = plugin_utils::RouterResponse::builder()
@@ -97,10 +96,10 @@ where
                                 .build()
                                 .into();
 
-                            Ok(Step::Return(res))
+                            Ok(ControlFlow::Break(res))
                         }
                     }
-                    _ => Ok(Step::Continue(req)),
+                    _ => Ok(ControlFlow::Continue(req)),
                 }
             },
             service,

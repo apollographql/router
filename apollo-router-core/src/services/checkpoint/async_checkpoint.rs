@@ -1,6 +1,5 @@
-use super::Step;
 use futures::future::BoxFuture;
-use std::sync::Arc;
+use std::{ops::ControlFlow, sync::Arc};
 use tower::{BoxError, Layer, Service, ServiceExt};
 
 #[allow(clippy::type_complexity)]
@@ -16,7 +15,7 @@ where
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -31,13 +30,13 @@ where
     S::Future: Send,
     S::Response: Send + 'static,
 {
-    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -80,7 +79,7 @@ where
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -95,13 +94,13 @@ where
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
 {
-    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `Step`
+    /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,
@@ -139,8 +138,8 @@ where
         let inner = self.inner.clone();
         Box::pin(async move {
             match (checkpoint_fn)(req).await {
-                Ok(Step::Return(response)) => Ok(response),
-                Ok(Step::Continue(request)) => inner.oneshot(request).await,
+                Ok(ControlFlow::Break(response)) => Ok(response),
+                Ok(ControlFlow::Continue(request)) => inner.oneshot(request).await,
                 Err(error) => Err(error),
             }
         })
@@ -176,7 +175,7 @@ mod async_checkpoint_tests {
 
         let service_stack = ServiceBuilder::new()
             .async_checkpoint(|req: crate::ExecutionRequest| {
-                Box::pin(async { Ok(Step::Continue(req)) })
+                Box::pin(async { Ok(ControlFlow::Continue(req)) })
             })
             .service(service);
 
@@ -212,7 +211,7 @@ mod async_checkpoint_tests {
         let service = router_service.build();
 
         let service_stack =
-            AsyncCheckpointLayer::new(|req| Box::pin(async { Ok(Step::Continue(req)) }))
+            AsyncCheckpointLayer::new(|req| Box::pin(async { Ok(ControlFlow::Continue(req)) }))
                 .layer(service);
 
         let request = ExecutionRequest::builder().build().into();
@@ -238,7 +237,7 @@ mod async_checkpoint_tests {
 
         let service_stack = AsyncCheckpointLayer::new(|_req| {
             Box::pin(async {
-                Ok(Step::Return(
+                Ok(ControlFlow::Break(
                     ExecutionResponse::builder()
                         .label("returned_before_mock_service".to_string())
                         .build()
