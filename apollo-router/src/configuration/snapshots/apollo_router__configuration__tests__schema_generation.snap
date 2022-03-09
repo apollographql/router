@@ -54,7 +54,7 @@ expression: "&schema"
             "$ref": "#/definitions/Operation"
           }
         },
-        "subgraph": {
+        "subgraphs": {
           "type": "object",
           "additionalProperties": {
             "type": "array",
@@ -63,7 +63,8 @@ expression: "&schema"
             }
           }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "Cors": {
       "description": "Cross origin request configuration.",
@@ -136,7 +137,8 @@ expression: "&schema"
         "value": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "ListenAddr": {
       "description": "Listening address.",
@@ -276,7 +278,8 @@ expression: "&schema"
             "matching": {
               "type": "string"
             }
-          }
+          },
+          "additionalProperties": false
         },
         {
           "type": "object",
@@ -297,7 +300,8 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             }
-          }
+          },
+          "additionalProperties": false
         }
       ]
     },
