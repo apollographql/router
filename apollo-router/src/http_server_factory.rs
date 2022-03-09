@@ -134,10 +134,47 @@ impl HttpServerHandle {
     }
 }
 
-#[cfg(unix)]
-pub type Listener = tokio_util::either::Either<tokio::net::TcpListener, tokio::net::UnixListener>;
-#[cfg(not(unix))]
-pub type Listener = tokio::net::TcpListener;
+pub enum Listener {
+    Tcp(tokio::net::TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener),
+}
+
+pub enum NetworkStream {
+    Tcp(tokio::net::TcpStream),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixStream),
+}
+
+impl Listener {
+    pub fn local_addr(&self) -> std::io::Result<ListenAddr> {
+        match self {
+            Listener::Tcp(listener) => listener.local_addr().map(Into::into),
+            #[cfg(unix)]
+            Listener::Unix(listener) => listener.local_addr().map(|addr| {
+                ListenAddr::UnixSocket(
+                    addr.as_pathname()
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                )
+            }),
+        }
+    }
+
+    pub async fn accept(&mut self) -> std::io::Result<NetworkStream> {
+        match self {
+            Listener::Tcp(listener) => listener
+                .accept()
+                .await
+                .map(|(stream, _)| NetworkStream::Tcp(stream)),
+            #[cfg(unix)]
+            Listener::Unix(listener) => listener
+                .accept()
+                .await
+                .map(|(stream, _)| NetworkStream::Unix(stream)),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -150,12 +187,7 @@ mod tests {
     #[test(tokio::test)]
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        #[cfg(unix)]
-        let listener: Listener = tokio_util::either::Either::Left(
-            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(),
-        );
-        #[cfg(not(unix))]
-        let listener: Listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = Listener::Tcp(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap());
 
         HttpServerHandle::new(
             shutdown_sender,
@@ -177,8 +209,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let sock = temp_dir.as_ref().join("sock");
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let listener: Listener =
-            tokio_util::either::Either::Right(tokio::net::UnixListener::bind(&sock).unwrap());
+        let listener = Listener::Unix(tokio::net::UnixListener::bind(&sock).unwrap());
 
         HttpServerHandle::new(
             shutdown_sender,
