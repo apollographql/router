@@ -1,6 +1,7 @@
-use crate::checkpoint::{CheckpointService, Step};
+use crate::checkpoint::CheckpointService;
 use crate::{plugin_utils, RouterRequest, RouterResponse};
 use http::StatusCode;
+use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
@@ -30,9 +31,9 @@ where
                         .context(req.context.into())
                         .build()
                         .with_status(StatusCode::BAD_REQUEST);
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 } else {
-                    Ok(Step::Continue(req))
+                    Ok(ControlFlow::Continue(req))
                 }
             },
             service,
