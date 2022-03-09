@@ -384,9 +384,6 @@ impl Default for Server {
 
 impl Cors {
     pub fn into_layer(self) -> CorsLayer {
-        // let cors =
-        //         .allow_origin(Origin::exact("http://localhost:3000".parse().unwrap()))
-        //         .allow_methods(vec![Method::GET]),
         let cors =
             CorsLayer::new()
                 .allow_credentials(self.allow_credentials.unwrap_or_default())

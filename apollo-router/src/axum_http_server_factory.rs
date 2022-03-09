@@ -14,13 +14,15 @@ use futures::{channel::oneshot, prelude::*};
 use http::HeaderValue;
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
+use serde_json::json;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
-use tower::util::BoxCloneService;
+use tower::buffer::Buffer;
+use tower::util::BoxService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
@@ -63,7 +65,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future:
             std::marker::Send,
     {
-        let boxed_service = service.boxed_clone();
+        let boxed_service = Buffer::new(service.boxed(), 2000);
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -78,17 +80,21 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let svc = Router::new()
                 .route(
                     "/",
-                    get(redirect_or_run_graphql_operation), // .post(run_graphql_operation),
+                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
                 )
                 .route(
                     "/graphql",
-                    get(redirect_or_run_graphql_operation), // .post(run_graphql_operation),
+                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
                 )
+                .route("/.well-known", get(health_check))
+                .route("/apollo", get(health_check))
+                .route("/server-health", get(health_check))
                 .layer(
                     TraceLayer::new_for_http()
                         .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
                 )
-                // .layer(Extension(boxed_service))
+                .layer(Extension(boxed_service))
+                .layer(cors)
                 .into_make_service();
 
             // if we received a TCP listener, reuse it, otherwise create a new one
@@ -234,122 +240,63 @@ impl HttpServerFactory for AxumHttpServerFactory {
 }
 
 async fn redirect_or_run_graphql_operation(
-    headers: HeaderMap,
     RawQuery(query): RawQuery,
-    // Extension(service): Extension<
-    //     BoxCloneService<
-    //         http_compat::Request<graphql::Request>,
-    //         http_compat::Response<ResponseBody>,
-    //         BoxError,
-    //     >,
-    // >,
+    headers: HeaderMap,
+    Extension(service): Extension<
+        Buffer<
+            BoxService<
+                http_compat::Request<graphql::Request>,
+                http_compat::Response<ResponseBody>,
+                BoxError,
+            >,
+            http_compat::Request<graphql::Request>,
+        >,
+    >,
 ) -> impl IntoResponse {
-    todo!();
-    // if headers.get("accept").map(prefers_html).unwrap_or_default() {
-    //     return display_home_page().into_response();
-    // }
+    if headers.get("accept").map(prefers_html).unwrap_or_default() {
+        return display_home_page().into_response();
+    }
 
-    // if query.is_some() {
-    //     if let Ok(request) =
-    //         graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
-    //     {
-    //         return run_graphql_request(service, http::Method::GET, request, headers)
-    //             .await
-    //             .into_response();
-    //     }
-    // }
-    todo!();
-    // Response::builder()
-    //     .status(StatusCode::BAD_REQUEST)
-    //     .body(Bytes::from_static(b"Invalid GraphQL request"))
-    //     .into_response()
-}
-async fn run_graphql_operation() -> impl IntoResponse {
-    "coucou"
+    if query.is_some() {
+        if let Ok(request) =
+            graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
+        {
+            return run_graphql_request(service, http::Method::GET, request, headers)
+                .await
+                .into_response();
+        }
+    }
+
+    (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
-// async fn get_graphql_request_or_redirect<RS>(service: RS) -> impl IntoResponse
-// where
-//     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-//         + Send
-//         + Clone
-//         + 'static,
-//     <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
-// {
-//     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-//         display_home_page()
-//     } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-//         run_graphql_request(service, http::Method::GET, request, header_map).await
-//     } else {
-//         Box::new(warp::reply::with_status(
-//             "Invalid GraphQL request",
-//             StatusCode::BAD_REQUEST,
-//         ))
-//     };
-
-//     Ok::<_, warp::reject::Rejection>(reply)
-
-//     // warp::get()
-//     //     .and(warp::path::end().or(warp::path("graphql")).unify())
-//     //     .and(warp::header::optional::<String>("accept"))
-//     //     .and(
-//     //         warp::query::raw()
-//     //             .or(warp::any().map(String::default))
-//     //             .unify(),
-//     //     )
-//     //     .and(warp::header::headers_cloned())
-//     //     .and_then(
-//     //         move |accept: Option<String>, query: String, header_map: HeaderMap| {
-//     //             let service = service.clone();
-//     //             async move {
-
-//     //             }
-//     //         },
-//     //     )
-// }
+async fn run_graphql_operation(
+    headers: HeaderMap,
+    Json(request): Json<graphql::Request>,
+    Extension(service): Extension<
+        Buffer<
+            BoxService<
+                http_compat::Request<graphql::Request>,
+                http_compat::Response<ResponseBody>,
+                BoxError,
+            >,
+            http_compat::Request<graphql::Request>,
+        >,
+    >,
+) -> impl IntoResponse {
+    run_graphql_request(service, http::Method::POST, request, headers)
+        .await
+        .into_response()
+}
 
 fn display_home_page() -> Html<Bytes> {
     let html = Bytes::from_static(include_bytes!("../resources/index.html"));
     Html(html)
 }
 
-// fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone {
-//     warp::get()
-//         .and(warp::path(".well-known"))
-//         .and(warp::path("apollo"))
-//         .and(warp::path("server-health"))
-//         .and_then(move || async {
-//             static RESULT: Lazy<serde_json::Value> =
-//                 Lazy::new(|| serde_json::json!({"status": "pass"}));
-
-//             let reply = Box::new(warp::reply::json(&*RESULT)) as Box<dyn Reply>;
-//             Ok::<_, Rejection>(reply)
-//         })
-// }
-
-// fn post_graphql_request<RS>(
-//     service: RS,
-// ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
-// where
-//     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-//         + Send
-//         + Clone
-//         + 'static,
-//     <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
-// {
-//     warp::post()
-//         .and(warp::path::end().or(warp::path("graphql")).unify())
-//         .and(warp::body::json())
-//         .and(warp::header::headers_cloned())
-//         .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-//             let service = service.clone();
-//             async move {
-//                 let reply =
-//                     run_graphql_request(service, http::Method::POST, request, header_map).await;
-//                 Ok::<_, warp::reject::Rejection>(reply)
-//             }
-//         })
-// }
+async fn health_check() -> impl IntoResponse {
+    Json(json!({ "status": "pass" }))
+}
 
 // graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
 #[tracing::instrument(skip_all,
@@ -363,10 +310,13 @@ fn display_home_page() -> Html<Bytes> {
     )
 )]
 async fn run_graphql_request(
-    service: BoxCloneService<
+    service: Buffer<
+        BoxService<
+            http_compat::Request<graphql::Request>,
+            http_compat::Response<ResponseBody>,
+            BoxError,
+        >,
         http_compat::Request<graphql::Request>,
-        http_compat::Response<ResponseBody>,
-        BoxError,
     >,
     method: http::Method,
     request: graphql::Request,
