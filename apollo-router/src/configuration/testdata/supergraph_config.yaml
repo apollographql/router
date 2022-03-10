@@ -6,12 +6,3 @@ server:
     methods:
       - GET
       - PUT
-subgraphs:
-  accounts:
-    routing_url: http://localhost:4001/graphql
-  reviews:
-    routing_url: http://localhost:4002/graphql
-  products:
-    routing_url: http://localhost:4003/graphql
-  inventory:
-    routing_url: http://localhost:4004/graphql
