@@ -58,7 +58,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
 use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+
 ## 🚀 Features
+
+- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
+
+  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
+
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
