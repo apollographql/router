@@ -212,6 +212,11 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
+            "apollo.headers"
+          ]
+        },
+        {
+          "required": [
             "apollo.override_subgraph_url"
           ]
         },
@@ -244,14 +249,12 @@ expression: "&schema"
           "required": [
             "com.example.hello"
           ]
-        },
-        {
-          "required": [
-            "headers"
-          ]
         }
       ],
       "properties": {
+        "apollo.headers": {
+          "$ref": "#/definitions/Config"
+        },
         "apollo.override_subgraph_url": {
           "type": "object",
           "additionalProperties": {
@@ -276,9 +279,6 @@ expression: "&schema"
         },
         "com.example.hello": {
           "$ref": "#/definitions/Conf"
-        },
-        "headers": {
-          "$ref": "#/definitions/Config"
         }
       }
     },
