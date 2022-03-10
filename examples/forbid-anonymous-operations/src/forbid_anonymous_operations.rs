@@ -1,6 +1,7 @@
+use std::ops::ControlFlow;
+
 use apollo_router_core::{
-    checkpoint::Step, plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse,
-    ServiceBuilderExt,
+    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -30,8 +31,8 @@ impl Plugin for ForbidAnonymousOperations {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
-        // This method allows us to return Step::Continue(request) if we want to let the request through,
-        // or Step::Return(response) with a crafted response if we don't want the request to go through.
+        // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
+        // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
             .checkpoint(|req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
@@ -57,11 +58,11 @@ impl Plugin for ForbidAnonymousOperations {
                         }])
                         .build()
                         .with_status(StatusCode::BAD_REQUEST);
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
                     tracing::info!("Operation is allowed!");
-                    Ok(Step::Continue(req))
+                    Ok(ControlFlow::Continue(req))
                 }
             })
             .service(service)

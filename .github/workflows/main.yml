@@ -1,0 +1,14 @@
+name: CHANGELOG.md reminder
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  remind_missing_changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Missing Changelog Reminder
+        uses: mskelton/changelog-reminder-action@v2.0.0

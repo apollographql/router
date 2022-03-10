@@ -46,9 +46,9 @@ async fn main() -> Result<()> {
     let schema = SchemaKind::File {
         path: current_directory
             .parent()
-            .ok_or(anyhow!("no parent"))?
+            .ok_or_else(|| anyhow!("no parent"))?
             .parent()
-            .ok_or(anyhow!("no parent"))?
+            .ok_or_else(|| anyhow!("no parent"))?
             .join("examples/supergraph.graphql"),
         watch: false,
         delay: None,

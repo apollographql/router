@@ -1,4 +1,4 @@
-pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer, Step};
+pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
@@ -9,6 +9,7 @@ use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 use std::convert::Infallible;
+use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -199,7 +200,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         checkpoint_fn: impl Fn(
                 Request,
             ) -> Result<
-                Step<Request, <S as Service<Request>>::Response>,
+                ControlFlow<<S as Service<Request>>::Response, Request>,
                 <S as Service<Request>>::Error,
             > + Send
             + Sync
@@ -221,7 +222,7 @@ pub trait ServiceBuilderExt<L>: Sized {
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,
