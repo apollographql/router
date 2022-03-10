@@ -3,6 +3,3 @@ server:
   cors:
     origins: [foo, bar, baz]
     methods: [foo, bar]
-subgraphs:
-  example:
-    routing_url: http://foo

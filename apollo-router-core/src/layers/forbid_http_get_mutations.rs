@@ -1,8 +1,6 @@
-use crate::{
-    checkpoint::{CheckpointService, Step},
-    plugin_utils, ExecutionRequest, ExecutionResponse,
-};
+use crate::{checkpoint::CheckpointService, plugin_utils, ExecutionRequest, ExecutionResponse};
 use http::{Method, StatusCode};
+use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
@@ -34,9 +32,9 @@ where
                         .context(req.context)
                         .build()
                         .into();
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 } else {
-                    Ok(Step::Continue(req))
+                    Ok(ControlFlow::Continue(req))
                 }
             },
             service,
@@ -49,12 +47,14 @@ mod forbid_http_get_mutations_tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
     use crate::{
         plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
         Context, QueryPlan,
     };
-    use http::{Request, StatusCode};
+    use http::StatusCode;
+    use reqwest::Url;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -181,11 +181,9 @@ mod forbid_http_get_mutations_tests {
             .query_plan(Arc::new(QueryPlan { root }))
             .context(
                 Context::new().with_request(Arc::new(
-                    Request::builder()
-                        .method(method)
+                    RequestBuilder::new(method, Url::parse("http://test").unwrap())
                         .body(crate::Request::default())
-                        .unwrap()
-                        .into(),
+                        .unwrap(),
                 )),
             )
             .build()

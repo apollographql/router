@@ -2,6 +2,7 @@
 
 mod apollo_telemetry;
 pub mod configuration;
+mod executable;
 mod files;
 mod http_server_factory;
 mod layers;
@@ -20,6 +21,7 @@ use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
+pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
@@ -30,17 +32,142 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::subscriber::SetGlobalDefaultError;
-use tracing::Subscriber;
-use tracing_subscriber::fmt::format::{DefaultFields, Format};
-use tracing_subscriber::registry::LookupSpan;
+use tracing::span::{Attributes, Record};
+use tracing::subscriber::{set_global_default, SetGlobalDefaultError};
+use tracing::{Event as TracingEvent, Id, Metadata, Subscriber};
+use tracing_core::span::Current;
+use tracing_core::{Interest, LevelFilter};
+use tracing_subscriber::fmt::format::{DefaultFields, Format, Json, JsonFields};
+use tracing_subscriber::registry::{Data, LookupSpan};
 use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
 use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
-pub(crate) type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
+pub(crate) type BoxedLayer = Box<dyn Layer<RouterSubscriber> + Send + Sync>;
 
-pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+type FmtSubscriberTextEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+type FmtSubscriberJsonEnv = FmtSubscriber<JsonFields, Format<Json>, EnvFilter>;
+
+pub enum RouterSubscriber {
+    JsonSubscriber(FmtSubscriberJsonEnv),
+    TextSubscriber(FmtSubscriberTextEnv),
+}
+
+impl Subscriber for RouterSubscriber {
+    // Required to make the trait work
+
+    fn clone_span(&self, id: &Id) -> Id {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.clone_span(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.clone_span(id),
+        }
+    }
+
+    fn try_close(&self, id: Id) -> bool {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.try_close(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.try_close(id),
+        }
+    }
+
+    unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.downcast_raw(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.downcast_raw(id),
+        }
+    }
+
+    // May not be required to work, but better safe than sorry
+
+    fn current_span(&self) -> Current {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.current_span(),
+            RouterSubscriber::TextSubscriber(sub) => sub.current_span(),
+        }
+    }
+
+    fn drop_span(&self, id: Id) {
+        // Rather than delegate, call try_close() to avoid deprecation
+        // complaints
+        self.try_close(id);
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.max_level_hint(),
+            RouterSubscriber::TextSubscriber(sub) => sub.max_level_hint(),
+        }
+    }
+
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.register_callsite(metadata),
+            RouterSubscriber::TextSubscriber(sub) => sub.register_callsite(metadata),
+        }
+    }
+
+    // Required by the trait
+
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.enabled(meta),
+            RouterSubscriber::TextSubscriber(sub) => sub.enabled(meta),
+        }
+    }
+
+    fn new_span(&self, attrs: &Attributes<'_>) -> Id {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.new_span(attrs),
+            RouterSubscriber::TextSubscriber(sub) => sub.new_span(attrs),
+        }
+    }
+
+    fn record(&self, span: &Id, values: &Record<'_>) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.record(span, values),
+            RouterSubscriber::TextSubscriber(sub) => sub.record(span, values),
+        }
+    }
+
+    fn record_follows_from(&self, span: &Id, follows: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.record_follows_from(span, follows),
+            RouterSubscriber::TextSubscriber(sub) => sub.record_follows_from(span, follows),
+        }
+    }
+
+    fn event(&self, event: &TracingEvent<'_>) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.event(event),
+            RouterSubscriber::TextSubscriber(sub) => sub.event(event),
+        }
+    }
+
+    fn enter(&self, id: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.enter(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.enter(id),
+        }
+    }
+
+    fn exit(&self, id: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.exit(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.exit(id),
+        }
+    }
+}
+
+impl<'a> LookupSpan<'a> for RouterSubscriber {
+    type Data = Data<'a>;
+
+    fn span_data(&'a self, id: &Id) -> Option<<Self as LookupSpan<'a>>::Data> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.span_data(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.span_data(id),
+        }
+    }
+}
 
 struct BaseLayer;
 
@@ -48,9 +175,9 @@ struct BaseLayer;
 // for the layers set by the reporting.rs plugin
 impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
 
-static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, FmtSubscriberEnv>> = OnceCell::new();
+static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
 
-pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), FederatedServerError> {
+pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {
             // First create a boxed BaseLayer
@@ -63,13 +190,10 @@ pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), Federat
             let rl: BoxedLayer = Box::new(reloading_layer);
 
             // Compose that with our subscriber
-            // let composed: Layered<BoxedLayer, FmtSubscriber> = rl.with_subscriber(subscriber);
             let composed = rl.with_subscriber(subscriber);
 
             // Set our subscriber as the global subscriber
-            tracing::subscriber::set_global_default(composed)?;
-
-            tracing::info!("Global subscriber configured successfully");
+            set_global_default(composed)?;
 
             // Return our handle to store in OnceCell
             Ok(handle)

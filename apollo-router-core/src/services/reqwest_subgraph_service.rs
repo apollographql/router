@@ -10,17 +10,11 @@ use typed_builder::TypedBuilder;
 pub struct ReqwestSubgraphService {
     http_client: reqwest_middleware::ClientWithMiddleware,
     service: Arc<String>,
-    // TODO not used because provided by SubgraphRequest
-    // FIXME: debatable because here we would end up reparsing the URL on every call
-    // which would be a performance regression. The SubgraphRequest type should provide
-    // a url::Url instead of using the http crate
-    // for now, to make things work, if the URL in the request is /, we use this URL
-    url: reqwest::Url,
 }
 
 impl ReqwestSubgraphService {
     /// Construct a new http subgraph fetcher that will fetch from the supplied URL.
-    pub fn new(service: impl Into<String>, url: reqwest::Url) -> Self {
+    pub fn new(service: impl Into<String>) -> Self {
         let service = service.into();
 
         Self {
@@ -34,7 +28,6 @@ impl ReqwestSubgraphService {
             .with(LoggingMiddleware::new(&service))
             .build(),
             service: Arc::new(service),
-            url,
         }
     }
 }
@@ -57,14 +50,10 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
         } = request;
 
         let http_client = self.http_client.clone();
-        let target_url = if http_request.uri() == "/" {
-            self.url.clone()
-        } else {
-            reqwest::Url::parse(&http_request.uri().to_string()).expect("todo")
-        };
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
+            let url = http_request.url.clone();
             let (
                 http::request::Parts {
                     method,
@@ -76,10 +65,7 @@ impl tower::Service<graphql::SubgraphRequest> for ReqwestSubgraphService {
                 body,
             ) = http_request.into_parts();
 
-            let mut request = http_client
-                .request(method, target_url)
-                .json(&body)
-                .build()?;
+            let mut request = http_client.request(method, url).json(&body).build()?;
             request.headers_mut().extend(headers.into_iter());
             *request.version_mut() = version;
 

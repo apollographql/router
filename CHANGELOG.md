@@ -19,29 +19,104 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 
  -->
+
+# [x.x.x] (unreleased) - 2021-mm-dd
+
+ - **❗ BREAKING ❗**
+ -  **use ControlFlow in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+   `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow instead` of the `Step` enum. ControlFlow has two variants, `Continue` and `Break`.
  
-# [v0.1.0-alpha.8] Not yet released
+## ❗ BREAKING ❗
+- **Header propagation plugin** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  Header manipulation has been shifted to a plugin rather than service level layers. It now supports rules for all 
+  subgraphs as wel as individual subgraphs.
+
+  ```yaml
+  plugins:
+    headers:
+      all:
+      - propagate:
+        matching: "aaa.*"
+      - propagate:
+        named: "bbb"
+        default: "def"
+        rename: "ccc"
+      - insert:
+        name: "ddd"
+        value: "eee"
+      - remove:
+        matching: "fff.*"
+      - remove:
+        name: "ggg"
+      subgraphs:
+        products:
+        - propagate:
+          matching: ".*"
+    ```
+- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
+
+  Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
+use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+## 🚀 Features
+## 🐛 Fixes
+- **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
+  Previously our reporting plugin configuration did not participate in json schema generation. This is now broadly correct
+  and make writing schema much easier.
+
+  To generate a schema use the following command.
+  ```
+  router --schema > apollo_configuration_schema.json
+  ```
+  and follow the instructions for associating it with your particular text editor/IDE. 
+## 🛠 Maintenance
+## 📚 Documentation
+
+## Example section entry format
+
+- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+
+  Description! And a link to a [reference](http://url)
+
+
+# [v0.1.0-alpha.8] 2022-03-08
 
 ## :sparkles: Features
 
-- **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
-  Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
+- **Request lifecycle checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
 
-- **Sync and async checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
-  You can now write plugins that can act as check points in the services! Checkpoints allow you to make checks, and either return early with a Response, or forward a Request down the query pipeline.
+    Checkpoints in the request pipeline now allow plugin authors (which includes us!) to check conditions during a request's lifecycle and circumvent further execution if desired.
+    
+    Using `Step` return types within the checkpoint it's possible to influence what happens (including changing things like the HTTP status code, etc.).  A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` (to allow normal processing to continue) in the event of a cache "miss".
+    
+    These can be either synchronous or asynchronous.  To see examples, see:
+    
+    - A [synchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/forbid-anonymous-operations)
+    - An [asynchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/async-allow-client-id)
+
+- **Contracts support** ([PR #573](https://github.com/apollographql/router/pull/573))
+
+  The Apollo Router now supports [Apollo Studio Contracts](https://www.apollographql.com/docs/studio/contracts/)!
+
+- **Add OpenTracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
+
+  OpenTracing support has been added into the reporting plugin.  You're now able to have span propagation (via headers) via two common formats supported by the `opentracing` crate: `zipkin_b3` and `jaeger`.
+
 
 ## :bug: Fixes
 
+- **Configuration no longer requires `router_url`** ([PR #553](https://github.com/apollographql/router/pull/553))
+
+  When using Managed Federation or directly providing a Supergraph file, it is no longer necessary to provide a `routing_url` value.  Instead, the values provided by the Supergraph or Studio will be used and the `routing_url` can be used only to override specific URLs for specific subgraphs.
+
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
-  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (for instance, Reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the router lifecycle. This change now ensures that Reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration. 
 
-- **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
-  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
+  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (e.g., reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the Router lifecycle. This change now ensures that the reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration.
 
-## :nail_care: Improvements
+- **Propagate Router operation lifecycle errors** ([PR #537](https://github.com/apollographql/router/issues/537))
 
-- **Introduce Checkpoint and Step** ([PR #558](https://github.com/apollographql/router/pull/558))
-  Layers and Extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fullfilled already and it can bail out. A caching layer for example could return Step::Return(response) if the cache hit was successful, and Step::Continue(request) if the cache missed.
+  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occurred during query planning and query execution will be displayed as GraphQL errors instead of an empty payload.
+
 
 # [v0.1.0-alpha.7] 2022-02-25
 
