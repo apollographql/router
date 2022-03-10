@@ -114,6 +114,7 @@ fn option_protocol_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars:
     Option::<ProtocolMirror>::json_schema(gen)
 }
 
+//This is a copy of the Otel protocol enum so that ExportConfig can generate json schema.
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 enum ProtocolMirror {

@@ -331,6 +331,8 @@ mod tests {
     use super::*;
     use apollo_router_core::prelude::*;
     use apollo_router_core::SchemaError;
+    #[cfg(unix)]
+    #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
     use reqwest::Url;
     use schemars::gen::SchemaSettings;
@@ -346,6 +348,7 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(any(feature = "otlp-grpc"))]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft2019_09().with(|s| {

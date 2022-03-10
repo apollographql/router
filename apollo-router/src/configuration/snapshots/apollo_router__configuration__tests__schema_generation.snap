@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 357
+assertion_line: 358
 expression: "&schema"
 ---
 {
