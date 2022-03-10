@@ -150,7 +150,7 @@ impl Plugin for AllowClientIdFromFile {
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_plugin!(
-    "com.example",
+    "example",
     "allow-client-id-from-file",
     AllowClientIdFromFile
 );
@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.example.allow-client-id-from-file")
+            .get("example.allow-client-id-from-file")
             .expect("Plugin not found")
             .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))
             .unwrap();
