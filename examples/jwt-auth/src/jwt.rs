@@ -1,6 +1,67 @@
+//! Example implementation of a JWT verifying plugin
+//!
+//! DISCLAIMER:
+//!     This is an example for illustrative purposes. It has not been secrity audited
+//!     and is purely intended of an illustration of an approach to JWT verification
+//!     via a router plugin.
+//!
+//! The plugin uses [`jwt_simple`]: https://crates.io/crates/jwt-simple
+//!
+//! The plugin provides support for HMAC algorithms. Additional algorithms (RSA, etc..)
+//! are supported by the crate, but not implemented in this plugin (yet...)
+//!
+//! Usage:
+//!
+//! In your config.yaml, specify the following details:
+//! ```yaml
+//! plugins:
+//! Authentication Mechanism
+//!   # Must configure:
+//!   #  - algorithm: HS256 | HS384 | HS512
+//!   #  - key: valid base64 encoded key
+//!   #
+//!   example.jwt:
+//!     algorithm: HS256
+//!     key: 629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba
+//! ```
+//! algorithm: your choice of verifying HMAC algorithm
+//! key: hex encoded key
+//!
+//! There are also two optional parameters
+//! time_tolerance: <u64>
+//! max_token_life: <u64>
+//!
+//! Both of these parameters are in units of seconds. Both default to 15 mins if
+//! not specified
+//! time_tolerance: is how much time we are prepared to add on to expiration dates
+//! max_token_life: is the time between issued and expires for a token
+//!
+//! The time_tolerance exists to accommodate variations in clock timings between systems.
+//!
+//! max_token_life is enforced to prevent use of long lived (and possibly compromised)
+//! tokens through this plugin.
+//!
+//! Verification Limitations:
+//!
+//! The plugin enforces token expiry (as modified by time_tolerance and max_token_life)
+//! and then updates the context of the query to store the verified claims in the
+//! query context under the Key: "JWTClaims". Look at test
+//!     test_hmac_jwtauth_accepts_valid_tokens()
+//! for an example of how the claims are propagated into the request and how they can
+//! be examined in a downstream service.
+//!
+//! Limitations:
+//!
+//! This plugin is purely for purposes of illustration. A production plugin would include
+//! many more features not available here:
+//!  - Multiple verification mechanisms
+//!  - Additional algorithms
+//!  - Custom Claims
+//!  - Token refresh
+//!  - ...
+
 use apollo_router_core::{
-    checkpoint::Step, plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse,
-    ServiceBuilderExt,
+    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -9,6 +70,7 @@ use jwt_simple::Error;
 use schemars::JsonSchema;
 use serde::de;
 use serde::Deserialize;
+use std::ops::ControlFlow;
 use std::str::FromStr;
 use strum_macros::EnumString;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -67,19 +129,35 @@ struct JwtHmac {
 struct JwtAuth {
     // Store our configuration in case we need it later
     configuration: Conf,
+    // Time tolerance for token verification
+    time_tolerance: Duration,
+    // Maximum token life
+    max_token_life: Duration,
     // HMAC may be configured
     hmac: Option<JwtHmac>,
     // Add support for additional algorithms here
 }
 
 impl JwtAuth {
+    const DEFAULT_MAX_TOKEN_LIFE: u64 = 900;
+
     fn new(configuration: Conf) -> Result<Self, BoxError> {
         // Try to figure out which authentication mechanism to use
         let key = configuration.key.trim().to_string();
 
+        let time_tolerance = match configuration.time_tolerance {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(DEFAULT_TIME_TOLERANCE_SECS),
+        };
+        let max_token_life = match configuration.max_token_life {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(JwtAuth::DEFAULT_MAX_TOKEN_LIFE),
+        };
         let hmac = JwtAuth::try_initialize_hmac(&configuration, key);
 
         Ok(Self {
+            time_tolerance,
+            max_token_life,
             configuration,
             hmac,
         })
@@ -115,6 +193,8 @@ impl JwtAuth {
 struct Conf {
     algorithm: String,
     key: String,
+    time_tolerance: Option<u64>,
+    max_token_life: Option<u64>,
 }
 
 #[async_trait::async_trait]
@@ -140,14 +220,16 @@ impl Plugin for JwtAuth {
 
         // `ServiceBuilder` provides us with an `checkpoint` method.
         //
-        // This method allows us to return Step::Continue(request) if we want to let the request through,
-        // or Step::Return(response) with a crafted response if we don't want the request to go through.
+        // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
+        // or ControlFlow::Break(response) with a crafted response if we don't want the request to go through.
 
-        // Clone the data we need in our closure.
+        // Clone/Copy the data we need in our closure.
         let mut hmac_verifier = None;
         if let Some(hmac) = &self.hmac {
             hmac_verifier = Some(hmac.verifier.clone());
         }
+        let time_tolerance = self.time_tolerance;
+        let max_token_life = self.max_token_life;
 
         ServiceBuilder::new()
             .checkpoint(move |req: RouterRequest| {
@@ -156,7 +238,7 @@ impl Plugin for JwtAuth {
                 fn failure_message(
                     msg: String,
                     status: StatusCode,
-                ) -> Result<Step<RouterRequest, RouterResponse>, BoxError> {
+                ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
                     let res = plugin_utils::RouterResponse::builder()
                         .errors(vec![apollo_router_core::Error {
                             message: msg,
@@ -164,7 +246,7 @@ impl Plugin for JwtAuth {
                         }])
                         .build()
                         .with_status(status);
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 }
 
                 // The http_request is stored in a `RouterRequest` context.
@@ -201,7 +283,7 @@ impl Plugin for JwtAuth {
                     }
                 };
 
-                // Let's trim out leading and trailing whitespace to be accomodating
+                // Let's trim out leading and trailing whitespace to be accommodating
                 let jwt_value = jwt_value_untrimmed.trim();
 
                 // Make sure the format of our message matches our expectations
@@ -230,22 +312,20 @@ impl Plugin for JwtAuth {
                 let jwt = jwt_parts[1].trim_end();
 
                 // Now let's try to validate our token
-                // Default time tolerance is 15 mins. That's perhaps a bit generous,
-                // so we'll set that to 5 seconds.
-                let options = VerificationOptions { time_tolerance: Some(Duration::from_secs(5)), ..Default::default() };
+                let options = VerificationOptions { time_tolerance: Some(time_tolerance), ..Default::default() };
                 if let Some(verifier) = &hmac_verifier {
-                    match verifier.verify_token::<NoCustomClaims>(
+                    match verifier.verify_token::<JWTClaims<NoCustomClaims>>(
                         jwt,
                         Some(options),
                     ) {
                         Ok(claims) => {
-                            // Our JWT is basically valid, but, let's refuse JWTs that were issued
-                            // with a lifetime greater than 15 mins
+                            // Our JWT is basically valid, but, let's make sure it wasn't issued
+                            // with a lifetime greater than we can tolerate.
                             match claims.expires_at {
                                 Some(expires) => {
                                     match claims.issued_at {
                                         Some(issued) => {
-                                            if expires - issued > Duration::from_mins(15) {
+                                            if expires - issued > max_token_life {
                                                 // Prepare an HTTP 403 response with a GraphQL error message
                                                 return failure_message(
                                                     format!("{jwt} is not authorized: expiry period exceeds policy limit"),
@@ -271,7 +351,16 @@ impl Plugin for JwtAuth {
                                 }
                             }
                             // We are happy with this JWT, on we go...
-                            Ok(Step::Continue(req))
+                            // Let's put our claims in the context and then continue
+                            match req.context.insert("JWTClaims", claims) {
+                                Ok(_v) => Ok(ControlFlow::Continue(req)),
+                                Err(err) => {
+                                    return failure_message(
+                                        format!("couldn't store JWT claims in context: {}", err),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    );
+                                }
+                            }
                         },
                         Err(err) => {
                             // Prepare an HTTP 403 response with a GraphQL error message
@@ -307,7 +396,7 @@ impl Plugin for JwtAuth {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("com.example", "jwt", JwtAuth);
+register_plugin!("example", "jwt", JwtAuth);
 
 // Writing plugins means writing tests that make sure they behave as expected!
 //
@@ -325,7 +414,7 @@ mod tests {
     #[test]
     fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.example.jwt")
+            .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
             .unwrap();
@@ -494,9 +583,17 @@ mod tests {
         // Let's set up our mock to make sure it will be called once
         mock.expect_call()
             .once()
-            .returning(move |_req: RouterRequest| {
-                // We don't care about the contents of the request, so ignore it
-                // let's return the expected data
+            .returning(move |req: RouterRequest| {
+                // Let's make sure our request contains (some of) our JWTClaims
+                let claims: JWTClaims<NoCustomClaims> = req
+                    .context
+                    .get::<String, JWTClaims<NoCustomClaims>>("JWTClaims".to_string())
+                    .expect("claims are present") // Result
+                    .expect("really, they are present"); // Option
+                assert_eq!(claims.issuer, Some("issuer".to_string()));
+                assert_eq!(claims.subject, Some("subject".to_string()));
+                assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
+                assert_eq!(claims.nonce, Some("nonce".to_string()));
                 Ok(plugin_utils::RouterResponse::builder()
                     .data(expected_mock_response_data.into())
                     .build()
@@ -508,10 +605,11 @@ mod tests {
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
-        let conf = Conf {
-            algorithm: "HS256".to_string(),
-            key: key.to_string(),
-        };
+        let conf: Conf = serde_json::from_value(serde_json::json!({
+            "algorithm": "HS256".to_string(),
+            "key": key.to_string(),
+        }))
+        .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
@@ -519,7 +617,15 @@ mod tests {
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
         let verifier = HS256Key::from_bytes(hex::decode(key).unwrap().as_ref());
-        let claims = Claims::create(Duration::from_mins(2));
+        let mut audiences = HashSet::new();
+        audiences.insert("audience 1".to_string());
+        audiences.insert("audience 2".to_string());
+        let claims = Claims::create(Duration::from_mins(2))
+            .with_issuer("issuer")
+            .with_subject("subject")
+            .with_audiences(audiences)
+            .with_jwt_id("jwt_id")
+            .with_nonce("nonce");
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
@@ -558,11 +664,12 @@ mod tests {
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
-        let conf = Conf {
-            algorithm: "HS256".to_string(),
-            key: key.to_string(),
-        };
-
+        let conf: Conf = serde_json::from_value(serde_json::json!({
+            "algorithm": "HS256".to_string(),
+            "key": key.to_string(),
+            "max_token_life": 60,
+        }))
+        .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
 
@@ -570,7 +677,7 @@ mod tests {
 
         let verifier = HS256Key::from_bytes(hex::decode(key).unwrap().as_ref());
         // Generate a token which has an overly generous life span
-        let claims = Claims::create(Duration::from_mins(16));
+        let claims = Claims::create(Duration::from_secs(61));
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
@@ -611,10 +718,13 @@ mod tests {
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
-        let conf = Conf {
-            algorithm: "HS256".to_string(),
-            key: key.to_string(),
-        };
+        let tolerance = 0;
+        let conf: Conf = serde_json::from_value(serde_json::json!({
+            "algorithm": "HS256".to_string(),
+            "key": key.to_string(),
+            "time_tolerance": tolerance,
+        }))
+        .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
@@ -622,8 +732,9 @@ mod tests {
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
         let verifier = HS256Key::from_bytes(hex::decode(key).unwrap().as_ref());
-        // Generate a token which has an overly generous life span
-        let claims = Claims::create(Duration::from_secs(2));
+        // Generate a token which has a short life span
+        let token_life = 1;
+        let claims = Claims::create(Duration::from_secs(token_life));
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
@@ -635,9 +746,8 @@ mod tests {
             .build()
             .into();
 
-        // Let's sleep for 8 seconds, so our token expires
-        // Note: We have a 5 second grace period on validation
-        tokio::time::sleep(tokio::time::Duration::from_secs(8)).await;
+        // Let's sleep until our token has expired
+        tokio::time::sleep(tokio::time::Duration::from_secs(tolerance + token_life + 1)).await;
         // ...And call our service stack with it
         let service_response = service_stack
             .oneshot(request_with_appropriate_auth)
