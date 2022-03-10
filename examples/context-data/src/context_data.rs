@@ -103,4 +103,4 @@ impl Plugin for ContextData {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("com.example", "context_data", ContextData);
+register_plugin!("example", "context_data", ContextData);

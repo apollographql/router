@@ -509,7 +509,7 @@ async fn do_listen(addr_str: String) -> bool {
     true
 }
 
-register_plugin!("com.apollographql", "reporting", Reporting);
+register_plugin!("apollo", "reporting", Reporting);
 
 #[cfg(test)]
 mod tests {
@@ -517,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.apollographql.reporting")
+            .get("apollo.reporting")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "opentelemetry": null }))
             .unwrap();

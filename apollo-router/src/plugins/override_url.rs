@@ -40,7 +40,7 @@ impl Plugin for OverrideSubgraphUrl {
     }
 }
 
-register_plugin!("override_subgraph_url", OverrideSubgraphUrl);
+register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 
 #[cfg(test)]
 mod tests {
@@ -74,7 +74,7 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("override_subgraph_url")
+            .get("apollo.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(

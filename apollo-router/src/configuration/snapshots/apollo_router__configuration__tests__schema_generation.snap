@@ -354,73 +354,73 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-            "com.apollographql.reporting"
+            "apollo.headers"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_start"
+            "apollo.override_subgraph_url"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_start_and_stop"
+            "apollo.reporting"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_stop"
+            "apollo.test.always_fails_to_start"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_starts_and_stops"
+            "apollo.test.always_fails_to_start_and_stop"
+          ]
+        },
+        {
+          "required": [
+            "apollo.test.always_fails_to_stop"
+          ]
+        },
+        {
+          "required": [
+            "apollo.test.always_starts_and_stops"
           ]
         },
         {
           "required": [
             "com.example.hello"
           ]
-        },
-        {
-          "required": [
-            "headers"
-          ]
-        },
-        {
-          "required": [
-            "override_subgraph_url"
-          ]
         }
       ],
       "properties": {
-        "com.apollographql.reporting": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_start": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_start_and_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_starts_and_stops": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello": {
-          "$ref": "#/definitions/Conf"
-        },
-        "headers": {
+        "apollo.headers": {
           "$ref": "#/definitions/Config"
         },
-        "override_subgraph_url": {
+        "apollo.override_subgraph_url": {
           "type": "object",
           "additionalProperties": {
             "type": "string",
             "format": "uri"
           }
+        },
+        "apollo.reporting": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_start": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_start_and_stop": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_stop": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_starts_and_stops": {
+          "$ref": "#/definitions/Conf"
+        },
+        "com.example.hello": {
+          "$ref": "#/definitions/Conf"
         }
       }
     },
