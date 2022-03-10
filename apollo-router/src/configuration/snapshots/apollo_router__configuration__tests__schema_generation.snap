@@ -1,8 +1,7 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 355
+assertion_line: 357
 expression: "&schema"
-
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
@@ -28,22 +27,12 @@ expression: "&schema"
   "definitions": {
     "Conf": {
       "type": "object",
+      "required": [
+        "filename"
+      ],
       "properties": {
-        "graph": {
-          "$ref": "#/definitions/StudioGraph",
-          "nullable": true
-        },
-        "opentelemetry": {
-          "$ref": "#/definitions/OpenTelemetry",
-          "nullable": true
-        },
-        "opentracing": {
-          "$ref": "#/definitions/OpenTracingConfig",
-          "nullable": true
-        },
-        "spaceport": {
-          "$ref": "#/definitions/SpaceportConfig",
-          "nullable": true
+        "filename": {
+          "type": "string"
         }
       }
     },
@@ -155,20 +144,6 @@ expression: "&schema"
         }
       ]
     },
-    "OpenTelemetry": {
-      "$ref": "#/definitions/OpenTelemetry"
-    },
-    "OpenTracingConfig": {
-      "type": "object",
-      "required": [
-        "format"
-      ],
-      "properties": {
-        "format": {
-          "$ref": "#/definitions/PropagationFormat"
-        }
-      }
-    },
     "Operation": {
       "oneOf": [
         {
@@ -213,7 +188,7 @@ expression: "&schema"
       "anyOf": [
         {
           "required": [
-            "apollographql.com.rhai"
+            "apollo.rhai"
           ]
         },
         {
@@ -258,7 +233,7 @@ expression: "&schema"
         }
       ],
       "properties": {
-        "apollographql.com.rhai": {
+        "apollo.rhai": {
           "$ref": "#/definitions/Conf"
         },
         "com.apollographql.reporting": {
@@ -329,13 +304,6 @@ expression: "&schema"
         }
       ]
     },
-    "PropagationFormat": {
-      "type": "string",
-      "enum": [
-        "jaeger",
-        "zipkin_b3"
-      ]
-    },
     "Remove": {
       "oneOf": [
         {
@@ -381,29 +349,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "SpaceportConfig": {
-      "type": "object",
-      "required": [
-        "external"
-      ],
-      "properties": {
-        "collector": {
-          "default": "https://127.0.0.1:50051",
-          "type": "string"
-        },
-        "external": {
-          "type": "boolean"
-        },
-        "listener": {
-          "default": "127.0.0.1:50051",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "StudioGraph": {
-      "type": "object"
     }
   }
 }
