@@ -1,8 +1,7 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 449
+assertion_line: 357
 expression: "&schema"
-
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
@@ -22,28 +21,51 @@ expression: "&schema"
         "cors": null
       },
       "$ref": "#/definitions/Server"
-    },
-    "subgraphs": {
-      "description": "Mapping of name to subgraph that the router may contact.",
-      "default": {},
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/definitions/Subgraph"
-      }
     }
   },
   "additionalProperties": false,
   "definitions": {
     "Conf": {
       "type": "object",
-      "required": [
-        "name"
-      ],
       "properties": {
-        "name": {
-          "type": "string"
+        "graph": {
+          "$ref": "#/definitions/StudioGraph",
+          "nullable": true
+        },
+        "opentelemetry": {
+          "$ref": "#/definitions/OpenTelemetry",
+          "nullable": true
+        },
+        "opentracing": {
+          "$ref": "#/definitions/OpenTracingConfig",
+          "nullable": true
+        },
+        "spaceport": {
+          "$ref": "#/definitions/SpaceportConfig",
+          "nullable": true
         }
       }
+    },
+    "Config": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Operation"
+          }
+        },
+        "subgraphs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/Operation"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "Cors": {
       "description": "Cross origin request configuration.",
@@ -103,7 +125,7 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "InsertConfig": {
+    "Insert": {
       "type": "object",
       "required": [
         "name",
@@ -116,7 +138,8 @@ expression: "&schema"
         "value": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "ListenAddr": {
       "description": "Listening address.",
@@ -128,6 +151,60 @@ expression: "&schema"
         {
           "description": "Unix socket.",
           "type": "string"
+        }
+      ]
+    },
+    "OpenTelemetry": {
+      "$ref": "#/definitions/OpenTelemetry"
+    },
+    "OpenTracingConfig": {
+      "type": "object",
+      "required": [
+        "format"
+      ],
+      "properties": {
+        "format": {
+          "$ref": "#/definitions/PropagationFormat"
+        }
+      }
+    },
+    "Operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "insert"
+          ],
+          "properties": {
+            "insert": {
+              "$ref": "#/definitions/Insert"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "remove"
+          ],
+          "properties": {
+            "remove": {
+              "$ref": "#/definitions/Remove"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "propagate"
+          ],
+          "properties": {
+            "propagate": {
+              "$ref": "#/definitions/Propagate"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -167,6 +244,11 @@ expression: "&schema"
           "required": [
             "com.example.hello"
           ]
+        },
+        {
+          "required": [
+            "headers"
+          ]
         }
       ],
       "properties": {
@@ -194,11 +276,14 @@ expression: "&schema"
         },
         "com.example.hello": {
           "$ref": "#/definitions/Conf"
+        },
+        "headers": {
+          "$ref": "#/definitions/Config"
         }
       }
     },
-    "PropagateConfig": {
-      "oneOf": [
+    "Propagate": {
+      "anyOf": [
         {
           "type": "object",
           "required": [
@@ -206,13 +291,7 @@ expression: "&schema"
           ],
           "properties": {
             "matching": {
-              "type": "object",
-              "properties": {
-                "regex": {
-                  "default": ".*",
-                  "type": "string"
-                }
-              }
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -220,34 +299,35 @@ expression: "&schema"
         {
           "type": "object",
           "required": [
-            "named"
+            "default",
+            "named",
+            "rename"
           ],
           "properties": {
+            "default": {
+              "type": "string",
+              "nullable": true
+            },
             "named": {
-              "type": "object",
-              "required": [
-                "name"
-              ],
-              "properties": {
-                "default_value": {
-                  "type": "string",
-                  "nullable": true
-                },
-                "name": {
-                  "type": "string"
-                },
-                "rename": {
-                  "type": "string",
-                  "nullable": true
-                }
-              }
+              "type": "string"
+            },
+            "rename": {
+              "type": "string",
+              "nullable": true
             }
           },
           "additionalProperties": false
         }
       ]
     },
-    "RemoveConfig": {
+    "PropagationFormat": {
+      "type": "string",
+      "enum": [
+        "jaeger",
+        "zipkin_b3"
+      ]
+    },
+    "Remove": {
       "oneOf": [
         {
           "type": "object",
@@ -268,13 +348,7 @@ expression: "&schema"
           ],
           "properties": {
             "matching": {
-              "type": "object",
-              "properties": {
-                "regex": {
-                  "default": ".*",
-                  "type": "string"
-                }
-              }
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -299,49 +373,28 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "Subgraph": {
+    "SpaceportConfig": {
+      "type": "object",
+      "required": [
+        "external"
+      ],
       "properties": {
-        "layers": {
-          "items": {
-            "oneOf": [
-              {
-                "required": [
-                  "example.com_hello"
-                ]
-              },
-              {
-                "required": [
-                  "headers_insert"
-                ]
-              },
-              {
-                "required": [
-                  "headers_propagate"
-                ]
-              },
-              {
-                "required": [
-                  "headers_remove"
-                ]
-              }
-            ],
-            "properties": {
-              "example.com_hello": {
-                "$ref": "#/definitions/Conf"
-              },
-              "headers_insert": {
-                "$ref": "#/definitions/InsertConfig"
-              },
-              "headers_propagate": {
-                "$ref": "#/definitions/PropagateConfig"
-              },
-              "headers_remove": {
-                "$ref": "#/definitions/RemoveConfig"
-              }
-            }
-          }
+        "collector": {
+          "default": "https://127.0.0.1:50051",
+          "type": "string"
+        },
+        "external": {
+          "type": "boolean"
+        },
+        "listener": {
+          "default": "127.0.0.1:50051",
+          "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    "StudioGraph": {
+      "type": "object"
     }
   }
 }

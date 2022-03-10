@@ -1,11 +1,10 @@
 use apollo_router_core::{
-    checkpoint::Step, plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse,
-    ServiceBuilderExt,
+    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::{ops::ControlFlow, path::PathBuf};
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
 // This structure is the one we'll deserialize the yml configuration into
@@ -55,8 +54,8 @@ impl Plugin for AllowClientIdFromFile {
 
         // `ServiceBuilder` provides us with an `async_checkpoint` method.
         //
-        // This method allows us to return Step::Continue(request) if we want to let the request through,
-        // or Step::Return(response) with a crafted response if we don't want the request to go through.
+        // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
+        // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
             .async_checkpoint(move |req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
@@ -70,7 +69,7 @@ impl Plugin for AllowClientIdFromFile {
                         }])
                         .build()
                         .with_status(StatusCode::UNAUTHORIZED);
-                    return Box::pin(async { Ok(Step::Return(res)) });
+                    return Box::pin(async { Ok(ControlFlow::Break(res)) });
                 }
 
                 // It is best practice to perform checks before we unwrap,
@@ -95,7 +94,7 @@ impl Plugin for AllowClientIdFromFile {
                             }])
                             .build()
                             .with_status(StatusCode::BAD_REQUEST);
-                        return Box::pin(async { Ok(Step::Return(res)) });
+                        return Box::pin(async { Ok(ControlFlow::Break(res)) });
                     }
                 };
 
@@ -118,7 +117,7 @@ impl Plugin for AllowClientIdFromFile {
                     .unwrap();
 
                     if allowed_clients.contains(&client_id_string) {
-                        Ok(Step::Continue(req))
+                        Ok(ControlFlow::Continue(req))
                     } else {
                         // Prepare an HTTP 403 response with a GraphQL error message
                         let res = plugin_utils::RouterResponse::builder()
@@ -128,13 +127,13 @@ impl Plugin for AllowClientIdFromFile {
                             }])
                             .build()
                             .with_status(StatusCode::FORBIDDEN);
-                        Ok(Step::Return(res))
+                        Ok(ControlFlow::Break(res))
                     }
                 })
             })
             // Given the async nature of our checkpoint, we need to make sure
             // the underlying service will be available whenever the checkpoint
-            // returns Step::Continue.
+            // returns ControlFlow::Continue.
             // This is achieved by adding a buffer in front of the service,
             // and (automatically) giving one `slot` to our async_checkpoint
             //

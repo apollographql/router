@@ -1,8 +1,6 @@
-use crate::{
-    checkpoint::{CheckpointService, Step},
-    plugin_utils, ExecutionRequest, ExecutionResponse,
-};
+use crate::{checkpoint::CheckpointService, plugin_utils, ExecutionRequest, ExecutionResponse};
 use http::{Method, StatusCode};
+use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
@@ -34,9 +32,9 @@ where
                         .context(req.context)
                         .build()
                         .into();
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 } else {
-                    Ok(Step::Continue(req))
+                    Ok(ControlFlow::Continue(req))
                 }
             },
             service,

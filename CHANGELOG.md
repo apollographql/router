@@ -19,7 +19,57 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 
  -->
+
+# [x.x.x] (unreleased) - 2021-mm-dd
+
+ - **❗ BREAKING ❗**
+ -  **use ControlFlow in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+   `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow instead` of the `Step` enum. ControlFlow has two variants, `Continue` and `Break`.
  
+## ❗ BREAKING ❗
+- **Header propagation plugin** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  Header manipulation has been shifted to a plugin rather than service level layers. It now supports rules for all 
+  subgraphs as wel as individual subgraphs.
+
+  ```yaml
+  plugins:
+    headers:
+      all:
+      - propagate:
+        matching: "aaa.*"
+      - propagate:
+        named: "bbb"
+        default: "def"
+        rename: "ccc"
+      - insert:
+        name: "ddd"
+        value: "eee"
+      - remove:
+        matching: "fff.*"
+      - remove:
+        name: "ggg"
+      subgraphs:
+        products:
+        - propagate:
+          matching: ".*"
+    ```
+- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
+
+  Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
+use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+
+## Example section entry format
+
+- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+
+  Description! And a link to a [reference](http://url)
+
+
 # [v0.1.0-alpha.8] 2022-03-08
 
 ## :sparkles: Features

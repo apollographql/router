@@ -9,7 +9,6 @@ use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
 use crate::{replace_layer, BoxedLayer};
 
-use apollo_router_core::ConfigurableLayer;
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::SubgraphResponse;
 use apollo_router_core::{register_plugin, Plugin};
@@ -268,7 +267,7 @@ impl Plugin for Reporting {
 
         let mut opentracing_layer = None;
         if let Some(opentracing_conf) = &configuration.opentracing {
-            opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone())?.into();
+            opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone()).into();
         }
 
         Ok(Reporting {
