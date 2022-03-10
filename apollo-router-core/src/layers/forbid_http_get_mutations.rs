@@ -1,66 +1,44 @@
-use crate::{plugin_utils, ExecutionRequest, ExecutionResponse};
-use futures::future::BoxFuture;
+use crate::{checkpoint::CheckpointService, plugin_utils, ExecutionRequest, ExecutionResponse};
 use http::{Method, StatusCode};
-use std::task::Poll;
-use tower::{Layer, Service};
-
-pub struct ForbidHttpGetMutations {}
-
-pub struct ForbidHttpGetMutationsService<S>
-where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
-    <S as Service<ExecutionRequest>>::Future: Send + 'static,
-{
-    service: S,
-}
+use std::ops::ControlFlow;
+use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
 pub struct ForbidHttpGetMutationsLayer {}
 
 impl<S> Layer<S> for ForbidHttpGetMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
+    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
+    <S as Service<ExecutionRequest>>::Error: Into<BoxError> + Send + 'static,
 {
-    type Service = ForbidHttpGetMutationsService<S>;
+    type Service = CheckpointService<S, ExecutionRequest>;
 
     fn layer(&self, service: S) -> Self::Service {
-        ForbidHttpGetMutationsService { service }
-    }
-}
-
-impl<S> Service<ExecutionRequest> for ForbidHttpGetMutationsService<S>
-where
-    S: Service<ExecutionRequest, Response = ExecutionResponse> + Send,
-    <S as Service<ExecutionRequest>>::Future: Send,
-{
-    type Response = ExecutionResponse;
-    type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, req: ExecutionRequest) -> Self::Future {
-        if req.context.request.method() == Method::GET && req.query_plan.contains_mutations() {
-            let res = plugin_utils::ExecutionResponse::builder()
-                .errors(vec![crate::Error {
-                    message: "GET supports only query operation".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                }])
-                .status(StatusCode::METHOD_NOT_ALLOWED)
-                .headers(vec![("Allow".to_string(), "POST".to_string())])
-                .context(req.context)
-                .build()
-                .into();
-
-            Box::pin(async { Ok(res) })
-        } else {
-            Box::pin(self.service.call(req))
-        }
+        CheckpointService::new(
+            |req: ExecutionRequest| {
+                if req.context.request.method() == Method::GET
+                    && req.query_plan.contains_mutations()
+                {
+                    let res = plugin_utils::ExecutionResponse::builder()
+                        .errors(vec![crate::Error {
+                            message: "GET supports only query operation".to_string(),
+                            locations: Default::default(),
+                            path: Default::default(),
+                            extensions: Default::default(),
+                        }])
+                        .status(StatusCode::METHOD_NOT_ALLOWED)
+                        .headers(vec![("Allow".to_string(), "POST".to_string())])
+                        .context(req.context)
+                        .build()
+                        .into();
+                    Ok(ControlFlow::Break(res))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            },
+            service,
+        )
     }
 }
 
@@ -69,12 +47,14 @@ mod forbid_http_get_mutations_tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
     use crate::{
         plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
         Context, QueryPlan,
     };
-    use http::{Request, StatusCode};
+    use http::StatusCode;
+    use reqwest::Url;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -89,7 +69,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
@@ -108,7 +88,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
@@ -127,7 +107,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
@@ -147,7 +127,7 @@ mod forbid_http_get_mutations_tests {
         let expected_allow_header = "POST";
 
         let mock = MockExecutionService::new().build();
-        let mut service_stack = ForbidHttpGetMutationsLayer {}.layer(mock);
+        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Mutation);
 
@@ -201,11 +181,9 @@ mod forbid_http_get_mutations_tests {
             .query_plan(Arc::new(QueryPlan { root }))
             .context(
                 Context::new().with_request(Arc::new(
-                    Request::builder()
-                        .method(method)
+                    RequestBuilder::new(method, Url::parse("http://test").unwrap())
                         .body(crate::Request::default())
-                        .unwrap()
-                        .into(),
+                        .unwrap(),
                 )),
             )
             .build()

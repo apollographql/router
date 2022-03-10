@@ -108,7 +108,9 @@ impl ValueExt for Value {
                 failfast_debug!("trying to replace an array with an object");
             }
             (a, b) => {
-                *a = b;
+                if b != Value::Null {
+                    *a = b;
+                }
             }
         }
     }

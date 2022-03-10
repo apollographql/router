@@ -1,15 +1,13 @@
-use super::{from_names_and_values, CompatRequest};
-use crate::{Context, Object, QueryPlan};
-use futures::executor::block_on;
-use serde_json_bytes::Value;
+use super::CompatRequest;
+use crate::{http_compat::RequestBuilder, Context, QueryPlan};
+use http::Method;
+use reqwest::Url;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 #[derive(Default, Clone, TypedBuilder)]
 #[builder(field_defaults(default, setter(strip_option)))]
 pub struct QueryPlannerResponse {
-    #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
-    extensions: Option<Object>,
     query_plan: Option<Arc<QueryPlan>>,
     context: Option<Context>,
     request: Option<CompatRequest>,
@@ -18,13 +16,13 @@ pub struct QueryPlannerResponse {
 impl From<QueryPlannerResponse> for crate::QueryPlannerResponse {
     fn from(queryplanner_response: QueryPlannerResponse) -> Self {
         let context = queryplanner_response.context.unwrap_or_else(|| {
-            let ctx =
-                Context::new().with_request(queryplanner_response.request.unwrap_or_default());
-            if let Some(extensions) = queryplanner_response.extensions {
-                block_on(async { *(ctx.extensions().write().await) = extensions });
-            }
-
-            ctx
+            Context::new().with_request(queryplanner_response.request.unwrap_or_else(|| {
+                Arc::new(
+                    RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
+                        .body(crate::Request::default())
+                        .unwrap(),
+                )
+            }))
         });
         Self {
             query_plan: queryplanner_response

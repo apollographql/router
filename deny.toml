@@ -22,7 +22,7 @@ notice = "warn"
 # while https://github.com/chronotope/chrono/issues/499 is open. 
 # We need to keep track of this issue, and make sure `tracing-subscriber` is updated
 # We will then be able to remove this
-ignore = ["RUSTSEC-2020-0159"]
+ignore = ["RUSTSEC-2020-0159", "RUSTSEC-2020-0071"]
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
@@ -64,13 +64,13 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
@@ -81,7 +81,7 @@ license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
 [[licenses.clarify]]
 name = "apollo-spaceport"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-alpha.7"
+version = "0.1.0-alpha.8"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]

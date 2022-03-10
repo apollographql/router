@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 93
+assertion_line: 126
 expression: get_spans()
 
 ---
@@ -19,15 +19,15 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router_core::services::router_service::query_parsing": {
-      "name": "apollo_router_core::services::router_service::query_parsing",
+    "apollo_router_core::query_cache::get_query": {
+      "name": "apollo_router_core::query_cache::get_query",
       "record": {
         "entries": [],
         "metadata": {
-          "name": "query_parsing",
-          "target": "apollo_router_core::services::router_service",
+          "name": "get_query",
+          "target": "apollo_router_core::query_cache",
           "level": "INFO",
-          "module_path": "apollo_router_core::services::router_service",
+          "module_path": "apollo_router_core::query_cache",
           "fields": {
             "names": []
           }
@@ -42,7 +42,7 @@ expression: get_spans()
         "metadata": {
           "name": "plan",
           "target": "apollo_router_core::query_planner::router_bridge_query_planner",
-          "level": "DEBUG",
+          "level": "INFO",
           "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
           "fields": {
             "names": []
@@ -58,7 +58,7 @@ expression: get_spans()
         "metadata": {
           "name": "execute",
           "target": "apollo_router_core::services::execution_service",
-          "level": "DEBUG",
+          "level": "INFO",
           "module_path": "apollo_router_core::services::execution_service",
           "fields": {
             "names": []
@@ -66,69 +66,52 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router_core::services::execution_service::execution": {
-          "name": "apollo_router_core::services::execution_service::execution",
+        "apollo_router_core::query_planner::fetch": {
+          "name": "apollo_router_core::query_planner::fetch",
           "record": {
             "entries": [],
             "metadata": {
-              "name": "execution",
-              "target": "apollo_router_core::services::execution_service",
+              "name": "fetch",
+              "target": "apollo_router_core::query_planner",
               "level": "INFO",
-              "module_path": "apollo_router_core::services::execution_service",
+              "module_path": "apollo_router_core::query_planner",
               "fields": {
                 "names": []
               }
             }
           },
           "children": {
-            "apollo_router_core::query_planner::fetch": {
-              "name": "apollo_router_core::query_planner::fetch",
+            "apollo_router_core::query_planner::fetch::make_variables": {
+              "name": "apollo_router_core::query_planner::fetch::make_variables",
               "record": {
                 "entries": [],
                 "metadata": {
-                  "name": "fetch",
-                  "target": "apollo_router_core::query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router_core::query_planner",
+                  "name": "make_variables",
+                  "target": "apollo_router_core::query_planner::fetch",
+                  "level": "DEBUG",
+                  "module_path": "apollo_router_core::query_planner::fetch",
                   "fields": {
                     "names": []
                   }
                 }
               },
-              "children": {
-                "apollo_router_core::query_planner::fetch::make_variables": {
-                  "name": "apollo_router_core::query_planner::fetch::make_variables",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "make_variables",
-                      "target": "apollo_router_core::query_planner::fetch",
-                      "level": "DEBUG",
-                      "module_path": "apollo_router_core::query_planner::fetch",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {}
-                },
-                "apollo_router_core::query_planner::fetch::response_insert": {
-                  "name": "apollo_router_core::query_planner::fetch::response_insert",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "response_insert",
-                      "target": "apollo_router_core::query_planner::fetch",
-                      "level": "DEBUG",
-                      "module_path": "apollo_router_core::query_planner::fetch",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {}
+              "children": {}
+            },
+            "apollo_router_core::query_planner::fetch::response_insert": {
+              "name": "apollo_router_core::query_planner::fetch::response_insert",
+              "record": {
+                "entries": [],
+                "metadata": {
+                  "name": "response_insert",
+                  "target": "apollo_router_core::query_planner::fetch",
+                  "level": "DEBUG",
+                  "module_path": "apollo_router_core::query_planner::fetch",
+                  "fields": {
+                    "names": []
+                  }
                 }
-              }
+              },
+              "children": {}
             }
           }
         }

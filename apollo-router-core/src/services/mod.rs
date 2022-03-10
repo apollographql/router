@@ -1,20 +1,28 @@
+pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
+use futures::future::BoxFuture;
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 use std::convert::Infallible;
+use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
+
+pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
+mod reqwest_subgraph_service;
 mod router_service;
+pub use reqwest_subgraph_service::ReqwestSubgraphService;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -24,12 +32,60 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
     RawString(String),
+}
+
+impl TryFrom<ResponseBody> for Response {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::GraphQL(res) => Ok(res),
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawJSON")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected Response, found RawString")
+            }
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for String {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found RawJSON")
+            }
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawString, found GraphQL")
+            }
+            ResponseBody::RawString(res) => Ok(res),
+        }
+    }
+}
+
+impl TryFrom<ResponseBody> for serde_json::Value {
+    type Error = &'static str;
+
+    fn try_from(value: ResponseBody) -> Result<Self, Self::Error> {
+        match value {
+            ResponseBody::RawJSON(res) => Ok(res),
+            ResponseBody::GraphQL(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
+            }
+            ResponseBody::RawString(_) => {
+                Err("wrong ResponseBody kind: expected RawJSON, found RawString")
+            }
+        }
+    }
 }
 
 impl From<Response> for ResponseBody {
@@ -126,86 +182,66 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
 }
 
 #[allow(clippy::type_complexity)]
-pub trait ServiceBuilderExt<L> {
-    fn cache<S, Request, Key, Value>(
+pub trait ServiceBuilderExt<L>: Sized {
+    fn cache<Request, Response, Key, Value>(
         self,
-        cache: Cache<Key, Result<Value, String>>,
-        key_fn: fn(&Request) -> Key,
-        value_fn: fn(&S::Response) -> Value,
-        response_fn: fn(Request, Value) -> S::Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
+        cache: Cache<Key, Arc<RwLock<Option<Result<Value, String>>>>>,
+        key_fn: fn(&Request) -> Option<&Key>,
+        value_fn: fn(&Response) -> &Value,
+        response_fn: fn(Request, Value) -> Response,
+    ) -> ServiceBuilder<Stack<CachingLayer<Request, Response, Key, Value>, L>>
     where
         Request: Send,
-        S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<Request>>::Response: Send,
-        <S as Service<Request>>::Future: Send;
-
-    fn cache_query_plan<S>(
-        self,
-    ) -> ServiceBuilder<
-        Stack<
-            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
-            L,
-        >,
-    >
-    where
-        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
-        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<QueryPlannerRequest>>::Response: Send,
-        <S as Service<QueryPlannerRequest>>::Future: Send;
-}
-
-#[allow(clippy::type_complexity)]
-impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn cache<S, Request, Key, Value>(
-        self,
-        cache: Cache<Key, Result<Value, String>>,
-        key_fn: fn(&Request) -> Key,
-        value_fn: fn(&S::Response) -> Value,
-        response_fn: fn(Request, Value) -> S::Response,
-    ) -> ServiceBuilder<Stack<CachingLayer<S, Request, Key, Value>, L>>
-    where
-        Request: Send,
-        S: Service<Request> + Send,
-        <S as Service<Request>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<Request>>::Response: Send,
-        <S as Service<Request>>::Future: Send,
     {
         self.layer(CachingLayer::new(cache, key_fn, value_fn, response_fn))
     }
 
-    fn cache_query_plan<S>(
+    fn checkpoint<S, Request>(
         self,
-    ) -> ServiceBuilder<
-        Stack<
-            CachingLayer<S, QueryPlannerRequest, (Option<String>, Option<String>), Arc<QueryPlan>>,
-            L,
-        >,
-    >
+        checkpoint_fn: impl Fn(
+                Request,
+            ) -> Result<
+                ControlFlow<<S as Service<Request>>::Response, Request>,
+                <S as Service<Request>>::Error,
+            > + Send
+            + Sync
+            + 'static,
+    ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
     where
-        S: Service<QueryPlannerRequest, Response = QueryPlannerResponse> + Send,
-        <S as Service<QueryPlannerRequest>>::Error: Into<BoxError> + Send + Sync,
-        <S as Service<QueryPlannerRequest>>::Response: Send,
-        <S as Service<QueryPlannerRequest>>::Future: Send,
+        S: Service<Request> + Send + 'static,
+        Request: Send + 'static,
+        S::Future: Send,
+        S::Response: Send + 'static,
+        S::Error: Into<BoxError> + Send + 'static,
     {
-        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-        self.cache(
-            moka::sync::CacheBuilder::new(plan_cache_limit).build(),
-            |r: &QueryPlannerRequest| {
-                (
-                    r.context.request.body().query.clone(),
-                    r.context.request.body().operation_name.clone(),
-                )
-            },
-            |r: &QueryPlannerResponse| r.query_plan.clone(),
-            |r: QueryPlannerRequest, v: Arc<QueryPlan>| QueryPlannerResponse {
-                query_plan: v,
-                context: r.context,
-            },
-        )
+        self.layer(CheckpointLayer::new(checkpoint_fn))
+    }
+
+    fn async_checkpoint<S, Request>(
+        self,
+        async_checkpoint_fn: impl Fn(
+                Request,
+            ) -> BoxFuture<
+                'static,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
+            > + Send
+            + Sync
+            + 'static,
+    ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Request>, L>>
+    where
+        S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+        Request: Send + 'static,
+        S::Future: Send,
+        S::Response: Send + 'static,
+    {
+        self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
+    }
+    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
+}
+
+#[allow(clippy::type_complexity)]
+impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
+    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
+        ServiceBuilder::layer(self, layer)
     }
 }

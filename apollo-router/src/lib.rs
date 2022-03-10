@@ -6,7 +6,6 @@ mod files;
 mod http_server_factory;
 mod layers;
 mod plugins;
-pub mod reqwest_subgraph_service;
 pub mod router_factory;
 mod state_machine;
 mod warp_http_server_factory;
@@ -19,42 +18,202 @@ use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
-use derive_more::Display;
-use derive_more::From;
+use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::{Dispatch, Subscriber};
+use tracing::span::{Attributes, Record};
+use tracing::subscriber::{set_global_default, SetGlobalDefaultError};
+use tracing::{Event as TracingEvent, Id, Metadata, Subscriber};
+use tracing_core::span::Current;
+use tracing_core::{Interest, LevelFilter};
+use tracing_subscriber::fmt::format::{DefaultFields, Format, Json, JsonFields};
+use tracing_subscriber::registry::{Data, LookupSpan};
+use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
+use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
+pub(crate) type BoxedLayer = Box<dyn Layer<RouterSubscriber> + Send + Sync>;
+
+type FmtSubscriberTextEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
+type FmtSubscriberJsonEnv = FmtSubscriber<JsonFields, Format<Json>, EnvFilter>;
+
+pub enum RouterSubscriber {
+    JsonSubscriber(FmtSubscriberJsonEnv),
+    TextSubscriber(FmtSubscriberTextEnv),
+}
+
+impl Subscriber for RouterSubscriber {
+    // Required to make the trait work
+
+    fn clone_span(&self, id: &Id) -> Id {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.clone_span(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.clone_span(id),
+        }
+    }
+
+    fn try_close(&self, id: Id) -> bool {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.try_close(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.try_close(id),
+        }
+    }
+
+    unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.downcast_raw(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.downcast_raw(id),
+        }
+    }
+
+    // May not be required to work, but better safe than sorry
+
+    fn current_span(&self) -> Current {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.current_span(),
+            RouterSubscriber::TextSubscriber(sub) => sub.current_span(),
+        }
+    }
+
+    fn drop_span(&self, id: Id) {
+        // Rather than delegate, call try_close() to avoid deprecation
+        // complaints
+        self.try_close(id);
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.max_level_hint(),
+            RouterSubscriber::TextSubscriber(sub) => sub.max_level_hint(),
+        }
+    }
+
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.register_callsite(metadata),
+            RouterSubscriber::TextSubscriber(sub) => sub.register_callsite(metadata),
+        }
+    }
+
+    // Required by the trait
+
+    fn enabled(&self, meta: &Metadata<'_>) -> bool {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.enabled(meta),
+            RouterSubscriber::TextSubscriber(sub) => sub.enabled(meta),
+        }
+    }
+
+    fn new_span(&self, attrs: &Attributes<'_>) -> Id {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.new_span(attrs),
+            RouterSubscriber::TextSubscriber(sub) => sub.new_span(attrs),
+        }
+    }
+
+    fn record(&self, span: &Id, values: &Record<'_>) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.record(span, values),
+            RouterSubscriber::TextSubscriber(sub) => sub.record(span, values),
+        }
+    }
+
+    fn record_follows_from(&self, span: &Id, follows: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.record_follows_from(span, follows),
+            RouterSubscriber::TextSubscriber(sub) => sub.record_follows_from(span, follows),
+        }
+    }
+
+    fn event(&self, event: &TracingEvent<'_>) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.event(event),
+            RouterSubscriber::TextSubscriber(sub) => sub.event(event),
+        }
+    }
+
+    fn enter(&self, id: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.enter(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.enter(id),
+        }
+    }
+
+    fn exit(&self, id: &Id) {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.exit(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.exit(id),
+        }
+    }
+}
+
+impl<'a> LookupSpan<'a> for RouterSubscriber {
+    type Data = Data<'a>;
+
+    fn span_data(&'a self, id: &Id) -> Option<<Self as LookupSpan<'a>>::Data> {
+        match self {
+            RouterSubscriber::JsonSubscriber(sub) => sub.span_data(id),
+            RouterSubscriber::TextSubscriber(sub) => sub.span_data(id),
+        }
+    }
+}
+
+struct BaseLayer;
+
+// We don't actually need our BaseLayer to do anything. It exists as a holder
+// for the layers set by the reporting.rs plugin
+impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
+
+static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
+
+pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
+    RELOAD_HANDLE
+        .get_or_try_init(move || {
+            // First create a boxed BaseLayer
+            let cl: BoxedLayer = Box::new(BaseLayer {});
+
+            // Now create a reloading layer from that
+            let (reloading_layer, handle) = ReloadLayer::new(cl);
+
+            // Box up our reloading layer
+            let rl: BoxedLayer = Box::new(reloading_layer);
+
+            // Compose that with our subscriber
+            let composed = rl.with_subscriber(subscriber);
+
+            // Set our subscriber as the global subscriber
+            set_global_default(composed)?;
+
+            // Return our handle to store in OnceCell
+            Ok(handle)
+        })
+        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
+    Ok(())
+}
+
+pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
+    match RELOAD_HANDLE.get() {
+        Some(hdl) => {
+            hdl.reload(new_layer)
+                .map_err(FederatedServerError::ReloadTracingLayerError)?;
+        }
+        None => {
+            return Err(FederatedServerError::NoReloadTracingHandleError);
+        }
+    }
+    Ok(())
+}
+
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
-
-pub static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
-
-static DISPATCHER: Lazy<Mutex<Dispatch>> = Lazy::new(|| Mutex::new(Default::default()));
-
-/// Retrieve a new dispatcher which uses the global subscriber
-pub fn get_dispatcher() -> Dispatch {
-    DISPATCHER.lock().unwrap().clone()
-}
-
-/// Update our subscriber. Should only be invoked from OTEL plugin.
-pub fn set_dispatcher(new_sub: Arc<dyn Subscriber + Send + Sync + 'static>) {
-    let mut sub_guard = DISPATCHER.lock().unwrap();
-
-    let new_dispatch = tracing::Dispatch::new(new_sub);
-    *sub_guard = new_dispatch;
-}
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
@@ -88,6 +247,15 @@ pub enum FederatedServerError {
 
     /// Could not configure spaceport: {0}
     ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
+
+    /// No reload handle available
+    NoReloadTracingHandleError,
+
+    /// Could not set global subscriber: {0}
+    SetGlobalSubscriberError(SetGlobalDefaultError),
+
+    /// Could not reload tracing layer: {0}
+    ReloadTracingLayerError(ReloadError),
 }
 
 /// The user supplied schema. Either a static instance or a stream for hot reloading.
@@ -549,6 +717,29 @@ impl FederatedServerHandle {
         if let Some(mut state_receiver) = self.state_receiver.take() {
             state_receiver.close();
         }
+    }
+
+    /// State receiver that prints out basic lifecycle events.
+    pub async fn with_default_state_receiver(&mut self) {
+        self.state_receiver()
+            .for_each(|state| {
+                match state {
+                    State::Startup => {
+                        tracing::info!(r#"Starting Apollo Router"#)
+                    }
+                    State::Running { address, .. } => {
+                        tracing::info!("Listening on {} 🚀", address)
+                    }
+                    State::Stopped => {
+                        tracing::info!("Stopped")
+                    }
+                    State::Errored => {
+                        tracing::info!("Stopped with error")
+                    }
+                }
+                future::ready(())
+            })
+            .await
     }
 }
 

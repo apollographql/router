@@ -271,8 +271,14 @@ impl From<QueryPlannerError> for Response {
 pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
+    /// URL parse error for subgraph {0}: {1}
+    UrlParse(String, url::ParseError),
+    /// Could not find an URL for subgraph {0}
+    MissingSubgraphUrl(String),
     /// Parsing error(s).
     Parse(ParseErrors),
+    /// Api error(s): {0}
+    Api(String),
 }
 
 #[derive(Debug)]

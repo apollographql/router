@@ -1,11 +1,11 @@
-use crate::{plugin_utils, RouterRequest, RouterResponse};
-use futures::future::BoxFuture;
+use std::ops::ControlFlow;
+
+use crate::{checkpoint::CheckpointService, plugin_utils, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
-use std::task::Poll;
-use tower::{Layer, Service};
+use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
@@ -15,150 +15,97 @@ pub struct PersistedQuery {
 }
 
 #[derive(Clone)]
-pub struct APQ {
+pub struct APQLayer {
     cache: Cache<Vec<u8>, String>,
 }
 
-impl APQ {
+impl APQLayer {
     pub fn with_cache(cache: Cache<Vec<u8>, String>) -> Self {
         Self { cache }
     }
 }
 
-impl Default for APQ {
+impl Default for APQLayer {
     fn default() -> Self {
         Self::with_cache(Cache::new(512))
     }
 }
 
-pub struct APQService<S>
+impl<S> Layer<S> for APQLayer
 where
-    S: Service<RouterRequest>,
+    S: Service<RouterRequest, Response = RouterResponse> + Send + 'static,
+    <S as Service<RouterRequest>>::Future: Send + 'static,
+    <S as Service<RouterRequest>>::Error: Into<BoxError> + Send + 'static,
 {
-    service: S,
-    apq: APQ,
-}
-
-impl<S> APQService<S>
-where
-    S: Service<RouterRequest>,
-{
-    pub fn new(service: S, cache: Cache<Vec<u8>, String>) -> Self {
-        Self {
-            service,
-            apq: APQ::with_cache(cache),
-        }
-    }
-}
-
-impl<S> Layer<S> for APQ
-where
-    S: Service<RouterRequest, Response = RouterResponse>,
-{
-    type Service = APQService<S>;
+    type Service = CheckpointService<S, RouterRequest>;
 
     fn layer(&self, service: S) -> Self::Service {
-        APQService {
-            apq: self.clone(),
+        let cache = self.cache.clone();
+        CheckpointService::new(
+            move |mut req| {
+                let maybe_query_hash: Option<Vec<u8>> = req
+                    .context
+                    .request
+                    .body()
+                    .extensions
+                    .get("persistedQuery")
+                    .and_then(|value| {
+                        serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
+                    })
+                    .and_then(|persisted_query| {
+                        hex::decode(persisted_query.sha256hash.as_bytes()).ok()
+                    });
+
+                let body_query = req.context.request.body().query.clone();
+
+                match (maybe_query_hash, body_query) {
+                    (Some(query_hash), Some(query)) => {
+                        if query_matches_hash(query.as_str(), query_hash.as_slice()) {
+                            tracing::trace!("apq: cache insert");
+                            cache.insert(query_hash, query);
+                        } else {
+                            tracing::warn!(
+                                "apq: graphql request doesn't match provided sha256Hash"
+                            );
+                        }
+                        Ok(ControlFlow::Continue(req))
+                    }
+                    (Some(apq_hash), _) => {
+                        if let Some(cached_query) = cache.get(&apq_hash) {
+                            tracing::trace!("apq: cache hit");
+                            req.context.request.body_mut().query = Some(cached_query);
+                            Ok(ControlFlow::Continue(req))
+                        } else {
+                            tracing::trace!("apq: cache miss");
+                            let res = plugin_utils::RouterResponse::builder()
+                                .errors(vec![crate::Error {
+                                    message: "PersistedQueryNotFound".to_string(),
+                                    locations: Default::default(),
+                                    path: Default::default(),
+                                    extensions: serde_json_bytes::from_value(json!({
+                                          "code": "PERSISTED_QUERY_NOT_FOUND",
+                                          "exception": {
+                                          "stacktrace": [
+                                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                                          ],
+                                      },
+                                    }))
+                                    .unwrap(),
+                                }])
+                                .context(req.context.into())
+                                .build()
+                                .into();
+
+                            Ok(ControlFlow::Break(res))
+                        }
+                    }
+                    _ => Ok(ControlFlow::Continue(req)),
+                }
+            },
             service,
-        }
+        )
     }
 }
-
-impl<S> Service<RouterRequest> for APQService<S>
-where
-    S: Service<RouterRequest, Response = RouterResponse>,
-    S::Future: Send + 'static,
-{
-    type Response = <S as Service<RouterRequest>>::Response;
-
-    type Error = <S as Service<RouterRequest>>::Error;
-
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: RouterRequest) -> Self::Future {
-        let apq = self.apq.clone();
-
-        let req = {
-            let maybe_query_hash: Option<Vec<u8>> = req
-                .context
-                .request
-                .body()
-                .extensions
-                .get("persistedQuery")
-                .and_then(|value| {
-                    serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
-                })
-                .and_then(|persisted_query| {
-                    hex::decode(persisted_query.sha256hash.as_bytes()).ok()
-                });
-
-            let body_query = req.context.request.body().query.clone();
-
-            match (maybe_query_hash, body_query) {
-                (Some(query_hash), Some(query)) => {
-                    if query_matches_hash(query.as_str(), query_hash.as_slice()) {
-                        tracing::trace!("apq: cache insert");
-                        apq.cache.insert(query_hash, query);
-                    } else {
-                        tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
-                    }
-                }
-                (Some(apq_hash), _) => {
-                    if let Some(cached_query) = apq.cache.get(&apq_hash) {
-                        tracing::trace!("apq: cache hit");
-                        req.context.request.body_mut().query = Some(cached_query);
-                    } else {
-                        tracing::trace!("apq: cache miss");
-                        let res = plugin_utils::RouterResponse::builder()
-                            .errors(vec![crate::Error {
-                                message: "PersistedQueryNotFound".to_string(),
-                                locations: Default::default(),
-                                path: Default::default(),
-                                extensions: serde_json_bytes::from_value(json!({
-                                      "code": "PERSISTED_QUERY_NOT_FOUND",
-                                      "exception": {
-                                      "stacktrace": [
-                                          "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                                      ],
-                                  },
-                                }))
-                                .unwrap(),
-                            }])
-                            .context(req.context.into())
-                            .build()
-                            .into();
-
-                        return Box::pin(async move { Ok(res) });
-                    }
-                }
-                _ => {}
-            }
-            // A query must be available at this point
-            let query = req.context.request.body().query.as_ref();
-            if query.is_none() || query.unwrap().is_empty() {
-                let res = plugin_utils::RouterResponse::builder()
-                    .errors(vec![crate::Error {
-                        message: "Must provide query string.".to_string(),
-                        locations: Default::default(),
-                        path: Default::default(),
-                        extensions: Default::default(),
-                    }])
-                    .context(req.context.into())
-                    .build()
-                    .into();
-                return Box::pin(async move { Ok(res) });
-            }
-            req
-        };
-        Box::pin(self.service.call(req))
-    }
-}
-
 fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
     let mut digest = Sha256::new();
     digest.update(query.as_bytes());
@@ -245,7 +192,7 @@ mod apq_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = APQ::default().layer(mock);
+        let mut service_stack = APQLayer::default().layer(mock);
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
@@ -345,7 +292,7 @@ mod apq_tests {
 
         let mock_service = mock_service_builder.build();
 
-        let mut service_stack = APQ::default().layer(mock_service);
+        let mut service_stack = APQLayer::default().layer(mock_service);
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
@@ -375,28 +322,6 @@ mod apq_tests {
         let second_apq_error = services.call(second_hash_only.into()).await.unwrap();
 
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
-    }
-
-    #[tokio::test]
-    async fn it_will_error_on_empty_query_and_no_apq_header() {
-        let expected_error = crate::Error {
-            message: "Must provide query string.".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: Default::default(),
-        };
-
-        let mock_service = MockRouterService::new().build();
-
-        let mut service_stack = APQ::default().layer(mock_service);
-
-        let empty_request = RouterRequest::builder().build();
-
-        let services = service_stack.ready().await.unwrap();
-
-        let actual_response = services.call(empty_request.into()).await.unwrap();
-
-        assert_error_matches(&expected_error, actual_response);
     }
 
     fn assert_error_matches(expected_error: &crate::Error, res: crate::RouterResponse) {
