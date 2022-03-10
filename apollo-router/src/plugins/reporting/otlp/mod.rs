@@ -12,24 +12,25 @@ use crate::configuration::ConfigurationError;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use reqwest::Url;
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Otlp {
     Tracing(Option<Tracing>),
     // TODO metrics
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Tracing {
     exporter: Exporter,
     trace_config: Option<TraceConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Exporter {
     #[cfg(feature = "otlp-grpc")]
@@ -98,13 +99,30 @@ impl Tracing {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct ExportConfig {
     #[serde(deserialize_with = "endpoint_url", default)]
     pub endpoint: Option<Url>,
+
+    #[schemars(schema_with = "option_protocol_schema")]
     pub protocol: Option<Protocol>,
     pub timeout: Option<u64>,
+}
+
+fn option_protocol_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    Option::<ProtocolMirror>::json_schema(gen)
+}
+
+//This is a copy of the Otel protocol enum so that ExportConfig can generate json schema.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+enum ProtocolMirror {
+    /// GRPC protocol
+    Grpc,
+    // HttpJson,
+    /// HTTP protocol with binary protobuf
+    HttpBinary,
 }
 
 impl ExportConfig {

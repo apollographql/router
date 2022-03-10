@@ -274,7 +274,7 @@ pub(crate) fn default_service_namespace() -> String {
     "apollo".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Secret {
     Env(String),
@@ -292,7 +292,7 @@ impl Secret {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TlsConfig {
     domain_name: Option<String>,
@@ -331,6 +331,8 @@ mod tests {
     use super::*;
     use apollo_router_core::prelude::*;
     use apollo_router_core::SchemaError;
+    #[cfg(unix)]
+    #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
     use reqwest::Url;
     use schemars::gen::SchemaSettings;
@@ -346,6 +348,7 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(any(feature = "otlp-grpc"))]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft2019_09().with(|s| {

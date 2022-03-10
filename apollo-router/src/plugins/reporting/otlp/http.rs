@@ -1,10 +1,11 @@
 use super::ExportConfig;
 use crate::configuration::ConfigurationError;
 use opentelemetry_otlp::WithExportConfig;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HttpExporter {
     #[serde(flatten)]
