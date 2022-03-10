@@ -157,94 +157,9 @@ server:
     # Which response headers should be made available to scripts running in the
     # browser in response to a cross-origin request.
     expose_headers:
-
-#
-# Subgraphs
-#
-# This configuration affects the communication with underlying subgraphs.
-# The `subgraphs` property is a map to individual named subgraphs and should
-# map to the subgraph name that is defined in the Supergraph.
-#
-# On each named subgraph of the subgraphs map, these properties can be set:
-#
-#  - routing_url
-#  - layers
-#
-# These are explained further below.
-#
-# * routing_url *
-#
-# The URL the Router should connect to for this subgraph.
-#
-# By default, routing information is parsed from the supergraph which is
-# typically sufficient for most environments and respects the settings which
-# you've set during composition in Apollo Studio or via Rover.  Provide it here
-# only to *override* the supergraph's subgraph routing URLs.
-#
-#
-# * layers *
-#
-# This is a map of configurable layers which will be invoked.
-#
-# Layers are features (either native or extensions) which can be enabled for
-# each subgraph.  Common layers are the "headers*" layers, and an example can be
-# found for below.  For more information, see later in the documentation.
-#
-
-subgraphs:
-  # Specifies the runtime configuration for talking to the "accounts" subgraph.
-  accounts:
-    # The URL of the "accounts" subgraph's GraphQL endpoint
-    routing_url: http://localhost:4001/graphql
-
-    # Layers to be applied to the "accounts" subgraph.
-    layers:
-      - headers_propagate:
-          matching:
-            regex: ^upstream-header-.*
-      - headers_propagate:
-          named:
-            name: "old-name"
-            rename: "new-name"
-            default_value: "0"
-      - headers_propagate:
-          named:
-            name: "old-name"
-            rename: "new-name"
-            default_value: "0"
-      - headers_remove:
-          name: "x-legacy-account-id"
-      - headers_remove:
-          matching:
-            regex: ^x-deprecated.*
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "accounts"
-
-  # Specifies the runtime configuration for talking to the "products" subgraph.
-  products:
-    # The URL of the "products" subgraph's GraphQL endpoint
-    routing_url: http://localhost:4003/graphql
-
-    # Layers to be applied to the "products" subgraph.
-    layers:
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "products"
-      - headers_remove:
-          name: "x-legacy-tracking-id"
-
-
-# graph configuration, see documentation below
-# graph:
-
-# spaceport configuration, see documentation below
-# spaceport:
-
-# OpenTelemetry configuration, see documentation below
-# opentelemetry:
+plugins:
+    # See below for plugins
 ```
-
 ## Passing headers to subgraphs
 
 You can customize which HTTP headers the Apollo Router includes in its requests to your individual subgraphs. You specify these headers on a per-subgraph basis in your [YAML configuration file](#configuration-file).
@@ -255,7 +170,7 @@ More specifically, each the headers plugin include can be configured with an arr
 plugins:
   # ...other configuration...
 
-  headers:
+  apollo.headers:
     all:
     - propagate:
         matching:
@@ -330,7 +245,7 @@ Here's an example of customizing different headers for two subgraphs: `accounts`
 
 ```yaml
 plugins:
-  headers:
+  apollo.headers:
     all:
     # All subgraphs will propagate matching headers.
     - propagate:
