@@ -1,54 +1,18 @@
-//! Main entry point for CLI command to start server.
-
+//! curl -v \
+//!     --header 'content-type: application/json' \
+//!     --url 'http://127.0.0.1:4000' \
+//!     --data '{"query":"query { topProducts { reviews { author { name } } name } }"}'
+//! [...]
+//! {"data":{"topProducts":[{"reviews":[{"author":{"name":"Ada Lovelace"}},{"author":{"name":"Alan Turing"}}],"name":"Table"},{"reviews":[{"author":{"name":"Ada Lovelace"}}],"name":"Couch"},{"reviews":[{"author":{"name":"Alan Turing"}}],"name":"Chair"}]}}
 use anyhow::Result;
-use apollo_router::configuration::Configuration;
-use apollo_router::{
-    set_global_subscriber, ApolloRouterBuilder, ConfigurationKind, RouterSubscriber, SchemaKind,
-    ShutdownKind,
-};
-use apollo_router_core::Schema;
-use tracing_subscriber::EnvFilter;
 
+// adding the module to your main.rs file
+// will automatically register it to the router plugin registry.
+//
+// you can use the plugin by adding it to `config.yml`
 mod context_data;
 
-// curl -v \
-//     --header 'content-type: application/json' \
-//     --url 'http://127.0.0.1:4000' \
-//     --data '{"query":"query { topProducts { reviews { author { name } } name } }"}'
-// [...]
-// {"data":{"topProducts":[{"reviews":[{"author":{"name":"Ada Lovelace"}},{"author":{"name":"Alan Turing"}}],"name":"Table"},{"reviews":[{"author":{"name":"Ada Lovelace"}}],"name":"Couch"},{"reviews":[{"author":{"name":"Alan Turing"}}],"name":"Chair"}]}}
-#[tokio::main]
-async fn main() -> Result<()> {
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new("info").expect("could not parse log"));
-
-    set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
-
-    let schema = SchemaKind::Instance(
-        include_str!("../../supergraph.graphql")
-            .parse::<Schema>()?
-            .boxed(),
-    );
-
-    let configuration = ConfigurationKind::Instance(
-        include_str!("../config.yaml")
-            .parse::<Configuration>()?
-            .boxed(),
-    );
-
-    let server = ApolloRouterBuilder::default()
-        .configuration(configuration)
-        .schema(schema)
-        .shutdown(ShutdownKind::CtrlC)
-        .build();
-
-    let mut server_handle = server.serve();
-    server_handle.with_default_state_receiver().await;
-
-    if let Err(err) = server_handle.await {
-        tracing::error!("{}", err);
-        return Err(err.into());
-    }
-
-    Ok(())
+// `cargo run -- -s ../supergraph.graphql -c ./config.yml`
+fn main() -> Result<()> {
+    apollo_router::main()
 }
