@@ -12,7 +12,7 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
-const REPORTING_MODULE_NAME: &str = "reporting";
+const REPORTING_MODULE_NAME: &str = "apollo.reporting";
 
 /// Factory for creating a RouterService
 ///
