@@ -5,4 +5,4 @@ server:
 plugins:
   # this plugin doesn't have any configuration
   # mention it here and you're set!
-  example.context_data:
+  example.hello_world:

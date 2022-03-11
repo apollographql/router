@@ -335,6 +335,8 @@ mod tests {
     #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
     use reqwest::Url;
+    #[cfg(unix)]
+    #[cfg(any(feature = "otlp-grpc"))]
     use schemars::gen::SchemaSettings;
     use std::collections::HashMap;
 

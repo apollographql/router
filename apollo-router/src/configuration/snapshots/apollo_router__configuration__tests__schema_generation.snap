@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 358
+assertion_line: 360
 expression: "&schema"
 ---
 {
@@ -386,11 +386,6 @@ expression: "&schema"
           "required": [
             "apollo.test.always_starts_and_stops"
           ]
-        },
-        {
-          "required": [
-            "com.example.hello"
-          ]
         }
       ],
       "properties": {
@@ -417,9 +412,6 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         },
         "apollo.test.always_starts_and_stops": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello": {
           "$ref": "#/definitions/Conf"
         }
       }
