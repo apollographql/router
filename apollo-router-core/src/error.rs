@@ -7,6 +7,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tracing::level_filters::LevelFilter;
+use typed_builder::TypedBuilder;
 
 /// Error types for execution.
 ///
@@ -111,9 +112,10 @@ impl FetchError {
 }
 
 /// Any error.
-#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Error, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default, TypedBuilder)]
 #[error("{message}")]
 #[serde(rename_all = "camelCase")]
+#[builder(field_defaults(default))]
 pub struct Error {
     /// The error message.
     pub message: String,
@@ -122,6 +124,7 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
+    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.

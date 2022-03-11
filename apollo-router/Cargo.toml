@@ -55,6 +55,7 @@ regex = "1.5.4"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
 schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
+serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_yaml = "0.8.23"
 startup = "0.1.1"
@@ -77,6 +78,7 @@ apollo-spaceport = { path = "../apollo-spaceport" }
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
+rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.119"
 
 [dev-dependencies]
@@ -84,7 +86,6 @@ insta = "1.12.0"
 maplit = "1.0.2"
 mockall = "0.11.0"
 reqwest = { version = "0.11.9", features = ["json", "stream"] }
-serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 tempfile = "3.3.0"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 test-span = "0.3"

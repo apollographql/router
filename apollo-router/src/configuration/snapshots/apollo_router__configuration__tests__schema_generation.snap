@@ -369,6 +369,11 @@ expression: "&schema"
         },
         {
           "required": [
+            "apollo.rhai"
+          ]
+        },
+        {
+          "required": [
             "apollo.test.always_fails_to_start"
           ]
         },
@@ -400,6 +405,9 @@ expression: "&schema"
           }
         },
         "apollo.reporting": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.rhai": {
           "$ref": "#/definitions/Conf"
         },
         "apollo.test.always_fails_to_start": {

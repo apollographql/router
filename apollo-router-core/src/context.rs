@@ -5,13 +5,15 @@ use serde::Serialize;
 use std::sync::Arc;
 use tower::BoxError;
 
+pub type Extensions = Arc<DashMap<String, Value>>;
+
 #[derive(Clone, Debug)]
 pub struct Context<T = Arc<http_compat::Request<Request>>> {
     /// Original request to the Router.
     pub request: T,
 
     // Allows adding custom extensions to the context.
-    extensions: Arc<DashMap<String, Value>>,
+    pub extensions: Extensions,
 }
 
 impl Context<()> {
