@@ -1,7 +1,7 @@
 //! Example implementation of a JWT verifying plugin
 //!
 //! DISCLAIMER:
-//!     This is an example for illustrative purposes. It has not been secrity audited
+//!     This is an example for illustrative purposes. It has not been security audited
 //!     and is purely intended of an illustration of an approach to JWT verification
 //!     via a router plugin.
 //!
@@ -360,9 +360,9 @@ impl Plugin for JwtAuth {
                         }
                     }
                 } else {
-                    // We've only implemented support for HMAC. Two possibilities here:
-                    //  - Either we tried to specify a valid, but unimplemented algorithem
-                    //  - Or we have specified an invalid algorithem (typo?). Either way:
+                    // We've only implemented support for HMAC. Three possibilities here:
+                    //  - Either we tried to specify a valid, but unimplemented algorithm.
+                    //  - Or we have specified an invalid algorithm (typo?).
                     //  - Or we haven't configured hmac support.
                     failure_message(
                         "Only hmac support is implemented. Check configuration for typos".to_string(),
