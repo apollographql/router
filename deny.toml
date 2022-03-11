@@ -44,6 +44,7 @@ allow = [
     "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
+    "MPL-2.0"
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"

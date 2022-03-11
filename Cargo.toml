@@ -9,6 +9,7 @@ members = [
     "examples/compose-your-graphql-router",
     "examples/context-data",
     "examples/forbid-anonymous-operations",
+    "examples/hello-world",
     "fuzz",
     "uplink",
     "xtask",

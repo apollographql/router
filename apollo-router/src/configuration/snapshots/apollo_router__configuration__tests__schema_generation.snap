@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 358
+assertion_line: 360
 expression: "&schema"
 ---
 {
@@ -369,6 +369,11 @@ expression: "&schema"
         },
         {
           "required": [
+            "apollo.rhai"
+          ]
+        },
+        {
+          "required": [
             "apollo.test.always_fails_to_start"
           ]
         },
@@ -386,11 +391,6 @@ expression: "&schema"
           "required": [
             "apollo.test.always_starts_and_stops"
           ]
-        },
-        {
-          "required": [
-            "com.example.hello"
-          ]
         }
       ],
       "properties": {
@@ -407,6 +407,9 @@ expression: "&schema"
         "apollo.reporting": {
           "$ref": "#/definitions/Conf"
         },
+        "apollo.rhai": {
+          "$ref": "#/definitions/Conf"
+        },
         "apollo.test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
@@ -417,9 +420,6 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         },
         "apollo.test.always_starts_and_stops": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello": {
           "$ref": "#/definitions/Conf"
         }
       }
