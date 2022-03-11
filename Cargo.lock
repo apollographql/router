@@ -1728,6 +1728,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
 
 [[package]]
+name = "hello-world"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-router",
+ "apollo-router-core",
+ "async-trait",
+ "futures",
+ "http",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_json_bytes",
+ "tokio",
+ "tokio-util 0.7.0",
+ "tower",
+ "tracing",
+ "tracing-subscriber 0.3.9",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"

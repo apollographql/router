@@ -6,6 +6,6 @@ plugins:
   # this plugin takes a path
   # and will read from it everytime a request comes in
   # to check if a client can run a query
-  com.example.allow-client-id-from-file:
+  example.allow-client-id-from-file:
     header: "x-client-id" # the header to check for
     path: "allowedClientIds.json" # the file that contains the allowed clients list
