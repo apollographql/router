@@ -1,0 +1,4 @@
+plugins:
+  apollo.reporting:
+    opentelemetry:
+      jaeger:

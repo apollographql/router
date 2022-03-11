@@ -13,8 +13,8 @@ async fn main() -> Result<()> {
 
     set_global_subscriber(RouterSubscriber::TextSubscriber(builder.finish()))?;
 
-    // get the supergraph from ../../examples/supergraph.graphql
-    let schema = Arc::new(include_str!("../../supergraph.graphql").parse()?);
+    // get the supergraph from ../../examples/graphql/supergraph.graphql
+    let schema = Arc::new(include_str!("../../graphql/supergraph.graphql").parse()?);
 
     // PluggableRouterServiceBuilder creates a GraphQL pipeline to process queries against a supergraph Schema
     // The whole pipeline is set up...
