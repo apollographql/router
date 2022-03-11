@@ -1,8 +1,7 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 355
+assertion_line: 358
 expression: "&schema"
-
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
@@ -126,6 +125,58 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "Exporter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "grpc"
+          ],
+          "properties": {
+            "grpc": {
+              "$ref": "#/definitions/GrpcExporter",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "GrpcExporter": {
+      "type": "object",
+      "required": [
+        "protocol"
+      ],
+      "properties": {
+        "endpoint": {
+          "default": null,
+          "type": "string",
+          "format": "uri",
+          "nullable": true
+        },
+        "metadata": {
+          "default": null,
+          "type": "object",
+          "additionalProperties": true,
+          "nullable": true
+        },
+        "protocol": {
+          "$ref": "#/definitions/ProtocolMirror",
+          "nullable": true
+        },
+        "timeout": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "tls_config": {
+          "$ref": "#/definitions/TlsConfig",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "Insert": {
       "type": "object",
       "required": [
@@ -142,6 +193,53 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "Jaeger": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "$ref": "#/definitions/JaegerEndpoint",
+          "nullable": true
+        },
+        "service_name": {
+          "default": "router",
+          "type": "string"
+        },
+        "trace_config": {
+          "$ref": "#/definitions/TraceConfig",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "JaegerEndpoint": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "agent"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "collector"
+          ],
+          "properties": {
+            "collector": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "ListenAddr": {
       "description": "Listening address.",
       "anyOf": [
@@ -156,7 +254,33 @@ expression: "&schema"
       ]
     },
     "OpenTelemetry": {
-      "$ref": "#/definitions/OpenTelemetry"
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "jaeger"
+          ],
+          "properties": {
+            "jaeger": {
+              "$ref": "#/definitions/Jaeger",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "otlp"
+          ],
+          "properties": {
+            "otlp": {
+              "$ref": "#/definitions/Otlp"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "OpenTracingConfig": {
       "type": "object",
@@ -209,77 +333,94 @@ expression: "&schema"
         }
       ]
     },
+    "Otlp": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "tracing"
+          ],
+          "properties": {
+            "tracing": {
+              "$ref": "#/definitions/Tracing",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "Plugins": {
       "anyOf": [
         {
           "required": [
-            "com.apollographql.reporting"
+            "apollo.headers"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_start"
+            "apollo.override_subgraph_url"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_start_and_stop"
+            "apollo.reporting"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_fails_to_stop"
+            "apollo.test.always_fails_to_start"
           ]
         },
         {
           "required": [
-            "com.apollographql.test.always_starts_and_stops"
+            "apollo.test.always_fails_to_start_and_stop"
+          ]
+        },
+        {
+          "required": [
+            "apollo.test.always_fails_to_stop"
+          ]
+        },
+        {
+          "required": [
+            "apollo.test.always_starts_and_stops"
           ]
         },
         {
           "required": [
             "com.example.hello"
           ]
-        },
-        {
-          "required": [
-            "headers"
-          ]
-        },
-        {
-          "required": [
-            "override_subgraph_url"
-          ]
         }
       ],
       "properties": {
-        "com.apollographql.reporting": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_start": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_start_and_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_fails_to_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.apollographql.test.always_starts_and_stops": {
-          "$ref": "#/definitions/Conf"
-        },
-        "com.example.hello": {
-          "$ref": "#/definitions/Conf"
-        },
-        "headers": {
+        "apollo.headers": {
           "$ref": "#/definitions/Config"
         },
-        "override_subgraph_url": {
+        "apollo.override_subgraph_url": {
           "type": "object",
           "additionalProperties": {
             "type": "string",
             "format": "uri"
           }
+        },
+        "apollo.reporting": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_start": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_start_and_stop": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_fails_to_stop": {
+          "$ref": "#/definitions/Conf"
+        },
+        "apollo.test.always_starts_and_stops": {
+          "$ref": "#/definitions/Conf"
+        },
+        "com.example.hello": {
+          "$ref": "#/definitions/Conf"
         }
       }
     },
@@ -328,6 +469,13 @@ expression: "&schema"
         "zipkin_b3"
       ]
     },
+    "ProtocolMirror": {
+      "type": "string",
+      "enum": [
+        "Grpc",
+        "HttpBinary"
+      ]
+    },
     "Remove": {
       "oneOf": [
         {
@@ -349,6 +497,59 @@ expression: "&schema"
           ],
           "properties": {
             "matching": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "SamplerMirror": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "AlwaysOn",
+            "AlwaysOff"
+          ]
+        },
+        {
+          "description": "Respects the parent span's sampling decision or delegates a delegate sampler for root spans. Not supported via yaml config Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+          "type": "object",
+          "required": [
+            "TraceIdRatioBased"
+          ],
+          "properties": {
+            "TraceIdRatioBased": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Secret": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "env"
+          ],
+          "properties": {
+            "env": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "file"
+          ],
+          "properties": {
+            "file": {
               "type": "string"
             }
           },
@@ -396,6 +597,93 @@ expression: "&schema"
     },
     "StudioGraph": {
       "type": "object"
+    },
+    "TlsConfig": {
+      "type": "object",
+      "properties": {
+        "ca": {
+          "$ref": "#/definitions/Secret",
+          "nullable": true
+        },
+        "cert": {
+          "$ref": "#/definitions/Secret",
+          "nullable": true
+        },
+        "domain_name": {
+          "type": "string",
+          "nullable": true
+        },
+        "key": {
+          "$ref": "#/definitions/Secret",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "TraceConfig": {
+      "type": "object",
+      "required": [
+        "resource",
+        "sampler"
+      ],
+      "properties": {
+        "max_attributes_per_event": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "max_attributes_per_link": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "max_attributes_per_span": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "max_events_per_span": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "max_links_per_span": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": true,
+          "nullable": true
+        },
+        "sampler": {
+          "$ref": "#/definitions/SamplerMirror",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Tracing": {
+      "type": "object",
+      "required": [
+        "exporter"
+      ],
+      "properties": {
+        "exporter": {
+          "$ref": "#/definitions/Exporter"
+        },
+        "trace_config": {
+          "$ref": "#/definitions/TraceConfig",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -75,8 +75,8 @@ checksum = "c1da9c412262c1dd533a84c9b867dcb4e68ab852a0936e235d75242585dda631"
 
 [[package]]
 name = "apollo-encoder"
-version = "0.2.2"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
+version = "0.2.3"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958#75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958"
 
 [[package]]
 name = "apollo-federation-types"
@@ -89,8 +89,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.3"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "027e04c63b91ac33053684910a90018a0e96d45d52c4489cf4c12b4cb240802d"
 dependencies = [
  "rowan",
 ]
@@ -98,8 +99,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "027e04c63b91ac33053684910a90018a0e96d45d52c4489cf4c12b4cb240802d"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958#75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958"
 dependencies = [
  "rowan",
 ]
@@ -245,10 +245,10 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=21bd947e8af49b68229cc44d62f6481ed4fe5cbe#21bd947e8af49b68229cc44d62f6481ed4fe5cbe"
+source = "git+https://github.com/apollographql/apollo-rs.git?rev=75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958#75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958"
 dependencies = [
- "apollo-encoder 0.2.2",
- "apollo-parser 0.2.3",
+ "apollo-encoder 0.2.3",
+ "apollo-parser 0.2.4 (git+https://github.com/apollographql/apollo-rs.git?rev=75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958)",
  "arbitrary",
  "once_cell",
 ]
@@ -1641,9 +1641,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.11"
+version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9f1f717ddc7b2ba36df7e871fd88db79326551d3d6f1fc406fbfd28b582ff8e"
+checksum = "62eeb471aa3e3c9197aa4bfeabfe02982f6dc96f750486c0bb0009ac58b26d2b"
 dependencies = [
  "bytes",
  "fnv",
@@ -3239,7 +3239,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.3",
+ "apollo-parser 0.2.4 (git+https://github.com/apollographql/apollo-rs.git?rev=75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958)",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -4239,9 +4239,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90c125fdea84614a4368fd35786b51d0682ab8d42705e061e92f0b955dea40fb"
+checksum = "aba3f3efabf7fb41fae8534fc20a817013dd1c12cb45441efb6c82e6556b4cd8"
 dependencies = [
  "bitflags",
  "bytes",
@@ -4284,9 +4284,9 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.31"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6c650a8ef0cd2dd93736f033d21cbd1224c5a967aa0c258d00fcf7dafef9b9f"
+checksum = "4a1bdf54a7c28a2bbf701e1d2233f6c77f473486b94bee4f9678da5a148dca7f"
 dependencies = [
  "cfg-if 1.0.0",
  "log",

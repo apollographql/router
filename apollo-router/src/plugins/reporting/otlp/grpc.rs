@@ -1,18 +1,29 @@
 use super::ExportConfig;
 use crate::configuration::{ConfigurationError, TlsConfig};
 use opentelemetry_otlp::WithExportConfig;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use tonic::metadata::{KeyAndValueRef, MetadataKey, MetadataMap};
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GrpcExporter {
     #[serde(flatten)]
     export_config: ExportConfig,
     tls_config: Option<TlsConfig>,
-    #[serde(with = "header_map_serde", default)]
+    #[serde(
+        deserialize_with = "header_map_serde::deserialize",
+        serialize_with = "header_map_serde::serialize",
+        default
+    )]
+    #[schemars(schema_with = "option_metadata_map")]
     metadata: Option<MetadataMap>,
+}
+
+fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    Option::<HashMap<String, Value>>::json_schema(gen)
 }
 
 impl GrpcExporter {

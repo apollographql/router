@@ -18,7 +18,7 @@ use tower::util::BoxService;
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
-register_plugin!("", "headers", Headers);
+register_plugin!("apollo", "headers", Headers);
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
