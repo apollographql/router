@@ -134,7 +134,7 @@ impl Plugin for Rhai {
         &mut self,
         mut service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "map_router_service_request";
+        const FUNCTION_NAME_REQUEST: &str = "router_service_request";
         if self
             .ast
             .iter_fn_def()
@@ -155,7 +155,7 @@ impl Plugin for Rhai {
                 .boxed();
         }
 
-        const FUNCTION_NAME_RESPONSE: &str = "map_router_service_response";
+        const FUNCTION_NAME_RESPONSE: &str = "router_service_response";
         service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, RouterResponse);
 
         service
@@ -165,7 +165,7 @@ impl Plugin for Rhai {
         &mut self,
         mut service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "map_query_planning_service_request";
+        const FUNCTION_NAME_REQUEST: &str = "query_planning_service_request";
         if self
             .ast
             .iter_fn_def()
@@ -186,7 +186,7 @@ impl Plugin for Rhai {
                 .boxed();
         }
 
-        const FUNCTION_NAME_RESPONSE: &str = "map_query_planning_service_response";
+        const FUNCTION_NAME_RESPONSE: &str = "query_planning_service_response";
         if self
             .ast
             .iter_fn_def()
@@ -227,7 +227,7 @@ impl Plugin for Rhai {
         &mut self,
         mut service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "map_execution_service_request";
+        const FUNCTION_NAME_REQUEST: &str = "execution_service_request";
         if self
             .ast
             .iter_fn_def()
@@ -251,7 +251,7 @@ impl Plugin for Rhai {
                 .boxed();
         }
 
-        const FUNCTION_NAME_RESPONSE: &str = "map_execution_service_response";
+        const FUNCTION_NAME_RESPONSE: &str = "execution_service_response";
         service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, ExecutionResponse);
 
         service
@@ -262,7 +262,7 @@ impl Plugin for Rhai {
         _name: &str,
         mut service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "map_subgraph_service_request";
+        const FUNCTION_NAME_REQUEST: &str = "subgraph_service_request";
         if self
             .ast
             .iter_fn_def()
@@ -290,7 +290,7 @@ impl Plugin for Rhai {
                 .boxed();
         }
 
-        const FUNCTION_NAME_RESPONSE: &str = "map_subgraph_service_response";
+        const FUNCTION_NAME_RESPONSE: &str = "subgraph_service_response";
         let this = self.clone();
         let function_found = self
             .ast
@@ -578,7 +578,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function map_execution_service_request"
+            "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function execution_service_request"
         );
     }
 }

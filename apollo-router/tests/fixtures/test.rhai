@@ -1,6 +1,6 @@
 // This is a test used for rhai plugin
 
-fn map_router_service_response(context) {
+fn router_service_response(context) {
     context.headers["blabla"] = "here is a test";
     // Header names are always in lower case
     if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
@@ -14,7 +14,7 @@ fn map_router_service_response(context) {
     context
 }
 
-fn map_execution_service_request(context) {
+fn execution_service_request(context) {
     // Header names are always in lower case
     if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
         context.headers.coucou = "hello";
