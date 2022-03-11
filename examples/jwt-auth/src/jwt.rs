@@ -253,25 +253,14 @@ impl Plugin for JwtAuth {
                 // We are going to check the headers for the presence of the header we're looking for
                 // We are implementing: https://www.rfc-editor.org/rfc/rfc6750
                 // so check for our AUTHORIZATION header.
-                if !req.context.request.headers().contains_key(AUTHORIZATION) {
-                    // Prepare an HTTP 401 response with a GraphQL error message
-                    return failure_message(
-                        format!("Missing '{}' header", AUTHORIZATION),
-                        StatusCode::UNAUTHORIZED,
-                    );
-                }
+                let jwt_value_result = match req.context.request.headers().get(AUTHORIZATION) {
+                    Some(value) => value.to_str(),
+                    None =>
+                        // Prepare an HTTP 401 response with a GraphQL error message
+                        return failure_message(format!("Missing '{}' header", AUTHORIZATION), StatusCode::UNAUTHORIZED),
+                };
 
-                // It is best practice to perform checks before we unwrap,
-                // And to use `expect()` instead of `unwrap()`, with a message
-                // that explains why the use of `expect()` is safe
-                let jwt_value_result = req
-                    .context
-                    .request
-                    .headers()
-                    .get(AUTHORIZATION)
-                    .expect("this cannot fail; we checked for header presence above;qed")
-                    .to_str();
-
+                // If we find the header, but can't convert it to a string, let the client know
                 let jwt_value_untrimmed = match jwt_value_result {
                     Ok(value) => value,
                     Err(_not_a_string_error) => {
@@ -298,7 +287,7 @@ impl Plugin for JwtAuth {
                 }
 
                 // We know we have a "space", since we checked above. Split our string
-                // in (at most 2) sections and trim the second section.
+                // in (at most 2) sections.
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
                     // Prepare an HTTP 400 response with a GraphQL error message
