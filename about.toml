@@ -8,6 +8,7 @@ accepted = [
     "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
+    "MPL-2.0"
 ]
 
 # Ignore non plublished crates, such as xtask for example

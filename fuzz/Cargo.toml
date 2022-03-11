@@ -11,9 +11,9 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-# apollo-smith = { path = "../../apollo-rs/crates/apollo-smith" }
-apollo-smith = { git = "https://github.com/apollographql/apollo-rs.git", rev = "21bd947e8af49b68229cc44d62f6481ed4fe5cbe" }
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "21bd947e8af49b68229cc44d62f6481ed4fe5cbe" }
+# apollo-smith = { path = "../../apollo-rs/crates/apollo-smith", features = ["parser-impl"] }
+apollo-smith = { git = "https://github.com/apollographql/apollo-rs.git", rev = "75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958", features = ["parser-impl"] }
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "75dc54cdc129d1784e92a1e5ff32e4e4f2bfc958" }
 # apollo-parser = { path = "../../apollo-rs/crates/apollo-parser" }
 env_logger = "0.9.0"
 log = "0.4.14"

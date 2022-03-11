@@ -3,8 +3,7 @@ title: Apollo Router usage and config
 sidebar_title: Usage and config
 ---
 
-import { Link } from "gatsby"
-
+import { Link } from "gatsby";
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
@@ -268,8 +267,8 @@ You can specify which headers to propagate based on a matching [regex pattern](h
 
 You can also provide a static string with the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
-* `default_value`: A value to set if _no_ value was sent by the client
-* `rename`: Renames the header's key to the provided value
+- `default_value`: A value to set if _no_ value was sent by the client
+- `rename`: Renames the header's key to the provided value
 
 ```yaml
 - headers_propagate:
@@ -342,7 +341,11 @@ If the router receives an incoming request that already contains a `TraceParent`
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-opentelemetry:
+apollo.reporting:
+  # Optional if you want to enable opentracing propagation headers to your subgraphs
+  # opentracing:
+    # "zipkin_b3" and "jaeger" formats are supported
+    # format: "zipkin_b3"
   jaeger:
     # optional: if not present, jaeger will use the default UDP agent address
     #endpoint:
@@ -389,11 +392,14 @@ opentelemetry:
 
 ### Using OTLP
 
-
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-opentelemetry:
+apollo.reporting:
+  # Optional if you want to enable opentracing propagation headers to your subgraphs
+  # opentracing:
+    # "zipkin_b3" and "jaeger" formats are supported
+    # format: "zipkin_b3"
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   otlp:
     tracing:
@@ -438,4 +444,4 @@ opentelemetry:
 
 ## Configuring managed federation
 
-See [Managed federation with the Apollo Router](/studio/).
+See [Managed federation with the Apollo Router](/managed-federation/).

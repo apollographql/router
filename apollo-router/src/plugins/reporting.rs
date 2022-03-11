@@ -8,6 +8,7 @@ use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
 use crate::{replace_layer, BoxedLayer};
+use std::collections::HashMap;
 
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::SubgraphResponse;
@@ -22,10 +23,9 @@ use opentelemetry::KeyValue;
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use otlp::Tracing;
 use reqwest::Url;
-use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
@@ -37,7 +37,7 @@ use tower::{BoxError, ServiceExt};
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use tracing_subscriber::Layer as TracingLayer;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum OpenTelemetry {
@@ -46,19 +46,7 @@ pub enum OpenTelemetry {
     Otlp(otlp::Otlp),
 }
 
-// This short circuits the Opentelemetry schema generation.
-// When Otel is moved to a plugin this will be removed.
-impl JsonSchema for OpenTelemetry {
-    fn schema_name() -> String {
-        stringify!(OpenTelemetry).to_string()
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<OpenTelemetry>()
-    }
-}
-
-#[derive(Debug, Clone, Derivative, Deserialize, Serialize)]
+#[derive(Debug, Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[derivative(Default)]
 pub struct Jaeger {
@@ -75,7 +63,7 @@ pub struct Jaeger {
     pub trace_config: Option<TraceConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum JaegerEndpoint {
     Agent(SocketAddr),
@@ -90,16 +78,42 @@ fn default_jaeger_password() -> Option<String> {
     std::env::var("JAEGER_PASSWORD").ok()
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TraceConfig {
+    #[schemars(schema_with = "option_sampler_schema")]
     pub sampler: Option<Sampler>,
     pub max_events_per_span: Option<u32>,
     pub max_attributes_per_span: Option<u32>,
     pub max_links_per_span: Option<u32>,
     pub max_attributes_per_event: Option<u32>,
     pub max_attributes_per_link: Option<u32>,
+    #[schemars(schema_with = "option_resource_schema")]
     pub resource: Option<Resource>,
+}
+
+fn option_resource_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    Option::<HashMap<String, Value>>::json_schema(gen)
+}
+
+fn option_sampler_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    Option::<SamplerMirror>::json_schema(gen)
+}
+
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+pub enum SamplerMirror {
+    /// Always sample the trace
+    AlwaysOn,
+    /// Never sample the trace
+    AlwaysOff,
+    /// Respects the parent span's sampling decision or delegates a delegate sampler for root spans.
+    /// Not supported via yaml config
+    //ParentBased(Box<Sampler>),
+    /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
+    /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
+    /// zero, but spans may still be sampled if their parent is.
+    TraceIdRatioBased(f64),
 }
 
 impl TraceConfig {
@@ -495,7 +509,7 @@ async fn do_listen(addr_str: String) -> bool {
     true
 }
 
-register_plugin!("com.apollographql", "reporting", Reporting);
+register_plugin!("apollo", "reporting", Reporting);
 
 #[cfg(test)]
 mod tests {
@@ -503,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.apollographql.reporting")
+            .get("apollo.reporting")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "opentelemetry": null }))
             .unwrap();

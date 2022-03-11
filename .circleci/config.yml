@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v7-{{ checksum "rust-toolchain.toml" }}
+    default: v8-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:

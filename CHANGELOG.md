@@ -23,6 +23,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [x.x.x] (unreleased) - 2021-mm-dd
 
  - **❗ BREAKING ❗**
+ -  **Rename plugins with the prefix `apollo` instead of `com.apollographql`** ([PR #602](https://github.com/apollographql/router/pull/600))
+    Instead of using `com.apollographql.reporting` in the configuration file you have to use `apollo.reporting`.
+
+ - **❗ BREAKING ❗**
  -  **use ControlFlow in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
    `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow instead` of the `Step` enum. ControlFlow has two variants, `Continue` and `Break`.
  
@@ -58,8 +62,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
 use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+
 ## 🚀 Features
+
+- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
+
+  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
+
 ## 🐛 Fixes
+- **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
+  Previously our reporting plugin configuration did not participate in json schema generation. This is now broadly correct
+  and make writing schema much easier.
+
+  To generate a schema use the following command.
+  ```
+  router --schema > apollo_configuration_schema.json
+  ```
+  and follow the instructions for associating it with your particular text editor/IDE. 
 ## 🛠 Maintenance
 ## 📚 Documentation
 

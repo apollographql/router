@@ -12,7 +12,7 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
-const REPORTING_MODULE_NAME: &str = "com.apollographql.reporting";
+const REPORTING_MODULE_NAME: &str = "apollo.reporting";
 
 /// Factory for creating a RouterService
 ///
@@ -278,7 +278,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -309,7 +309,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_start",
         AlwaysFailsToStartPlugin
     );
@@ -340,7 +340,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_stop",
         AlwaysFailsToStopPlugin
     );
@@ -374,7 +374,7 @@ mod test {
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_start_and_stop",
         AlwaysFailsToStartAndStopPlugin
     );
@@ -391,7 +391,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_starts_and_stops:
+                apollo.test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -405,7 +405,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_start:
+                apollo.test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -419,7 +419,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_stop:
+                apollo.test.always_fails_to_stop:
                     name: albert
         "#,
         )
@@ -433,7 +433,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_start_and_stop:
+                apollo.test.always_fails_to_start_and_stop:
                     name: albert
         "#,
         )
