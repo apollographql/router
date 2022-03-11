@@ -151,7 +151,7 @@ impl Plugin for AllowClientIdFromFile {
 // we use using the `Reverse domain name notation`
 register_plugin!(
     "example",
-    "allow-client-id-from-file",
+    "allow_client_id_from_file",
     AllowClientIdFromFile
 );
 
