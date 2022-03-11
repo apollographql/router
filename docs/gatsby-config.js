@@ -8,7 +8,7 @@ module.exports = {
         ...themeOptions,
         root: __dirname,
         pathPrefix: "/docs/router",
-        subtitle: "Router (alpha)",
+        subtitle: "Router (preview)",
         description: "Documentation for the Apollo Router",
         githubRepo: "apollographql/router",
         algoliaIndexName: 'router',
