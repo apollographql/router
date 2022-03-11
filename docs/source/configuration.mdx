@@ -251,9 +251,16 @@ plugins:
     - propagate:
         matching:
           regex: ^upstream-header-.*
+    # All subgraphs will propagate matching headers.
+    - propagate:
+        named: "some-header"
+        default: "default-value"
+        rename: "destination-header"
     # All subgraphs will remove the "x-legacy-account-id" header.
     - remove:
-        name: "x-legacy-account-id"
+        named: "x-legacy-account-id"
+    - remove:
+        matching: "x-legacy-account-id"
     # Subgraph specific configuration
     subgraphs:
       products:
