@@ -1,6 +1,7 @@
 use crate::{fetch::OperationKind, prelude::graphql::*};
 use apollo_parser::ast;
 use derivative::Derivative;
+use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
 
@@ -31,6 +32,7 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
+        variables: Object,
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
@@ -47,12 +49,28 @@ impl Query {
             if let Some(operation) = operation {
                 let mut output = Object::default();
 
-                response.data =
-                    match self.apply_root_selection_set(operation, &mut input, &mut output, schema)
-                    {
-                        Ok(()) => output.into(),
-                        Err(InvalidValue) => Value::Null,
-                    }
+                let all_variables = if operation.variables.is_empty() {
+                    variables
+                } else {
+                    operation
+                        .variables
+                        .iter()
+                        .filter_map(|(k, (_, opt))| opt.as_ref().map(|v| (k, v)))
+                        .chain(variables.iter())
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect()
+                };
+
+                response.data = match self.apply_root_selection_set(
+                    operation,
+                    &all_variables,
+                    &mut input,
+                    &mut output,
+                    schema,
+                ) {
+                    Ok(()) => output.into(),
+                    Err(InvalidValue) => Value::Null,
+                }
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -132,6 +150,7 @@ impl Query {
     fn format_value(
         &self,
         field_type: &FieldType,
+        variables: &Object,
         input: &mut Value,
         output: &mut Value,
         selection_set: &[Selection],
@@ -144,7 +163,8 @@ impl Query {
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
             FieldType::NonNull(inner_type) => {
-                match self.format_value(inner_type, input, output, selection_set, schema) {
+                match self.format_value(inner_type, variables, input, output, selection_set, schema)
+                {
                     Err(_) => Err(InvalidValue),
                     Ok(_) => {
                         if output.is_null() {
@@ -176,6 +196,7 @@ impl Query {
                         .try_for_each(|(i, element)| {
                             self.format_value(
                                 inner_type,
+                                variables,
                                 element,
                                 &mut output_array[i],
                                 selection_set,
@@ -225,6 +246,7 @@ impl Query {
 
                         match self.apply_selection_set(
                             selection_set,
+                            variables,
                             input_object,
                             output_object,
                             schema,
@@ -300,6 +322,7 @@ impl Query {
     fn apply_selection_set(
         &self,
         selection_set: &[Selection],
+        variables: &Object,
         input: &mut Object,
         output: &mut Object,
         schema: &Schema,
@@ -310,7 +333,17 @@ impl Query {
                     name,
                     selection_set,
                     field_type,
+                    skip,
                 } => {
+                    if skip
+                        .should_skip(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
                     if let Some(input_value) = input.get_mut(name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
@@ -325,6 +358,7 @@ impl Query {
                         let output_value = output.entry((*name).clone()).or_insert(Value::Null);
                         self.format_value(
                             field_type,
+                            variables,
                             input_value,
                             output_value,
                             selection_set,
@@ -344,9 +378,19 @@ impl Query {
                         Fragment {
                             type_condition,
                             selection_set,
+                            skip,
                         },
                     known_type,
                 } => {
+                    if skip
+                        .should_skip(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
                     // known_type = true means that from the query's shape, we know
                     // we should get the right type here. But in the case we get a
                     // __typename field and it does not match, we should not apply
@@ -356,15 +400,32 @@ impl Query {
                         .map(|val| val.as_str() == Some(type_condition.as_str()))
                         .unwrap_or(*known_type)
                     {
-                        self.apply_selection_set(selection_set, input, output, schema)?;
+                        self.apply_selection_set(selection_set, variables, input, output, schema)?;
                     }
                 }
-                Selection::FragmentSpread { name, known_type } => {
+                Selection::FragmentSpread {
+                    name,
+                    known_type,
+                    skip,
+                } => {
+                    if skip
+                        .should_skip(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
                     if let Some(fragment) = self
                         .fragments
                         .get(name)
                         .or_else(|| schema.fragments.get(name))
                     {
+                        if fragment.skip.should_skip(variables).unwrap_or(false) {
+                            continue;
+                        }
+
                         if input
                             .get("__typename")
                             .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
@@ -374,6 +435,7 @@ impl Query {
                         {
                             self.apply_selection_set(
                                 &fragment.selection_set,
+                                variables,
                                 input,
                                 output,
                                 schema,
@@ -393,6 +455,7 @@ impl Query {
     fn apply_root_selection_set(
         &self,
         operation: &Operation,
+        variables: &Object,
         input: &mut Object,
         output: &mut Object,
         schema: &Schema,
@@ -403,6 +466,7 @@ impl Query {
                     name,
                     selection_set,
                     field_type,
+                    skip: _,
                 } => {
                     if let Some(input_value) = input.get_mut(name.as_str()) {
                         // if there's already a value for that key in the output it means either:
@@ -419,6 +483,7 @@ impl Query {
                         let output_value = output.entry((*name).clone()).or_insert(Value::Null);
                         self.format_value(
                             field_type,
+                            variables,
                             input_value,
                             output_value,
                             selection_set,
@@ -433,6 +498,7 @@ impl Query {
                         Fragment {
                             type_condition,
                             selection_set,
+                            skip: _,
                         },
                     known_type: _,
                 } => {
@@ -444,11 +510,12 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     }
-                    self.apply_selection_set(selection_set, input, output, schema)?;
+                    self.apply_selection_set(selection_set, variables, input, output, schema)?;
                 }
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
+                    skip: _,
                 } => {
                     if let Some(fragment) = self
                         .fragments
@@ -463,7 +530,13 @@ impl Query {
                                 return Err(InvalidValue);
                             }
                         }
-                        self.apply_selection_set(&fragment.selection_set, input, output, schema)?;
+                        self.apply_selection_set(
+                            &fragment.selection_set,
+                            variables,
+                            input,
+                            output,
+                            schema,
+                        )?;
                     } else {
                         // the fragment should have been already checked with the schema
                         failfast_debug!("Missing fragment named: {}", name);
@@ -509,7 +582,7 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, ty)| {
+            .filter_map(|(name, (ty, _))| {
                 let value = request.variables.get(*name).unwrap_or(&Value::Null);
                 ty.validate_value(value, schema).err().map(|_| {
                     FetchError::ValidationInvalidTypeVariable {
@@ -533,7 +606,7 @@ struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
-    variables: HashMap<String, FieldType>,
+    variables: HashMap<ByteString, (FieldType, Option<Value>)>,
 }
 
 impl Operation {
@@ -582,7 +655,10 @@ impl Operation {
                         .expect("the node Type is not optional in the spec; qed"),
                 );
 
-                (name, ty)
+                (
+                    ByteString::from(name),
+                    (ty, parse_default_value(&definition)),
+                )
             })
             .collect();
 
@@ -620,6 +696,52 @@ impl From<ast::OperationType> for OperationType {
     }
 }
 
+fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
+    definition
+        .default_value()
+        .and_then(|v| v.value())
+        .and_then(|value| parse_value(&value))
+}
+
+fn parse_value(value: &ast::Value) -> Option<Value> {
+    match value {
+        ast::Value::Variable(_) => None,
+        ast::Value::StringValue(s) => Some(s.to_string().into()),
+        ast::Value::FloatValue(f) => f.to_string().parse::<f64>().ok().map(Into::into),
+        ast::Value::IntValue(i) => {
+            let s = i.to_string();
+            s.parse::<i64>()
+                .ok()
+                .map(Into::into)
+                .or_else(|| s.parse::<u64>().ok().map(Into::into))
+        }
+        ast::Value::BooleanValue(b) => {
+            match (b.true_token().is_some(), b.false_token().is_some()) {
+                (true, false) => Some(Value::Bool(true)),
+                (false, true) => Some(Value::Bool(false)),
+                _ => None,
+            }
+        }
+        ast::Value::NullValue(_) => Some(Value::Null),
+        ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
+        ast::Value::ListValue(l) => l
+            .values()
+            .map(|v| parse_value(&v))
+            .collect::<Option<_>>()
+            .map(Value::Array),
+        ast::Value::ObjectValue(o) => o
+            .object_fields()
+            .map(|field| match (field.name(), field.value()) {
+                (Some(name), Some(value)) => {
+                    parse_value(&value).map(|v| (name.text().to_string().into(), v))
+                }
+                _ => None,
+            })
+            .collect::<Option<_>>()
+            .map(Value::Object),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,10 +763,26 @@ mod tests {
 
     macro_rules! assert_format_response {
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
+            assert_format_response!(
+                $schema,
+                $query,
+                $response,
+                $operation,
+                Value::Object(Object::default()),
+                $expected
+            );
+        }};
+
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
-            query.format_response(&mut response, $operation, &schema);
+            query.format_response(
+                &mut response,
+                $operation,
+                $variables.as_object().unwrap().clone(),
+                &schema,
+            );
             assert_eq_and_ordered!(response.data, $expected);
         }};
     }
@@ -2078,7 +2216,7 @@ mod tests {
             }},
         );
 
-        // non null scalar b was null, the operatiuon should be null
+        // non null scalar b was null, the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2094,7 +2232,7 @@ mod tests {
             }},
         );
 
-        // non null scalar b was absent, the operatiuon should be null
+        // non null scalar b was absent, the operation should be null
         assert_format_response!(
             schema,
             query2,
@@ -2728,6 +2866,353 @@ mod tests {
                         "body": "hello",
                     },
                     "name": null,
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn skip() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+            review: Review
+        }
+
+        type Review {
+            id: String!
+            body: String
+        }";
+
+        // duplicate operation name
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    name @skip(if: true)
+                }
+                get @skip(if: false) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                    "review": {
+                        "id": "b",
+                    }
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "review": {
+                        "id": "b",
+                    }
+                },
+            }},
+        );
+
+        // skipped non null
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id @skip(if: true)
+                    name
+                }
+            }",
+            json! {{
+                "get": {
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // inline fragment
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ... on Product @skip(if: true) {
+                        name
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ... on Product @skip(if: false) {
+                        name
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // directive on fragment spread
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test @skip(if: false)
+                }
+            }
+
+            fragment test on Product {
+                nom: name
+                name @skip(if: true)
+            }
+            ",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test @skip(if: true)
+                }
+            }
+
+            fragment test on Product {
+                nom: name
+                name @skip(if: true)
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        // directive on fragment
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test
+                }
+            }
+
+            fragment test on Product @skip(if: false) {
+                nom: name
+                name @skip(if: true)
+            }
+            ",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test
+                }
+            }
+
+            fragment test on Product @skip(if: true) {
+                nom: name
+                name @skip(if: true)
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        // variables
+        // duplicate operation name
+        assert_format_response!(
+            schema,
+            "query Example($shouldSkip: Boolean) {
+                get {
+                    id
+                    name @skip(if: $shouldSkip)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldSkip": true
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query Example($shouldSkip: Boolean) {
+                get {
+                    id
+                    name @skip(if: $shouldSkip)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldSkip": false
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // default variable value
+        assert_format_response!(
+            schema,
+            "query Example($shouldSkip: Boolean = true) {
+                get {
+                    id
+                    name @skip(if: $shouldSkip)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{ }},
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query Example($shouldSkip: Boolean = true) {
+                get {
+                    id
+                    name @skip(if: $shouldSkip)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldSkip": false
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
                 },
             }},
         );
