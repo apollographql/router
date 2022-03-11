@@ -270,6 +270,19 @@ plugins:
             value: "products"
 ```
 
+You can also use Yaml anchors to eliminate repetition in your config:
+```yaml
+plugins:
+  apollo.headers:
+    subgraphs:
+      products:
+        - insert: &custom_header
+            name: "custom-header"
+            value: "something"
+      reviews:
+        - insert: *custom_header
+```
+
 ## OpenTelemetry tracing
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for [Jaeger](https://www.jaegertracing.io/) and the [OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter) over HTTP or gRPC. The router generates traces that include the various phases of executing a GraphQL operation and associated dependencies.
