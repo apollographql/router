@@ -32,10 +32,10 @@ module.exports = {
             'configuration/subgraph-routing-urls',
             'configuration/telemetry',
           ],
-          'Plugins': [
-            'plugins/overview',
-            'plugins/native',
-            'plugins/rhai',
+          'Customizations': [
+            'customizations/overview',
+            'customizations/native',
+            'customizations/rhai',
           ],
           'Third-Party Support': [
             '[Subgraph-compatible libraries](https://www.apollographql.com/docs/federation/v2/other-servers/)',
