@@ -1,9 +1,21 @@
 ---
-title: Apollo Router usage and config
-sidebar_title: Usage and config
+title: Configuring the Apollo Router
+sidebar_title: Overview
+description: High-performance graph routing for federated graphs
 ---
 
 import { Link } from "gatsby";
+
+TODO:
+
+Probably have a section that talks about the various ways to configure the RouteR:
+
+- CLI arguments
+- Configuration file
+- Supergraph schema
+
+---
+
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
@@ -77,27 +89,6 @@ Default: `info`
 </tbody>
 </table>
 
-## Handling CORS
-
-If you attempt to query the Apollo Router from a browser-based client, your request might be rejected due to CORS policies.
-
-You can configure CORS in the [YAML configuration file](#configuration-file) you provide to the Apollo Router.
-
-Here's an example configuration for adding `localhost` to the list of approved origins:
-
-```yaml
-# examples/nodejs/configuration.yaml
-server:
-  listen: 127.0.0.1:4000
-  cors:
-    origins:
-      - https://studio.apollographql.com
-      - http://localhost
-```
-
-## Logging
-
-The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments). JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver.
 
 ## Configuration file
 
@@ -441,7 +432,3 @@ apollo.reporting:
                   - value1
                   - value2
 ```
-
-## Configuring managed federation
-
-See [Managed federation with the Apollo Router](/managed-federation/).
