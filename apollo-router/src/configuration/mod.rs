@@ -52,7 +52,6 @@ pub enum ConfigurationError {
 /// Currently maintains a mapping of subgraphs.
 #[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[derivative(Debug)]
-#[serde(deny_unknown_fields)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
@@ -62,7 +61,12 @@ pub struct Configuration {
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: Plugins,
+    pub plugins: UserPlugins,
+
+    #[serde(default)]
+    #[builder(default)]
+    #[serde(flatten)]
+    pub apollo_plugins: ApolloPlugins,
 }
 
 fn default_listen() -> ListenAddr {
@@ -85,13 +89,42 @@ impl FromStr for Configuration {
     }
 }
 
+fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
+    let plugins_refs = plugins
+        .keys()
+        .map(|name| {
+            Schema::Object(SchemaObject {
+                object: Some(Box::new(ObjectValidation {
+                    required: Set::from([name.to_string()]),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let plugins_object = SchemaObject {
+        object: Some(Box::new(ObjectValidation {
+            properties: plugins,
+            ..Default::default()
+        })),
+        subschemas: Some(Box::new(SubschemaValidation {
+            any_of: Some(plugins_refs),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+
+    Schema::Object(plugins_object)
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
-pub struct Plugins {
+pub struct ApolloPlugins {
     pub plugins: Map<String, Value>,
 }
 
-impl JsonSchema for Plugins {
+impl JsonSchema for ApolloPlugins {
     fn schema_name() -> String {
         stringify!(Plugins).to_string()
     }
@@ -103,34 +136,40 @@ impl JsonSchema for Plugins {
         let plugins = plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
+            .filter(|(name, _)| name.starts_with("apollo."))
+            .map(|(name, factory)| {
+                (
+                    name["apollo.".len()..].to_string(),
+                    factory.create_schema(gen),
+                )
+            })
+            .collect::<schemars::Map<String, Schema>>();
+        gen_schema(plugins)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
+#[serde(transparent)]
+pub struct UserPlugins {
+    pub plugins: Map<String, Value>,
+}
+
+impl JsonSchema for UserPlugins {
+    fn schema_name() -> String {
+        stringify!(Plugins).to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // This is a manual implementation of Plugins schema to allow plugins that have been registered at
+        // compile time to be picked up.
+
+        let plugins = plugins()
+            .iter()
+            .sorted_by_key(|(name, _)| *name)
+            .filter(|(name, _)| !name.starts_with("apollo."))
             .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
             .collect::<schemars::Map<String, Schema>>();
-        let plugins_refs = plugins
-            .keys()
-            .map(|name| {
-                Schema::Object(SchemaObject {
-                    object: Some(Box::new(ObjectValidation {
-                        required: Set::from([name.to_string()]),
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let plugins_object = SchemaObject {
-            object: Some(Box::new(ObjectValidation {
-                properties: plugins,
-                ..Default::default()
-            })),
-            subschemas: Some(Box::new(SubschemaValidation {
-                any_of: Some(plugins_refs),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-
-        Schema::Object(plugins_object)
+        gen_schema(plugins)
     }
 }
 
