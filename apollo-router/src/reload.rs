@@ -146,6 +146,7 @@ where
     //
     // This is not true in the "general case", which I imagine is
     // why this is not implemented in the tracing_subscriber crate.
+    #[inline]
     unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
         self.inner.read().unwrap().downcast_raw(id)
     }
