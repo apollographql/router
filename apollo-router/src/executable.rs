@@ -116,6 +116,7 @@ pub async fn rt_main() -> Result<()> {
         let settings = SchemaSettings::draft2019_09().with(|s| {
             s.option_nullable = true;
             s.option_add_null_type = false;
+            s.inline_subschemas = true;
         });
         let gen = settings.into_generator();
         let schema = gen.into_root_schema_for::<Configuration>();
