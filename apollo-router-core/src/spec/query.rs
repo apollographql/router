@@ -360,11 +360,7 @@ impl Query {
                     }
                 }
                 Selection::FragmentSpread { name, known_type } => {
-                    if let Some(fragment) = self
-                        .fragments
-                        .get(name)
-                        .or_else(|| schema.fragments.get(name))
-                    {
+                    if let Some(fragment) = self.fragments.get(name) {
                         if input
                             .get("__typename")
                             .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
@@ -450,11 +446,7 @@ impl Query {
                     name,
                     known_type: _,
                 } => {
-                    if let Some(fragment) = self
-                        .fragments
-                        .get(name)
-                        .or_else(|| schema.fragments.get(name))
-                    {
+                    if let Some(fragment) = self.fragments.get(name) {
                         // top level objects will not provide a __typename field
                         match (fragment.type_condition.as_str(), operation.kind) {
                             ("Query", OperationKind::Query)
