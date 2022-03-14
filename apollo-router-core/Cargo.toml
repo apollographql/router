@@ -13,7 +13,7 @@ publish = false
 failfast = []
 
 [dependencies]
-apollo-parser = "0.2.3"
+apollo-parser = "0.2.4"
 async-trait = "0.1.52"
 atty = "0.2.14"
 bytes = "1.1.0"
@@ -51,7 +51,7 @@ tokio = { version = "1.17.0", features = ["rt", "sync"] }
 tower = { version = "0.4.12", features = ["full"] }
 tower-service = "0.3.1"
 tower-test = "0.4.0"
-tracing = "0.1.31"
+tracing = "0.1.32"
 typed-builder = "0.10.0"
 url = "2.2.2"
 urlencoding = "2.1.0"
