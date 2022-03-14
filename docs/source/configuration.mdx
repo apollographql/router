@@ -296,53 +296,55 @@ If the router receives an incoming request that already contains a `TraceParent`
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-apollo.reporting:
-  # Optional if you want to enable opentracing propagation headers to your subgraphs
-  # opentracing:
-    # "zipkin_b3" and "jaeger" formats are supported
-    # format: "zipkin_b3"
-  jaeger:
-    # optional: if not present, jaeger will use the default UDP agent address
-    #endpoint:
-      # address for the UDP agent mode
-      # incomptable with collector
-      # agent: "127.0.0.1:1234"
+plugins:
+  apollo.reporting:
+    # Optional if you want to enable opentracing propagation headers to your subgraphs
+    # opentracing:
+      # "zipkin_b3" and "jaeger" formats are supported
+      # format: "zipkin_b3"
+    opentelemetry:
+      jaeger:
+        # optional: if not present, jaeger will use the default UDP agent address
+        #endpoint:
+          # address for the UDP agent mode
+          # incomptable with collector
+          # agent: "127.0.0.1:1234"
 
-      # URL of the HTTP collector
-      # collector:" http://example.org"
-      # the username and password are obtained from the environment variables
-      # JAEGER_USERNAME and JAEGER_PASSWORD
+          # URL of the HTTP collector
+          # collector:" http://example.org"
+          # the username and password are obtained from the environment variables
+          # JAEGER_USERNAME and JAEGER_PASSWORD
 
-    # name of the service used in traces
-    # defaults to router
-    service_name: "router"
+        # name of the service used in traces
+        # defaults to router
+        service_name: "router"
 
-    trace_config:
-      # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-      # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-      # and 1 and decides on trace creation whether it will be recorded.
-      sampler:
-        TraceIdRatioBased: 0.42
-      max_events_per_span: 1
-      max_attributes_per_span: 2
-      max_links_per_span: 3
-      max_attributes_per_event: 4
-      max_attributes_per_link: 5
-      resource:
-        attrs:
-          key1:
-            String: value
-          key2:
-            Bool: true
-          key3:
-            I64: 42
-          key4:
-            F64: 42.0
-          key5:
-            Array:
-              String:
-                - value1
-                - value2
+        trace_config:
+          # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+          # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+          # and 1 and decides on trace creation whether it will be recorded.
+          sampler:
+            TraceIdRatioBased: 0.42
+          max_events_per_span: 1
+          max_attributes_per_span: 2
+          max_links_per_span: 3
+          max_attributes_per_event: 4
+          max_attributes_per_link: 5
+          resource:
+            attrs:
+              key1:
+                String: value
+              key2:
+                Bool: true
+              key3:
+                I64: 42
+              key4:
+                F64: 42.0
+              key5:
+                Array:
+                  String:
+                    - value1
+                    - value2
 ```
 
 ### Using OTLP
@@ -350,51 +352,51 @@ apollo.reporting:
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-apollo.reporting:
-  # Optional if you want to enable opentracing propagation headers to your subgraphs
-  # opentracing:
-    # "zipkin_b3" and "jaeger" formats are supported
-    # format: "zipkin_b3"
-  # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
-  otlp:
-    tracing:
-      exporter:
-        # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
-        http:
-          # URL of the exporter
-          endpoint:
-          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-          protocol: Grpc
-          # timmeout in seconds
-          timeout: 60
-          metadata:
-            - foo: bar
-      trace_config:
-        # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-        # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-        # and 1 and decides on trace creation whether it will be recorded.
-        sampler:
-          TraceIdRatioBased: 0.42
-        max_events_per_span: 1
-        max_attributes_per_span: 2
-        max_links_per_span: 3
-        max_attributes_per_event: 4
-        max_attributes_per_link: 5
-        resource:
-          attrs:
-            key1:
-              String: value
-            key2:
-              Bool: true
-            key3:
-              I64: 42
-            key4:
-              F64: 42.0
-            key5:
-              Array:
-                String:
-                  - value1
-                  - value2
+plugins:
+  apollo.reporting:
+    # Optional if you want to enable opentracing propagation headers to your subgraphs
+    # opentracing:
+      # "zipkin_b3" and "jaeger" formats are supported
+      # format: "zipkin_b3"
+    # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
+    opentelemetry:
+      otlp:
+        tracing:
+          exporter:
+            # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
+            http:
+              # URL of the exporter
+              endpoint: http://example.com
+              # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+              protocol: Grpc
+              # timmeout in seconds
+              timeout: 60
+          trace_config:
+            # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+            # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+            # and 1 and decides on trace creation whether it will be recorded.
+            sampler:
+              TraceIdRatioBased: 0.42
+            max_events_per_span: 1
+            max_attributes_per_span: 2
+            max_links_per_span: 3
+            max_attributes_per_event: 4
+            max_attributes_per_link: 5
+            resource:
+              attrs:
+                key1:
+                  String: value
+                key2:
+                  Bool: true
+                key3:
+                  I64: 42
+                key4:
+                  F64: 42.0
+                key5:
+                  Array:
+                    String:
+                      - value1
+                      - value2
 ```
 
 ## Configuring managed federation
