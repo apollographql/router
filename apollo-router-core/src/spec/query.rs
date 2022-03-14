@@ -1088,6 +1088,11 @@ mod tests {
             "query($foo:Foo){x}",
             json!({"foo":{"bar":{"x":1}}})
         );
+        assert_validation!(
+            "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
+            "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
+            json!({"availability": "AVAILABLE"})
+        )
     }
 
     #[test]

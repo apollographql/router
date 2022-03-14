@@ -70,6 +70,11 @@ use a layer vs a plugin. As the layer API is a subset of the plugin API the laye
   Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
 
 ## 🐛 Fixes
+
+- **Enums in query parameters** ([612](https://github.com/apollographql/router/issues/612)) 
+Enums in query parameters were handled correctly in the response formatting, but not in query validation.
+We now have a new test and a fix.
+
 - **OTEL trace propagation** ([PR #620](https://github.com/apollographql/router/pull/620))
   When we re-worked our OTEL implementation to be a plugin, the ability to trace across processes (into subgraphs) was
   lost. This fix restores this capability.
