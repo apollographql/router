@@ -37,7 +37,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   subgraphs as wel as individual subgraphs.
 
   ```yaml
-  plugins:
     headers:
       all:
       - propagate:
@@ -62,6 +61,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
 use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+
+- **Move Apollo plugins to top level configuration**
+Previously plugins were all under the `plugins:` section of the yaml config. However, now apollo plugins are promoted 
+to the top level of the config. This reflects the fact that these plugins provide core functionality even though they 
+are implemented as plugins under the hood.
 
 ## 🚀 Features
 

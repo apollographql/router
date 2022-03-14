@@ -71,7 +71,7 @@ pub struct Configuration {
     apollo_plugins: ApolloPlugins,
 }
 
-const APOLLO_PLUGIN_PREFIX: &'static str = "apollo.";
+const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
