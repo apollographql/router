@@ -52,7 +52,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
 ], optional = true }
 prost-types = "0.9.0"
 regex = "1.5.4"
-reqwest = { version = "0.11.9", features = ["json", "stream"] }
+reqwest = { version = "0.11.10", features = ["json", "stream"] }
 schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
@@ -79,13 +79,13 @@ warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
-libc = "0.2.119"
+libc = "0.2.120"
 
 [dev-dependencies]
 insta = "1.12.0"
 maplit = "1.0.2"
 mockall = "0.11.0"
-reqwest = { version = "0.11.9", features = ["json", "stream"] }
+reqwest = { version = "0.11.10", features = ["json", "stream"] }
 tempfile = "3.3.0"
 test-log = { version = "0.2.8", default-features = false, features = ["trace"] }
 test-span = "0.3"
