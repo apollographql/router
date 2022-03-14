@@ -181,10 +181,11 @@ struct Reporting {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 struct Conf {
     pub spaceport: Option<SpaceportConfig>,
 
-    #[serde(skip)]
+    #[serde(skip, default)]
     pub graph: Option<StudioGraph>,
 
     pub opentelemetry: Option<OpenTelemetry>,

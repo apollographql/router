@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 432
+assertion_line: 436
 expression: "&schema"
 ---
 {
@@ -109,7 +109,8 @@ expression: "&schema"
           "$ref": "#/definitions/SpaceportConfig",
           "nullable": true
         }
-      }
+      },
+      "additionalProperties": false
     },
     "Config": {
       "type": "object",

@@ -1,5 +1,6 @@
 //! Logic for loading configuration in to an object model
 
+use crate::subscriber::is_global_subscriber_set;
 use apollo_router_core::plugins;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -83,8 +84,12 @@ impl Configuration {
 
     pub fn plugins(&self) -> Map<String, Value> {
         let mut plugins = Vec::default();
-        // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
-        plugins.push(("apollo.reporting".into(), Value::Object(Map::new())));
+
+        if is_global_subscriber_set() {
+            // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
+            // Note that this can only be done if the global subscriber has been set, i.e. we're not unit testing.
+            plugins.push(("apollo.reporting".into(), Value::Object(Map::new())));
+        }
 
         // Add all the apollo plugins
         for (plugin, config) in &self.apollo_plugins.plugins {
@@ -106,7 +111,12 @@ impl Configuration {
             _ => 0,
         });
 
-        plugins.into_iter().collect()
+        let mut final_plugins = Map::new();
+        for (plugin, config) in plugins {
+            final_plugins.insert(plugin, config);
+        }
+
+        final_plugins
     }
 }
 
