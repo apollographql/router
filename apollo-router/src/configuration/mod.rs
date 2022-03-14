@@ -61,7 +61,7 @@ pub struct Configuration {
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub plugins: UserPlugins,
+    pub user_plugins: UserPlugins,
 
     #[serde(default)]
     #[builder(default)]

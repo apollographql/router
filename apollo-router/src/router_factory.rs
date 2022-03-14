@@ -124,7 +124,11 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             // If it was required, we ensured that the Reporting plugin was in the
             // list of plugins above. Now make sure that we process that plugin
             // before any other plugins.
-            let already_processed = match configuration.plugins.plugins.get(REPORTING_MODULE_NAME) {
+            let already_processed = match configuration
+                .user_plugins
+                .plugins
+                .get(REPORTING_MODULE_NAME)
+            {
                 Some(reporting_configuration) => {
                     builder = process_plugin(
                         builder,
@@ -141,7 +145,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             // Process the remaining plugins. We use already_processed to skip
             // those plugins we already processed.
             for (name, configuration) in configuration
-                .plugins
+                .user_plugins
                 .plugins
                 .iter()
                 .filter(|(name, _)| !already_processed.contains(&name.as_str()))
@@ -209,11 +213,11 @@ fn add_default_plugins(mut configuration: Configuration) -> Configuration {
         // insert a valid "minimal" configuration which allows
         // studio usage reporting to function
         if !configuration
-            .plugins
+            .user_plugins
             .plugins
             .contains_key(REPORTING_MODULE_NAME)
         {
-            configuration.plugins.plugins.insert(
+            configuration.user_plugins.plugins.insert(
                 REPORTING_MODULE_NAME.to_string(),
                 serde_json::json!({ "opentelemetry": null }),
             );
