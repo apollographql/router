@@ -7,7 +7,7 @@ use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
-use crate::{replace_layer, BaseLayer, BoxedLayer};
+use crate::subscriber::{replace_layer, BaseLayer, BoxedLayer};
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::SubgraphResponse;
 use apollo_router_core::{register_plugin, Plugin};

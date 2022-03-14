@@ -31,7 +31,6 @@ use tracing_core::{
     Event, Metadata,
 };
 
-// #[cfg(feature = "std")]
 macro_rules! try_lock {
     ($lock:expr) => {
         try_lock!($lock, else return)
@@ -79,9 +78,9 @@ enum ErrorKind {
 
 // ===== impl Layer =====
 
-impl<L, S> crate::Layer<S> for Layer<L, S>
+impl<L, S> tracing_subscriber::Layer<S> for Layer<L, S>
 where
-    L: crate::Layer<S> + 'static,
+    L: tracing_subscriber::Layer<S> + 'static,
     S: Subscriber,
 {
     fn on_layer(&mut self, subscriber: &mut S) {
@@ -154,7 +153,7 @@ where
 
 impl<L, S> Layer<L, S>
 where
-    L: crate::Layer<S> + 'static,
+    L: tracing_subscriber::Layer<S> + 'static,
     S: Subscriber,
 {
     /// Wraps the given `Layer`, returning a `Layer` and a `Handle` that allows
@@ -181,7 +180,7 @@ where
 
 impl<L, S> Handle<L, S>
 where
-    L: crate::Layer<S> + 'static,
+    L: tracing_subscriber::Layer<S> + 'static,
     S: Subscriber,
 {
     /// Replace the current layer with the provided `new_layer`.

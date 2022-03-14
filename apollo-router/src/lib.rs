@@ -10,10 +10,11 @@ mod plugins;
 mod reload;
 pub mod router_factory;
 mod state_machine;
+pub mod subscriber;
 mod warp_http_server_factory;
 
 use crate::apollo_telemetry::SpaceportConfig;
-use crate::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
+use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
@@ -27,205 +28,14 @@ pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use once_cell::sync::OnceCell;
-use std::any::TypeId;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
-use tracing::span::{Attributes, Record};
-use tracing::subscriber::{set_global_default, SetGlobalDefaultError};
-use tracing::{Event as TracingEvent, Id, Metadata, Subscriber};
-use tracing_core::span::Current;
-use tracing_core::{Interest, LevelFilter};
-use tracing_subscriber::fmt::format::{DefaultFields, Format, Json, JsonFields};
-use tracing_subscriber::registry::{Data, LookupSpan};
-use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
+use tracing::subscriber::SetGlobalDefaultError;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
-
-pub(crate) type BoxedLayer = Box<dyn Layer<RouterSubscriber> + Send + Sync>;
-
-type FmtSubscriberTextEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
-type FmtSubscriberJsonEnv = FmtSubscriber<JsonFields, Format<Json>, EnvFilter>;
-
-pub enum RouterSubscriber {
-    JsonSubscriber(FmtSubscriberJsonEnv),
-    TextSubscriber(FmtSubscriberTextEnv),
-}
-
-impl Subscriber for RouterSubscriber {
-    // Required to make the trait work
-
-    fn clone_span(&self, id: &Id) -> Id {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.clone_span(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.clone_span(id),
-        }
-    }
-
-    fn try_close(&self, id: Id) -> bool {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.try_close(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.try_close(id),
-        }
-    }
-
-    /// The delegated downcasting model is copied from the implementation
-    /// of `Subscriber` for `Layered` in the tracing_subscriber crate.
-    /// The logic appears to be sound, but be wary of problems here.
-    unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
-        // If downcasting to `Self`, return a pointer to `self`.
-        if id == TypeId::of::<Self>() {
-            return Some(self as *const _ as *const ());
-        }
-
-        // If not downcasting to `Self`, then check the encapsulated
-        // subscribers to see if we can downcast one of them.
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.downcast_raw(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.downcast_raw(id),
-        }
-    }
-
-    // May not be required to work, but better safe than sorry
-
-    fn current_span(&self) -> Current {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.current_span(),
-            RouterSubscriber::TextSubscriber(sub) => sub.current_span(),
-        }
-    }
-
-    fn drop_span(&self, id: Id) {
-        // Rather than delegate, call try_close() to avoid deprecation
-        // complaints
-        self.try_close(id);
-    }
-
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.max_level_hint(),
-            RouterSubscriber::TextSubscriber(sub) => sub.max_level_hint(),
-        }
-    }
-
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.register_callsite(metadata),
-            RouterSubscriber::TextSubscriber(sub) => sub.register_callsite(metadata),
-        }
-    }
-
-    // Required by the trait
-
-    fn enabled(&self, meta: &Metadata<'_>) -> bool {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.enabled(meta),
-            RouterSubscriber::TextSubscriber(sub) => sub.enabled(meta),
-        }
-    }
-
-    fn new_span(&self, attrs: &Attributes<'_>) -> Id {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.new_span(attrs),
-            RouterSubscriber::TextSubscriber(sub) => sub.new_span(attrs),
-        }
-    }
-
-    fn record(&self, span: &Id, values: &Record<'_>) {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.record(span, values),
-            RouterSubscriber::TextSubscriber(sub) => sub.record(span, values),
-        }
-    }
-
-    fn record_follows_from(&self, span: &Id, follows: &Id) {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.record_follows_from(span, follows),
-            RouterSubscriber::TextSubscriber(sub) => sub.record_follows_from(span, follows),
-        }
-    }
-
-    fn event(&self, event: &TracingEvent<'_>) {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.event(event),
-            RouterSubscriber::TextSubscriber(sub) => sub.event(event),
-        }
-    }
-
-    fn enter(&self, id: &Id) {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.enter(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.enter(id),
-        }
-    }
-
-    fn exit(&self, id: &Id) {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.exit(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.exit(id),
-        }
-    }
-}
-
-impl<'a> LookupSpan<'a> for RouterSubscriber {
-    type Data = Data<'a>;
-
-    fn span_data(&'a self, id: &Id) -> Option<<Self as LookupSpan<'a>>::Data> {
-        match self {
-            RouterSubscriber::JsonSubscriber(sub) => sub.span_data(id),
-            RouterSubscriber::TextSubscriber(sub) => sub.span_data(id),
-        }
-    }
-}
-
-pub(crate) struct BaseLayer;
-
-// We don't actually need our BaseLayer to do anything. It exists as a holder
-// for the layers set by the reporting.rs plugin
-impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
-
-static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
-
-pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
-    RELOAD_HANDLE
-        .get_or_try_init(move || {
-            // First create a boxed BaseLayer
-            let cl: BoxedLayer = Box::new(BaseLayer {});
-
-            // Now create a reloading layer from that
-            let (reloading_layer, handle) = ReloadLayer::new(cl);
-
-            // Box up our reloading layer
-            let rl: BoxedLayer = Box::new(reloading_layer);
-
-            // Compose that with our subscriber
-            let composed = rl.with_subscriber(subscriber);
-
-            // Set our subscriber as the global subscriber
-            set_global_default(composed)?;
-
-            // Return our handle to store in OnceCell
-            Ok(handle)
-        })
-        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
-    Ok(())
-}
-
-pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
-    match RELOAD_HANDLE.get() {
-        Some(hdl) => {
-            hdl.reload(new_layer)
-                .map_err(FederatedServerError::ReloadTracingLayerError)?;
-        }
-        None => {
-            return Err(FederatedServerError::NoReloadTracingHandleError);
-        }
-    }
-    Ok(())
-}
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
