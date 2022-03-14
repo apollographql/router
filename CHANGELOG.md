@@ -71,7 +71,13 @@ use a layer vs a plugin. As the layer API is a subset of the plugin API the laye
 
 ## 🐛 Fixes
 
-- **Enums in query parameters** ([612](https://github.com/apollographql/router/issues/612)) Enums in query parameters were handled correctly in the response formatting, but not in query validation. We now have a new test and a fix.
+- **Enums in query parameters** ([612](https://github.com/apollographql/router/issues/612)) 
+Enums in query parameters were handled correctly in the response formatting, but not in query validation.
+We now have a new test and a fix.
+
+- **OTEL trace propagation** ([PR #620](https://github.com/apollographql/router/pull/620))
+  When we re-worked our OTEL implementation to be a plugin, the ability to trace across processes (into subgraphs) was
+  lost. This fix restores this capability.
 
 - **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
   Previously our reporting plugin configuration did not participate in json schema generation. This is now broadly correct

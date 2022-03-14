@@ -32,7 +32,7 @@ mod allow_client_id_from_file;
 
 use anyhow::Result;
 
-// `cargo run -- -s ../supergraph.graphql -c ./config.yml`
+// `cargo run -- -s ../graphql/supergraph.graphql -c ./config.yml`
 fn main() -> Result<()> {
     apollo_router::main()
 }
