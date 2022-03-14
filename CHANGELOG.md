@@ -70,6 +70,10 @@ use a layer vs a plugin. As the layer API is a subset of the plugin API the laye
   Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
 
 ## 🐛 Fixes
+- **OTEL trace propagation** ([PR #620](https://github.com/apollographql/router/pull/620))
+  When we re-worked our OTEL implementation to be a plugin, the ability to trace across processes (into subgraphs) was
+  lost. This fix restores this capability.
+
 - **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
   Previously our reporting plugin configuration did not participate in json schema generation. This is now broadly correct
   and make writing schema much easier.
