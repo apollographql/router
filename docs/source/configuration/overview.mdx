@@ -89,6 +89,22 @@ Default: `info`
 </tbody>
 </table>
 
+## Configuration-awareness in your text editor
+
+The Apollo Router is able to produce a JSON schema for use in your text editor. It significantly eases the burden of making
+sure that your yaml file is correctly formatted, and even gives you content assist.
+
+To generate the schema use:
+```bash
+router --schema > configuration_schema.json
+```
+
+One you have generated the schema configure your text editor. Here are some instructions for well known editors:
+* [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+* [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+* [Sublime](https://github.com/sublimelsp/LSP-yaml)
+* [Vim](https://github.com/Quramy/vison)
+* [VsCode](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
 
 ## Configuration file
 
@@ -131,118 +147,37 @@ server:
     # Which response headers should be made available to scripts running in the
     # browser in response to a cross-origin request.
     expose_headers:
-
-#
-# Subgraphs
-#
-# This configuration affects the communication with underlying subgraphs.
-# The `subgraphs` property is a map to individual named subgraphs and should
-# map to the subgraph name that is defined in the Supergraph.
-#
-# On each named subgraph of the subgraphs map, these properties can be set:
-#
-#  - routing_url
-#  - layers
-#
-# These are explained further below.
-#
-# * routing_url *
-#
-# The URL the Router should connect to for this subgraph.
-#
-# By default, routing information is parsed from the supergraph which is
-# typically sufficient for most environments and respects the settings which
-# you've set during composition in Apollo Studio or via Rover.  Provide it here
-# only to *override* the supergraph's subgraph routing URLs.
-#
-#
-# * layers *
-#
-# This is a map of configurable layers which will be invoked.
-#
-# Layers are features (either native or extensions) which can be enabled for
-# each subgraph.  Common layers are the "headers*" layers, and an example can be
-# found for below.  For more information, see later in the documentation.
-#
-
-subgraphs:
-  # Specifies the runtime configuration for talking to the "accounts" subgraph.
-  accounts:
-    # The URL of the "accounts" subgraph's GraphQL endpoint
-    routing_url: http://localhost:4001/graphql
-
-    # Layers to be applied to the "accounts" subgraph.
-    layers:
-      - headers_propagate:
-          matching:
-            regex: ^upstream-header-.*
-      - headers_propagate:
-          named:
-            name: "old-name"
-            rename: "new-name"
-            default_value: "0"
-      - headers_propagate:
-          named:
-            name: "old-name"
-            rename: "new-name"
-            default_value: "0"
-      - headers_remove:
-          name: "x-legacy-account-id"
-      - headers_remove:
-          matching:
-            regex: ^x-deprecated.*
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "accounts"
-
-  # Specifies the runtime configuration for talking to the "products" subgraph.
-  products:
-    # The URL of the "products" subgraph's GraphQL endpoint
-    routing_url: http://localhost:4003/graphql
-
-    # Layers to be applied to the "products" subgraph.
-    layers:
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "products"
-      - headers_remove:
-          name: "x-legacy-tracking-id"
-
-
-# graph configuration, see documentation below
-# graph:
-
-# spaceport configuration, see documentation below
-# spaceport:
-
-# OpenTelemetry configuration, see documentation below
-# opentelemetry:
+plugins:
+    # See below for plugins
 ```
-
 ## Passing headers to subgraphs
 
 You can customize which HTTP headers the Apollo Router includes in its requests to your individual subgraphs. You specify these headers on a per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-More specifically, each subgraph's configuration includes a `layers` array that can include header-related actions for the router to perform (in order) before sending a request:
+More specifically, each the headers plugin include can be configured with an array of header-related actions for the router to perform (in order) before sending a request:
 
 ```yaml{4-12}
-products:
+plugins:
   # ...other configuration...
 
-  layers:
-    - headers_propagate:
+  apollo.headers:
+    all:
+    - propagate:
         matching:
           regex: ^upstream-header-.*
-    - headers_remove:
+    - remove:
         name: "x-legacy-account-id"
-    - headers_insert:
-        name: "router-subgraph-name"
-        value: "accounts"
+    subgraphs:
+      products:
+        - insert:
+            name: "router-subgraph-name"
+            value: "products"
+
 ```
 
 The following transformations are specific to customizing headers sent to subgraphs:
 
-### `headers_propagate`
+### `propagate`
 
 Enables you to selectively propagate headers that were included in the client's request to the router.
 
@@ -251,7 +186,7 @@ Enables you to selectively propagate headers that were included in the client's 
 You can specify which headers to propagate based on a matching [regex pattern](https://docs.rs/regex/latest/regex/):
 
 ```yaml
-- headers_propagate:
+- propagate:
     matching:
       regex: .*
 ```
@@ -262,16 +197,13 @@ You can also provide a static string with the `named` option. These `named` conf
 - `rename`: Renames the header's key to the provided value
 
 ```yaml
-- headers_propagate:
-    named:
-      name: "x-user-id"
-      default_value: "abc123"
+- propagate:
+      named: "x-user-id"
+      value: "abc123"
       rename: "account-id"
-    named:
-      name: "Authorization"
 ```
 
-### `headers_remove`
+### `remove`
 
 Enables you to selectively remove headers that were included in the client's request to the router. Similar to [`headers_propagate`](#headers-propagate), this option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
 
@@ -279,9 +211,9 @@ Enables you to selectively remove headers that were included in the client's req
 
 ```yaml
 # Do not send this subgraph the "Cookie" header.
-- headers_remove:
-    name: "Cookie"
-- headers_remove:
+- remove:
+    named: "Cookie"
+- remove:
     matching:
       # Remove headers that include the legacy 'x-' prefix.
       regex: ^x-.*$
@@ -292,7 +224,7 @@ Enables you to selectively remove headers that were included in the client's req
 Enables you to add custom headers to requests going to a specific subgraph. These headers are always static strings that originate in the router, instead of originating in the client.
 
 ```yaml
-- headers_insert:
+- insert:
     name: "sent-from-our-apollo-router"
     value: "indeed"
 ```
@@ -302,21 +234,43 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 Here's an example of customizing different headers for two subgraphs: `accounts` and `products`. These two subgraphs are both sent `router-subgraph-name` headers with either the `accounts` or `products` value, respectively. Any other subgraph receives _no_ headers.
 
 ```yaml
-subgraphs:
-  # These headers apply to the "accounts" subgraph only.
-  # They are not passed to the "products" subgraph (below).
-  accounts:
-    layers:
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "accounts"
-  products:
-    # Layers to be applied to the "products" subgraph only.
-    # They are not passed to the "accounts" subgraph (above).
-    layers:
-      - headers_insert:
-          name: "router-subgraph-name"
-          value: "products"
+plugins:
+  apollo.headers:
+    all:
+    # All subgraphs will propagate matching headers.
+    - propagate:
+        matching:
+          regex: ^upstream-header-.*
+    # All subgraphs will propagate matching headers.
+    - propagate:
+        named: "some-header"
+        default: "default-value"
+        rename: "destination-header"
+    # All subgraphs will remove the "x-legacy-account-id" header.
+    - remove:
+        named: "x-legacy-account-id"
+    - remove:
+        matching: "x-legacy-account-id"
+    # Subgraph specific configuration
+    subgraphs:
+      products:
+        # Calls to the products subgraph will have the "router-subgraph-name" header.
+        - insert:
+            name: "router-subgraph-name"
+            value: "products"
+```
+
+You can also use Yaml anchors to eliminate repetition in your config:
+```yaml
+plugins:
+  apollo.headers:
+    subgraphs:
+      products:
+        - insert: &custom_header
+            name: "custom-header"
+            value: "something"
+      reviews:
+        - insert: *custom_header
 ```
 
 ## OpenTelemetry tracing
@@ -332,53 +286,55 @@ If the router receives an incoming request that already contains a `TraceParent`
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-apollo.reporting:
-  # Optional if you want to enable opentracing propagation headers to your subgraphs
-  # opentracing:
-    # "zipkin_b3" and "jaeger" formats are supported
-    # format: "zipkin_b3"
-  jaeger:
-    # optional: if not present, jaeger will use the default UDP agent address
-    #endpoint:
-      # address for the UDP agent mode
-      # incomptable with collector
-      # agent: "127.0.0.1:1234"
+plugins:
+  apollo.reporting:
+    # Optional if you want to enable opentracing propagation headers to your subgraphs
+    # opentracing:
+      # "zipkin_b3" and "jaeger" formats are supported
+      # format: "zipkin_b3"
+    opentelemetry:
+      jaeger:
+        # optional: if not present, jaeger will use the default UDP agent address
+        #endpoint:
+          # address for the UDP agent mode
+          # incomptable with collector
+          # agent: "127.0.0.1:1234"
 
-      # URL of the HTTP collector
-      # collector:" http://example.org"
-      # the username and password are obtained from the environment variables
-      # JAEGER_USERNAME and JAEGER_PASSWORD
+          # URL of the HTTP collector
+          # collector:" http://example.org"
+          # the username and password are obtained from the environment variables
+          # JAEGER_USERNAME and JAEGER_PASSWORD
 
-    # name of the service used in traces
-    # defaults to router
-    service_name: "router"
+        # name of the service used in traces
+        # defaults to router
+        service_name: "router"
 
-    trace_config:
-      # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-      # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-      # and 1 and decides on trace creation whether it will be recorded.
-      sampler:
-        TraceIdRatioBased: 0.42
-      max_events_per_span: 1
-      max_attributes_per_span: 2
-      max_links_per_span: 3
-      max_attributes_per_event: 4
-      max_attributes_per_link: 5
-      resource:
-        attrs:
-          key1:
-            String: value
-          key2:
-            Bool: true
-          key3:
-            I64: 42
-          key4:
-            F64: 42.0
-          key5:
-            Array:
-              String:
-                - value1
-                - value2
+        trace_config:
+          # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+          # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+          # and 1 and decides on trace creation whether it will be recorded.
+          sampler:
+            TraceIdRatioBased: 0.42
+          max_events_per_span: 1
+          max_attributes_per_span: 2
+          max_links_per_span: 3
+          max_attributes_per_event: 4
+          max_attributes_per_link: 5
+          resource:
+            attrs:
+              key1:
+                String: value
+              key2:
+                Bool: true
+              key3:
+                I64: 42
+              key4:
+                F64: 42.0
+              key5:
+                Array:
+                  String:
+                    - value1
+                    - value2
 ```
 
 ### Using OTLP
@@ -386,49 +342,49 @@ apollo.reporting:
 ```yaml:title=configuration.yaml
 server:
   listen: 127.0.0.1:4000
-apollo.reporting:
-  # Optional if you want to enable opentracing propagation headers to your subgraphs
-  # opentracing:
-    # "zipkin_b3" and "jaeger" formats are supported
-    # format: "zipkin_b3"
-  # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
-  otlp:
-    tracing:
-      exporter:
-        # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
-        http:
-          # URL of the exporter
-          endpoint:
-          # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-          protocol: Grpc
-          # timmeout in seconds
-          timeout: 60
-          metadata:
-            - foo: bar
-      trace_config:
-        # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-        # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-        # and 1 and decides on trace creation whether it will be recorded.
-        sampler:
-          TraceIdRatioBased: 0.42
-        max_events_per_span: 1
-        max_attributes_per_span: 2
-        max_links_per_span: 3
-        max_attributes_per_event: 4
-        max_attributes_per_link: 5
-        resource:
-          attrs:
-            key1:
-              String: value
-            key2:
-              Bool: true
-            key3:
-              I64: 42
-            key4:
-              F64: 42.0
-            key5:
-              Array:
-                String:
-                  - value1
-                  - value2
+plugins:
+  apollo.reporting:
+    # Optional if you want to enable opentracing propagation headers to your subgraphs
+    # opentracing:
+      # "zipkin_b3" and "jaeger" formats are supported
+      # format: "zipkin_b3"
+    # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
+    opentelemetry:
+      otlp:
+        tracing:
+          exporter:
+            # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
+            http:
+              # URL of the exporter
+              endpoint: http://example.com
+              # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
+              protocol: Grpc
+              # timmeout in seconds
+              timeout: 60
+          trace_config:
+            # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
+            # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
+            # and 1 and decides on trace creation whether it will be recorded.
+            sampler:
+              TraceIdRatioBased: 0.42
+            max_events_per_span: 1
+            max_attributes_per_span: 2
+            max_links_per_span: 3
+            max_attributes_per_event: 4
+            max_attributes_per_link: 5
+            resource:
+              attrs:
+                key1:
+                  String: value
+                key2:
+                  Bool: true
+                key3:
+                  I64: 42
+                key4:
+                  F64: 42.0
+                key5:
+                  Array:
+                    String:
+                      - value1
+                      - value2
 ```

@@ -32,7 +32,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
@@ -120,6 +120,7 @@ pub struct RouterRequest {
 }
 
 assert_impl_all!(RouterResponse: Send);
+#[derive(Clone)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
     pub context: Context,

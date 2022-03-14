@@ -1,4 +1,4 @@
-use super::{from_names_and_values, CompatRequest};
+use super::from_names_and_values;
 use crate::{http_compat::Request, Context, Error, Object, Path};
 use http::{Response, StatusCode};
 use serde_json_bytes::Value;
@@ -20,7 +20,7 @@ pub struct ExecutionResponse {
     status: StatusCode,
     #[builder(default, setter(!strip_option))]
     headers: Vec<(String, String)>,
-    context: Option<Context<CompatRequest>>,
+    context: Option<Context>,
 }
 
 impl From<ExecutionResponse> for crate::ExecutionResponse {

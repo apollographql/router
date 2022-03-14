@@ -5,4 +5,4 @@ server:
 plugins:
   # this plugin doesn't have any configuration
   # mention it here and you're set!
-  com.example.forbid_anonymous_operations:
+  example.forbid_anonymous_operations:

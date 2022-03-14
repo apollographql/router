@@ -1,5 +1,8 @@
 use super::from_names_and_values;
-use crate::{http_compat::RequestBuilder, Context, Object};
+use crate::{
+    http_compat::{self, RequestBuilder},
+    Context, Object,
+};
 use http::Method;
 use reqwest::Url;
 use serde_json_bytes::Value;
@@ -14,7 +17,7 @@ pub struct RouterRequest {
     variables: Option<Arc<Object>>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
     extensions: Option<Object>,
-    context: Option<Context<()>>,
+    context: Option<Context<http_compat::Request<crate::Request>>>,
     headers: Option<Vec<(String, String)>>,
 }
 
@@ -35,7 +38,9 @@ impl From<RouterRequest> for crate::RouterRequest {
         let req = req.body(gql_request).expect("body is always valid; qed");
 
         crate::RouterRequest {
-            context: request.context.unwrap_or_default().with_request(req),
+            context: request
+                .context
+                .unwrap_or_else(|| Context::new().with_request(req)),
         }
     }
 }
