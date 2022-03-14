@@ -8,6 +8,57 @@ import { Link } from 'gatsby';
 
 TODO:
 
-- Explain the life-cycle ordering (before all other native plugins?)
+- Explain the life-cycle ordering (clarify that it's before all other native plugins?)
 - Give examples
 
+---
+
+If you have specific needs that requires you to write your own plugin but you don't want to learn Rust and you want to use a scripting language, rather than a compiled language, you can use [`rhai`](http://rhai.rs) script to implement some business logic in Router.
+
+The rhai plugin is using the same mechanisms as native Rust plugins and has access to the same life-cycle events.
+
+### Example
+
+#### Configuration
+
+```yaml
+rhai:
+    filename: "location_of_your_rhai_script.rhai"
+```
+
+> TODO: Define terminology like Service
+
+#### Script
+
+Here is a rhai script that manipulates headers and the request context in addition to modifying the response. Every listed function takes a `context` as parameter with `extensions` and `headers` inside and must return an updated `context`.
+
+```javascript
+fn execution_service_request(context) {
+    if context.headers["x-custom-header"] != "CUSTOM_VALUE" {
+        throw "Error: you did not provide the right custom header";
+    }
+}
+
+fn router_service_response(context) {
+    context.headers["test-header"] = "here is a test";
+    // Header names are always in lower case
+    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        context.headers.greetings = "hello";
+    }
+    let value = context.extensions.test + 10;
+    context.headers["coming_from_extensions"] = `value_${value}`;
+    context.extensions.test = 42;
+    context.extensions.addition = "Here is a new element in the context";
+
+    context
+}
+
+// Other available functions:
+// 
+// query_planning_service_request
+// query_planning_service_response
+// execution_service_request
+// execution_service_response
+// subgraph_service_request
+// subgraph_service_response
+```
