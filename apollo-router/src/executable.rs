@@ -1,8 +1,9 @@
 //! Main entry point for CLI command to start server.
 
 use crate::{
-    configuration::Configuration, set_global_subscriber, ApolloRouterBuilder, ConfigurationKind,
-    RouterSubscriber, SchemaKind, ShutdownKind,
+    configuration::Configuration,
+    subscriber::{set_global_subscriber, RouterSubscriber},
+    ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
 use directories::ProjectDirs;

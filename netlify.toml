@@ -7,8 +7,8 @@
   # we'll check to see if `/bin/false` returns true (it won't) as a gauge.
   ignore  = "/bin/false"
 [build.environment]
-  NODE_VERSION = "14"
-  NPM_VERSION  = "7"
+  NODE_VERSION = "16"
+  NPM_VERSION  = "8"
 [context.production.environment]
   PREFIX_PATHS = "true"
 [context.branch-deploy.environment]

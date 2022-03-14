@@ -1,0 +1,25 @@
+---
+title: Migrating to Apollo Router from the Apollo Gateway
+sidebar_title: Migrating from Gateway
+description: An overview of the considerations to make when migrating from Apollo Gateway to the Apollo Router.
+---
+
+import { Link } from 'gatsby';
+
+TODO
+
+- Talk about the difference in the model.  Static versus dynamic.
+  - Request pipeline lifecycle hooks (Apollo Server ish)
+    - Pre/post parse
+    - pre/post validate
+    - pre/post execution
+    - pre/post-response
+    - .. etc .
+  - `RemoteGraphQLDataSource`s
+- Approaches to configuring Apollo Router
+  - Native features
+  - custom plugins (rhai)
+  - custom plugins (native)
+- Highlight main touch-points for configuration in the Gateway, go through Router approaches for those.
+  - Headers
+  - Telemetry

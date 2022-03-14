@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use apollo_router::{set_global_subscriber, RouterSubscriber};
+use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
 use apollo_router_core::{plugin_utils, PluggableRouterServiceBuilder};
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};

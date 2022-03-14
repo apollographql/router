@@ -1,19 +1,9 @@
 ---
-title: Managed federation with the Apollo Router
-sidebar_title: Managed federation
+title: TODO Spaceport 
+sidebar_title: Some spaceport stuff
 ---
 
-This article describes using the Apollo Router with [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/) and Apollo Studio.
-
-## Connecting to Apollo Uplink
-
-[Uplink](https://www.apollographql.com/docs/federation/managed-federation/uplink/) is the Apollo-hosted endpoint that a managed router polls to fetch its latest supergraph schema. To authenticate the Apollo Router with Studio:
-
-1. [Create a graph API key](https://www.apollographql.com/docs/studio/api-keys/#graph-api-keys) with the `Contributor` key role.
-2. In the router's environment, set the API key as the value of the `APOLLO_KEY` environment variable.
-3. Also set the `APOLLO_GRAPH_REF` environment variable to match whichever Studio graph and variant the router is using (e.g., `my-graph-id@production`).
-
-After you set these values, the Apollo Router automatically starts polling Uplink on startup. Setting these values also enables [usage reporting](#usage-reporting-agent-spaceport) by default.
+TODO clean this up.
 
 ## Usage reporting agent (spaceport)
 
@@ -32,20 +22,22 @@ More information on usage reporting is available in the [Studio documentation](h
 Spaceport can run either as an [internal component](#internal-spaceport) of a single Apollo Router instance, or as an [external resource](#external-spaceport) shared by _multiple_ router instances.
 
 ```yaml:title=configuration.yaml
-# Spaceport configuration. These values are the default values if not specified
-spaceport:
-  # By default, Apollo Router runs an internal collector. You can override
-  # this default behavior by setting `external: true`. If `true`, no reporting
-  # agent spawns, and the router instead communicates with `collector` below.
-  external: false
+plugins:
+  apollo.reporting:
+    # Spaceport configuration. These values are the default values if not specified
+    spaceport:
+      # By default, Apollo Router runs an internal collector. You can override
+      # this default behavior by setting `external: true`. If `true`, no reporting
+      # agent spawns, and the router instead communicates with `collector` below.
+      external: false
 
-  # If `external` is `true`, this should be the location of a spaceport
-  # that's running external from the Router. Omit otherwise.
-  collector: https://127.0.0.1:50051
+      # If `external` is `true`, this should be the location of a spaceport
+      # that's running external from the Router. Omit otherwise.
+      collector: https://127.0.0.1:50051
 
-  # If `external` is `false`, this is the interface and port to listen on.
-  # Omit otherwise.
-  listener: 127.0.0.1:50051
+      # If `external` is `false`, this is the interface and port to listen on.
+      # Omit otherwise.
+      listener: 127.0.0.1:50051
 ```
 
 #### Internal spaceport
