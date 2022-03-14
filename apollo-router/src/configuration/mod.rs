@@ -61,13 +61,16 @@ pub struct Configuration {
     /// Plugin configuration
     #[serde(default)]
     #[builder(default)]
-    pub user_plugins: UserPlugins,
+    plugins: UserPlugins,
 
+    /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[builder(default)]
     #[serde(flatten)]
-    pub apollo_plugins: ApolloPlugins,
+    apollo_plugins: ApolloPlugins,
 }
+
+const APOLLO_PLUGIN_PREFIX: &'static str = "apollo.";
 
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -76,6 +79,34 @@ fn default_listen() -> ListenAddr {
 impl Configuration {
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
+    }
+
+    pub fn plugins(&self) -> Map<String, Value> {
+        let mut plugins = Vec::default();
+        // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
+        plugins.push(("apollo.reporting".into(), Value::Object(Map::new())));
+
+        // Add all the apollo plugins
+        for (plugin, config) in &self.apollo_plugins.plugins {
+            plugins.push((
+                format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin),
+                config.clone(),
+            ));
+        }
+
+        // Add all the user plugins
+        for (plugin, config) in &self.plugins.plugins {
+            plugins.push((plugin.clone(), config.clone()));
+        }
+
+        // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
+        plugins.sort_by_key(|(name, _)| match name.as_str() {
+            "apollo.reporting" => -100,
+            "apollo.rhai" => 100,
+            _ => 0,
+        });
+
+        plugins.into_iter().collect()
     }
 }
 
@@ -136,10 +167,10 @@ impl JsonSchema for ApolloPlugins {
         let plugins = plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| name.starts_with("apollo."))
+            .filter(|(name, _)| name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|(name, factory)| {
                 (
-                    name["apollo.".len()..].to_string(),
+                    name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
                     factory.create_schema(gen),
                 )
             })

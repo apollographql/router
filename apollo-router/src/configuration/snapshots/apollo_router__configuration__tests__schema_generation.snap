@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 360
+assertion_line: 432
 expression: "&schema"
 ---
 {
@@ -8,11 +8,69 @@ expression: "&schema"
   "title": "Configuration",
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
+  "anyOf": [
+    {
+      "required": [
+        "headers"
+      ]
+    },
+    {
+      "required": [
+        "override_subgraph_url"
+      ]
+    },
+    {
+      "required": [
+        "reporting"
+      ]
+    },
+    {
+      "required": [
+        "rhai"
+      ]
+    },
+    {
+      "required": [
+        "test.always_fails_to_start"
+      ]
+    },
+    {
+      "required": [
+        "test.always_fails_to_start_and_stop"
+      ]
+    },
+    {
+      "required": [
+        "test.always_fails_to_stop"
+      ]
+    },
+    {
+      "required": [
+        "test.always_starts_and_stops"
+      ]
+    }
+  ],
   "properties": {
+    "headers": {
+      "$ref": "#/definitions/Config"
+    },
+    "override_subgraph_url": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "format": "uri"
+      }
+    },
     "plugins": {
       "description": "Plugin configuration",
       "default": {},
       "$ref": "#/definitions/Plugins"
+    },
+    "reporting": {
+      "$ref": "#/definitions/Conf"
+    },
+    "rhai": {
+      "$ref": "#/definitions/Conf"
     },
     "server": {
       "description": "Configuration options pertaining to the http server component.",
@@ -21,17 +79,24 @@ expression: "&schema"
         "cors": null
       },
       "$ref": "#/definitions/Server"
+    },
+    "test.always_fails_to_start": {
+      "$ref": "#/definitions/Conf"
+    },
+    "test.always_fails_to_start_and_stop": {
+      "$ref": "#/definitions/Conf"
+    },
+    "test.always_fails_to_stop": {
+      "$ref": "#/definitions/Conf"
+    },
+    "test.always_starts_and_stops": {
+      "$ref": "#/definitions/Conf"
     }
   },
-  "additionalProperties": false,
   "definitions": {
     "Conf": {
       "type": "object",
       "properties": {
-        "graph": {
-          "$ref": "#/definitions/StudioGraph",
-          "nullable": true
-        },
         "opentelemetry": {
           "$ref": "#/definitions/OpenTelemetry",
           "nullable": true
@@ -351,78 +416,7 @@ expression: "&schema"
       ]
     },
     "Plugins": {
-      "anyOf": [
-        {
-          "required": [
-            "apollo.headers"
-          ]
-        },
-        {
-          "required": [
-            "apollo.override_subgraph_url"
-          ]
-        },
-        {
-          "required": [
-            "apollo.reporting"
-          ]
-        },
-        {
-          "required": [
-            "apollo.rhai"
-          ]
-        },
-        {
-          "required": [
-            "apollo.test.always_fails_to_start"
-          ]
-        },
-        {
-          "required": [
-            "apollo.test.always_fails_to_start_and_stop"
-          ]
-        },
-        {
-          "required": [
-            "apollo.test.always_fails_to_stop"
-          ]
-        },
-        {
-          "required": [
-            "apollo.test.always_starts_and_stops"
-          ]
-        }
-      ],
-      "properties": {
-        "apollo.headers": {
-          "$ref": "#/definitions/Config"
-        },
-        "apollo.override_subgraph_url": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "format": "uri"
-          }
-        },
-        "apollo.reporting": {
-          "$ref": "#/definitions/Conf"
-        },
-        "apollo.rhai": {
-          "$ref": "#/definitions/Conf"
-        },
-        "apollo.test.always_fails_to_start": {
-          "$ref": "#/definitions/Conf"
-        },
-        "apollo.test.always_fails_to_start_and_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "apollo.test.always_fails_to_stop": {
-          "$ref": "#/definitions/Conf"
-        },
-        "apollo.test.always_starts_and_stops": {
-          "$ref": "#/definitions/Conf"
-        }
-      }
+      "anyOf": []
     },
     "Propagate": {
       "anyOf": [
@@ -594,9 +588,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "StudioGraph": {
-      "type": "object"
     },
     "TlsConfig": {
       "type": "object",

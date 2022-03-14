@@ -184,6 +184,7 @@ struct Reporting {
 struct Conf {
     pub spaceport: Option<SpaceportConfig>,
 
+    #[serde(skip)]
     pub graph: Option<StudioGraph>,
 
     pub opentelemetry: Option<OpenTelemetry>,
@@ -230,7 +231,8 @@ impl Plugin for Reporting {
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::debug!("Reporting configuration {:?}!", configuration);
-        // Create graph configuration based on environment variables
+
+        // Graph can only be set via env variables.
         configuration.graph = studio_graph();
 
         // Studio Agent Spaceport listener
