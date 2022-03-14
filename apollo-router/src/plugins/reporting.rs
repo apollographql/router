@@ -7,9 +7,7 @@ use crate::apollo_telemetry::StudioGraph;
 use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
-use crate::{replace_layer, BoxedLayer};
-use std::collections::HashMap;
-
+use crate::{replace_layer, BaseLayer, BoxedLayer};
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::SubgraphResponse;
 use apollo_router_core::{register_plugin, Plugin};
@@ -26,6 +24,7 @@ use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
@@ -213,9 +212,7 @@ impl Plugin for Reporting {
 
     async fn startup(&mut self) -> Result<(), BoxError> {
         tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
-        if let Some(layer) = self.try_build_layer()? {
-            replace_layer(layer)?;
-        }
+        replace_layer(self.try_build_layer()?)?;
 
         // Only check for notify if we have graph configuration
         if self.config.graph.is_some() {
@@ -304,7 +301,7 @@ impl Plugin for Reporting {
 }
 
 impl Reporting {
-    fn try_build_layer(&self) -> Result<Option<BoxedLayer>, BoxError> {
+    fn try_build_layer(&self) -> Result<BoxedLayer, BoxError> {
         tracing::debug!(
             "spaceport: {:?}, graph: {:?}",
             self.config.spaceport,
@@ -393,11 +390,12 @@ impl Reporting {
                 });
                 futures::executor::block_on(jh)?;
 
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                // let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                let telemetry = tracing_opentelemetry::OpenTelemetryLayer::new(tracer);
 
                 opentelemetry::global::set_error_handler(handle_error)?;
 
-                Ok(Some(Box::new(telemetry)))
+                Ok(Box::new(telemetry))
             }
             #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
             Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
@@ -411,7 +409,6 @@ impl Reporting {
                 // It's difficult to extend the OTLP model with an additional exporter
                 // as we do when Jaeger is being used. In this case we simply add the
                 // agent as a new layer and proceed from there.
-                // let subscriber = subscriber.with(telemetry);
                 if graph_config.is_some() {
                     // Add spaceport agent as an OT pipeline
                     let tracer = match new_pipeline()
@@ -427,9 +424,9 @@ impl Reporting {
                     };
                     let agent = tracing_opentelemetry::layer().with_tracer(tracer);
                     tracing::debug!("Adding agent telemetry");
-                    Ok(Some(Box::new(telemetry.and_then(agent))))
+                    Ok(Box::new(telemetry.and_then(agent)))
                 } else {
-                    Ok(Some(Box::new(telemetry)))
+                    Ok(Box::new(telemetry))
                 }
             }
             None => {
@@ -448,9 +445,11 @@ impl Reporting {
                     };
                     let agent = tracing_opentelemetry::layer().with_tracer(tracer);
                     tracing::debug!("Adding agent telemetry");
-                    Ok(Some(Box::new(agent)))
+                    Ok(Box::new(agent))
                 } else {
-                    Ok(None)
+                    // If we don't have any reporting to do, just put in place our BaseLayer
+                    // (which does nothing)
+                    Ok(Box::new(BaseLayer {}))
                 }
             }
         }

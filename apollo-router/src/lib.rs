@@ -7,11 +7,13 @@ mod files;
 mod http_server_factory;
 mod layers;
 mod plugins;
+mod reload;
 pub mod router_factory;
 mod state_machine;
 mod warp_http_server_factory;
 
 use crate::apollo_telemetry::SpaceportConfig;
+use crate::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 use crate::warp_http_server_factory::WarpHttpServerFactory;
@@ -26,6 +28,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
+use std::any::TypeId;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -39,7 +42,6 @@ use tracing_core::span::Current;
 use tracing_core::{Interest, LevelFilter};
 use tracing_subscriber::fmt::format::{DefaultFields, Format, Json, JsonFields};
 use tracing_subscriber::registry::{Data, LookupSpan};
-use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
 use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
@@ -70,7 +72,17 @@ impl Subscriber for RouterSubscriber {
         }
     }
 
+    /// The delegated downcasting model is copied from the implementation
+    /// of `Subscriber` for `Layered` in the tracing_subscriber crate.
+    /// The logic appears to be sound, but be wary of problems here.
     unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
+        // If downcasting to `Self`, return a pointer to `self`.
+        if id == TypeId::of::<Self>() {
+            return Some(self as *const _ as *const ());
+        }
+
+        // If not downcasting to `Self`, then check the encapsulated
+        // subscribers to see if we can downcast one of them.
         match self {
             RouterSubscriber::JsonSubscriber(sub) => sub.downcast_raw(id),
             RouterSubscriber::TextSubscriber(sub) => sub.downcast_raw(id),
@@ -169,7 +181,7 @@ impl<'a> LookupSpan<'a> for RouterSubscriber {
     }
 }
 
-struct BaseLayer;
+pub(crate) struct BaseLayer;
 
 // We don't actually need our BaseLayer to do anything. It exists as a holder
 // for the layers set by the reporting.rs plugin
