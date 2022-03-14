@@ -260,18 +260,23 @@ plugins:
             value: "products"
 ```
 
-You can also use Yaml anchors to eliminate repetition in your config:
-```yaml
+## Avoiding repetition using YAML anchors and aliases
+
+You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
+
+```yaml{5,9}:title==configuration.yaml
 plugins:
   apollo.headers:
     subgraphs:
       products:
-        - insert: &custom_header
+        - insert: &insert_custom_header
             name: "custom-header"
             value: "something"
       reviews:
-        - insert: *custom_header
+        - insert: *insert_custom_header
 ```
+
+In this example, the `&insert_custom_header` anchor captures the `name` and `value` properties from the `products` subgraph's `insert` and re-uses the same properties in the `insert` of the `reviews` subgraph by referring to the `*insert_custom_header` alias.
 
 ## OpenTelemetry tracing
 
