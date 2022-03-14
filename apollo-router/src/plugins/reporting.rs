@@ -390,8 +390,7 @@ impl Reporting {
                 });
                 futures::executor::block_on(jh)?;
 
-                // let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                let telemetry = tracing_opentelemetry::OpenTelemetryLayer::new(tracer);
+                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                 opentelemetry::global::set_error_handler(handle_error)?;
 
