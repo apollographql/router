@@ -1016,49 +1016,34 @@ mod tests {
         assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
         assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
         assert_validation!(
-            "type Foo{ y: String } type Query { x: String }",
+            "input Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({})
         );
         assert_validation!(
-            "type Foo{ y: String } type Query { x: String }",
+            "input Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{}})
         );
         assert_validation_error!(
-            "type Foo{ y: String } type Query { x: String }",
+            "input Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":1})
         );
         assert_validation_error!(
-            "type Foo{ y: String } type Query { x: String }",
+            "input Foo{ y: String } type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":"str"})
         );
         assert_validation_error!(
-            "type Foo{x:Int!} type Query { x: String }",
+            "input Foo{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{}})
         );
         assert_validation!(
-            "type Foo{x:Int!} type Query { x: String }",
+            "input Foo{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"x":1}})
-        );
-        assert_validation!(
-            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
-            "query($foo:Foo){x}",
-            json!({"foo":{"x":1}}),
-        );
-        assert_validation_error!(
-            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
-            "query($foo:Foo){x}",
-            json!({"foo":{"x":"str"}}),
-        );
-        assert_validation_error!(
-            "type Foo implements Bar { x: Int! } interface Bar{ x:Int! } type Query { x: String }",
-            "query($foo:Foo){x}",
-            json!({"foo":{}}),
         );
         assert_validation!(
             "scalar Foo type Query { x: String }",
@@ -1076,7 +1061,7 @@ mod tests {
             json!({})
         );
         assert_validation!(
-            "type Foo{bar:Bar!} type Bar{x:Int!} type Query { x: String }",
+            "input Foo{bar:Bar!} input Bar{x:Int!} type Query { x: String }",
             "query($foo:Foo){x}",
             json!({"foo":{"bar":{"x":1}}})
         );
@@ -1084,7 +1069,47 @@ mod tests {
             "enum Availability{AVAILABLE} type Product{availability:Availability! name:String} type Query{products(availability: Availability!): [Product]!}",
             "query GetProductsByAvailability($availability: Availability!){products(availability: $availability) {name}}",
             json!({"availability": "AVAILABLE"})
-        )
+        );
+
+        assert_validation!(
+            "input MessageInput {
+                content: String
+                author: String
+              }
+              type Receipt {
+                  id: ID!
+              }
+              type Query{
+                  send(message: MessageInput): String}",
+            "query {
+                send(message: {
+                    content: \"Hello\"
+                    author: \"Me\"
+                }) {
+                    id
+                }}",
+            json!({"availability": "AVAILABLE"})
+        );
+
+        assert_validation!(
+            "input MessageInput {
+                content: String
+                author: String
+              }
+              type Receipt {
+                  id: ID!
+              }
+              type Query{
+                  send(message: MessageInput): String}",
+            "query($msg: MessageInput) {
+                send(message: $msg) {
+                    id
+                }}",
+            json!({"msg":  {
+                "content": "Hello",
+                "author": "Me"
+            }})
+        );
     }
 
     #[test]
