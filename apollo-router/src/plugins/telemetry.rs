@@ -174,7 +174,7 @@ impl fmt::Display for ReportingError {
 impl std::error::Error for ReportingError {}
 
 #[derive(Debug)]
-struct Reporting {
+struct Telemetry {
     config: Conf,
     tx: tokio::sync::mpsc::Sender<SpaceportConfig>,
     opentracing_layer: Option<OpenTracingLayer>,
@@ -209,11 +209,11 @@ fn studio_graph() -> Option<StudioGraph> {
 }
 
 #[async_trait::async_trait]
-impl Plugin for Reporting {
+impl Plugin for Telemetry {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
+        tracing::debug!("starting: {}: {}", stringify!(Telemetry), self.name());
         replace_layer(self.try_build_layer()?)?;
 
         // Only check for notify if we have graph configuration
@@ -284,7 +284,7 @@ impl Plugin for Reporting {
             opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone()).into();
         }
 
-        Ok(Reporting {
+        Ok(Telemetry {
             config: configuration,
             tx,
             opentracing_layer,
@@ -303,7 +303,7 @@ impl Plugin for Reporting {
     }
 }
 
-impl Reporting {
+impl Telemetry {
     fn try_build_layer(&self) -> Result<BoxedLayer, BoxError> {
         tracing::debug!(
             "spaceport: {:?}, graph: {:?}",
@@ -510,7 +510,7 @@ async fn do_listen(addr_str: String) -> bool {
     true
 }
 
-register_plugin!("apollo", "reporting", Reporting);
+register_plugin!("apollo", "telemetry", Telemetry);
 
 #[cfg(test)]
 mod tests {
@@ -518,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("apollo.reporting")
+            .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "opentelemetry": null }))
             .unwrap();

@@ -88,7 +88,7 @@ impl Configuration {
         if is_global_subscriber_set() {
             // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
             // Note that this can only be done if the global subscriber has been set, i.e. we're not unit testing.
-            plugins.push(("apollo.reporting".into(), Value::Object(Map::new())));
+            plugins.push(("apollo.telemetry".into(), Value::Object(Map::new())));
         }
 
         // Add all the apollo plugins
@@ -106,7 +106,7 @@ impl Configuration {
 
         // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
         plugins.sort_by_key(|(name, _)| match name.as_str() {
-            "apollo.reporting" => -100,
+            "apollo.telemetry" => -100,
             "apollo.rhai" => 100,
             _ => 0,
         });
