@@ -207,7 +207,7 @@ impl JsonSchema for UserPlugins {
         let plugins = plugins()
             .iter()
             .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| !name.starts_with("apollo."))
+            .filter(|(name, _)| !name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
