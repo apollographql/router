@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 427
+assertion_line: 428
 expression: "&schema"
 ---
 {
@@ -21,7 +21,7 @@ expression: "&schema"
     },
     "plugins": {
       "description": "Plugin configuration",
-      "default": {},
+      "default": null,
       "$ref": "#/definitions/Plugins"
     },
     "rhai": {
@@ -51,7 +51,6 @@ expression: "&schema"
       "$ref": "#/definitions/Conf"
     }
   },
-  "additionalProperties": false,
   "definitions": {
     "Conf": {
       "type": "object",
