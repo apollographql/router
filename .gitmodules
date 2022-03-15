@@ -1,3 +1,7 @@
 [submodule "submodules/federation-demo"]
 	path = dockerfiles/federation-demo/federation-demo
 	url = https://github.com/apollographql/federation-demo.git
+
+[submodule "federation2-demo"]
+	path = dockerfiles/federation2-demo
+	url = https://github.com/apollographql/supergraph-demo-fed2.git
