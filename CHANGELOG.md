@@ -100,15 +100,6 @@ are implemented as plugins under the hood.
   router --schema > apollo_configuration_schema.json
   ```
   and follow the instructions for associating it with your particular text editor/IDE. 
-## 🛠 Maintenance
-## 📚 Documentation
-
-## Example section entry format
-
-- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
-
-  Description! And a link to a [reference](http://url)
-
 
 # [v0.1.0-alpha.8] 2022-03-08
 
