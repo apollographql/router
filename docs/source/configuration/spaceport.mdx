@@ -1,8 +1,6 @@
 ---
-title: TODO Spaceport
+title: Spaceport
 ---
-
-TODO clean this up.
 
 ## Usage reporting agent (spaceport)
 
@@ -16,27 +14,26 @@ You enable usage reporting in the Apollo Router by following the same steps list
 
 More information on usage reporting is available in the [Studio documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/).
 
-### Configuring spaceport
+### Configuring Spaceport
 
 Spaceport can run either as an [internal component](#internal-spaceport) of a single Apollo Router instance, or as an [external resource](#external-spaceport) shared by _multiple_ router instances.
 
-```yaml title="configuration.yaml"
-plugins:
-  apollo.reporting:
-    # Spaceport configuration. These values are the default values if not specified
-    spaceport:
-      # By default, Apollo Router runs an internal collector. You can override
-      # this default behavior by setting `external: true`. If `true`, no reporting
-      # agent spawns, and the router instead communicates with `collector` below.
-      external: false
+```yaml title="config.router.yaml"
+telemetry:
+  # Spaceport configuration. These values are the default values if not specified
+  spaceport:
+    # By default, Apollo Router runs an internal collector. You can override
+    # this default behavior by setting `external: true`. If `true`, no reporting
+    # agent spawns, and the router instead communicates with `collector` below.
+    external: false
 
-      # If `external` is `true`, this should be the location of a spaceport
-      # that's running external from the Router. Omit otherwise.
-      collector: https://127.0.0.1:50051
+    # If `external` is `true`, this should be the location of a spaceport
+    # that's running external from the Router. Omit otherwise.
+    collector: https://127.0.0.1:50051
 
-      # If `external` is `false`, this is the interface and port to listen on.
-      # Omit otherwise.
-      listener: 127.0.0.1:50051
+    # If `external` is `false`, this is the interface and port to listen on.
+    # Omit otherwise.
+    listener: 127.0.0.1:50051
 ```
 
 #### Internal spaceport
