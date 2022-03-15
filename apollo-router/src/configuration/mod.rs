@@ -6,8 +6,8 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
-use schemars::{JsonSchema, Set};
+use schemars::schema::{ObjectValidation, Schema, SchemaObject};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
@@ -53,6 +53,7 @@ pub enum ConfigurationError {
 /// Currently maintains a mapping of subgraphs.
 #[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[derivative(Debug)]
+#[serde(deny_unknown_fields)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
@@ -131,26 +132,10 @@ impl FromStr for Configuration {
 }
 
 fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
-    let plugins_refs = plugins
-        .keys()
-        .map(|name| {
-            Schema::Object(SchemaObject {
-                object: Some(Box::new(ObjectValidation {
-                    required: Set::from([name.to_string()]),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            })
-        })
-        .collect::<Vec<_>>();
-
     let plugins_object = SchemaObject {
         object: Some(Box::new(ObjectValidation {
             properties: plugins,
-            ..Default::default()
-        })),
-        subschemas: Some(Box::new(SubschemaValidation {
-            any_of: Some(plugins_refs),
+            additional_properties: Option::Some(Box::new(Schema::Bool(false))),
             ..Default::default()
         })),
         ..Default::default()

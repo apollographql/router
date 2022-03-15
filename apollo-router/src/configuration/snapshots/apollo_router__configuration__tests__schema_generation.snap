@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 442
+assertion_line: 427
 expression: "&schema"
 ---
 {
@@ -8,48 +8,6 @@ expression: "&schema"
   "title": "Configuration",
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
-  "anyOf": [
-    {
-      "required": [
-        "headers"
-      ]
-    },
-    {
-      "required": [
-        "override_subgraph_url"
-      ]
-    },
-    {
-      "required": [
-        "rhai"
-      ]
-    },
-    {
-      "required": [
-        "telemetry"
-      ]
-    },
-    {
-      "required": [
-        "test.always_fails_to_start"
-      ]
-    },
-    {
-      "required": [
-        "test.always_fails_to_start_and_stop"
-      ]
-    },
-    {
-      "required": [
-        "test.always_fails_to_stop"
-      ]
-    },
-    {
-      "required": [
-        "test.always_starts_and_stops"
-      ]
-    }
-  ],
   "properties": {
     "headers": {
       "$ref": "#/definitions/Config"
@@ -93,6 +51,7 @@ expression: "&schema"
       "$ref": "#/definitions/Conf"
     }
   },
+  "additionalProperties": false,
   "definitions": {
     "Conf": {
       "type": "object",
@@ -103,7 +62,8 @@ expression: "&schema"
         "filename": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "Config": {
       "type": "object",
@@ -254,7 +214,7 @@ expression: "&schema"
       ]
     },
     "Plugins": {
-      "anyOf": []
+      "additionalProperties": false
     },
     "Propagate": {
       "anyOf": [
