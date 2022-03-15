@@ -24,7 +24,7 @@ pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[structopt(
         long = "log",
-        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info",
+        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info,reqwest_tracing=info",
         alias = "loglevel"
     )]
     env_filter: String,
