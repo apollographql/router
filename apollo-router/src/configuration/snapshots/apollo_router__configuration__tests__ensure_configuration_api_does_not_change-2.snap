@@ -1,9 +1,9 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 366
+assertion_line: 443
 expression: config
-
 ---
+plugins: {}
 server:
   listen: "1.2.3.4:5"
   cors:
@@ -19,5 +19,4 @@ server:
     methods:
       - foo
       - bar
-plugins: {}
 

@@ -12,8 +12,6 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
-const REPORTING_MODULE_NAME: &str = "apollo.reporting";
-
 /// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
@@ -74,8 +72,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut errors: Vec<ConfigurationError> = Vec::default();
         let configuration = (*configuration).clone();
 
-        let configuration = add_default_plugins(configuration);
-
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         for (name, _) in schema.subgraphs() {
@@ -121,31 +117,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 builder
             }
 
-            // If it was required, we ensured that the Reporting plugin was in the
-            // list of plugins above. Now make sure that we process that plugin
-            // before any other plugins.
-            let already_processed = match configuration.plugins.plugins.get(REPORTING_MODULE_NAME) {
-                Some(reporting_configuration) => {
-                    builder = process_plugin(
-                        builder,
-                        &mut errors,
-                        REPORTING_MODULE_NAME.to_string(),
-                        reporting_configuration,
-                    )
-                    .await;
-                    vec![REPORTING_MODULE_NAME]
-                }
-                None => vec![],
-            };
-
-            // Process the remaining plugins. We use already_processed to skip
-            // those plugins we already processed.
-            for (name, configuration) in configuration
-                .plugins
-                .plugins
-                .iter()
-                .filter(|(name, _)| !already_processed.contains(&name.as_str()))
-            {
+            // Process the plugins.
+            for (name, configuration) in configuration.plugins().iter() {
                 let name = name.clone();
                 builder = process_plugin(builder, &mut errors, name, configuration).await;
             }
@@ -198,29 +171,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
         Ok(service)
     }
-}
-
-fn add_default_plugins(mut configuration: Configuration) -> Configuration {
-    // Because studio usage reporting requires the Reporting plugin,
-    // we must force the addition of the Reporting plugin if APOLLO_KEY
-    // is set.
-    if std::env::var("APOLLO_KEY").is_ok() {
-        // If the user has not specified Reporting configuration, then
-        // insert a valid "minimal" configuration which allows
-        // studio usage reporting to function
-        if !configuration
-            .plugins
-            .plugins
-            .contains_key(REPORTING_MODULE_NAME)
-        {
-            configuration.plugins.plugins.insert(
-                REPORTING_MODULE_NAME.to_string(),
-                serde_json::json!({ "opentelemetry": null }),
-            );
-        }
-    }
-
-    configuration
 }
 
 #[cfg(test)]
