@@ -1,7 +1,0 @@
-plugins:
-  apollo.reporting:
-    opentelemetry:
-      otlp:
-        tracing:
-          exporter:
-            grpc:

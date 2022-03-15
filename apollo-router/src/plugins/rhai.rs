@@ -79,6 +79,7 @@ struct Rhai {
 }
 
 #[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Conf {
     filename: PathBuf,
 }
