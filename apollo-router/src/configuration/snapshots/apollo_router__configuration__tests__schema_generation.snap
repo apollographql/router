@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 436
+assertion_line: 442
 expression: "&schema"
 ---
 {
@@ -9,6 +9,11 @@ expression: "&schema"
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
   "anyOf": [
+    {
+      "required": [
+        "forbid_mutations"
+      ]
+    },
     {
       "required": [
         "headers"
@@ -51,6 +56,9 @@ expression: "&schema"
     }
   ],
   "properties": {
+    "forbid_mutations": {
+      "type": "boolean"
+    },
     "headers": {
       "$ref": "#/definitions/Config"
     },
