@@ -4,62 +4,57 @@ sidebar_title: Header propagation
 description: Configuring the HTTP headers which are sent to subgraphs
 ---
 
-import { Link } from 'gatsby';
 
-You can customize which HTTP headers the Apollo Router includes in its requests to your individual subgraphs. You specify these headers on a per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-More specifically, each the headers plugin include can be configured with an array of header-related actions for the router to perform (in order) before sending a request:
+You can customize which HTTP headers the Apollo Router includes in its requests to your subgraphs. Transformations can be specified on all or per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-```yaml{4-12}
-plugins:
-  # ...other configuration...
+```yaml{3-12}
+# ...other configuration...
 
-  apollo.headers:
-    all:
+headers:
+  all:
     - propagate:
-        matching:
-          regex: ^upstream-header-.*
+        matching: ^upstream-header-.*
     - remove:
-        name: "x-legacy-account-id"
-    subgraphs:
-      products:
-        - insert:
-            name: "router-subgraph-name"
-            value: "products"
+        named: "x-legacy-account-id"
+  subgraphs:
+    products:
+    - insert:
+        name: "router-subgraph-name"
+        value: "products"
 
 ```
 
-The following transformations are specific to customizing headers sent to subgraphs:
+The following transformations are possible:
 
 ### `propagate`
 
 Enables you to selectively propagate headers that were included in the client's request to the router.
 
-> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length`.
-
 You can specify which headers to propagate based on a matching [regex pattern](https://docs.rs/regex/latest/regex/):
 
 ```yaml
 - propagate:
-    matching:
-      regex: .*
+    matching: .*
 ```
+> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length` when propagating by pattern.
+
 
 You can also provide a static string with the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
-- `default_value`: A value to set if _no_ value was sent by the client
+- `default`: A value to set if _no_ value was sent by the client
 - `rename`: Renames the header's key to the provided value
 
 ```yaml
 - propagate:
       named: "x-user-id"
-      value: "abc123"
+      default: "abc123"
       rename: "account-id"
 ```
 
 ### `remove`
 
-Enables you to selectively remove headers that were included in the client's request to the router. Similar to [`headers_propagate`](#headers-propagate), this option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
+Enables you to selectively remove headers that were included in the client's request to the router. This option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
 
 > **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length`.
 
@@ -68,12 +63,11 @@ Enables you to selectively remove headers that were included in the client's req
 - remove:
     named: "Cookie"
 - remove:
-    matching:
-      # Remove headers that include the legacy 'x-' prefix.
-      regex: ^x-.*$
+    # Remove headers that include the legacy 'x-' prefix.
+    matching: ^x-.*$
 ```
 
-### `headers_insert`
+### `insert`
 
 Enables you to add custom headers to requests going to a specific subgraph. These headers are always static strings that originate in the router, instead of originating in the client.
 
@@ -85,31 +79,40 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 
 ### Example
 
-Here's an example of customizing different headers for two subgraphs: `accounts` and `products`. These two subgraphs are both sent `router-subgraph-name` headers with either the `accounts` or `products` value, respectively. Any other subgraph receives _no_ headers.
+Here's a complete example showing all the possible configuration options in use.
 
 ```yaml
-plugins:
-  apollo.headers:
-    all:
-    # All subgraphs will propagate matching headers.
-    - propagate:
-        matching:
-          regex: ^upstream-header-.*
-    # All subgraphs will propagate matching headers.
-    - propagate:
-        named: "some-header"
-        default: "default-value"
-        rename: "destination-header"
-    # All subgraphs will remove the "x-legacy-account-id" header.
-    - remove:
-        named: "x-legacy-account-id"
-    - remove:
-        matching: "x-legacy-account-id"
-    # Subgraph specific configuration
-    subgraphs:
-      products:
-        # Calls to the products subgraph will have the "router-subgraph-name" header.
+headers:
+  # All subgraph configuration.
+  all:
+  # Propagate matching headers.
+  - propagate:
+      matching: ^upstream-header-.*
+  # Propagate matching headers.
+  - propagate:
+      named: "some-header"
+      default: "default-value"
+      rename: "destination-header"
+  # Remove the "x-legacy-account-id" header.
+  - remove:
+      named: "x-legacy-account-id"
+  # Remove matching headers.
+  - remove:
+      matching: ^x-deprecated-.*
+  # Insert the 'my-company' header.
+  - insert:
+      name: "my-company"
+      value: "acme"
+  # Subgraph-specific configuration.
+  subgraphs:
+    products:
+      # Calls to the products subgraph will have the "router-subgraph-name" header set to `products`.
+      - insert:
+          name: "router-subgraph-name"
+          value: "products"
+      accounts:
+        # Calls to the accounts subgraph will have the "router-subgraph-name" header set to `accounts`.
         - insert:
             name: "router-subgraph-name"
-            value: "products"
+            value: "accounts"
 ```
