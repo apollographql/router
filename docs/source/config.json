@@ -1,0 +1,41 @@
+{
+  "title": "Router (preview)",
+  "algoliaFilters": [
+    "docset:router"
+  ],
+  "sidebar": {
+    "Introduction": "/",
+    "Quickstart": "/quickstart",
+    "Migrating from Gateway": "/migrating-from-gateway",
+    "Development workflow": {
+      "Build and run queries": "/development-workflow/build-run-queries",
+      "Request format": "/development-workflow/requests",
+      "Apollo Studio Explorer": "https://www.apollographql.com/docs/studio/explorer/"
+    },
+    "Managed Federation": {
+      "Overview": "/managed-federation/overview",
+      "Setup": "/managed-federation/setup",
+      "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
+    },
+    "Configuration": {
+      "Overview": "/configuration/overview",
+      "Logging": "/configuration/logging",
+      "Header propagation": "/configuration/header-propagation",
+      "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
+      "Telemetry": "/configuration/telemetry"
+    },
+    "Plugins": {
+      "Overview": "/plugins/overview",
+      "Native Rust": "/plugins/native",
+      "rhai script": "/plugins/rhai"
+    },
+    "Third-Party Support": {
+      "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
+      "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
+    },
+    "TODO(Not Categorized)": {
+      "Build from source": "/build-from-source",
+      "Some spaceport stuff": "/spaceport"
+    }
+  }
+}

@@ -1,6 +1,5 @@
 ---
 title: Configuring the Apollo Router
-sidebar_title: Overview
 description: High-performance graph routing for federated graphs
 ---
 
@@ -110,7 +109,7 @@ One you have generated the schema configure your text editor. Here are some inst
 
 Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are shown below:
 
-```yaml:title=configuration.yaml
+```yaml title="configuration.yaml"
 #
 # The Apollo Router doesn't require a configuration file to run. This
 # example is a verbose representation of possible configuration. It's
@@ -264,7 +263,7 @@ plugins:
 
 You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
 
-```yaml{5,9}:title=configuration.yaml
+```yaml {5,9} title="configuration.yaml"
 plugins:
   apollo.headers:
     subgraphs:
@@ -288,7 +287,7 @@ If the router receives an incoming request that already contains a `TraceParent`
 
 ### Using Jaeger
 
-```yaml:title=configuration.yaml
+```yaml title="configuration.yaml"
 server:
   listen: 127.0.0.1:4000
 plugins:
@@ -344,7 +343,7 @@ plugins:
 
 ### Using OTLP
 
-```yaml:title=configuration.yaml
+```yaml title="configuration.yaml"
 server:
   listen: 127.0.0.1:4000
 plugins:
