@@ -96,6 +96,10 @@ are implemented as plugins under the hood.
   router --schema > apollo_configuration_schema.json
   ```
   and follow the instructions for associating it with your particular text editor/IDE. 
+
+- **Input object validation** ([PR #658](https://github.com/apollographql/router/pull/658))
+  variable validation was incorrectly using output object instead of input objects
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
