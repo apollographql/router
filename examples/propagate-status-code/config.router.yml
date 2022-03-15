@@ -8,3 +8,8 @@ server:
       - "https://studio.apollographql.com/"
 plugins:
   example.propagate-status-code:
+    status_codes:
+      - 401
+      - 403
+      - 400
+      - 500
