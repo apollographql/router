@@ -6,7 +6,9 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
+use http::header::CONTENT_TYPE;
 use http::uri::Authority;
+use http::HeaderValue;
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
@@ -25,6 +27,7 @@ use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::{
     http::{header::HeaderMap, StatusCode},
+    reply::with,
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -74,7 +77,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let routes = get_health_request()
                 .or(get_graphql_request_or_redirect(service.clone()))
                 .or(post_graphql_request(service.clone()))
-                .with(cors);
+                .with(cors)
+                .with(with::default_header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                ));
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
