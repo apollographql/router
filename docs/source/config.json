@@ -24,10 +24,10 @@
       "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
       "Telemetry": "/configuration/telemetry"
     },
-    "Plugins": {
-      "Overview": "/plugins/overview",
-      "Native Rust": "/plugins/native",
-      "rhai script": "/plugins/rhai"
+    "Customizations": {
+      "Overview": "/customizations/overview",
+      "Native Rust plugins": "/customizations/native",
+      "rhai script": "/customizations/rhai"
     },
     "Third-Party Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
