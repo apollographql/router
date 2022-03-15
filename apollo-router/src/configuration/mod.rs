@@ -53,7 +53,6 @@ pub enum ConfigurationError {
 /// Currently maintains a mapping of subgraphs.
 #[derive(Clone, Derivative, Deserialize, Serialize, TypedBuilder, JsonSchema)]
 #[derivative(Debug)]
-#[serde(deny_unknown_fields)]
 pub struct Configuration {
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
@@ -101,8 +100,10 @@ impl Configuration {
         }
 
         // Add all the user plugins
-        for (plugin, config) in &self.plugins.plugins {
-            plugins.push((plugin.clone(), config.clone()));
+        if let Some(config_map) = self.plugins.plugins.as_ref() {
+            for (plugin, config) in config_map {
+                plugins.push((plugin.clone(), config.clone()));
+            }
         }
 
         // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
@@ -177,7 +178,7 @@ impl JsonSchema for ApolloPlugins {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct UserPlugins {
-    pub plugins: Map<String, Value>,
+    pub plugins: Option<Map<String, Value>>,
 }
 
 impl JsonSchema for UserPlugins {
