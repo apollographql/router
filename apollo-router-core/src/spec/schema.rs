@@ -13,7 +13,6 @@ pub struct Schema {
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) custom_scalars: HashSet<String>,
-    pub(crate) fragments: Fragments,
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
 }
@@ -315,30 +314,16 @@ impl std::str::FromStr for Schema {
                 })
                 .collect();
 
-            let mut schema = Schema {
+            Ok(Schema {
                 subtype_map,
                 string: schema.to_owned(),
                 subgraphs,
                 object_types,
                 interfaces,
                 custom_scalars,
-                fragments: Fragments::default(),
                 enums,
                 api_schema: None,
-            };
-            if let Some(fragments) = Fragments::from_ast(&document, &schema) {
-                schema.fragments = fragments;
-
-                Ok(schema)
-            } else {
-                // empty error here, waiting for apollo-rs semantic analysis to provide meaningful
-                // errors when parsing Fragments
-                let errors = ParseErrors {
-                    raw_schema: schema.string.clone(),
-                    errors: vec![],
-                };
-                Err(SchemaError::Parse(errors))
-            }
+            })
         }
     }
 }
@@ -381,7 +366,6 @@ impl Schema {
             object_types: Default::default(),
             interfaces: Default::default(),
             custom_scalars: Default::default(),
-            fragments: Default::default(),
             enums: Default::default(),
             api_schema: None,
         }
