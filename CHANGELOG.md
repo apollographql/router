@@ -56,11 +56,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Having `plugins` _and_ `layers` as configurable items in YAML was creating confusion as to when it was appropriate to use a `layer` vs a `plugin`.  As the layer API is a subset of the plugin API, `plugins` has been kept, however the `layer` option has been dropped.
 
--  **Plugin names have dropped the `com.apollographql` prefix** ([PR #602](https://github.com/apollographql/router/pull/600))
+- **Plugin names have dropped the `com.apollographql` prefix** ([PR #602](https://github.com/apollographql/router/pull/600))
 
   Previously, core plugins were prefixed with `com.apollographql.`.  This is no longer the case and, when coupled with the above moving of the core plugins to the top-level, the prefixing is no longer present.  This means that, for example, `com.apollographql.telemetry` would now be just `telemetry`.
 
--  **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+- **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
 
   Both `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow` instead of the `Step` enum.  `ControlFlow` has two variants, `Continue` and `Break`.
 
