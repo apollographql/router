@@ -20,6 +20,29 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+## ❗ BREAKING ❗
+
+- **Header propagation remove configuration `name` to `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
+  Previously:
+```yaml
+  # Remove a named header
+  - remove:
+    name: "Remove"
+```
+Now:
+```yaml
+  # Remove a named header
+  - remove:
+    named: "Remove"
+```
+This is consistent with propagate.
+
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+
+
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
 
