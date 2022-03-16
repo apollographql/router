@@ -6,7 +6,7 @@ use anyhow::Result;
 // you can use the plugin by adding it to `config.yml`
 mod propagate_status_code;
 
-// `cargo run -- -s ../graphql/supergraph.graphql -c ./config.router.yml`
+// `cargo run -- -s ../graphql/supergraph.graphql -c ./config.router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }
