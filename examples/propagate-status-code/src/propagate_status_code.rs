@@ -36,22 +36,26 @@ impl Plugin for PropagateStatusCode {
         let all_status_codes = self.status_codes.clone();
         service
             .map_response(move |res| {
-                // if a response contains a status code we're watching,
-                // we push it into the extensions so RouterService can decide
-                // what the global response status will be
-                if all_status_codes.contains(&res.response.status().as_u16()) {
+                let response_status_code = res.response.status().as_u16();
+                // if a response contains a status code we're watching...
+                if all_status_codes.contains(&response_status_code) {
                     // upsert allows us to:
                     // - check for the presence of a value for `status_codes` (first parameter)
                     // update the value if present (second parameter)
                     // insert a value if not (third parameter)
                     res.context
                         .upsert(
-                            &"status_codes".to_string(),
-                            |mut status_codes: Vec<u16>| {
-                                status_codes.push(res.response.status().as_u16());
-                                status_codes
+                            &"status_code".to_string(),
+                            |status_code: u16| {
+                                // return the status code with the highest priority
+                                for &code in all_status_codes.iter() {
+                                    if code == response_status_code || code == status_code {
+                                        return code;
+                                    }
+                                }
+                                status_code
                             },
-                            || vec![res.response.status().as_u16()],
+                            || res.response.status().as_u16(),
                         )
                         .expect("couldn't insert status codes");
                 }
@@ -65,24 +69,15 @@ impl Plugin for PropagateStatusCode {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let all_status_codes = self.status_codes.clone();
-
         service
             .map_response(move |mut res| {
-                if let Some(received_status_codes) = res
+                if let Some(code) = res
                     .context
-                    .get::<&String, Vec<u16>>(&"status_codes".to_string())
+                    .get::<&String, u16>(&"status_code".to_string())
                     .expect("couldn't access context")
                 {
-                    // Traverse our watch list status codes,
-                    // and use the first match (most important) if any as the response status code
-                    if let Some(&code) = all_status_codes
-                        .iter()
-                        .find(|&code| received_status_codes.contains(code))
-                    {
-                        *res.response.status_mut() =
-                            StatusCode::from_u16(code).expect("status code should be valid");
-                    }
+                    *res.response.status_mut() =
+                        StatusCode::from_u16(code).expect("status code should be valid");
                 }
                 res
             })
@@ -151,13 +146,13 @@ mod tests {
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
         // Make sure the extensions doesn't contain any status
-        let received_status_codes: Vec<u16> = service_response
+        let received_status_code: u16 = service_response
             .context
-            .get("status_codes")
+            .get("status_code")
             .expect("couldn't access context")
             .expect("couldn't access status_codes");
 
-        assert!(received_status_codes.contains(&403));
+        assert_eq!(403, received_status_code);
     }
 
     #[tokio::test]
@@ -186,9 +181,9 @@ mod tests {
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
         // Make sure the extensions doesn't contain any status
-        let received_status_codes: Option<Vec<u16>> = service_response
+        let received_status_codes: Option<u16> = service_response
             .context
-            .get("status_codes")
+            .get("status_code")
             .expect("couldn't access context");
 
         assert!(received_status_codes.is_none());
@@ -208,7 +203,7 @@ mod tests {
                 let context = router_request.context;
                 // Insert several status codes which shall override the router response status
                 context
-                    .insert(&"status_codes".to_string(), json!([403u16, 500u16]))
+                    .insert(&"status_code".to_string(), json!(500))
                     .expect("couldn't insert status_code");
 
                 Ok(plugin_utils::RouterResponse::builder()
@@ -245,12 +240,7 @@ mod tests {
             .times(1)
             .returning(move |router_request: RouterRequest| {
                 let context = router_request.context;
-                // Insert a StatusCode that isn't part of our PropagateStatusCode configuration
-                // which shall NOT override the response status
-                context
-                    .insert(&"status_codes".to_string(), json!([418u16]))
-                    .expect("couldn't insert status_code");
-
+                // Don't insert any StatusCode
                 Ok(plugin_utils::RouterResponse::builder()
                     .context(context.into())
                     .build()
