@@ -5,7 +5,12 @@ description: Overriding the default subgraph URLs used during query plan executi
 
 import { Link } from 'gatsby';
 
-TODO
+By default, the router uses subgraph URLs defined in the schema so there is no further configuration needed.
+But when you need to override those addresses locally, you can do that in your [YAML configuration file](#configuration-file).
 
-- By default, you don't need this.  We use the subgraph routing URLs that exist in the supergraph.
-- Setting these overrides those values.
+This will override the URL for the accounts subgraph:
+
+```yaml
+override_subgraph_url:
+  accounts: http://localhost:8080
+```
