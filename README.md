@@ -7,7 +7,7 @@
 
 The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/) written in Rust that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
 
-Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.  Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes.  Generally speaking, we expect most breaking changes to be mostly on the plugin API and the configuration file format.  We will clearly convey such changes in the release notes.
+Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.  Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes.  Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format.  We will clearly convey such changes in the release notes.
 
 New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest).  The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
 
