@@ -1,0 +1,6 @@
+telemetry:
+  opentelemetry:
+    otlp:
+      tracing:
+        exporter:
+          grpc:
