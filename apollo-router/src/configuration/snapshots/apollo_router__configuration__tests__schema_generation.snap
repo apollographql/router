@@ -101,9 +101,7 @@ expression: "&schema"
                       {
                         "type": "object",
                         "required": [
-                          "default",
-                          "named",
-                          "rename"
+                          "named"
                         ],
                         "properties": {
                           "default": {
@@ -219,9 +217,7 @@ expression: "&schema"
                         {
                           "type": "object",
                           "required": [
-                            "default",
-                            "named",
-                            "rename"
+                            "named"
                           ],
                           "properties": {
                             "default": {
@@ -397,10 +393,6 @@ expression: "&schema"
                     },
                     "trace_config": {
                       "type": "object",
-                      "required": [
-                        "resource",
-                        "sampler"
-                      ],
                       "properties": {
                         "max_attributes_per_event": {
                           "type": "integer",
@@ -433,11 +425,13 @@ expression: "&schema"
                           "nullable": true
                         },
                         "resource": {
+                          "default": null,
                           "type": "object",
                           "additionalProperties": true,
                           "nullable": true
                         },
                         "sampler": {
+                          "default": null,
                           "oneOf": [
                             {
                               "type": "string",
@@ -504,9 +498,6 @@ expression: "&schema"
                                   "properties": {
                                     "grpc": {
                                       "type": "object",
-                                      "required": [
-                                        "protocol"
-                                      ],
                                       "properties": {
                                         "endpoint": {
                                           "default": null,
@@ -521,6 +512,7 @@ expression: "&schema"
                                           "nullable": true
                                         },
                                         "protocol": {
+                                          "default": null,
                                           "type": "string",
                                           "enum": [
                                             "Grpc",
@@ -643,10 +635,6 @@ expression: "&schema"
                             },
                             "trace_config": {
                               "type": "object",
-                              "required": [
-                                "resource",
-                                "sampler"
-                              ],
                               "properties": {
                                 "max_attributes_per_event": {
                                   "type": "integer",
@@ -679,11 +667,13 @@ expression: "&schema"
                                   "nullable": true
                                 },
                                 "resource": {
+                                  "default": null,
                                   "type": "object",
                                   "additionalProperties": true,
                                   "nullable": true
                                 },
                                 "sampler": {
+                                  "default": null,
                                   "oneOf": [
                                     {
                                       "type": "string",

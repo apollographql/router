@@ -80,14 +80,14 @@ fn default_jaeger_password() -> Option<String> {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TraceConfig {
-    #[schemars(schema_with = "option_sampler_schema")]
+    #[schemars(schema_with = "option_sampler_schema", default)]
     pub sampler: Option<Sampler>,
     pub max_events_per_span: Option<u32>,
     pub max_attributes_per_span: Option<u32>,
     pub max_links_per_span: Option<u32>,
     pub max_attributes_per_event: Option<u32>,
     pub max_attributes_per_link: Option<u32>,
-    #[schemars(schema_with = "option_resource_schema")]
+    #[schemars(schema_with = "option_resource_schema", default)]
     pub resource: Option<Resource>,
 }
 
