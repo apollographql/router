@@ -91,6 +91,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
       name: "ggg"
   ```
 
+- **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
+
+  The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+
+
 ## 🐛 Fixes
 
 - **`Content-Type` of HTTP responses is now set to `application/json`** ([Issue #639](https://github.com/apollographql/router/issues/639))
