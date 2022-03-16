@@ -6,24 +6,20 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tower::{util::BoxService, BoxError, ServiceExt};
 
+// This configuration will be used
+// to Deserialize the yml configuration
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct PropagateStatusCodeConfig {
     status_codes: Vec<u16>,
 }
 
 #[derive(Default)]
-// Global state for our plugin would live here.
-// We don't need any in this example
 struct PropagateStatusCode {
+    // An ordered list of status codes to check
     status_codes: Vec<u16>,
 }
 
 impl Plugin for PropagateStatusCode {
-    // We either forbid anonymous operations,
-    // Or we don't. This is the reason why we don't need
-    // to deserialize any configuration from a .yml file.
-    //
-    // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = PropagateStatusCodeConfig;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
@@ -40,7 +36,14 @@ impl Plugin for PropagateStatusCode {
         let all_status_codes = self.status_codes.clone();
         service
             .map_response(move |res| {
+                // if a response contains a status code we're watching,
+                // we push it into the extensions so RouterService can decide
+                // what the global response status will be
                 if all_status_codes.contains(&res.response.status().as_u16()) {
+                    // upsert allows us to:
+                    // - check for the presence of a value for `status_codes` (first parameter)
+                    // update the value if present (second parameter)
+                    // insert a value if not (third parameter)
                     res.context
                         .upsert(
                             &"status_codes".to_string(),
@@ -57,8 +60,7 @@ impl Plugin for PropagateStatusCode {
             .boxed()
     }
 
-    // Forbidding anonymous operations can happen at the very beginning of our GraphQL request lifecycle.
-    // We will thus put the logic it in the `router_service` section of our plugin.
+    // At this point, all subgraph_services will have pushed their status codes if they match the `watch list`.
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -72,12 +74,14 @@ impl Plugin for PropagateStatusCode {
                     .get::<&String, Vec<u16>>(&"status_codes".to_string())
                     .expect("couldn't access context")
                 {
-                    for code in all_status_codes {
-                        if received_status_codes.contains(&code) {
-                            *res.response.status_mut() =
-                                StatusCode::from_u16(code).expect("status code should be valid");
-                            break;
-                        }
+                    // Traverse our watch list status codes,
+                    // and use the first match (most important) if any as the response status code
+                    if let Some(&code) = all_status_codes
+                        .iter()
+                        .find(|&code| received_status_codes.contains(code))
+                    {
+                        *res.response.status_mut() =
+                            StatusCode::from_u16(code).expect("status code should be valid");
                     }
                 }
                 res
@@ -88,9 +92,6 @@ impl Plugin for PropagateStatusCode {
 
 // This macro allows us to use it in our plugin registry!
 // register_plugin takes a group name, and a plugin name.
-//
-// In order to keep the plugin names consistent,
-// we use using the `Reverse domain name notation`
 register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 
 // Writing plugins means writing tests that make sure they behave as expected!
@@ -106,9 +107,9 @@ mod tests {
     use tower::ServiceExt;
 
     // This test ensures the router will be able to
-    // find our `forbid_anonymous_operations` plugin,
-    // and deserialize an empty yml configuration into it
-    // see config.yml for more information
+    // find our `propagate_status_code` plugin,
+    // and deserialize an yml configuration with a list of status_codes into it
+    // see config.router.yaml for more information
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
@@ -205,9 +206,9 @@ mod tests {
             .times(1)
             .returning(move |router_request: RouterRequest| {
                 let context = router_request.context;
-                // Insert StatusCode::FORBIDDEN, which shall override the router response status
+                // Insert several status codes which shall override the router response status
                 context
-                    .insert(&"status_codes".to_string(), json!([403u16]))
+                    .insert(&"status_codes".to_string(), json!([403u16, 500u16]))
                     .expect("couldn't insert status_code");
 
                 Ok(plugin_utils::RouterResponse::builder()
@@ -218,7 +219,7 @@ mod tests {
 
         let mock_service = mock_service.build();
 
-        // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
+        // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
         })
@@ -229,7 +230,10 @@ mod tests {
 
         let service_response = service_stack.oneshot(router_request).await.unwrap();
 
-        assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
+        assert_eq!(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            service_response.response.status()
+        );
     }
 
     #[tokio::test]
