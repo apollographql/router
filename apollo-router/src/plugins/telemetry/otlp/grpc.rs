@@ -18,7 +18,7 @@ pub struct GrpcExporter {
         serialize_with = "header_map_serde::serialize",
         default
     )]
-    #[schemars(schema_with = "option_metadata_map")]
+    #[schemars(schema_with = "option_metadata_map", default)]
     metadata: Option<MetadataMap>,
 }
 

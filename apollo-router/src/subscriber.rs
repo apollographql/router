@@ -216,6 +216,10 @@ impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span
 
 static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, RouterSubscriber>> = OnceCell::new();
 
+pub fn is_global_subscriber_set() -> bool {
+    matches!(RELOAD_HANDLE.get(), Some(_))
+}
+
 pub fn set_global_subscriber(subscriber: RouterSubscriber) -> Result<(), FederatedServerError> {
     RELOAD_HANDLE
         .get_or_try_init(move || {

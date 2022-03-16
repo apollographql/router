@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- # [x.x.x] (unreleased) - 2021-mm-dd
+<!-- # [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
@@ -20,83 +20,134 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-# [x.x.x] (unreleased) - 2021-mm-dd
-
- - **❗ BREAKING ❗**
- -  **Rename plugins with the prefix `apollo` instead of `com.apollographql`** ([PR #602](https://github.com/apollographql/router/pull/600))
-    Instead of using `com.apollographql.reporting` in the configuration file you have to use `apollo.reporting`.
-
- - **❗ BREAKING ❗**
- -  **use ControlFlow in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
-   `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow instead` of the `Step` enum. ControlFlow has two variants, `Continue` and `Break`.
- 
 ## ❗ BREAKING ❗
-- **Header propagation plugin** ([PR #599](https://github.com/apollographql/router/pull/599))
 
-  Header manipulation has been shifted to a plugin rather than service level layers. It now supports rules for all 
-  subgraphs as wel as individual subgraphs.
-
-  ```yaml
-  plugins:
-    headers:
-      all:
-      - propagate:
-        matching: "aaa.*"
-      - propagate:
-        named: "bbb"
-        default: "def"
-        rename: "ccc"
-      - insert:
-        name: "ddd"
-        value: "eee"
-      - remove:
-        matching: "fff.*"
-      - remove:
-        name: "ggg"
-      subgraphs:
-        products:
-        - propagate:
-          matching: ".*"
-    ```
-- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
-
-  Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
-use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
+- **Header propagation remove configuration `name` to `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
+  Previously:
+```yaml
+  # Remove a named header
+  - remove:
+    name: "Remove"
+```
+Now:
+```yaml
+  # Remove a named header
+  - remove:
+    named: "Remove"
+```
+This is consistent with propagate.
 
 ## 🚀 Features
-
-- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
-
-  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
-
 ## 🐛 Fixes
-
-- **Enums in query parameters** ([612](https://github.com/apollographql/router/issues/612)) 
-Enums in query parameters were handled correctly in the response formatting, but not in query validation.
-We now have a new test and a fix.
-
-- **OTEL trace propagation** ([PR #620](https://github.com/apollographql/router/pull/620))
-  When we re-worked our OTEL implementation to be a plugin, the ability to trace across processes (into subgraphs) was
-  lost. This fix restores this capability.
-
-- **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
-  Previously our reporting plugin configuration did not participate in json schema generation. This is now broadly correct
-  and make writing schema much easier.
-
-  To generate a schema use the following command.
-  ```
-  router --schema > apollo_configuration_schema.json
-  ```
-  and follow the instructions for associating it with your particular text editor/IDE. 
 ## 🛠 Maintenance
 ## 📚 Documentation
 
-## Example section entry format
 
-- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+# [v0.1.0-alpha.9] 2022-03-16
+## ❗ BREAKING ❗
 
-  Description! And a link to a [reference](http://url)
+- **Header propagation configuration changes** ([PR #599](https://github.com/apollographql/router/pull/599))
 
+  Header manipulation configuration is now a core-plugin and configured at the _top-level_ of the Router's configuration file, rather than its previous location within service-level layers.  Some keys have also been renamed.  For example:
+
+  **Previous configuration**
+
+  ```yaml
+  subgraphs:
+    products:
+      layers:
+        - headers_propagate:
+            matching:
+              regex: .*
+  ```
+
+  **New configuration**
+
+  ```yaml
+  headers:
+    subgraphs:
+      products:
+        - propagate:
+          matching: ".*"
+  ```
+
+- **Move Apollo plugins to top-level configuration** ([PR #623](https://github.com/apollographql/router/pull/623))
+
+  Previously plugins were all under the `plugins:` section of the YAML config.  However, these "core" plugins are now promoted to the top-level of the config. This reflects the fact that these plugins provide core functionality even though they are implemented as plugins under the hood and further reflects the fact that they receive special treatment in terms of initialization order (they are initialized first before members of `plugins`).
+
+- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
+
+  Having `plugins` _and_ `layers` as configurable items in YAML was creating confusion as to when it was appropriate to use a `layer` vs a `plugin`.  As the layer API is a subset of the plugin API, `plugins` has been kept, however the `layer` option has been dropped.
+
+- **Plugin names have dropped the `com.apollographql` prefix** ([PR #602](https://github.com/apollographql/router/pull/600))
+
+  Previously, core plugins were prefixed with `com.apollographql.`.  This is no longer the case and, when coupled with the above moving of the core plugins to the top-level, the prefixing is no longer present.  This means that, for example, `com.apollographql.telemetry` would now be just `telemetry`.
+
+- **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+
+  Both `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow` instead of the `Step` enum.  `ControlFlow` has two variants, `Continue` and `Break`.
+
+- **The `reporting` configuration changes to `telemetry`** ([PR #651](https://github.com/apollographql/router/pull/651))
+
+  All configuration that was previously under the `reporting` header is now under a `telemetry` key.
+## :sparkles: Features
+
+- **Header propagation now supports "all" subgraphs** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  It is now possible to configure header propagation rules for *all* subgraphs without needing to explicitly name each subgraph.  You can accomplish this by using the `all` key, under the (now relocated; see above _breaking changes_) `headers` section.
+
+  ```yaml
+  headers:
+    all:
+    - propagate:
+      matching: "aaa.*"
+    - propagate:
+      named: "bbb"
+      default: "def"
+      rename: "ccc"
+    - insert:
+      name: "ddd"
+      value: "eee"
+    - remove:
+      matching: "fff.*"
+    - remove:
+      name: "ggg"
+  ```
+
+- **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
+
+  The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+
+
+## 🐛 Fixes
+
+- **`Content-Type` of HTTP responses is now set to `application/json`** ([Issue #639](https://github.com/apollographql/router/issues/639))
+
+  Previously, we were not setting a `content-type` on HTTP responses.  While plugins can still set a different `content-type` if they'd like, we now ensure that a `content-type` of `application/json` is set when one was not already provided.
+
+- **GraphQL Enums in query parameters** ([Issue #612](https://github.com/apollographql/router/issues/612))
+
+  Enums in query parameters were handled correctly in the response formatting, but not in query validation.  We now have a new test and a fix.
+
+- **OTel trace propagation works again** ([PR #620](https://github.com/apollographql/router/pull/620))
+
+  When we re-worked our OTel implementation to be a plugin, the ability to trace across processes (into subgraphs) was lost. This fix restores this capability.  We are working to improve our end-to-end testing of this to prevent further regressions.
+
+- **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
+
+  Previously our `reporting` plugin configuration was not able to participate in JSON Schema generation. This is now broadly correct and makes writing a syntactically-correct schema much easier.
+
+  To generate a schema, you can still run the same command as before:
+
+  ```
+  router --schema > apollo_configuration_schema.json
+  ```
+
+  Then, follow the instructions for associating it with your development environment.
+
+- **Input object validation** ([PR #658](https://github.com/apollographql/router/pull/658))
+
+  Variable validation was incorrectly using output objects instead of input objects
 
 # [v0.1.0-alpha.8] 2022-03-08
 

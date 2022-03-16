@@ -33,7 +33,7 @@ enum Operation {
 enum Remove {
     #[schemars(schema_with = "string_schema")]
     #[serde(deserialize_with = "deserialize_header_name")]
-    Name(HeaderName),
+    Named(HeaderName),
 
     #[schemars(schema_with = "string_schema")]
     #[serde(deserialize_with = "deserialize_regex")]
@@ -65,10 +65,10 @@ enum Propagate {
         #[schemars(schema_with = "string_schema")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
-        #[schemars(schema_with = "option_string_schema")]
+        #[schemars(schema_with = "option_string_schema", default)]
         #[serde(deserialize_with = "deserialize_option_header_name")]
         rename: Option<HeaderName>,
-        #[schemars(schema_with = "option_string_schema")]
+        #[schemars(schema_with = "option_string_schema", default)]
         #[serde(deserialize_with = "deserialize_option_header_value")]
         default: Option<HeaderValue>,
     },
@@ -185,7 +185,7 @@ where
                         .headers_mut()
                         .insert(&config.name, config.value.clone());
                 }
-                Operation::Remove(Remove::Name(name)) => {
+                Operation::Remove(Remove::Named(name)) => {
                     req.http_request.headers_mut().remove(name);
                 }
                 Operation::Remove(Remove::Matching(matching)) => {
@@ -411,7 +411,7 @@ mod test {
             r#"
         all:
             - remove:
-                name: "test"
+                named: "test"
         "#,
         )
         .unwrap();
@@ -492,7 +492,7 @@ mod test {
             .returning(example_response);
 
         let mut service =
-            HeadersLayer::new(vec![Operation::Remove(Remove::Name("aa".try_into()?))])
+            HeadersLayer::new(vec![Operation::Remove(Remove::Named("aa".try_into()?))])
                 .layer(mock.build());
 
         service.ready().await?.call(example_request()).await?;
