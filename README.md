@@ -32,6 +32,8 @@ directory.
 OPTIONS:
     -c, --config <configuration-path>    Configuration file location
     -s, --supergraph <supergraph-path>   Supergraph Schema location
+    -w, --watch                          Watches for changes in the supergraph and configuration file
+        --schema                         Prints out a JSON schema of the configuration file
 ```
 
 ## Who is Apollo?
