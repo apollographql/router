@@ -1,13 +1,10 @@
-use std::ops::ControlFlow;
-
 use apollo_router_core::{
-    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
-    SubgraphRequest, SubgraphResponse,
+    register_plugin, Plugin, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
+use tower::{util::BoxService, BoxError, ServiceExt};
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct PropagateStatusCodeConfig {
@@ -44,23 +41,16 @@ impl Plugin for PropagateStatusCode {
         service
             .map_response(move |res| {
                 if all_status_codes.contains(&res.response.status().as_u16()) {
-                    let status_codes = res.context.extensions.get_mut(&"status_codes".to_string());
-
-                    match status_codes {
-                        Some(mut status_codes) => {
-                            let values = status_codes.value_mut();
-                            values
-                                .as_array_mut()
-                                .expect("status codes must be an array")
-                                .push(res.response.status().as_u16().into());
-                        }
-                        None => {
-                            res.context.extensions.insert(
-                                "status_codes".to_string(),
-                                vec![res.response.status().as_u16()].into(),
-                            );
-                        }
-                    };
+                    res.context
+                        .upsert(
+                            &"status_codes".to_string(),
+                            |mut status_codes: Vec<u16>| {
+                                status_codes.push(res.response.status().as_u16());
+                                status_codes
+                            },
+                            || vec![res.response.status().as_u16()],
+                        )
+                        .expect("couldn't insert status codes");
                 }
                 res
             })
@@ -77,26 +67,18 @@ impl Plugin for PropagateStatusCode {
 
         service
             .map_response(move |mut res| {
-                let status_code = if let Some(received_status_codes) =
-                    res.context.extensions.get(&"status_codes".to_string())
+                if let Some(received_status_codes) = res
+                    .context
+                    .get::<&String, Vec<u16>>(&"status_codes".to_string())
+                    .expect("couldn't access context")
                 {
-                    let mut code = None;
-                    let received_status_codes = received_status_codes
-                        .as_array()
-                        .expect("status codes must be an array");
-                    for s in all_status_codes {
-                        if received_status_codes.contains(&s.into()) {
-                            code = Some(s);
+                    for code in all_status_codes {
+                        if received_status_codes.contains(&code) {
+                            *res.response.status_mut() =
+                                StatusCode::from_u16(code).expect("status code should be valid");
                             break;
                         }
                     }
-                    code
-                } else {
-                    None
-                };
-                if let Some(code) = status_code {
-                    *res.response.status_mut() =
-                        StatusCode::from_u16(code).expect("status code should be valid");
                 }
                 res
             })
@@ -117,10 +99,10 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 // and test your plugins in isolation:
 #[cfg(test)]
 mod tests {
-    use super::PropagateStatusCode;
+    use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
     use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
     use http::StatusCode;
-    use serde_json::Value;
+    use serde_json::json;
     use tower::ServiceExt;
 
     // This test ensures the router will be able to
@@ -132,136 +114,158 @@ mod tests {
         apollo_router_core::plugins()
             .get("example.propagate_status_code")
             .expect("Plugin not found")
-            .create_instance(&Value::Null)
+            .create_instance(&json!({ "status_codes" : [500, 403, 401] }))
             .unwrap();
     }
 
+    // Unit testing this plugin will be a tad more complicated than testing the other ones.
+    // We will first ensure the SubgraphService pushes the right status codes.
+    //
+    // We will then make sure the RouterService is able to turn the relevant ordered status codes
+    // into the relevant http response status.
+
     #[tokio::test]
-    async fn test_no_operation_name() {
-        // create a mock service we will use to test our plugin
-        // It does not have any behavior, because we do not expect it to be called.
-        // If it is called, the test will panic,
-        // letting us know PropagateStatusCode did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+    async fn subgraph_service_shouldnt_add_matching_status_code() {
+        let mut mock_service = plugin_utils::MockSubgraphService::new();
+
+        // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(plugin_utils::SubgraphResponse::builder()
+                .status(StatusCode::FORBIDDEN)
+                .build()
+                .into())
+        });
+
+        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::default().router_service(mock_service.boxed());
+        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
+            status_codes: vec![500, 403, 401],
+        })
+        .expect("couldn't create plugin")
+        .subgraph_service("accounts", mock_service.boxed());
 
-        // Let's create a request without an operation name...
-        let request_without_any_operation_name =
-            plugin_utils::RouterRequest::builder().build().into();
+        let subgraph_request = plugin_utils::SubgraphRequest::builder().build().into();
 
-        // ...And call our service stack with it
-        let service_response = service_stack
-            .oneshot(request_without_any_operation_name)
-            .await
-            .unwrap();
+        let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
-        // PropagateStatusCode should return a 400...
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+        // Make sure the extensions doesn't contain any status
+        let received_status_codes: Vec<u16> = service_response
+            .context
+            .get("status_codes")
+            .expect("couldn't access context")
+            .expect("couldn't access status_codes");
 
-        // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
-
-        assert_eq!(
-            "Anonymous operations are not allowed".to_string(),
-            graphql_response.errors[0].message
-        )
+        assert!(received_status_codes.contains(&403));
     }
 
     #[tokio::test]
-    async fn test_empty_operation_name() {
-        // create a mock service we will use to test our plugin
-        // It does not have any behavior, because we do not expect it to be called.
-        // If it is called, the test will panic,
-        // letting us know PropagateStatusCode did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+    async fn subgraph_service_shouldnt_add_not_matching_status_code() {
+        let mut mock_service = plugin_utils::MockSubgraphService::new();
+
+        // Return StatusCode::OK, which shall NOT be added to our status_codes
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(plugin_utils::SubgraphResponse::builder()
+                .status(StatusCode::OK)
+                .build()
+                .into())
+        });
+
+        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::default().router_service(mock_service.boxed());
+        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
+            status_codes: vec![500, 403, 401],
+        })
+        .expect("couldn't create plugin")
+        .subgraph_service("accounts", mock_service.boxed());
 
-        // Let's create a request with an empty operation name...
-        let request_with_empty_operation_name = plugin_utils::RouterRequest::builder()
-            .operation_name("".to_string())
-            .build()
-            .into();
+        let subgraph_request = plugin_utils::SubgraphRequest::builder().build().into();
 
-        // ...And call our service stack with it
-        let service_response = service_stack
-            .oneshot(request_with_empty_operation_name)
-            .await
-            .unwrap();
+        let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
-        // PropagateStatusCode should return a 400...
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+        // Make sure the extensions doesn't contain any status
+        let received_status_codes: Option<Vec<u16>> = service_response
+            .context
+            .get("status_codes")
+            .expect("couldn't access context");
 
-        // with the expected error message
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
-
-        assert_eq!(
-            "Anonymous operations are not allowed".to_string(),
-            graphql_response.errors[0].message
-        )
+        assert!(received_status_codes.is_none());
     }
 
+    // Now that our status codes mechanism has been tested,
+    // we can unit test the RouterService part of our plugin
+
     #[tokio::test]
-    async fn test_valid_operation_name() {
-        let operation_name = "validOperationName";
+    async fn router_service_override_status_code() {
+        let mut mock_service = plugin_utils::MockRouterService::new();
 
-        // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockRouterService::new();
-
-        // The expected reply is going to be JSON returned in the RouterResponse { data } section.
-        let expected_mock_response_data = "response created within the mock";
-
-        // Let's set up our mock to make sure it will be called once, with the expected operation_name
-        mock.expect_call()
+        mock_service
+            .expect_call()
             .times(1)
-            .returning(move |req: RouterRequest| {
-                assert_eq!(
-                    operation_name,
-                    // we're ok with unwrap's here because we're running a test
-                    // we would not do this in actual code
-                    req.context.request.body().operation_name.as_ref().unwrap()
-                );
-                // let's return the expected data
+            .returning(move |router_request: RouterRequest| {
+                let context = router_request.context;
+                // Insert StatusCode::FORBIDDEN, which shall override the router response status
+                context
+                    .insert(&"status_codes".to_string(), json!([403u16]))
+                    .expect("couldn't insert status_code");
+
                 Ok(plugin_utils::RouterResponse::builder()
-                    .data(expected_mock_response_data.into())
+                    .context(context.into())
                     .build()
                     .into())
             });
 
-        // The mock has been set up, we can now build a service from it
-        let mock_service = mock.build();
+        let mock_service = mock_service.build();
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let service_stack = PropagateStatusCode::default().router_service(mock_service.boxed());
+        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
+            status_codes: vec![500, 403, 401],
+        })
+        .expect("couldn't create plugin")
+        .router_service(mock_service.boxed());
 
-        // Let's create a request with an valid operation name...
-        let request_with_operation_name = plugin_utils::RouterRequest::builder()
-            .operation_name(operation_name.to_string())
-            .build()
-            .into();
+        let router_request = plugin_utils::RouterRequest::builder().build().into();
 
-        // ...And call our service stack with it
-        let service_response = service_stack
-            .oneshot(request_with_operation_name)
-            .await
-            .unwrap();
+        let service_response = service_stack.oneshot(router_request).await.unwrap();
 
-        // Our stack should have returned an OK response...
+        assert_eq!(StatusCode::FORBIDDEN, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn router_service_do_not_override_status_code() {
+        let mut mock_service = plugin_utils::MockRouterService::new();
+
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |router_request: RouterRequest| {
+                let context = router_request.context;
+                // Insert a StatusCode that isn't part of our PropagateStatusCode configuration
+                // which shall NOT override the response status
+                context
+                    .insert(&"status_codes".to_string(), json!([418u16]))
+                    .expect("couldn't insert status_code");
+
+                Ok(plugin_utils::RouterResponse::builder()
+                    .context(context.into())
+                    .build()
+                    .into())
+            });
+
+        let mock_service = mock_service.build();
+
+        // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
+        let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
+            status_codes: vec![500, 403, 401],
+        })
+        .expect("couldn't create plugin")
+        .router_service(mock_service.boxed());
+
+        let router_request = plugin_utils::RouterRequest::builder().build().into();
+
+        let service_response = service_stack.oneshot(router_request).await.unwrap();
+
         assert_eq!(StatusCode::OK, service_response.response.status());
-
-        // ...with the expected data
-        let graphql_response: apollo_router_core::Response =
-            service_response.response.into_body().try_into().unwrap();
-
-        assert_eq!(
-            // we're allowed to unwrap() here because we know the json is a str()
-            graphql_response.data.as_str().unwrap(),
-            expected_mock_response_data
-        )
     }
 }
