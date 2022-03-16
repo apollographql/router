@@ -7,6 +7,7 @@ members = [
     "apollo-router-benchmarks",
     "examples/async-allow-client-id",
     "examples/compose-your-graphql-router",
+    "examples/cookies-to-headers",
     "examples/context-data",
     "examples/forbid-anonymous-operations",
     "examples/hello-world",
