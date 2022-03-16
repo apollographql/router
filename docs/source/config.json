@@ -35,7 +35,7 @@
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
     },
     "TODO(Not Categorized)": {
-      "Build from source": "/build-from-source",
+      "Build from source": "/build-from-source"
     }
   }
 }
