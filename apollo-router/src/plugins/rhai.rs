@@ -76,6 +76,7 @@ macro_rules! handle_error {
 #[derive(Default, Clone)]
 struct Rhai {
     ast: AST,
+    engine: Arc<Engine>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -126,9 +127,9 @@ impl Plugin for Rhai {
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::debug!("RHAI {:#?}!", configuration.filename);
-        let engine = Engine::new();
+        let engine = Arc::new(Rhai::new_rhai_engine());
         let ast = engine.compile_file(configuration.filename)?;
-        Ok(Self { ast })
+        Ok(Self { ast, engine })
     }
 
     fn router_service(
@@ -371,9 +372,9 @@ impl Rhai {
         function_name: &str,
         context: Context<http_compat::Request<Request>>,
     ) -> Result<Context<http_compat::Request<Request>>, String> {
-        let engine = self.new_rhai_engine();
         let mut scope = Scope::new();
-        let response: RhaiContext = engine
+        let response: RhaiContext = self
+            .engine
             .call_fn(
                 &mut scope,
                 &self.ast,
@@ -390,12 +391,12 @@ impl Rhai {
         function_name: &str,
         context: Context<Arc<http_compat::Request<Request>>>,
     ) -> Result<Context<Arc<http_compat::Request<Request>>>, String> {
-        let engine = self.new_rhai_engine();
         let mut scope = Scope::new();
 
         let mut new_context = Context::new().with_request((*context.request).clone());
         new_context.extensions = context.extensions;
-        let response: RhaiContext = engine
+        let response: RhaiContext = self
+            .engine
             .call_fn(
                 &mut scope,
                 &self.ast,
@@ -407,7 +408,7 @@ impl Rhai {
         Ok(response.context.into())
     }
 
-    fn new_rhai_engine(&self) -> Engine {
+    fn new_rhai_engine() -> Engine {
         let mut engine = Engine::new();
         engine
             .register_indexer_set_result(Headers::set_header)

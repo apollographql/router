@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 428
+assertion_line: 429
 expression: "&schema"
 ---
 {
@@ -10,7 +10,241 @@ expression: "&schema"
   "type": "object",
   "properties": {
     "headers": {
-      "$ref": "#/definitions/Config"
+      "type": "object",
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "insert"
+                ],
+                "properties": {
+                  "insert": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "remove"
+                ],
+                "properties": {
+                  "remove": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "name"
+                        ],
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "matching"
+                        ],
+                        "properties": {
+                          "matching": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "propagate"
+                ],
+                "properties": {
+                  "propagate": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "matching"
+                        ],
+                        "properties": {
+                          "matching": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "named"
+                        ],
+                        "properties": {
+                          "default": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "named": {
+                            "type": "string"
+                          },
+                          "rename": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "subgraphs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "insert"
+                  ],
+                  "properties": {
+                    "insert": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "value"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "remove"
+                  ],
+                  "properties": {
+                    "remove": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "name"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "matching"
+                          ],
+                          "properties": {
+                            "matching": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "propagate"
+                  ],
+                  "properties": {
+                    "propagate": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "matching"
+                          ],
+                          "properties": {
+                            "matching": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "named"
+                          ],
+                          "properties": {
+                            "default": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "named": {
+                              "type": "string"
+                            },
+                            "rename": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "override_subgraph_url": {
       "type": "object",
@@ -22,10 +256,7 @@ expression: "&schema"
     "plugins": {
       "description": "Plugin configuration",
       "default": null,
-      "$ref": "#/definitions/Plugins"
-    },
-    "rhai": {
-      "$ref": "#/definitions/Conf"
+      "additionalProperties": false
     },
     "server": {
       "description": "Configuration options pertaining to the http server component.",
@@ -33,271 +264,543 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "cors": null
       },
-      "$ref": "#/definitions/Server"
-    },
-    "telemetry": {
-      "$ref": "#/definitions/Conf"
-    },
-    "test.always_fails_to_start": {
-      "$ref": "#/definitions/Conf"
-    },
-    "test.always_fails_to_start_and_stop": {
-      "$ref": "#/definitions/Conf"
-    },
-    "test.always_fails_to_stop": {
-      "$ref": "#/definitions/Conf"
-    },
-    "test.always_starts_and_stops": {
-      "$ref": "#/definitions/Conf"
-    }
-  },
-  "definitions": {
-    "Conf": {
-      "type": "object",
-      "required": [
-        "filename"
-      ],
-      "properties": {
-        "filename": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "Config": {
-      "type": "object",
-      "properties": {
-        "all": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/Operation"
-          }
-        },
-        "subgraphs": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "$ref": "#/definitions/Operation"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "Cors": {
-      "description": "Cross origin request configuration.",
-      "type": "object",
-      "properties": {
-        "allow_any_origin": {
-          "description": "Set to false to disallow any origin and rely exclusively on `origins`.\n\n/!\\ Defaults to true Having this set to true is the only way to allow Origin: null.",
-          "default": null,
-          "type": "boolean",
-          "nullable": true
-        },
-        "allow_credentials": {
-          "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
-          "default": null,
-          "type": "boolean",
-          "nullable": true
-        },
-        "allow_headers": {
-          "description": "The headers to allow. Defaults to the required request header for Apollo Studio",
-          "default": [
-            "Content-Type"
-          ],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "expose_headers": {
-          "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
-          "default": null,
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "nullable": true
-        },
-        "methods": {
-          "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
-          "default": [
-            "GET",
-            "POST",
-            "OPTIONS"
-          ],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "origins": {
-          "description": "The origin(s) to allow requests from. Use `https://studio.apollographql.com/` to allow Apollo Studio to function.",
-          "default": [],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "Insert": {
-      "type": "object",
-      "required": [
-        "name",
-        "value"
-      ],
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "value": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "ListenAddr": {
-      "description": "Listening address.",
-      "anyOf": [
-        {
-          "description": "Socket address.",
-          "type": "string"
-        },
-        {
-          "description": "Unix socket.",
-          "type": "string"
-        }
-      ]
-    },
-    "Operation": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "insert"
-          ],
-          "properties": {
-            "insert": {
-              "$ref": "#/definitions/Insert"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "remove"
-          ],
-          "properties": {
-            "remove": {
-              "$ref": "#/definitions/Remove"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "propagate"
-          ],
-          "properties": {
-            "propagate": {
-              "$ref": "#/definitions/Propagate"
-            }
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
-    "Plugins": {
-      "additionalProperties": false
-    },
-    "Propagate": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "matching"
-          ],
-          "properties": {
-            "matching": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "default",
-            "named",
-            "rename"
-          ],
-          "properties": {
-            "default": {
-              "type": "string",
-              "nullable": true
-            },
-            "named": {
-              "type": "string"
-            },
-            "rename": {
-              "type": "string",
-              "nullable": true
-            }
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
-    "Remove": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "name"
-          ],
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "matching"
-          ],
-          "properties": {
-            "matching": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
-    "Server": {
-      "description": "Configuration options pertaining to the http server component.",
       "type": "object",
       "properties": {
         "cors": {
           "description": "Cross origin request headers.",
           "default": null,
-          "$ref": "#/definitions/Cors",
+          "type": "object",
+          "properties": {
+            "allow_any_origin": {
+              "description": "Set to false to disallow any origin and rely exclusively on `origins`.\n\n/!\\ Defaults to true Having this set to true is the only way to allow Origin: null.",
+              "default": null,
+              "type": "boolean",
+              "nullable": true
+            },
+            "allow_credentials": {
+              "description": "Set to true to add the `Access-Control-Allow-Credentials` header.",
+              "default": null,
+              "type": "boolean",
+              "nullable": true
+            },
+            "allow_headers": {
+              "description": "The headers to allow. Defaults to the required request header for Apollo Studio",
+              "default": [
+                "Content-Type"
+              ],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "expose_headers": {
+              "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
+              "default": null,
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            },
+            "methods": {
+              "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
+              "default": [
+                "GET",
+                "POST",
+                "OPTIONS"
+              ],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "origins": {
+              "description": "The origin(s) to allow requests from. Use `https://studio.apollographql.com/` to allow Apollo Studio to function.",
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
           "nullable": true
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
           "default": "127.0.0.1:4000",
-          "$ref": "#/definitions/ListenAddr"
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "opentelemetry": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "jaeger"
+              ],
+              "properties": {
+                "jaeger": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "agent"
+                          ],
+                          "properties": {
+                            "agent": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "collector"
+                          ],
+                          "properties": {
+                            "collector": {
+                              "type": "string",
+                              "format": "uri"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ],
+                      "nullable": true
+                    },
+                    "service_name": {
+                      "default": "router",
+                      "type": "string"
+                    },
+                    "trace_config": {
+                      "type": "object",
+                      "properties": {
+                        "max_attributes_per_event": {
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_attributes_per_link": {
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_attributes_per_span": {
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_events_per_span": {
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_links_per_span": {
+                          "type": "integer",
+                          "format": "uint32",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "resource": {
+                          "default": null,
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "sampler": {
+                          "default": null,
+                          "oneOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "AlwaysOn",
+                                "AlwaysOff"
+                              ]
+                            },
+                            {
+                              "description": "Respects the parent span's sampling decision or delegates a delegate sampler for root spans. Not supported via yaml config Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                              "type": "object",
+                              "required": [
+                                "TraceIdRatioBased"
+                              ],
+                              "properties": {
+                                "TraceIdRatioBased": {
+                                  "type": "number",
+                                  "format": "double"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false,
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "otlp"
+              ],
+              "properties": {
+                "otlp": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "tracing"
+                      ],
+                      "properties": {
+                        "tracing": {
+                          "type": "object",
+                          "required": [
+                            "exporter"
+                          ],
+                          "properties": {
+                            "exporter": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "required": [
+                                    "grpc"
+                                  ],
+                                  "properties": {
+                                    "grpc": {
+                                      "type": "object",
+                                      "properties": {
+                                        "endpoint": {
+                                          "default": null,
+                                          "type": "string",
+                                          "format": "uri",
+                                          "nullable": true
+                                        },
+                                        "metadata": {
+                                          "default": null,
+                                          "type": "object",
+                                          "additionalProperties": true,
+                                          "nullable": true
+                                        },
+                                        "protocol": {
+                                          "default": null,
+                                          "type": "string",
+                                          "enum": [
+                                            "Grpc",
+                                            "HttpBinary"
+                                          ],
+                                          "nullable": true
+                                        },
+                                        "timeout": {
+                                          "type": "integer",
+                                          "format": "uint64",
+                                          "minimum": 0.0,
+                                          "nullable": true
+                                        },
+                                        "tls_config": {
+                                          "type": "object",
+                                          "properties": {
+                                            "ca": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "env"
+                                                  ],
+                                                  "properties": {
+                                                    "env": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "file"
+                                                  ],
+                                                  "properties": {
+                                                    "file": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                }
+                                              ],
+                                              "nullable": true
+                                            },
+                                            "cert": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "env"
+                                                  ],
+                                                  "properties": {
+                                                    "env": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "file"
+                                                  ],
+                                                  "properties": {
+                                                    "file": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                }
+                                              ],
+                                              "nullable": true
+                                            },
+                                            "domain_name": {
+                                              "type": "string",
+                                              "nullable": true
+                                            },
+                                            "key": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "env"
+                                                  ],
+                                                  "properties": {
+                                                    "env": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "file"
+                                                  ],
+                                                  "properties": {
+                                                    "file": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                }
+                                              ],
+                                              "nullable": true
+                                            }
+                                          },
+                                          "additionalProperties": false,
+                                          "nullable": true
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "nullable": true
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "trace_config": {
+                              "type": "object",
+                              "properties": {
+                                "max_attributes_per_event": {
+                                  "type": "integer",
+                                  "format": "uint32",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "max_attributes_per_link": {
+                                  "type": "integer",
+                                  "format": "uint32",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "max_attributes_per_span": {
+                                  "type": "integer",
+                                  "format": "uint32",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "max_events_per_span": {
+                                  "type": "integer",
+                                  "format": "uint32",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "max_links_per_span": {
+                                  "type": "integer",
+                                  "format": "uint32",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "resource": {
+                                  "default": null,
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                  "nullable": true
+                                },
+                                "sampler": {
+                                  "default": null,
+                                  "oneOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "AlwaysOn",
+                                        "AlwaysOff"
+                                      ]
+                                    },
+                                    {
+                                      "description": "Respects the parent span's sampling decision or delegates a delegate sampler for root spans. Not supported via yaml config Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                                      "type": "object",
+                                      "required": [
+                                        "TraceIdRatioBased"
+                                      ],
+                                      "properties": {
+                                        "TraceIdRatioBased": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false,
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "nullable": true
+        },
+        "opentracing": {
+          "type": "object",
+          "required": [
+            "format"
+          ],
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": [
+                "jaeger",
+                "zipkin_b3"
+              ]
+            }
+          },
+          "nullable": true
+        },
+        "spaceport": {
+          "type": "object",
+          "required": [
+            "external"
+          ],
+          "properties": {
+            "collector": {
+              "default": "https://127.0.0.1:50051",
+              "type": "string"
+            },
+            "external": {
+              "type": "boolean"
+            },
+            "listener": {
+              "default": "127.0.0.1:50051",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "test.always_fails_to_start": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "test.always_fails_to_start_and_stop": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "test.always_fails_to_stop": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "test.always_starts_and_stops": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
     }
   }
 }

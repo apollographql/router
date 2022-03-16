@@ -105,7 +105,7 @@ pub struct ExportConfig {
     #[serde(deserialize_with = "endpoint_url", default)]
     pub endpoint: Option<Url>,
 
-    #[schemars(schema_with = "option_protocol_schema")]
+    #[schemars(schema_with = "option_protocol_schema", default)]
     pub protocol: Option<Protocol>,
     pub timeout: Option<u64>,
 }

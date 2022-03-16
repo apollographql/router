@@ -65,10 +65,10 @@ enum Propagate {
         #[schemars(schema_with = "string_schema")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
-        #[schemars(schema_with = "option_string_schema")]
+        #[schemars(schema_with = "option_string_schema", default)]
         #[serde(deserialize_with = "deserialize_option_header_name")]
         rename: Option<HeaderName>,
-        #[schemars(schema_with = "option_string_schema")]
+        #[schemars(schema_with = "option_string_schema", default)]
         #[serde(deserialize_with = "deserialize_option_header_value")]
         default: Option<HeaderValue>,
     },
