@@ -5,17 +5,7 @@ description: High-performance graph routing for federated graphs
 
 import { Link } from "gatsby";
 
-TODO:
-
-Probably have a section that talks about the various ways to configure the RouteR:
-
-- CLI arguments
-- Configuration file
-- Supergraph schema
-- Call out the ability to make custom plugins (and point to the plugins section)
-
 ---
-
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
@@ -47,11 +37,12 @@ Options are described below.
 </td>
 <td>
 
-The absolute or relative path to the router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
+The path to the Apollo Router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas),
+absolute or relative to the current directory.
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
 
-**Required** unless you provide this value via the `SCHEMA_PATH` environment variable.
+**Required**
 
 </td>
 </tr>
@@ -65,9 +56,6 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <td>
 
 The absolute or relative path to the router's optional [YAML configuration file](#configuration-file).
-
-You can also provide this value via the `CONFIGURATION_PATH` environment variable.
-
 </td>
 </tr>
 
@@ -82,6 +70,49 @@ You can also provide this value via the `CONFIGURATION_PATH` environment variabl
 The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
 Default: `info`
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--schema`
+
+</td>
+<td>
+
+Prints out a JSON schema of the configuration file, including plugin configuration (see below)
+
+</td>
+</tr>
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-w` / `--watch`
+
+</td>
+<td>
+
+Watches for changes in the schema and configuration file, and reloads them automatically
+without downtime
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-V` / `--version`
+
+</td>
+<td>
+
+Prints out the Apollo Router's version
 
 </td>
 </tr>
@@ -110,14 +141,12 @@ One you have generated the schema configure your text editor. Here are some inst
 
 Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are shown below:
 
-```yaml title="configuration.yaml"
-#
-# The Apollo Router doesn't require a configuration file to run. This
-# example is a verbose representation of possible configuration. It's
-# more of an "everything and the kitchen sink" of potential configuration
-# rather than any recommendation.
-#
+### Listen address
 
+By default, the Apollo Router starts a HTTP server listening on `127.0.0.1:4000`. This can be
+changed in the configuration file:
+
+```yaml title="configuration.router.yaml"
 #
 # server: Configuration of the HTTP server
 #
@@ -125,7 +154,25 @@ server:
   # The socket address and port to listen on
   # Defaults to 127.0.0.1:4000
   listen: 127.0.0.1:4000
+```
 
+It can also listen on a Unix socket (not supported on Windows):
+
+```yaml title="configuration.router.yaml"
+server:
+  # absolute path to a Unix socket
+  listen: /tmp/router.sock
+
+```
+
+### Cross Origin Resource Sharing (CORS)
+
+The Apollo Router support [Cross Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)
+to indicate from which origin it accepts requests. **By default, it accepts requests from all origins**.
+If your environment has specific security requirements around CORS, they can be set up in the configuration file:
+
+```yaml title="configuration.router.yaml"
+server:
   #
   # CORS (Cross Origin Resource Sharing)
   #
@@ -147,140 +194,52 @@ server:
     # Which response headers should be made available to scripts running in the
     # browser in response to a cross-origin request.
     expose_headers:
-plugins:
-    # See below for plugins
-```
-
-## Avoiding repetition using YAML anchors and aliases
-
-You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
-
-```yaml {5,9} title="configuration.yaml"
-plugins:
-  apollo.headers:
-    subgraphs:
-      products:
-        - insert: &insert_custom_header
-            name: "custom-header"
-            value: "something"
-      reviews:
-        - insert: *insert_custom_header
 ```
 
 In this example, the `&insert_custom_header` anchor captures the `name` and `value` properties from the `products` subgraph's `insert` and re-uses the same properties in the `insert` of the `reviews` subgraph by referring to the `*insert_custom_header` alias.
 
-## OpenTelemetry tracing
+### OpenTelemetry tracing
 
-The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for [Jaeger](https://www.jaegertracing.io/) and the [OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter) over HTTP or gRPC. The router generates traces that include the various phases of executing a GraphQL operation and associated dependencies.
+The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for
+[Jaeger](https://www.jaegertracing.io/) and the
+[OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter)
+over HTTP or gRPC. The router generates traces that include the various phases of executing
+a GraphQL operation and associated dependencies.
 
-The router sends a `TraceParent` header to subgraphs so they can create and send their own spans under the same trace.
+You can set it up in the configuration file's [telemetry section](../telemetry).
 
-If the router receives an incoming request that already contains a `TraceParent` header, it uses that header's trace ID instead of generating a random one.
+### Plugins
 
-### Using Jaeger
+The Apollo Router can be customized through [plugins](../customizations/overview). Any plugin
+can have its specific section in the configuration file:
 
-```yaml title="configuration.yaml"
-server:
-  listen: 127.0.0.1:4000
+```yaml title="configuration.router.yaml"
 plugins:
-  apollo.reporting:
-    # Optional if you want to enable opentracing propagation headers to your subgraphs
-    # opentracing:
-      # "zipkin_b3" and "jaeger" formats are supported
-      # format: "zipkin_b3"
-    opentelemetry:
-      jaeger:
-        # optional: if not present, jaeger will use the default UDP agent address
-        #endpoint:
-          # address for the UDP agent mode
-          # incomptable with collector
-          # agent: "127.0.0.1:1234"
-
-          # URL of the HTTP collector
-          # collector:" http://example.org"
-          # the username and password are obtained from the environment variables
-          # JAEGER_USERNAME and JAEGER_PASSWORD
-
-        # name of the service used in traces
-        # defaults to router
-        service_name: "router"
-
-        trace_config:
-          # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-          # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-          # and 1 and decides on trace creation whether it will be recorded.
-          sampler:
-            TraceIdRatioBased: 0.42
-          max_events_per_span: 1
-          max_attributes_per_span: 2
-          max_links_per_span: 3
-          max_attributes_per_event: 4
-          max_attributes_per_link: 5
-          resource:
-            attrs:
-              key1:
-                String: value
-              key2:
-                Bool: true
-              key3:
-                I64: 42
-              key4:
-                F64: 42.0
-              key5:
-                Array:
-                  String:
-                    - value1
-                    - value2
+  example.plugin:
+    var1: "hello"
+    var2: 1
 ```
 
-### Using OTLP
+To activate a plugin without configuration option, it can be added as follows:
 
-```yaml title="configuration.yaml"
-server:
-  listen: 127.0.0.1:4000
+```yaml title="configuration.router.yaml"
 plugins:
-  apollo.reporting:
-    # Optional if you want to enable opentracing propagation headers to your subgraphs
-    # opentracing:
-      # "zipkin_b3" and "jaeger" formats are supported
-      # format: "zipkin_b3"
-    # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
-    opentelemetry:
-      otlp:
-        tracing:
-          exporter:
-            # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
-            http:
-              # URL of the exporter
-              endpoint: http://example.com
-              # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-              protocol: Grpc
-              # timeout in seconds
-              timeout: 60
-          trace_config:
-            # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-            # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-            # and 1 and decides on trace creation whether it will be recorded.
-            sampler:
-              TraceIdRatioBased: 0.42
-            max_events_per_span: 1
-            max_attributes_per_span: 2
-            max_links_per_span: 3
-            max_attributes_per_event: 4
-            max_attributes_per_link: 5
-            resource:
-              attrs:
-                key1:
-                  String: value
-                key2:
-                  Bool: true
-                key3:
-                  I64: 42
-                key4:
-                  F64: 42.0
-                key5:
-                  Array:
-                    String:
-                      - value1
-                      - value2
+  example.plugin:
 ```
+
+### Avoiding repetition using YAML anchors and aliases
+
+You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
+
+```yaml {5,9} title="configuration.yaml"
+headers:
+  subgraphs:
+    products:
+      - insert: &insert_custom_header
+          name: "custom-header"
+          value: "something"
+    reviews:
+      - insert: *insert_custom_header
+```
+
+Here the content under `&insert_custom_header` would be reused under `*insert_custom_header`.

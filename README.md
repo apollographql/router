@@ -23,16 +23,15 @@ We'd encourage you to experiment with it, report troubles and offer your feedbac
 
 ## Usage
 
-Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/supergraphs/) to be passed as the `--supergraph` argument and [optional configuration](https://www.apollographql.com/docs/router/configuration/).
+Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
 
 ```
 OPTIONS:
-    -c, --config <configuration-path>    Configuration file location [env:
-                                         CONFIGURATION_PATH=]
-    -s, --supergraph <supergraph-path>   Supergraph Schema location [env: SUPERGRAPH_PATH=]
+    -c, --config <configuration-path>    Configuration file location
+    -s, --supergraph <supergraph-path>   Supergraph Schema location
 ```
 
 ## Who is Apollo?
