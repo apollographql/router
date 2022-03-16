@@ -1,10 +1,7 @@
 ---
 title: Apollo Router quickstart
-sidebar_title: Quickstart
 description: Run the Apollo Router with Apollo-hosted subgraphs
 ---
-
-import { ExpansionPanel } from "gatsby-theme-apollo-docs";
 
 Hello! This tutorial walks you through installing Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
@@ -77,7 +74,7 @@ This saves a `supergraph-schema.graphql` file with the following contents:
 
 <ExpansionPanel title="Click to expand">
 
-```graphql:title=supergraph-schema.graphql
+```graphql title="supergraph-schema.graphql"
 schema
   @core(feature: "https://specs.apollo.dev/core/v0.1"),
   @core(feature: "https://specs.apollo.dev/join/v0.1")
@@ -172,7 +169,7 @@ The console output should look like the following:
 2022-03-14T11:56:56.000707Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-That's it! Visit `http://127.0.0.1:4000` to open the [Apollo Sandbox Explorer](https://www.apollographql.com/docs/studio/explorer/). You can inspect the entire federated graph and run your first queries against Apollo Router!
+That's it! Visit `http://127.0.0.1:4000` to open the [Apollo Sandbox Explorer](/studio/explorer/sandbox/). You can inspect the entire federated graph and run your first queries against Apollo Router!
 
 ## Next steps
 

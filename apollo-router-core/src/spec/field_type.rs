@@ -69,9 +69,13 @@ impl FieldType {
                     inner_ty.validate_value(value, schema)
                 }
             }
-            (FieldType::Named(name), _) if schema.custom_scalars.contains(name) => Ok(()),
+            (FieldType::Named(name), _)
+                if schema.custom_scalars.contains(name) || schema.enums.contains_key(name) =>
+            {
+                Ok(())
+            }
             (FieldType::Named(name), value) if value.is_object() => {
-                if let Some(object_ty) = schema.object_types.get(name) {
+                if let Some(object_ty) = schema.input_types.get(name) {
                     object_ty
                         .validate_object(value.as_object().unwrap(), schema)
                         .map_err(|_| InvalidValue)

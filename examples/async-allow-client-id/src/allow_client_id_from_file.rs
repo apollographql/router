@@ -176,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("example.allow-client-id-from-file")
+            .get("example.allow_client_id_from_file")
             .expect("Plugin not found")
             .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))
             .unwrap();

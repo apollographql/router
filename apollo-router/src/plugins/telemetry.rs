@@ -80,14 +80,14 @@ fn default_jaeger_password() -> Option<String> {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TraceConfig {
-    #[schemars(schema_with = "option_sampler_schema")]
+    #[schemars(schema_with = "option_sampler_schema", default)]
     pub sampler: Option<Sampler>,
     pub max_events_per_span: Option<u32>,
     pub max_attributes_per_span: Option<u32>,
     pub max_links_per_span: Option<u32>,
     pub max_attributes_per_event: Option<u32>,
     pub max_attributes_per_link: Option<u32>,
-    #[schemars(schema_with = "option_resource_schema")]
+    #[schemars(schema_with = "option_resource_schema", default)]
     pub resource: Option<Resource>,
 }
 
@@ -174,16 +174,18 @@ impl fmt::Display for ReportingError {
 impl std::error::Error for ReportingError {}
 
 #[derive(Debug)]
-struct Reporting {
+struct Telemetry {
     config: Conf,
     tx: tokio::sync::mpsc::Sender<SpaceportConfig>,
     opentracing_layer: Option<OpenTracingLayer>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 struct Conf {
     pub spaceport: Option<SpaceportConfig>,
 
+    #[serde(skip, default)]
     pub graph: Option<StudioGraph>,
 
     pub opentelemetry: Option<OpenTelemetry>,
@@ -207,11 +209,11 @@ fn studio_graph() -> Option<StudioGraph> {
 }
 
 #[async_trait::async_trait]
-impl Plugin for Reporting {
+impl Plugin for Telemetry {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("starting: {}: {}", stringify!(Reporting), self.name());
+        tracing::debug!("starting: {}: {}", stringify!(Telemetry), self.name());
         replace_layer(self.try_build_layer()?)?;
 
         // Only check for notify if we have graph configuration
@@ -230,7 +232,8 @@ impl Plugin for Reporting {
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
         tracing::debug!("Reporting configuration {:?}!", configuration);
-        // Create graph configuration based on environment variables
+
+        // Graph can only be set via env variables.
         configuration.graph = studio_graph();
 
         // Studio Agent Spaceport listener
@@ -281,7 +284,7 @@ impl Plugin for Reporting {
             opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone()).into();
         }
 
-        Ok(Reporting {
+        Ok(Telemetry {
             config: configuration,
             tx,
             opentracing_layer,
@@ -300,7 +303,7 @@ impl Plugin for Reporting {
     }
 }
 
-impl Reporting {
+impl Telemetry {
     fn try_build_layer(&self) -> Result<BoxedLayer, BoxError> {
         tracing::debug!(
             "spaceport: {:?}, graph: {:?}",
@@ -507,7 +510,7 @@ async fn do_listen(addr_str: String) -> bool {
     true
 }
 
-register_plugin!("apollo", "reporting", Reporting);
+register_plugin!("apollo", "telemetry", Telemetry);
 
 #[cfg(test)]
 mod tests {
@@ -515,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("apollo.reporting")
+            .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "opentelemetry": null }))
             .unwrap();
