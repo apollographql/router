@@ -12,6 +12,7 @@ Probably have a section that talks about the various ways to configure the Route
 - CLI arguments
 - Configuration file
 - Supergraph schema
+- Call out the ability to make custom plugins (and point to the plugins section)
 
 ---
 
@@ -254,7 +255,7 @@ plugins:
               endpoint: http://example.com
               # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
               protocol: Grpc
-              # timmeout in seconds
+              # timeout in seconds
               timeout: 60
           trace_config:
             # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
