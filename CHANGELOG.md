@@ -76,6 +76,11 @@ All configuration that was previously under the `reporting` header is now under 
 
   Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
 
+- **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
+
+  The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+
+
 ## 🐛 Fixes
 
 - **Content-Type is application/json** ([639](https://github.com/apollographql/router/issues/639)) 
