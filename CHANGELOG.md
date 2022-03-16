@@ -62,10 +62,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Having plugins and layers as configurable items in yaml was creating confusion as to when it was appropriate to
 use a layer vs a plugin. As the layer API is a subset of the plugin API the layer option has been removed.
 
-- **Move Apollo plugins to top level configuration**
+- **Move Apollo plugins to top level configuration** ([PR #623](https://github.com/apollographql/router/pull/623))
 Previously plugins were all under the `plugins:` section of the yaml config. However, now apollo plugins are promoted 
 to the top level of the config. This reflects the fact that these plugins provide core functionality even though they 
 are implemented as plugins under the hood.
+
+- **Reporting config name changed to telemetry** ([PR #651](https://github.com/apollographql/router/pull/651))
+All configuration that was previously under the `reporting` header is now under `telemetry`
 
 ## 🚀 Features
 
@@ -76,6 +79,7 @@ are implemented as plugins under the hood.
 - **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
 
   The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+
 
 ## 🐛 Fixes
 
@@ -100,6 +104,19 @@ are implemented as plugins under the hood.
   router --schema > apollo_configuration_schema.json
   ```
   and follow the instructions for associating it with your particular text editor/IDE. 
+
+- **Input object validation** ([PR #658](https://github.com/apollographql/router/pull/658))
+  variable validation was incorrectly using output object instead of input objects
+
+## 🛠 Maintenance
+## 📚 Documentation
+
+## Example section entry format
+
+- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+
+  Description! And a link to a [reference](http://url)
+
 
 # [v0.1.0-alpha.8] 2022-03-08
 
