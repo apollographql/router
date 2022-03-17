@@ -16,7 +16,7 @@ struct HelloWorld {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin confguration here. It will automatically be deserialized from JSON.
+    // Put your plugin configuration here. It will automatically be deserialized from JSON.
 }
 
 // This is a bare bones plugin that can be duplicated when creating your own.
