@@ -43,6 +43,16 @@ This is consistent with propagate.
 ## 📚 Documentation
 
 
+# [v0.1.0-alpha.10] 2022-03-18
+## ❗ BREAKING ❗
+
+## :sparkles: Features
+- **Add Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+
+  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
+
+## 🐛 Fixes
+
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
 
