@@ -19,6 +19,6 @@ authentication server.
     }
 ```
 
-Note that layers that require a service to me moved across an `await` point, e.g. `checkpoint_async` or `filter_async`
+Note that layers that require a service to be moved across an `await` point, e.g. `checkpoint_async` or `filter_async`
 must be followed by a call to buffer, as they require the downstream service to be `Clone`.
 
