@@ -1,6 +1,6 @@
 # JWT authentication
 
-DISCLAIMER: This is an example for illustrative purposes. It has not been security audited and is purely intended of an 
+DISCLAIMER: This is an example for illustrative purposes. It has not been security audited and is purely intended as an 
 illustration of an approach to JWT verification via a router plugin.
 
 Demonstrates using `checkpoint` to perform authentication and reject requests that do not pass auth.
