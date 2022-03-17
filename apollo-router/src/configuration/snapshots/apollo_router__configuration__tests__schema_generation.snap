@@ -52,10 +52,10 @@ expression: "&schema"
                       {
                         "type": "object",
                         "required": [
-                          "name"
+                          "named"
                         ],
                         "properties": {
-                          "name": {
+                          "named": {
                             "type": "string"
                           }
                         },
@@ -168,10 +168,10 @@ expression: "&schema"
                         {
                           "type": "object",
                           "required": [
-                            "name"
+                            "named"
                           ],
                           "properties": {
-                            "name": {
+                            "named": {
                               "type": "string"
                             }
                           },
