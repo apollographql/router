@@ -19,12 +19,16 @@ sequenceDiagram
     RouterService->>QueryPlannerService: plan
     QueryPlannerService-->>RouterService: 
     RouterService->>ExecutionService: execute
+    par
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
+    and 
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
+    and 
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
+    end
     ExecutionService-->>RouterService: response
     RouterService-->>Client: response
 ```
