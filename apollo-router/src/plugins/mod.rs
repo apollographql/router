@@ -1,2 +1,3 @@
 pub mod override_url;
-mod telemetry;
+pub mod rhai;
+pub mod telemetry;

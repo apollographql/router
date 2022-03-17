@@ -7,6 +7,7 @@ use apollo_router_core::{
 use apollo_router_core::{
     register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
+use http::header::CONTENT_LENGTH;
 use http::HeaderMap;
 use http::{header::HeaderName, HeaderValue};
 use rhai::serde::{from_dynamic, to_dynamic};
@@ -41,9 +42,21 @@ macro_rules! service_handle_response {
                         .into();
                 }
                 if function_found {
-                    response.context = this
-                        .run_rhai_script_arc($function_name, response.context)
-                        .unwrap();
+                    let ctx_request = response.context.request.clone();
+                    response.context =
+                        match this.run_rhai_script_arc($function_name, response.context) {
+                            Ok(res) => res,
+                            Err(err) => {
+                                let ctx = Context::new().with_request(ctx_request);
+                                ctx.insert(CONTEXT_ERROR, err)
+                                    .expect("error is always a string; qed");
+
+                                return plugin_utils::$response_ty::builder()
+                                    .context(ctx)
+                                    .build()
+                                    .into();
+                            }
+                        };
 
                     for (header_name, header_value) in response.context.request.headers() {
                         response
@@ -51,6 +64,7 @@ macro_rules! service_handle_response {
                             .headers_mut()
                             .insert(header_name, header_value.clone());
                     }
+                    response.response.headers_mut().remove(CONTENT_LENGTH);
                 }
 
                 response
@@ -74,14 +88,14 @@ macro_rules! handle_error {
 }
 
 #[derive(Default, Clone)]
-struct Rhai {
+pub struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct Conf {
+pub struct Conf {
     filename: PathBuf,
 }
 
@@ -214,10 +228,8 @@ impl Plugin for Rhai {
                             }
                         };
 
-                    plugin_utils::QueryPlannerResponse::builder()
-                        .context(response.context)
-                        .build()
-                        .into()
+                    // Not safe to use the builders for managing responses
+                    response
                 })
                 .boxed()
         }
@@ -244,11 +256,8 @@ impl Plugin for Rhai {
                         this.run_rhai_script_arc(FUNCTION_NAME_REQUEST, request.context.clone()),
                         request
                     );
-
-                    plugin_utils::ExecutionRequest::builder()
-                        .context(request.context)
-                        .build()
-                        .into()
+                    // Not safe to use the builders for managing requests
+                    request
                 })
                 .boxed();
         }
@@ -286,7 +295,7 @@ impl Plugin for Rhai {
                             .headers_mut()
                             .insert(header_name.clone(), header_value.clone());
                     }
-
+                    request.http_request.headers_mut().remove(CONTENT_LENGTH);
                     request
                 })
                 .boxed();
@@ -314,9 +323,21 @@ impl Plugin for Rhai {
                         .into();
                 }
                 if function_found {
-                    response.context = this
-                        .run_rhai_script_arc(FUNCTION_NAME_RESPONSE, response.context)
-                        .unwrap();
+                    let ctx_request = response.context.request.clone();
+                    response.context =
+                        match this.run_rhai_script_arc(FUNCTION_NAME_RESPONSE, response.context) {
+                            Ok(res) => res,
+                            Err(err) => {
+                                let ctx = Context::new().with_request(ctx_request);
+                                ctx.insert(CONTEXT_ERROR, err)
+                                    .expect("error is always a string; qed");
+
+                                return plugin_utils::SubgraphResponse::builder()
+                                    .context(ctx)
+                                    .build()
+                                    .into();
+                            }
+                        };
 
                     for (header_name, header_value) in response.context.request.headers() {
                         response
@@ -324,6 +345,7 @@ impl Plugin for Rhai {
                             .headers_mut()
                             .insert(header_name, header_value.clone());
                     }
+                    response.response.headers_mut().remove(CONTENT_LENGTH);
                 }
 
                 response
@@ -411,6 +433,7 @@ impl Rhai {
     fn new_rhai_engine() -> Engine {
         let mut engine = Engine::new();
         engine
+            .set_max_expr_depths(0, 0)
             .register_indexer_set_result(Headers::set_header)
             .register_indexer_get(Headers::get_header)
             .register_indexer_set(Object::set)

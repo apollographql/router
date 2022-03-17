@@ -6,7 +6,7 @@ mod executable;
 mod files;
 mod http_server_factory;
 mod layers;
-mod plugins;
+pub mod plugins;
 mod reload;
 pub mod router_factory;
 mod state_machine;
