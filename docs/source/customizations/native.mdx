@@ -89,7 +89,7 @@ use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 ```
 
-The compiler will let you know things any of these are not needed via helpful warnings. Depending on what your module is doing you may find that you are using modules from different crates as well.
+The compiler will let you know if any of these things are not needed via helpful warnings. Depending on what your module is doing you may find that you are using modules from different crates as well.
 
 ### Defining your configuration
 All plugins must have configuration. Minimally a boolean to specify enabled of not, but potentially anything that can be 
@@ -207,9 +207,9 @@ It provides common building blocks that removes much of the complexity of writin
     }
 ```
 
-[tower-rs](https://github.com/tower-rs), on which the router is based, comes with many "off the shelf" layers. In addition, Apollo provide layers that cover common functionality and integration with third party products.
+[tower-rs](https://github.com/tower-rs), on which the router is based, comes with many "off the shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third party products.
 
-Before implementing a layer yourself, always checking to see if an existing layer implementation will fit your needs. Layer reuse is significantly easier than implementing layers from scratch.
+Before implementing a layer yourself, always check if an existing layer implementation will fit your needs. Layer reuse is significantly easier than implementing layers from scratch.
 
 ### Registering your plugin
 To enable the Apollo Router to discover your plugin it must be registered.
