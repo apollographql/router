@@ -843,25 +843,12 @@ name = "cookies-to-headers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-router",
  "apollo-router-core",
- "async-trait",
- "futures",
- "hex",
  "http",
- "jwt-simple",
- "schemars",
- "serde",
  "serde_json",
- "serde_json_bytes",
- "strum 0.24.0",
- "strum_macros 0.24.0",
  "tokio",
- "tokio-util 0.7.0",
  "tower",
- "tracing",
- "tracing-subscriber 0.3.9",
 ]
 
 [[package]]

@@ -88,14 +88,14 @@ macro_rules! handle_error {
 }
 
 #[derive(Default, Clone)]
-struct Rhai {
+pub struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct Conf {
+pub struct Conf {
     filename: PathBuf,
 }
 
@@ -433,6 +433,7 @@ impl Rhai {
     fn new_rhai_engine() -> Engine {
         let mut engine = Engine::new();
         engine
+            .set_max_expr_depths(0, 0)
             .register_indexer_set_result(Headers::set_header)
             .register_indexer_get(Headers::get_header)
             .register_indexer_set(Object::set)
