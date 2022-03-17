@@ -9,6 +9,9 @@ expression: "&schema"
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
   "properties": {
+    "forbid_mutations": {
+      "type": "boolean"
+    },
     "headers": {
       "type": "object",
       "properties": {
