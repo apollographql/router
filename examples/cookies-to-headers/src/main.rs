@@ -25,7 +25,7 @@
 
 use anyhow::Result;
 
-// `cargo run -- -s ../graphql/supergraph.graphql -c ./config.yml`
+// `cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }
