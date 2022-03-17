@@ -296,7 +296,6 @@ impl Plugin for Rhai {
                             .insert(header_name.clone(), header_value.clone());
                     }
                     request.http_request.headers_mut().remove(CONTENT_LENGTH);
-                    tracing::info!("headers: {:?}", request.http_request.headers());
                     request
                 })
                 .boxed();
