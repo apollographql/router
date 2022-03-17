@@ -9,7 +9,7 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // We don't need any in this example
 struct ContextData {}
 
-// Passing information via context is useful for storing things like authentication data or other
+// Passing information via context is useful for storing things like authentication data or
 // collecting cache control information.
 // Services are structured in a hierarchy:
 // ```
@@ -20,12 +20,12 @@ struct ContextData {}
 //                                      |------> ........
 // ```
 //
-// For each request a single instance of context is created and passed to all services.
+// For each request a single instance of `Context` is created and passed to all services.
 //
 // In this example we:
-// 1. Place some information in context at the incoming request of the router service. (world!)
+// 1. Place some information in `Context` at the incoming request of the router service. (world!)
 // 2. Pick up and print it out at subgraph request. (Hello world!)
-// 3. For each subgraph response merge the some information into the context. (response_count)
+// 3. For each subgraph response merge some information into the `Context`. (response_count)
 // 4. Pick up and print it out at router response. (response_count)
 //
 impl Plugin for ContextData {

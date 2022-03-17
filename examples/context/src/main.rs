@@ -12,7 +12,7 @@ use anyhow::Result;
 // you can use the plugin by adding it to `config.yml`
 mod context_data;
 
-// `cargo run -- -s ../graphql/supergraph.graphql -c ./config.yml`
+// `cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }
