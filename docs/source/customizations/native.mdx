@@ -19,15 +19,15 @@ Implement this function if your plugin must interact at the earliest/latest stag
 
 #### Query Planning (query_planning_service)
 
-Implement this function if your plugin must interact with the query planning functionality. For example,  ???
+Implement this function if your plugin must interact with the query planning functionality. For example, if you wish to log query plan details.
 
 #### Execution (execution_service)
 
-Implement this function if your plugin must interact with the execution functionality. For example,  ???
+Implement this function if your plugin must interact with the execution functionality. For example, if you wish to prevent a query from being executed based on a policy decision.
 
 #### Subgraph (subgraph_service)
 
-Implement this function if your plugin must interact with the subgraph functionality. For example,  you wish to insert additional headers to pass to a subgraph.
+Implement this function if your plugin must interact with the subgraph functionality. For example, you wish to insert additional headers to pass to a subgraph.
 
 Typical use cases will involve interactions with the router or subgraph services. 
 
@@ -103,31 +103,30 @@ This is the most heart of implementing your plugin and this can be as simple or 
 impl Plugin for HelloWorld {
     type Config = Conf;;
 
-    // THIS WILL BE INVOKED WHENEVER A CONFIGURATION IS CHANGED
-    // DURING ROUTER EXECUTION INCLUDING AT STARTUP
+    // This will be invoked whenever a configuration is changed
+    // during router execution including at startup
     async fn startup(&mut self) -> Result<(), BoxError> {
         // Perform any startup code for your plugin here
         // This will be called before any requests are served.
         Ok(())
     }
 
-    // THIS WILL BE INVOKED WHENEVER A CONFIGURATION IS CHANGED
-    // DURING ROUTER EXECUTION INCLUDING AT SHUTDOWN
+    // This will be invoked whenever a configuration is changed
+    // during router execution including at shutdown
     async fn shutdown(&mut self) -> Result<(), BoxError> {
         // Perform any shutdown code for your plugin here
         // No new requests will be served after this is called.
         Ok(())
     }
 
-    // THIS WILL BE INVOKED ONCE WHEN A ROUTER STARTS AND COMPILED
-    // IN PLUGINS ARE REGISTERED
+    // This will be invoked once when a router starts and compiled
+    // in plugins are registered
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(HelloWorld { configuration })
     }
 
-    // ONLY IMPLEMENT THOSE SERVICES YOU WISH TO MODIFY. THE DEFAULT
-    // IMPLEMENTATION WILL DO THE SAME AS JUST RETURNING THE
-    // UN-MODIFIED SERVICE
+    // Only implement those services you wish to modify. The default
+    // implementation will just return un-modified service
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
