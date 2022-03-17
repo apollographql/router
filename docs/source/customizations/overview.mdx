@@ -37,14 +37,14 @@ sequenceDiagram
 
     Client->>RouterService: request
     RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService:
+    QueryPlannerService-->>RouterService: 
     RouterService->>ExecutionService: execute
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-->>RouterService: response
     RouterService-->>Client: response
 ```
