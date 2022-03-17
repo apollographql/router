@@ -22,7 +22,8 @@
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
-      "Telemetry": "/configuration/telemetry"
+      "OpenTelemetry": "/configuration/open-telemetry",
+      "Spaceport": "/configuration/spaceport"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
@@ -34,8 +35,7 @@
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
     },
     "TODO(Not Categorized)": {
-      "Build from source": "/build-from-source",
-      "Some spaceport stuff": "/spaceport"
+      "Build from source": "/build-from-source"
     }
   }
 }

@@ -1,0 +1,52 @@
+# `headers` configuration allows you to propagate, remove or rename headers on subgraph requests.
+# Rules are applied in order, starting will those in the `all` section followed by any subgraph specific config.
+headers:
+  # The following section is applied to all subgraphs.
+  all:
+    # Propagate headers matching name but do nothing if the client header did not exist.
+    - propagate:
+        named: "Propagate"
+
+    # Propagate headers matching name and default if the client header did not exist.
+    - propagate:
+        named: "PropagateAndDefault"
+        default: "DefaultValue"
+
+    # Propagate headers matching name and rename on the subgraph request.
+    - propagate:
+        named: "PropagateAndRename"
+        rename: "NewHeaderName"
+
+    # Propagate headers matching name and rename on the subgraph request. Default if the client header did not exist.
+    - propagate:
+        named: "PropagateAndDefaultAndRename"
+        default: "DefaultValue"
+        rename: "NewHeaderName"
+
+    # Propagate headers matching a regex
+    - propagate:
+        matching: "PropagateMatching-.*"
+
+    # Remove a named header
+    - remove:
+        named: "Remove"
+
+    # Remove headers matching a regex
+    - remove:
+        matching: "RemoveMatching-.*"
+
+    # Insert a header value
+    - insert:
+        name: "Insert"
+        value: "Value"
+
+  # The following section is applied to all subgraphs.
+  subgraphs:
+    # Anything shown in the above `all` section can be specified on a subgraph specific basis.
+    products:
+      # Insert a header value
+      - insert:
+          name: "InsertSubgraph"
+          value: "Value"
+
+

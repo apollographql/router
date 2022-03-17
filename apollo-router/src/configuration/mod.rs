@@ -6,8 +6,8 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use schemars::gen::SchemaGenerator;
-use schemars::schema::{ObjectValidation, Schema, SchemaObject, SubschemaValidation};
-use schemars::{JsonSchema, Set};
+use schemars::schema::{ObjectValidation, Schema, SchemaObject};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
@@ -88,7 +88,7 @@ impl Configuration {
         if is_global_subscriber_set() {
             // Add the reporting plugin, this will be overridden if such a plugin actually exists in the config.
             // Note that this can only be done if the global subscriber has been set, i.e. we're not unit testing.
-            plugins.push(("apollo.reporting".into(), Value::Object(Map::new())));
+            plugins.push(("apollo.telemetry".into(), Value::Object(Map::new())));
         }
 
         // Add all the apollo plugins
@@ -100,13 +100,15 @@ impl Configuration {
         }
 
         // Add all the user plugins
-        for (plugin, config) in &self.plugins.plugins {
-            plugins.push((plugin.clone(), config.clone()));
+        if let Some(config_map) = self.plugins.plugins.as_ref() {
+            for (plugin, config) in config_map {
+                plugins.push((plugin.clone(), config.clone()));
+            }
         }
 
         // Plugins must be sorted. For now this sort is hard coded, but we may add something generic.
         plugins.sort_by_key(|(name, _)| match name.as_str() {
-            "apollo.reporting" => -100,
+            "apollo.telemetry" => -100,
             "apollo.rhai" => 100,
             _ => 0,
         });
@@ -131,26 +133,10 @@ impl FromStr for Configuration {
 }
 
 fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
-    let plugins_refs = plugins
-        .keys()
-        .map(|name| {
-            Schema::Object(SchemaObject {
-                object: Some(Box::new(ObjectValidation {
-                    required: Set::from([name.to_string()]),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            })
-        })
-        .collect::<Vec<_>>();
-
     let plugins_object = SchemaObject {
         object: Some(Box::new(ObjectValidation {
             properties: plugins,
-            ..Default::default()
-        })),
-        subschemas: Some(Box::new(SubschemaValidation {
-            any_of: Some(plugins_refs),
+            additional_properties: Option::Some(Box::new(Schema::Bool(false))),
             ..Default::default()
         })),
         ..Default::default()
@@ -192,7 +178,7 @@ impl JsonSchema for ApolloPlugins {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct UserPlugins {
-    pub plugins: Map<String, Value>,
+    pub plugins: Option<Map<String, Value>>,
 }
 
 impl JsonSchema for UserPlugins {
@@ -436,6 +422,7 @@ mod tests {
         let settings = SchemaSettings::draft2019_09().with(|s| {
             s.option_nullable = true;
             s.option_add_null_type = false;
+            s.inline_subschemas = true;
         });
         let gen = settings.into_generator();
         let schema = gen.into_root_schema_for::<Configuration>();
