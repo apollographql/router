@@ -1,5 +1,5 @@
 ---
-title: Writing simple business logic in a scripting language
+title: Writing simple logic in a scripting language
 description: Using rhai script to implement simple behaviors without compiling a custom plugin
 ---
 
@@ -7,22 +7,24 @@ import { Link } from 'gatsby';
 
 ---
 
-If you have specific needs that requires you to write your own plugin but you don't want to learn Rust and you want to use a scripting language, rather than a compiled language, you can use [`rhai`](http://rhai.rs) script to implement some business logic in Router.
+The router supports simple customization (via YAML configuration) and more complex customization (via a Rust Plugin Extension), but what if you want to do something slightly more complex than configuration, but don't want to write a Rust plugin. That's where our Rhai plugin steps in. Rhai is a simple scripting language, [`rhai`](http://rhai.rs), that provides basic capabilities. With Rhai it's easy to write simple scripts which manipulate strings, process headers and perform a variety of small ad-hoc programming tasks.
 
 The rhai plugin is using the same mechanisms as native Rust plugins and has access to the same life-cycle events.
+
+At this time our support for Rhai is deemed experimental and is rudimentary. If the experiment goes well, expect us to extend our support and make the environment more capable.
 
 ### Configuration
 
 ```yaml
 rhai:
-    # Currently there can only be a single file.  If there are multiple
+    # Currently there can only be a single rhai file.  If there are multiple
     # customizations, keep them all in a single file.
     filename: "location_of_your_rhai_script.rhai"
 ```
 
 ### Rhai Plugins
 
-As with native plugins, there are 4 services, each with a request and a response, which can be used to inject extra behaviour into a router. The router Rhai plugin implements eight functions (two for each service) as follows:
+As with native plugins, there are 4 services, each with a request and a response, which can be used to inject extra behaviour into a router. The Rhai plugin implements eight functions (two for each service) as follows:
 
     - router_service_request
     - router_service_response
@@ -33,7 +35,7 @@ As with native plugins, there are 4 services, each with a request and a response
     - subgraph_service_request
     - subgraph_service_response
 
-Each of these functions are optional, just implement the ones where you wish to inject behaviour. Every listed function takes a `context` as parameter with `extensions` and `headers` inside and must return an updated `context`.
+Each of these functions are optional, just implement the ones where you wish to inject behaviour. Every listed function takes a `context` as parameter with `extensions` and `headers` inside and must return a `context`.
 
 ### Examples
 
