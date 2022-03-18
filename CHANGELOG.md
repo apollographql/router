@@ -39,6 +39,9 @@ Now:
 ```
 This is consistent with propagate.
 
+- **RUST_LOG / Cmd arg precedence changed** ([PR #693](https://github.com/apollographql/router/pull/693))
+  Precedence has changed from ENV variable, CLI arg, default to CLI arg, ENV variable, default.
+
 ## 🚀 Features
 
 - **Forbid mutations plugin** ([#641](https://github.com/apollographql/router/pull/641))
@@ -46,9 +49,6 @@ This is consistent with propagate.
 
 - **Add Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
   Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
-
-- **RUST_LOG renamed to APOLLO_LOG_LEVEL** ([PR #693](https://github.com/apollographql/router/pull/693))
-  The `RUST_LOG` environment variable has been renamed to `APOLLO_LOG`. Precedence has changed from ENV variable, CLI arg, default to CLI arg, ENV variable, default.
 
 ## 🐛 Fixes
 ## 🛠 Maintenance
