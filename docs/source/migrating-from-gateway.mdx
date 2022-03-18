@@ -6,20 +6,83 @@ description: An overview of the considerations to make when migrating from Apoll
 
 import { Link } from 'gatsby';
 
+The Apollo Router is a high-performance alternative to the Apollo Gateway, written in the Rust programming language.  Apollo Router offers the same general functionality and feature set as the Apollo Gateway, though the manner in which it is configured is different.
+
+The standard Apollo Router packaging is a static binary that is passed its configuration file at start time, rather than a JavaScript application used as a library.  Its configuration file is hot-reloaded, making it possible to change the behavior of a running server with no downtime.  Rather than writing configuration as JavaScript or TypeScript code, the Apollo Router's configuration is provided as a YAML file and supplied to the Router using an argument.
+
+It is possible to use the Apollo Router as a library, but the Apollo Router aims to make it less necessary to write custom user-code, as is done in the Gateway, and instead integrate the most common critical features directly using declarative methods.
+
+## Taking inventory of Gateway configuration
+
+Apollo Gateway runs on top of Apollo Server, and both have various surfaces on which configurations can be made.  To migrate from the Apollo Gateway, you'll need to take account of these configuration and customizations, and implement the same behavior using different mechanisms provided by the Apollo Router.  For example, you may be customizing the HTTP headers that your subgraphs receive from the client, or passing specific headers back to the client from specific subgraphs.
+
+It'll be good to make a check-list, and you'll want to start by looking for configuration and customizations these places:
+
+- Environment variables
+- Non-Apollo telemetry and instrumentation (i.e., OpenTelemetry, Datadog)
+- Constructor options passed to `new ApolloGateway({ ... })`
+- Constructor options passed to `new ApolloServer({ ... })` (TODO — is this one important? Is plugins most important?)
+- Specific `plugins` passed to `new ApolloServer({ plugins: [ ... ] })`
+- Custom middleware (e.g., Express, Koa, Fastify)
+
+The sections below provide more details on what to look for in each of these categories.
+
+### Environment variables
+
+Environment variables have implicit effect on some Apollo features, like Managed Federation and usage reporting.  Take note of any `APOLLO_` prefixed environment variables that are being set when starting the host runtime you run your Apollo Gateway and Apollo Server on.  All official Apollo-related environment variables are prefixed with `APOLLO_`.
+
+The Apollo Router supports most (non-deprecated) `APOLLO_`-prefixed environment variables, including:
+
+- `APOLLO_KEY`
+- `APOLLO_GRAPH_REF`
+
+Again, deprecated environment variables (e.g., `ENGINE_API_KEY`) are not supported.  Additionally, the Apollo Router does not currently respect the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you necessitate this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
+
+## Constructor options passed to `new ApolloGateway({ ... })`
+
+TODO: The options that you pass to the `ApolloGateway` constructor.  (e.g., `supergraphSdl`, `serviceList`, etc.)
+
+### `supergraphSdl`
+
+Generally speaking, the free Apollo managed federation features can be used as the source of truth for Apollo Router, needing only to have the `APOLLO_KEY` environment specified.
+
+When starting it, the Apollo Router takes a `--supergraph` argument which specifies the supergraph file which the Router should use.  This file is watched and the Router's supergraph will hot-reload when the file contents are changed.  Any external process can be used to update the Supergraph, though the most common is `rover supergraph compose` TODO LINK.
+
+### `serviceList`
+
+This method of doing in-process composition was deprecated with the introduction of `supergraphSdl`.  Today, `rover supergraph compose` TODO LINK can can process subgraphs from combination of introspection, SDL files and even Studio-registered variants and turn them into a supergraph.  The supergraph can be passed to the Router using the `--supergraph` argument, and is hot-reloaded on each change.  
+
+### `buildService`
+
+- This is often used to override subgraph URLs at runtime.  Now you can use `override_subgraph_urls`. 
+- This function can return `RemoteGraphQLDataSource` classes which allow changing requests to subgraphs
+  These are often used to change headers that are passed to subgraphs.  This can be done with `headers`.
+  - `willSendRequest`
+  - `didReceiveResponse`
+  - `didEncounterError`
+- `logger`
+
+## Specific `plugins` passed to `new ApolloServer({ plugins: [ ... ] })`
+
 TODO
 
-- Talk about the difference in the model.  Static versus dynamic.
+- Talk about the differences in writing plugins in Rust.
+- Link to the life-cycles in the overview of the customizations section (generally link there)
+
+Apollo Router is trying to minimize the number of cases where custom plugins are necessary to perform common behaviors, for example, setting custom HTTP status codes, transmitting telemetry data, etc.  Out of the box, Apollo Router has a YAML-configuration based approach to propagating headers and support for OpenTelemetry. TODO LINKs
+
+In general, we're interested in minimizing the need for users to write plugins. In that spirit, prior to writing a plugin, we encourage users to open issues on our GitHub repository with use-cases so we can iterate on possible generalized solutions.
+
+That said, some customizations - or time constraints - will likely necessitate some users write plugins.  The Apollo Router's plugins are today written in Rust.  In the future, we expect to offer the ability to write scripted behavior in other languages.  To facilitate writing Rust plugins, we've put together a series of examples of common plugins and those can be found in the Customizations section of our docs.
+
+TODO
+
+  - custom plugins (rhai script)
+  - custom plugins (native)
+
   - Request pipeline lifecycle hooks (Apollo Server ish)
     - Pre/post parse
     - pre/post validate
     - pre/post execution
     - pre/post-response
     - .. etc .
-  - `RemoteGraphQLDataSource`s
-- Approaches to configuring Apollo Router
-  - Native features
-  - custom plugins (rhai)
-  - custom plugins (native)
-- Highlight main touch-points for configuration in the Gateway, go through Router approaches for those.
-  - Headers
-  - Telemetry
