@@ -108,6 +108,7 @@ Then define your plugin with the specifying the configuration as an associated t
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
     type Config = Conf;
+}
 ```
 
 Note: You need to derive JsonSchema so that your configuration can participate in json schema generation.
@@ -179,6 +180,7 @@ impl Plugin for HelloWorld {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
     }
+}
 ```
 
 
@@ -236,7 +238,7 @@ plugins:
 
 ## Plugin Lifecycle
 
-Plugins follow a strict lifecyle which helps provides structure to the processing within the router.
+Plugins follow a strict lifecycle which helps provides structure to the processing within the router.
 
 ### Plugin Creation
 
