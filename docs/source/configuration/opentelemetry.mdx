@@ -21,12 +21,12 @@ To get maximum benefit from distributed-tracing, all components in your system s
 
 ## Opentracing support
 Although OpenTelemetry has superseded OpenTracing, you may need to interact with systems that have not yet moved to
-OpenTelemetry. 
+OpenTelemetry.
 
 If you are using OpenTelemetry throughout your systems and just want to view in [Jaeger](https://www.jaegertracing.io/) 
-you don't need to configure this.  
+you don't need to configure this.
 
-```yaml title="config.router.yaml" 
+```yaml title="router.yaml"
 # ...other configuration...
 
 telemetry:
@@ -34,14 +34,14 @@ telemetry:
   opentracing:
     # "zipkin_b3" and "jaeger" formats are supported
     format: "zipkin_b3"
-   
+
   # ...other telemetry configuration...
 ```
 
 ## Using Jaeger
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
-```yaml title="config.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   opentelemetry:
     jaeger:
@@ -89,14 +89,12 @@ telemetry:
 ```
 
 ## OpenTelemetry Collector via OTLP
-[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that can be 
-used to receive, process and export your telemetry data in a pluggable way. 
 
-If you find that the built-in telemetry 
-features of the Apollo Router are missing some desired functionality e.g. [exporting to Kafka](https://opentelemetry.io/docs/collector/configuration/#exporters)
-then it's worth considering this option.
+[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that can be used to receive, process and export your telemetry data in a pluggable way.
 
-```yaml title="config.router.yaml"
+If you find that the built-in telemetry features of the Apollo Router are missing some desired functionality e.g. [exporting to Kafka](https://opentelemetry.io/docs/collector/configuration/#exporters) then it's worth considering this option.
+
+```yaml title="router.yaml"
 telemetry:
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   opentelemetry:

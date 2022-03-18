@@ -27,7 +27,7 @@ If you haven't yet, complete the first two steps from the Apollo Studio getting 
 If you've already set up Apollo Federation _without_ Apollo Studio, you're probably passing a `--supergraph` (or `-s`) flag in the command (e.g., in container startup scripts) you use to start the router:
 
 ```sh
-router --config ./config.yaml --supergraph ./your-local-supergraph.graphql
+router --config ./router.yaml --supergraph ./your-local-supergraph.graphql
 ```
 
 Your configuration file may use a different name, but the `--supergraph` option is specific to _non_-managed federation, in which supergraph schema composition is performed via the Rover CLI and provided as a file.
@@ -37,7 +37,7 @@ With managed federation, composition is instead performed by _Apollo_, and the r
 When starting the Apollo Router and retrieving the schema from the Apollo Studio registry, remove the `--supergraph` (or `-s`) argument from your Apollo Router startup command, leaving the `--config` argument if it was already provided:
 
 ```sh
-router --config ./config.yaml
+router --config ./router.yaml
 ```
 
 ## 4. Connect the router to Studio
@@ -49,7 +49,7 @@ Your router uses a graph API key to identify itself to Studio.
 After obtaining your graph API key, you set two environment variables in your environment when starting your router:
 
 ```sh
-APOLLO_KEY=<YOUR_GRAPH_API_KEY> APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT> router --config ./config.yaml
+APOLLO_KEY=<YOUR_GRAPH_API_KEY> APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT> router --config ./router.yaml
 ```
 
 The `--config` argument may be present if you were previously passing the operational configuration file to the router and the configuration may use a different name.

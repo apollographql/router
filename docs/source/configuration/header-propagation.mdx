@@ -5,7 +5,7 @@ description: Configuring the HTTP headers which are sent to subgraphs
 
 You can customize which HTTP headers the Apollo Router includes in its requests to your subgraphs. Transformations can be specified on all or per-subgraph basis in your [YAML configuration file](#configuration-file).
 
-```yaml{3-12}:title=config.router.yaml
+```yaml{3-12}:title=router.yaml
 # ...other configuration...
 
 headers:
@@ -79,7 +79,7 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 
 Here's a complete example showing all the possible configuration options in use.
 
-```yaml:title=config.router.yaml
+```yaml:title=router.yaml
 headers:
   # All subgraph configuration.
   all:

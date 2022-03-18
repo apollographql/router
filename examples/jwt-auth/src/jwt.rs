@@ -12,7 +12,7 @@
 //!
 //! Usage:
 //!
-//! In your config.yaml, specify the following details:
+//! In your router.yaml, specify the following details:
 //! ```yaml
 //! plugins:
 //! Authentication Mechanism
@@ -399,7 +399,7 @@ mod tests {
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
     // and deserialize an hmac configured yml configuration into it
-    // see config.yml for more information
+    // see `router.yaml` for more information
     #[test]
     fn plugin_registered() {
         apollo_router_core::plugins()
