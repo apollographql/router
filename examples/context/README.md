@@ -1,5 +1,14 @@
 # Context
-Context can be used to pass information between services. It's useful for storing things like authentication data or 
+
+Demonstrate use of context to pass information between request lifecycle stages.
+
+## Usage
+```bash
+cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
+```
+
+## Implementation
+Context can be used to pass information between services. It's useful for storing things like authentication data or
 collecting cache control information.
 
 The request lifecycle looks like this:
