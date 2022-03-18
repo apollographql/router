@@ -29,17 +29,14 @@ The sections below provide more details on what to look for in each of these cat
 
 ### Environment variables
 
-Environment variables have implicit effect on some Apollo features, like Managed Federation and usage reporting.  Take note of any `APOLLO_` prefixed environment variables that are being set when starting the host runtime you run your Apollo Gateway and Apollo Server on.
+Environment variables have implicit effect on some Apollo features, like Managed Federation and usage reporting.  Take note of any `APOLLO_` prefixed environment variables that are being set when starting the host runtime you run your Apollo Gateway and Apollo Server on.  All official Apollo-related environment variables are prefixed with `APOLLO_`.
 
-All official Apollo-related environment variables are prefixed with `APOLLO_`.  Common cases are:
+The Apollo Router supports most (non-deprecated) `APOLLO_`-prefixed environment variables, including:
 
 - `APOLLO_KEY`
 - `APOLLO_GRAPH_REF`
-- TODO More?
 
-In most cases, the Apollo Router supports the same environment variables, though the following are not yet supported:
-
-- `TODO` (probably customizing the uplink endpoints)
+Again, deprecated environment variables (e.g., `ENGINE_API_KEY`) are not supported.  Additionally, the Apollo Router does not currently respect the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you necessitate this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
 
 ## Constructor options passed to `new ApolloGateway({ ... })`
 
