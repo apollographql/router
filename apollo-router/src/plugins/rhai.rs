@@ -456,7 +456,7 @@ impl Rhai {
     }
 }
 
-register_plugin!("apollo", "rhai", Rhai);
+register_plugin!("experimental", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
@@ -488,7 +488,7 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("apollo.rhai")
+            .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
@@ -560,7 +560,7 @@ mod tests {
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
-            .get("apollo.rhai")
+            .get("experimental.rhai")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
