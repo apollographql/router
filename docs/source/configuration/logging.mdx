@@ -1,8 +1,29 @@
 ---
-title: Configuring Logging
-description: Tuning logging configurations
+title: Logging
+description: Logging output
 ---
 
 import { Link } from 'gatsby';
 
-The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments). JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver.
+The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments).
+
+## Basic logging via shell
+
+Basic logging is mostly used during local development.
+
+```bash
+2022-03-18T10:28:11.090054Z  INFO apollo_router::executable: apollo-router@0.1.0-alpha.9
+2022-03-18T10:28:11.160650Z  INFO apollo_router: Starting Apollo Router
+2022-03-18T10:28:11.339906Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
+```
+
+## JSON-formatted logging:
+
+JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver. It is preferred for production environments.
+
+```json
+{"timestamp":"2022-03-18T11:46:41.926942Z","level":"INFO","fields":{"message":"apollo-router@0.1.0-alpha.9"},"target":"apollo_router::executable"}
+{"timestamp":"2022-03-18T11:46:41.985121Z","level":"INFO","fields":{"message":"Starting Apollo Router"},"target":"apollo_router"}
+{"timestamp":"2022-03-18T11:46:42.171173Z","level":"INFO","fields":{"message":"Listening on http://127.0.0.1:4000 🚀"},"target":"apollo_router"}
+{"timestamp":"2022-03-18T11:46:43.453993Z","level":"INFO","fields":{"message":"Stopped"},"target":"apollo_router"}
+```
