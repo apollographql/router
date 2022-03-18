@@ -13,16 +13,17 @@ The rhai plugin is using the same mechanisms as native Rust plugins and has acce
 
 At this time our support for Rhai is deemed experimental and is rudimentary. If the experiment goes well, expect us to extend our support and make the environment more capable.
 
-### Configuration
+## Configuration
 
 ```yaml
-rhai:
+plugins:
+  experimental.rhai:
     # Currently there can only be a single rhai file.  If there are multiple
     # customizations, keep them all in a single file.
     filename: "location_of_your_rhai_script.rhai"
 ```
 
-### Rhai Plugins
+## Rhai scripting
 
 As with native plugins, there are 4 services, each with a request and a response, which can be used to inject extra behaviour into a router. The Rhai plugin implements eight functions (two for each service) as follows:
 
@@ -37,9 +38,9 @@ As with native plugins, there are 4 services, each with a request and a response
 
 Each of these functions are optional, just implement the ones where you wish to inject behaviour. Every listed function takes a `context` as parameter with `extensions` and `headers` inside and must return a `context`.
 
-### Examples
+## Examples
 
-##### Example 1
+### Example 1
 
 Manipulate headers and the request context in addition to modifying the response.
 
@@ -66,7 +67,7 @@ fn router_service_response(context) {
 }
 ```
 
-#### Example 2
+### Example 2
 
 Convert cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the examples/cookies-to-headers directory.
 

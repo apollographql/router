@@ -19,6 +19,7 @@
     },
     "Configuration": {
       "Overview": "/configuration/overview",
+      "Cors": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
