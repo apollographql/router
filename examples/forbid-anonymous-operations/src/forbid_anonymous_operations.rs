@@ -14,7 +14,7 @@ struct ForbidAnonymousOperations {}
 impl Plugin for ForbidAnonymousOperations {
     // We either forbid anonymous operations,
     // Or we don't. This is the reason why we don't need
-    // to deserialize any configuration from a .yml file.
+    // to deserialize any configuration from a .yaml file.
     //
     // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = ();
@@ -96,7 +96,7 @@ mod tests {
     // This test ensures the router will be able to
     // find our `forbid_anonymous_operations` plugin,
     // and deserialize an empty yml configuration into it
-    // see config.yml for more information
+    // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()

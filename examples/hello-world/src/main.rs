@@ -9,7 +9,7 @@ use anyhow::Result;
 // adding the module to your main.rs file
 // will automatically register it to the router plugin registry.
 //
-// you can use the plugin by adding it to `config.yml`
+// you can use the plugin by adding it to `router.yml`
 mod hello_world;
 
 // `cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml`

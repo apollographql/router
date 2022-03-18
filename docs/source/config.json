@@ -23,7 +23,7 @@
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
-      "OpenTelemetry": "/configuration/open-telemetry",
+      "OpenTelemetry": "/configuration/opentelemetry",
       "Spaceport": "/configuration/spaceport"
     },
     "Customizations": {

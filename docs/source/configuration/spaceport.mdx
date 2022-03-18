@@ -21,7 +21,7 @@ More information on usage reporting is available in the [Studio documentation](h
 ## Advanced configuration
 Spaceport can run either as an [internal component](#internal-spaceport) of a single Apollo Router instance, or as an [external resource](#external-spaceport) shared by _multiple_ router instances.
 
-```yaml title="config.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   # Spaceport configuration. These values are the default values if not specified
   spaceport:
@@ -37,7 +37,7 @@ By default, spaceport runs within a single Apollo Router instance. It requires n
 
 You can optionally configure which address the internal spaceport listens on by setting the `listener` property. This should only be necessary if there's a conflict on the default port that Router chooses (e.g., if running multiple routers or other applications using the same port on the same host), or if it's desirable to change the bind address.
 
-```yaml title="config.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   # Spaceport configuration. These values are the default values if not specified
   spaceport:
@@ -54,7 +54,7 @@ To enable the external spaceport, another Router can be run to act as the collec
 
 For help with this feature, please [open a discussion](https://github.com/apollographql/router/discussions).
 
-```yaml title="config.router.yaml"
+```yaml title="router.yaml"
 telemetry:
   # Spaceport configuration. These values are the default values if not specified
   spaceport:

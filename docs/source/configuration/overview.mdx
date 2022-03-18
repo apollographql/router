@@ -9,8 +9,10 @@ import { Link } from "gatsby";
 
 You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
+TODO We don't explain `--config` or the configuration file first.
+
 ```bash
-./router --config configuration.yaml --supergraph supergraph-schema.graphql
+./router --config router.yaml --supergraph supergraph-schema.graphql
 ```
 
 Options are described below.
@@ -141,7 +143,7 @@ Apollo Router takes an optional YAML configuration file as input via the `--conf
 By default, the Apollo Router starts a HTTP server listening on `127.0.0.1:4000`. This can be
 changed in the configuration file:
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 #
 # server: Configuration of the HTTP server
 #
@@ -153,7 +155,7 @@ server:
 
 It can also listen on a Unix socket (not supported on Windows):
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 server:
   # absolute path to a Unix socket
   listen: /tmp/router.sock
@@ -179,7 +181,7 @@ You can set it up in the configuration file's [OpenTelemetry section](../open-te
 The Apollo Router can be customized through [plugins](../customizations/overview). Any plugin
 can have its specific section in the configuration file:
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 plugins:
   example.plugin:
     var1: "hello"
@@ -190,7 +192,7 @@ plugins:
 
 You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
 
-```yaml {5,9} title="configuration.yaml"
+```yaml {5,9} title="router.yaml"
 headers:
   subgraphs:
     products:

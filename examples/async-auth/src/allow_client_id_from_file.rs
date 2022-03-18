@@ -172,7 +172,7 @@ mod tests {
     // This test ensures the router will be able to
     // find our `allow-client-id-from-file` plugin,
     // and deserialize an empty yml configuration containing a path
-    // see config.yml for more information
+    // see router.yaml for more information
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
