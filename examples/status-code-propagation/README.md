@@ -3,6 +3,12 @@
 Demonstrates propagation of http status code from subgraph services to the overall response.
 For instance, if a subgraph service fails and returns non 200 status code then it is propagated to the client.
 
+## Usage
+```bash
+cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
+```
+
+## Implementation
 This implementation makes use of `map_response` and `Context` to pass information from subgraph requests to the overall
 `router_response` service.
 

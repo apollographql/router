@@ -2,6 +2,13 @@
 
 Demonstrates using `checkpoint` to prevent requests with anonymous operations.
 
+## Usage
+```bash
+cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
+```
+
+## Implementation
+
 `checkpoint` and `checkpoint_async` allow you to halt request and return immediately. This is particularly useful for authentication.
 
 ```rust

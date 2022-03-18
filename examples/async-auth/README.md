@@ -1,7 +1,14 @@
 # Async authentication
 Demonstrates use of `checkpoint_async` to perform authentication that depends on an asynchronous call.
 
-In this case a file is read to check for an ID, but it could be any async call, for example to an external 
+## Usage
+```bash
+cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
+```
+
+## Implementation
+
+In this example a file is read to check for an ID, but it could be any async call, for example to an external 
 authentication server.
 
 `checkpoint` and `checkpoint_async` allow you to halt request and return immediately. This is particularly useful for authentication.
