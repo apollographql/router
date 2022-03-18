@@ -44,7 +44,7 @@ This is consistent with propagate.
 - **Forbid mutations plugin** ([#641](https://github.com/apollographql/router/pull/641))
   The forbid mutations plugin allows you to configure the router so it disallows mutations, effectively making it read only. This can come in handy when testing the router by mirroring traffic for example.
 
-- **Add Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+- **Add experimental Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
   Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
 
 ## 🐛 Fixes
