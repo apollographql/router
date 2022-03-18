@@ -456,7 +456,7 @@ impl Rhai {
     }
 }
 
-register_plugin!("apollo", "rhai", Rhai);
+register_plugin!("experimental", "rhai", Rhai);
 
 #[cfg(test)]
 mod tests {
