@@ -6,11 +6,11 @@ description: An overview of the considerations to make when migrating from Apoll
 
 import { Link } from 'gatsby';
 
-The Apollo Router is a high-performance alternative to the Apollo Gateway, written in the Rust programming language.  Apollo Router offers the same general functionality and feature set as the Apollo Gateway, though the technique in which it is configured is different.
+The Apollo Router is a high-performance alternative to the Apollo Gateway, written in the Rust programming language.  Apollo Router offers the same general functionality and feature set as the Apollo Gateway, though the manner in which it is configured is different.
 
 The standard Apollo Router packaging is a static binary that is passed its configuration file at start time, rather than a JavaScript application used as a library.  Its configuration file is hot-reloaded, making it possible to change the behavior of a running server with no downtime.  Rather than writing configuration as JavaScript or TypeScript code, the Apollo Router's configuration is provided as a YAML file and supplied to the Router using an argument.
 
-It is possible to use the Apollo Router as a library, but the Apollo Router aims to make it less necessary to write custom user-code in the Gateway and instead integrate the most common critical features directly using declarative methods.
+It is possible to use the Apollo Router as a library, but the Apollo Router aims to make it less necessary to write custom user-code, as is done in the Gateway, and instead integrate the most common critical features directly using declarative methods.
 
 ## Taking inventory of Gateway configuration
 
