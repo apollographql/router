@@ -1,6 +1,6 @@
 ---
 title: Configuring the Apollo Router
-description: High-performance graph routing for federated graphs
+description: YAML configuration
 ---
 
 import { Link } from "gatsby";
@@ -162,7 +162,7 @@ server:
 
 ### Cross Origin Resource Sharing (CORS)
 
-The Apollo Router can configure [Cross Origin Resource Sharing policies](../cors) throughits configuration file.
+The Apollo Router can configure [Cross Origin Resource Sharing policies](../cors) through its configuration file.
 
 ### OpenTelemetry tracing
 
@@ -174,7 +174,7 @@ a GraphQL operation and associated dependencies.
 
 You can set it up in the configuration file's [OpenTelemetry section](../open-telemetry).
 
-### Plugins
+## Customizations
 
 The Apollo Router can be customized through [plugins](../customizations/overview). Any plugin
 can have its specific section in the configuration file:
@@ -186,14 +186,7 @@ plugins:
     var2: 1
 ```
 
-To activate a plugin without configuration option, it can be added as follows:
-
-```yaml title="configuration.router.yaml"
-plugins:
-  example.plugin:
-```
-
-### Avoiding repetition using YAML anchors and aliases
+## Avoiding repetition using YAML anchors and aliases
 
 You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
 
