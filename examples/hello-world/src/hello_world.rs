@@ -16,7 +16,7 @@ struct HelloWorld {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin confguration here. It will automatically be deserialized from JSON.
+    // Put your plugin configuration here. It will automatically be deserialized from JSON.
 }
 
 // This is a bare bones plugin that can be duplicated when creating your own.
@@ -102,15 +102,13 @@ register_plugin!("example", "hello_world", HelloWorld);
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
-    use std::str::FromStr;
 
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
             .get("example.hello_world")
             .expect("Plugin not found")
-            .create_instance(&Value::from_str("{\"name\":\"Bob\"}").unwrap())
+            .create_instance(&serde_json::json!({"name" : "Bob"}))
             .unwrap();
     }
 }

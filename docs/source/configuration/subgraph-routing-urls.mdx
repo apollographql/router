@@ -5,10 +5,13 @@ description: Overriding the default subgraph URLs used during query plan executi
 
 import { Link } from 'gatsby';
 
-By default, the router uses subgraph URLs defined in the schema so there is no further configuration needed.
-But when you need to override those addresses locally, you can do that in your [YAML configuration file](#configuration-file).
+By default, the router uses subgraph URLs defined in the supergraph schema during composition, either in Apollo Studio or in Rover.  In this case, there is usually no further configuration needed.
 
-This will override the URL for the accounts subgraph:
+In the event that you need to override the URL that is provided - for example, to account for changing network topography - you can change override specific subgraphs configuration in your [YAML configuration file](#configuration-file).
+
+## Example
+
+In this example the `accounts` subgraph URL is overridden to point to `http://localhost:8080` and the value which was specified during composition in either Apollo Studio or Rover will be ignored.
 
 ```yaml
 override_subgraph_url:

@@ -4,3 +4,4 @@ telemetry:
       tracing:
         exporter:
           grpc:
+            protocol: Grpc

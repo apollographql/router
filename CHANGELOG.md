@@ -20,6 +20,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+# [vnext] 2022-XX-XX
+
 ## ❗ BREAKING ❗
 
 - **Header propagation remove configuration `name` to `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
@@ -38,10 +40,16 @@ Now:
 This is consistent with propagate.
 
 ## 🚀 Features
+
+- **Forbid mutations plugin** ([#641](https://github.com/apollographql/router/pull/641))
+  The forbid mutations plugin allows you to configure the router so it disallows mutations, effectively making it read only. This can come in handy when testing the router by mirroring traffic for example.
+
+- **Add Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function you can have on a Rust plugin. You have access to the context and headers directly from the RHAI script.
+
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
-
 
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
@@ -85,6 +93,9 @@ This is consistent with propagate.
 
 - **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
 
+
+- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
+
   Both `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow` instead of the `Step` enum.  `ControlFlow` has two variants, `Continue` and `Break`.
 
 - **The `reporting` configuration changes to `telemetry`** ([PR #651](https://github.com/apollographql/router/pull/651))
@@ -117,6 +128,7 @@ This is consistent with propagate.
 - **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
 
   The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+>>>>>>> main
 
 
 ## 🐛 Fixes

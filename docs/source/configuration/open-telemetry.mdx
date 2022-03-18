@@ -1,8 +1,9 @@
 ---
 title: OpenTelemetry
+description: Collect tracing information
 ---
 
-## OpenTelemetry
+import { Link } from "gatsby";
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 * [Jaeger](https://www.jaegertracing.io/)
@@ -14,11 +15,11 @@ This is useful for showing how response time is affected by:
 * Query shape (sub-request dependencies).
 * Apollo Router post-processing.
 
-Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/) can assemble spans into a gaant chart for analysis.
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/) can assemble spans into a gantt chart for analysis.
 
 To get maximum benefit from distributed-tracing, all components in your system should be instrumented.
 
-### Opentracing support
+## Opentracing support
 Although OpenTelemetry has superseded OpenTracing, you may need to interact with systems that have not yet moved to
 OpenTelemetry. 
 
@@ -37,7 +38,7 @@ telemetry:
   # ...other telemetry configuration...
 ```
 
-### Using Jaeger
+## Using Jaeger
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
 ```yaml title="config.router.yaml"
@@ -87,7 +88,7 @@ telemetry:
                   - value2
 ```
 
-### OpenTelemetry Collector via OTLP
+## OpenTelemetry Collector via OTLP
 [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that can be 
 used to receive, process and export your telemetry data in a pluggable way. 
 
