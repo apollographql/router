@@ -1,13 +1,57 @@
 ---
 title: Logging
-description: Logging output formats
+description: Configuring logging
 ---
 
 import { Link } from 'gatsby';
 
+## Logging verbosity
+
+The Apollo Router accepts a command line argument to set the log level.
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+</td>
+<td>
+
+The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+Default: `info`
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+It also accepts a `APOLLO_LOG_LEVEL` environment variable with the same options as the command line argument.
+
+Command line takes precedence over environment variable.
+
+### Advanced configuration
+
+It is possible to have more granular control over logging, see the [Env Logger](https://docs.rs/env_logger/latest/env_logger/) documentation for more infomation. 
+
+Note that `reqwest_tracing` must be set to at least `INFO` for tracing to subgraphs to work. This is because request tracing propagation happens at `INFO` level.
+
+## Output formats
+
 The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments).
 
-## Basic logging via shell
+### Basic logging via shell
 
 Basic logging is mostly used during local development.
 
@@ -17,9 +61,9 @@ Basic logging is mostly used during local development.
 2022-03-18T10:28:11.339906Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-## JSON-formatted logging:
+### JSON-formatted logging:
 
-JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver. It is preferred for production environments.
+JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver. The Apollo Router uses the popular Bunyan format.
 
 ```json
 {"timestamp":"2022-03-18T11:46:41.926942Z","level":"INFO","fields":{"message":"apollo-router@0.1.0-alpha.9"},"target":"apollo_router::executable"}
