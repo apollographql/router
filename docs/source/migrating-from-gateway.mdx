@@ -16,9 +16,9 @@ It is possible to use the Apollo Router as a library, but the Apollo Router aims
 
 Apollo Gateway runs on top of Apollo Server, and both have various surfaces on which configurations can be made.  To migrate from the Apollo Gateway, you'll need to take account of these configuration and customizations, and implement the same behavior using different mechanisms provided by the Apollo Router.  For example, you may be customizing the HTTP headers that your subgraphs receive from the client, or passing specific headers back to the client from specific subgraphs.
 
-Since Apollo Router is a new product in a new language and different customization techniques, it'll be good to make a check-list of existing configurations to ensure that you capture the differences in your migration.
+Since Apollo Router is a new product in a new language with different customization techniques, it'll be good to make a check-list of existing configurations to ensure that you capture the differences in your migration.
 
-You'll want to start by looking for configuration and customizations these places:
+You'll want to start by looking for configuration and customizations in these places:
 
 - Environment variables
 - Non-Apollo telemetry and instrumentation (i.e., OpenTelemetry, Datadog)
@@ -38,7 +38,7 @@ The Apollo Router supports most (non-deprecated) `APOLLO_`-prefixed environment 
 - `APOLLO_KEY`
 - `APOLLO_GRAPH_REF`
 
-Again, deprecated environment variables (e.g., `ENGINE_API_KEY`) are *not* supported.  Additionally, the Apollo Router does not currently respect the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you necessitate this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
+Again, deprecated environment variables (e.g., `ENGINE_API_KEY`) are *not* supported.  Additionally, the Apollo Router does not currently respect the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you require this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
 
 ## Constructor options passed to `new ApolloGateway({ ... })`
 
@@ -48,7 +48,7 @@ The amount of customizations you'll find on the `new ApolloGateway({ ... })` con
 
 Generally speaking, the free Apollo managed federation features can be used as the source of truth for Apollo Router, needing only to have the `APOLLO_KEY` environment specified.
 
-When starting it, the Apollo Router takes a `--supergraph` argument which specifies the supergraph file which the Router should use.  This file is watched and the Router's supergraph will hot-reload when the file contents are changed.  Any external process can be used to update the Supergraph, though the most common is `rover supergraph compose`, as [seen in our documentation](https://www.apollographql.com/docs/rover/supergraphs/) when not already using Managed Federation.
+When starting, the Apollo Router takes a `--supergraph` argument that specifies the supergraph file that the Router should use.  This file is watched and the Router's supergraph will hot-reload when the file contents are changed.  Any external process can be used to update the Supergraph, though the most common is `rover supergraph compose`, as [seen in our documentation](https://www.apollographql.com/docs/rover/supergraphs/) when not already using Managed Federation.
 
 ### `serviceList`
 
@@ -89,13 +89,13 @@ The `context` parameter is an object that is which TODO
 
 It was often necessary to write various plugins for Apollo Server, which is the foundation that Apollo Gateway runs on.  These plugins are passed to the `new ApolloServer({ ... })` constructor options in the `plugins` array.  Understanding what each plugin which was enabled will be important to note.
 
-Generally speaking, Apollo Router is trying to minimize the number of cases where custom plugins are necessary to perform common behaviors, for example, setting custom HTTP status codes, transmitting telemetry data, etc.  To facilitate this, Apollo Router has a YAML-structured configuration based which enables common behaviors:
+Generally speaking, Apollo Router is trying to minimize the number of cases where custom plugins are necessary to perform common behaviors. For example, setting custom HTTP status codes, transmitting telemetry data, etc.  To facilitate this, Apollo Router has a YAML-structured configuration that enables common behaviors:
 
 - Propagating particular/all headers to subgraphs
 - OpenTelemetry instrumentation and distributed tracing support
 - Adjusting logging verbosity
 
-To try to reduce the amount of user code that lives in each Apollo Router, prior to re-implementing existing Apollo Gateway plugin behavior in a new language (Rust), we encourage our community to start (or engage on existing) conversations about desired customizations in the [GitHub Discussions on the Router repository](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box and we'd like to help discuss their design.
+Prior to re-implementing existing Apollo Gateway plugin behavior in a new language (Rust), we encourage our community to start (or engage on existing) conversations about desired customizations in the [GitHub Discussions on the Router repository](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box and we'd like help to discuss their design.
 
 For less common use-cases, we also want to help build an ecosystem of plugins that can exist for Apollo Router, allowing users to enable more custom behaviors and to be able to ship the functionality they need before native support is available.
 
