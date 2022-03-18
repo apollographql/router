@@ -7,11 +7,25 @@ import { Link } from 'gatsby';
 
 ---
 
-The router supports simple customization (via YAML configuration) and more complex customization (via a Rust Plugin Extension), but what if you want to do something slightly more complex than configuration, but don't want to write a Rust plugin. That's where our Rhai plugin steps in. Rhai is a simple scripting language, [`rhai`](http://rhai.rs), that provides basic capabilities. With Rhai it's easy to write simple scripts which manipulate strings, process headers and perform a variety of small ad-hoc programming tasks.
+The router supports simple customization (via YAML configuration) and more complex customization (via a Rust Plugin Extension), but what if you want to do something slightly more complex than configuration, but don't want to write a Rust plugin. That's where our Rhai plugin steps in.
 
-The rhai plugin is using the same mechanisms as native Rust plugins and has access to the same life-cycle events.
+Rhai is a simple scripting language, [`Rhai`](http://rhai.rs), that provides basic capabilities. With Rhai it's easy to write simple scripts which manipulate strings, process headers and perform a variety of small ad-hoc programming tasks.
 
-At this time our support for Rhai is deemed experimental and is rudimentary. If the experiment goes well, expect us to extend our support and make the environment more capable.
+The Rhai scripting uses the same mechanisms as native Rust plugins and has access to the same life-cycle events.
+
+## Rhai support is experimental
+
+We are actively developing Rhai capability, and there is limited functionality right now.
+
+What you can do:
+* Simple manipulation of headers.
+
+What you cannot do:
+* Calls to external services.
+* Modify the body or status codes of requests/responses.
+* `checkpoint` style short circuiting of requests.
+
+We will likely make breaking changes to the Rhai script functionality in the future. However, updating your scripts should not be a large task. 
 
 ## Configuration
 
@@ -23,7 +37,7 @@ plugins:
     filename: "location_of_your_rhai_script.rhai"
 ```
 
-## Rhai scripting
+## Service hooks
 
 As with native plugins, there are 4 services, each with a request and a response, which can be used to inject extra behaviour into a router. The Rhai plugin implements eight functions (two for each service) as follows:
 
