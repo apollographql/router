@@ -19,12 +19,11 @@
     },
     "Configuration": {
       "Overview": "/configuration/overview",
-      "Cors": "/configuration/cors",
+      "CORS": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
-      "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
       "OpenTelemetry": "/configuration/opentelemetry",
-      "Spaceport": "/configuration/spaceport"
+      "Usage reporting": "/configuration/spaceport"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
