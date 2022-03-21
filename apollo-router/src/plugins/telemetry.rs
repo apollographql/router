@@ -33,8 +33,6 @@ use std::str::FromStr;
 use tower::util::BoxService;
 use tower::Layer;
 use tower::{BoxError, ServiceExt};
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-use tracing_subscriber::Layer as TracingLayer;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -213,7 +211,6 @@ impl Plugin for Telemetry {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("starting: {}: {}", stringify!(Telemetry), self.name());
         replace_layer(self.try_build_layer()?)?;
 
         // Only check for notify if we have graph configuration
@@ -226,7 +223,6 @@ impl Plugin for Telemetry {
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("shutting down: {}: {}", stringify!(Reporting), self.name());
         Ok(())
     }
 
@@ -355,37 +351,58 @@ impl Telemetry {
     fn setup_otlp(
         spaceport_config: &Option<SpaceportConfig>,
         graph_config: &Option<StudioGraph>,
-        tracing: &Tracing,
+        config: &Tracing,
     ) -> Result<BoxedLayer, BoxError> {
-        let mut pipeline = opentelemetry_otlp::new_pipeline().tracing();
+        let batch_size = std::env::var("OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+            .ok()
+            .and_then(|batch_size| usize::from_str(&batch_size).ok());
 
-        pipeline = pipeline.with_exporter(tracing.exporter.exporter()?);
+        let batch = BatchSpanProcessor::builder(
+            config.exporter.exporter()?.build_span_exporter()?,
+            opentelemetry::runtime::Tokio,
+        )
+        .with_scheduled_delay(std::time::Duration::from_secs(1));
+        let batch = if let Some(size) = batch_size {
+            batch.with_max_export_batch_size(size)
+        } else {
+            batch
+        }
+        .build();
 
-        pipeline = pipeline.with_trace_config(
-            tracing
-                .trace_config
-                .clone()
-                .unwrap_or_default()
-                .trace_config(),
-        );
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder();
+        if let Some(trace_config) = &config.trace_config {
+            builder = builder.with_config(trace_config.trace_config());
+        }
+        // If we have apollo graph configuration, then we can export statistics
+        // to the apollo ingress. If we don't, we can't and so no point configuring the
+        // exporter.
+        if graph_config.is_some() {
+            let apollo_exporter =
+                Self::apollo_exporter_pipeline(spaceport_config, graph_config).get_exporter()?;
+            builder = builder.with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
+        }
 
-        let tracer = pipeline.install_batch(opentelemetry::runtime::Tokio)?;
+        let provider = builder.with_span_processor(batch).build();
+
+        let tracer =
+            provider.versioned_tracer("opentelemetry-otlp", Some(env!("CARGO_PKG_VERSION")), None);
+
+        // This code will hang unless we execute from a separate
+        // thread.  See:
+        // https://github.com/apollographql/router/issues/331
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
+        // for more details and description.
+        let jh = tokio::task::spawn_blocking(|| {
+            opentelemetry::global::force_flush_tracer_provider();
+            opentelemetry::global::set_tracer_provider(provider);
+        });
+        futures::executor::block_on(jh)?;
 
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
         opentelemetry::global::set_error_handler(handle_error)?;
-        // It's difficult to extend the OTLP model with an additional exporter
-        // as we do when Jaeger is being used. In this case we simply add the
-        // agent as a new layer and proceed from there.
-        if graph_config.is_some() {
-            // Add spaceport agent as an OT pipeline
-            let apollo_exporter =
-                Self::apollo_exporter_pipeline(spaceport_config, graph_config).install_batch()?;
-            let agent = tracing_opentelemetry::layer().with_tracer(apollo_exporter);
-            tracing::debug!("Adding agent telemetry");
-            Ok(Box::new(telemetry.and_then(agent)))
-        } else {
-            Ok(Box::new(telemetry))
-        }
+
+        Ok(Box::new(telemetry))
     }
 
     fn setup_jaeger(
