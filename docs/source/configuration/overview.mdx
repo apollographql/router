@@ -126,7 +126,7 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 server:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1:4001
+  listen: 127.0.0.1:5000
 ```
 
 It can also listen on a Unix socket (not supported on Windows):
@@ -157,7 +157,7 @@ Subgraphs _not_ included in the `override_subgraph_url` list continue to use the
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
 
-### Cross Origin Resource Sharing (CORS)
+### Cross-Origin Resource Sharing (CORS)
 
 See [Configuring CORS in the Apollo Router](./cors).
 
@@ -201,7 +201,7 @@ The Apollo Router can generate a JSON schema for config validation in your text 
 Generate the schema with the following command:
 
 ```bash
-router --schema > configuration_schema.json
+./router --schema > configuration_schema.json
 ```
 
 After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
