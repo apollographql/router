@@ -213,6 +213,33 @@ It provides common building blocks that removes much of the complexity of writin
 
 Before implementing a layer yourself, always check if an existing layer implementation will fit your needs. Layer reuse is significantly easier than implementing layers from scratch.
 
+### Context
+
+Sometimes there is a need to propagate information between services. For instance:
+
+* Authentication information obtained at the `RouterService` is picked up by `SubgraphService(s)`.
+* Cache control headers at subgraph services are aggregated and returned to the client at the `RouterService`
+
+When a request is received a context is created and propagated throughout the entire request. It can store anything that is Serde compatible. For instance, all simple types or a custom type.
+
+#### Insert
+```rust
+context.insert("key1", 1)?;
+Serialization and deserialization happen automatically. You may sometimes need to specify the type in the case where the rust compiler cannot figure it out by itself.
+```
+
+#### Get
+```rust
+let value : u32 = context.get("key1")?;
+Upserts are guaranteed to happen serially. This is useful at the subgraph service where multiple requests are happening in parallel.
+```
+
+#### Upsert
+```rust
+context.upsert("key1", |v| v + 1, || 0)?;
+```
+Use `upsert` if you need to merge several values. Rust is multi-threaded, and you will get unexpected results if multiple threads write to context at the same time. `upasert` prevents issues by guaranteeing that modifications happen serially.
+
 ### Registering your plugin
 To enable the Apollo Router to discover your plugin it must be registered.
 

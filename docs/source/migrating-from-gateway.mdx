@@ -100,11 +100,15 @@ The `ApolloServer` constructor supports a large variety of options, but for the 
 
 ### `context`
 
-The `context` parameter is an object that is which TODO
+The `context` parameter is an object that is which allows you to propagate information across the request lifecycle. Use cases include:
+* Authentication information.
+* Header propagation.
+
+The Apollo Router has [similar functionality](./customizations/native#context).
 
 ### `plugins`
 
-It was often necessary to write various plugins for Apollo Server, which is the foundation that Apollo Gateway runs on.  These plugins are passed to the `new ApolloServer({ ... })` constructor options in the `plugins` array.  First, take note of each plugin and its use-cases and add it to your check-list, then consider approaches to accomplish the same thing in the Apollo Router.  Plugins might not map one-to-one to plugins in the Apollo Router, but you'll find similar techniques..
+It was often necessary to write various plugins for Apollo Server, which is the foundation that Apollo Gateway runs on.  These plugins are passed to the `new ApolloServer({ ... })` constructor options in the `plugins` array.  First, take note of each plugin and its use-cases and add it to your check-list, then consider approaches to accomplish the same thing in the Apollo Router.  Plugins might not map one-to-one to plugins in the Apollo Router, but you'll find similar techniques.
 
 Generally speaking, Apollo Router is trying to minimize the number of cases where custom plugins are necessary to perform common behaviors. For example, setting custom HTTP status codes, transmitting telemetry data, etc.  To facilitate this, Apollo Router has a YAML-structured configuration that enables common behaviors:
 
