@@ -20,39 +20,56 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-# [vnext] 2022-XX-XX
+# [v0.1.0-alpha.10] 2022-03-21
 
 ## ❗ BREAKING ❗
 
-- **Header propagation remove configuration `name` to `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
-  Previously:
-```yaml
-  # Remove a named header
-  - remove:
-    name: "Remove"
-```
-Now:
-```yaml
-  # Remove a named header
-  - remove:
-    named: "Remove"
-```
-This is consistent with propagate.
+- **Header propagation `remove`'s `name` is now `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
 
-- **RUST_LOG / Cmd arg precedence changed** ([PR #693](https://github.com/apollographql/router/pull/693))
-  Precedence has changed from ENV variable, CLI arg, default to CLI arg, ENV variable, default.
+  This merely renames the `remove` options' `name` setting to be instead `named` to be a bit more intuitively named and consistent with its partner configuration, `propagate`.
+
+  _Previous configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      name: "Remove" # Was: "name"
+  ```
+  _New configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      named: "Remove" # Now: "named"
+  ```
+
+- **Command-line flag vs Environment variable precedence changed** ([PR #693](https://github.com/apollographql/router/pull/693))
+
+  For logging related verbosity overrides, the `RUST_LOG` environment variable no longer takes precedence over the command line argument.  The full order of precedence is now command-line argument overrides environment variable overrides the default setting.
 
 ## 🚀 Features
 
-- **Forbid mutations plugin** ([#641](https://github.com/apollographql/router/pull/641))
-  The forbid mutations plugin allows you to configure the router so that it disallows mutations, effectively making it read only. This can come in handy when testing the router by mirroring traffic for example.
+- **Forbid mutations plugin** ([PR #641](https://github.com/apollographql/router/pull/641))
 
-- **Add experimental Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
-  Add a plugin to be able to write plugins in [Rhai script](https://rhai.rs/). You are now able to write your own `*_service` function as you can with a Rust plugin. You have access to the context and headers directly from the RHAI script.
+  The forbid mutations plugin allows you to configure the router so that it disallows mutations.  Assuming none of your `query` requests are mutating data or changing state (they shouldn't!) this plugin can be used to effectively make your graph read-only. This can come in handy when testing the router, for example, if you are mirroring/shadowing traffic when trying to validate a Gateway to Router migration! 😸
+
+- **⚠️ Add experimental Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+
+  Add an _experimental_ core plugin to be able to extend Apollo Router functionality using [Rhai script](https://rhai.rs/). This allows users to write their own `*_service` function similar to how as you would with a native Rust plugin but without needing to compile a custom router. Rhai scripts have access to the request context and headers directly and can make simple manipulations on them.
+
+  See our [Rhai script documentation](https://www.apollographql.com/docs/router/customizations/rhai) for examples and details!
 
 ## 🐛 Fixes
-## 🛠 Maintenance
+
+- **Correctly set the URL path of the HTTP request in `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
+
+  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
+
 ## 📚 Documentation
+
+- **We have incorporated a substantial amount of documentation** (via many, many PRs!)
+
+  See our improved documentation [on our website](https://www.apollographql.com/docs/router/).
 
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
@@ -131,14 +148,8 @@ This is consistent with propagate.
 - **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
 
   The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
->>>>>>> main
-
 
 ## 🐛 Fixes
-
-- **Take the current path of the http request and put it into the `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
-
-  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
 
 - **`Content-Type` of HTTP responses is now set to `application/json`** ([Issue #639](https://github.com/apollographql/router/issues/639))
 
