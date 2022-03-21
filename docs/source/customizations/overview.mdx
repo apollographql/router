@@ -1,22 +1,28 @@
 ---
-title: Extending Apollo Router functionality with Plugins
-description: Extending Apollo Router functionality 
+title: Plugins for the Apollo Router
+description: Extend the Apollo Router with custom functionality
 ---
 
-import { Link } from 'gatsby';
+You can write custom plugins for the Apollo Router to add functionality that isn't offered by default.  For example, you can make an external call to fetch authentication data for each incoming request.
 
-You can write custom plugins for Apollo Router to build functionality that isn't offered by default.  For example, make an external call to fetch some authentication data, or some complex logic.
+> Using plugins requires building a custom Apollo Router binary that includes your plugin code. This requires familiarity with building Rust projects. We also recommend looking at the [examples provided in the router repo](https://github.com/apollographql/router/tree/main/examples).
 
-Custom plugins require that you build a router binary that includes your custom code. For this you should be generally familiar with building Rust projects, and have looked at the [examples provided in the router repo](https://github.com/apollographql/router/tree/main/examples).
+## Plugin types
 
-If you only need to make simple changes to a request or response then it's worth checking to see if [rhai](#rhai) script is enough to meet your needs. 
+Two plugin types are available:
 
-If not, the [hello world](https://github.com/apollographql/router/blob/225915f6e084b13c3a0972f170cf4a1a6f8e7f28/examples/hello-world/src/hello_world.rs) plugin is a good getting started point for writing your first Rust router plugin.
+* [Native Rust plugins](./native/)
+* [Rhai script plugins](./rhai/) (experimental)
 
-## Request life-cycle
+### Which plugin type should I use?
 
-Regardless of if you are using Rhai or developing a native plugin, you will need to understand the request lifecycle
-and what data is available.
+If your plugin only needs to make basic changes to request or response headers, we recommend first checking whether a [Rhai script](./rhai/) can accomplish what you need.
+
+If not, the [hello world](https://github.com/apollographql/router/blob/225915f6e084b13c3a0972f170cf4a1a6f8e7f28/examples/hello-world/src/hello_world.rs) example plugin is a helpful starting point for writing your first [native Rust plugin](./native/).
+
+## Request lifecycle
+
+All types of Apollo Router plugins hook into the router's core request lifecycle. It's helpful to understand the phases of this lifecycle and what data is available:
 
 ```mermaid
 sequenceDiagram
@@ -33,20 +39,19 @@ sequenceDiagram
     par
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
-    and 
+    and
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
-    and 
+    and
     ExecutionService-)SubgraphService(s): sub-request
     SubgraphService(s)--)ExecutionService: 
-    end 
+    end
     ExecutionService-->>RouterService: response
     RouterService-->>Client: response
 ```
 
 Each service has a request and response data-structure that holds:
-1. A context object that was created at the start of the request and is propagated throughout the entire request life-cycle. It holds:
-    - The original request from the client.
-    - A bag of data that can be populated by plugins for communication across the request life-cycle.
-2. Any other specific data to that service, e.g., query plans, downstream requests/responses.
-
+* A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
+    - The original request from the client
+    - A bag of data that can be populated by plugins for communication across the request lifecycle
+* Any other specific data to that service (e.g., query plans and downstream requests/responses)

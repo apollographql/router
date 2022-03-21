@@ -1,13 +1,10 @@
 ---
-title: Logging
-description: Configuring logging
+title: Logging in the Apollo Router
 ---
 
 import { Link } from 'gatsby';
 
-## Logging verbosity
-
-The Apollo Router accepts a command line argument to set the log level.
+The Apollo Router accepts a command-line argument to set its log level:
 
 <table class="field-table api-ref">
   <thead>
@@ -29,7 +26,7 @@ The Apollo Router accepts a command line argument to set the log level.
 
 The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
-Default: `info`
+The default value is `info`.
 
 </td>
 </tr>
@@ -37,33 +34,30 @@ Default: `info`
 </tbody>
 </table>
 
-It also accepts a `RUST_LOG` environment variable with the same options as the command line argument.
-
-Command line takes precedence over environment variable.
-
-### Advanced configuration
-
-It is possible to have more granular control over logging, see the [Env Logger](https://docs.rs/env_logger/latest/env_logger/) documentation for more infomation. 
-
-Note that `reqwest_tracing` must be set to at least `INFO` for tracing to subgraphs to work. This is because request tracing propagation happens at `INFO` level.
+The router also accepts a `RUST_LOG` environment variable with the same possible values as the command-line argument. If you provide _both_, the command-line argument takes precedence.
 
 ## Output formats
 
-The Apollo Router automatically uses JSON-formatted logging when there is not an interactive shell session attached (e.g., in CI and deployed environments).
+The Apollo Router supports two logging formats:
+
+* [Basic logging](#basic-logging-via-shell), primarily for local development
+* [JSON-formatted logging](#json-formatted-logging), for compatibility with searchable logging tools like Google Cloud Logging
+
+The router uses basic logging whenever an interactive shell session is attached, and it uses JSON-formatted logging otherwise (e.g., in CI and deployed environments).
 
 ### Basic logging via shell
 
-Basic logging is mostly used during local development.
+Basic logging is mostly used during local development:
 
-```bash
+```
 2022-03-18T10:28:11.090054Z  INFO apollo_router::executable: apollo-router@0.1.0-alpha.9
 2022-03-18T10:28:11.160650Z  INFO apollo_router: Starting Apollo Router
 2022-03-18T10:28:11.339906Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-### JSON-formatted logging:
+### JSON-formatted logging
 
-JSON-formatted logging facilitates compatibility with searchable logging facilities like Google Cloud Logging or Stackdriver. The Apollo Router uses the popular Bunyan format.
+JSON-formatted logging provides compatibility with common searchable logging tools like Google Cloud Logging. The Apollo Router uses the popular Bunyan format:
 
 ```json
 {"timestamp":"2022-03-18T11:46:41.926942Z","level":"INFO","fields":{"message":"apollo-router@0.1.0-alpha.9"},"target":"apollo_router::executable"}
@@ -71,3 +65,9 @@ JSON-formatted logging facilitates compatibility with searchable logging facilit
 {"timestamp":"2022-03-18T11:46:42.171173Z","level":"INFO","fields":{"message":"Listening on http://127.0.0.1:4000 🚀"},"target":"apollo_router"}
 {"timestamp":"2022-03-18T11:46:43.453993Z","level":"INFO","fields":{"message":"Stopped"},"target":"apollo_router"}
 ```
+
+## Advanced configuration
+
+For more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
+
+Note that `reqwest_tracing` must be set to at least `INFO` for tracing to subgraphs to work. This is because request tracing propagation happens at `INFO` level.

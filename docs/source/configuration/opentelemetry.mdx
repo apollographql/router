@@ -1,30 +1,30 @@
 ---
-title: OpenTelemetry
+title: OpenTelemetry in the Apollo Router
 description: Collect tracing information
 ---
 
 import { Link } from "gatsby";
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+
 * [Jaeger](https://www.jaegertracing.io/)
 * [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC.
 
-The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. 
-This is useful for showing how response time is affected by:
-* Sub-request response times.
-* Query shape (sub-request dependencies).
-* Apollo Router post-processing.
+The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
-Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/) can assemble spans into a gantt chart for analysis.
+* Sub-request response times
+* Query shape (sub-request dependencies)
+* Apollo Router post-processing
 
-To get maximum benefit from distributed-tracing, all components in your system should be instrumented.
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
 
-## Opentracing support
-Although OpenTelemetry has superseded OpenTracing, you may need to interact with systems that have not yet moved to
-OpenTelemetry.
+> To get the most out of distributed tracing, _all_ components in your system should be instrumented.
 
-If you are using OpenTelemetry throughout your systems and just want to view in [Jaeger](https://www.jaegertracing.io/) 
-you don't need to configure this.
+## OpenTracing support
+
+Although OpenTelemetry has superseded OpenTracing, you might need to interact with systems that have not yet moved to OpenTelemetry.
+
+If you're using OpenTelemetry throughout your systems and just want to view in [Jaeger](https://www.jaegertracing.io/), you don't need to configure this.
 
 ```yaml title="router.yaml"
 # ...other configuration...
@@ -39,6 +39,7 @@ telemetry:
 ```
 
 ## Using Jaeger
+
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
 ```yaml title="router.yaml"

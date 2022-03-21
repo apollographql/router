@@ -1,11 +1,11 @@
 ---
-title: Spaceport
-description: Usage reporting via Apollo Studio
+title: Apollo Router usage reporting
+description: Send usage data to Apollo Studio
 ---
 
-**Spaceport** is a reporting agent for the Apollo Router that can transmit usage data to Apollo Studio. By default, it runs automatically as a component _within_ the Apollo Router. Additional details on its modes of operation are provided below.
+The Apollo Router can transmit usage data to Apollo Studio via a reporting agent called **spaceport**. By default, spaceport runs automatically as a component _within_ the Apollo Router. Additional details on its modes of operation are provided below.
 
-> **Note:** As with the rest of the Apollo Router, spaceport is in active development. Its behavior and functionality might change before general availability release. We welcome user feedback both during and after this alpha period.
+> **Note:** As with the rest of the Apollo Router, spaceport is in active development. Its behavior and functionality might change before general availability release. We welcome user feedback both during and after this preview period.
 
 ## Enabling usage reporting
 
@@ -16,9 +16,10 @@ APOLLO_KEY=<YOUR_GRAPH_API_KEY>
 APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT>
 ```
 
-More information on usage reporting is available in the [Studio documentation](https://www.apollographql.com/docs/studio/metrics/usage-reporting/).
+More information on usage reporting is available in the [Studio documentation](/studio/metrics/usage-reporting/).
 
 ## Advanced configuration
+
 Spaceport can run either as an [internal component](#internal-spaceport) of a single Apollo Router instance, or as an [external resource](#external-spaceport) shared by _multiple_ router instances.
 
 ```yaml title="router.yaml"
@@ -46,11 +47,13 @@ telemetry:
     listener: 127.0.0.1:50051
 ```
 
-### External spaceport
+### External spaceport (advanced)
 
-Running an external spaceport _is not necessary in most cases_. It might be desirable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally.  Under heavier workloads, it can also be beneficial to externalize the trace processing to reduce the amount of work that individiual router instances take on. The `listener` parameter is ignored for an external spaceport.
+**Running an external spaceport is not necessary in most cases.** However, it might be desirable in certain production environments where configuration of sensitive key data or allocation of reporting resources needs to be operated centrally. Under heavier workloads, it can also be beneficial to externalize trace processing to reduce the amount of work that individiual router instances perform.
 
-To enable the external spaceport, another Router can be run to act as the collector with the _exclusive_ role of processing Studio data. To configure this, the "collector" should have `external` set to `false` and an appropriate `listener` address and port combination. Routers exporting Studio data should set `external` to `true`, omit `listener`, and configure the `collector` property to point to the collector router.
+To enable the external spaceport, you run an additional Router instance with the _exclusive_ role of collecting and processing Studio data. To configure this, the "collector" should set `external` to `false` and an appropriate `listener` address and port combination.
+
+Router instances _besides_ the "collector" should set `external` to `true`, _omit_ `listener`, and configure the `collector` property to point to the collector router.
 
 For help with this feature, please [open a discussion](https://github.com/apollographql/router/discussions).
 
