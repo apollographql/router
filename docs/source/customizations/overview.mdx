@@ -34,17 +34,17 @@ sequenceDiagram
 
     Client->>RouterService: request
     RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService:
+    QueryPlannerService-->>RouterService: 
     RouterService->>ExecutionService: execute
     par
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     and
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     and
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     end
     ExecutionService-->>RouterService: response
     RouterService-->>Client: response
