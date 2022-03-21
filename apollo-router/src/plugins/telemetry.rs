@@ -1,9 +1,9 @@
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 mod otlp;
 
-use crate::apollo_telemetry::new_pipeline;
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::apollo_telemetry::StudioGraph;
+use crate::apollo_telemetry::{new_pipeline, PipelineBuilder};
 use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
@@ -331,18 +331,9 @@ impl Telemetry {
     ) -> Result<BoxedLayer, BoxError> {
         if graph_config.is_some() {
             // Add spaceport agent as an OT pipeline
-            let tracer = match new_pipeline()
-                .with_spaceport_config(spaceport_config)
-                .with_graph_config(graph_config)
-                .install_batch()
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("error installing spaceport telemetry: {}", e);
-                    return Err(Box::new(e));
-                }
-            };
-            let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+            let apollo_exporter =
+                Self::apollo_exporter_pipeline(spaceport_config, graph_config).install_batch()?;
+            let agent = tracing_opentelemetry::layer().with_tracer(apollo_exporter);
             tracing::debug!("Adding agent telemetry");
             Ok(Box::new(agent))
         } else {
@@ -350,6 +341,15 @@ impl Telemetry {
             // (which does nothing)
             Ok(Box::new(BaseLayer {}))
         }
+    }
+
+    fn apollo_exporter_pipeline(
+        spaceport_config: &Option<SpaceportConfig>,
+        graph_config: &Option<StudioGraph>,
+    ) -> PipelineBuilder {
+        new_pipeline()
+            .with_spaceport_config(spaceport_config)
+            .with_graph_config(graph_config)
     }
 
     fn setup_otlp(
@@ -378,18 +378,9 @@ impl Telemetry {
         // agent as a new layer and proceed from there.
         if graph_config.is_some() {
             // Add spaceport agent as an OT pipeline
-            let tracer = match new_pipeline()
-                .with_spaceport_config(spaceport_config)
-                .with_graph_config(graph_config)
-                .install_batch()
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("error installing spaceport telemetry: {}", e);
-                    return Err(Box::new(e));
-                }
-            };
-            let agent = tracing_opentelemetry::layer().with_tracer(tracer);
+            let apollo_exporter =
+                Self::apollo_exporter_pipeline(spaceport_config, graph_config).install_batch()?;
+            let agent = tracing_opentelemetry::layer().with_tracer(apollo_exporter);
             tracing::debug!("Adding agent telemetry");
             Ok(Box::new(telemetry.and_then(agent)))
         } else {
@@ -446,17 +437,8 @@ impl Telemetry {
         // to the apollo ingress. If we don't, we can't and so no point configuring the
         // exporter.
         if graph_config.is_some() {
-            let apollo_exporter = match new_pipeline()
-                .with_spaceport_config(spaceport_config)
-                .with_graph_config(graph_config)
-                .get_exporter()
-            {
-                Ok(x) => x,
-                Err(e) => {
-                    tracing::error!("error installing spaceport telemetry: {}", e);
-                    return Err(Box::new(e));
-                }
-            };
+            let apollo_exporter =
+                Self::apollo_exporter_pipeline(spaceport_config, graph_config).get_exporter()?;
             builder = builder.with_batch_exporter(apollo_exporter, opentelemetry::runtime::Tokio)
         }
 
