@@ -25,6 +25,7 @@ use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use warp::path::FullPath;
 use warp::{
     http::{header::HeaderMap, StatusCode},
     reply::with,
@@ -315,11 +316,13 @@ where
         )
         .and(warp::header::headers_cloned())
         .and(warp::host::optional())
+        .and(warp::path::full())
         .and_then(
             move |accept: Option<String>,
                   query: String,
                   header_map: HeaderMap,
-                  authority: Option<Authority>| {
+                  authority: Option<Authority>,
+                  path: FullPath| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
@@ -329,6 +332,7 @@ where
                             service,
                             authority,
                             http::Method::GET,
+                            path,
                             request,
                             header_map,
                         )
@@ -379,10 +383,12 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
+        .and(warp::path::full())
         .and(warp::host::optional())
         .and_then(
             move |request: graphql::Request,
                   header_map: HeaderMap,
+                  path: FullPath,
                   authority: Option<Authority>| {
                 let service = service.clone();
                 async move {
@@ -390,6 +396,7 @@ where
                         service,
                         authority,
                         http::Method::POST,
+                        path,
                         request,
                         header_map,
                     )
@@ -415,6 +422,7 @@ fn run_graphql_request<RS>(
     service: RS,
     authority: Option<Authority>,
     method: http::Method,
+    path: FullPath,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
@@ -446,9 +454,11 @@ where
         match service.ready_oneshot().await {
             Ok(mut service) => {
                 let uri = match authority {
-                    Some(authority) => Url::parse(&format!("http://{}", authority.as_str()))
-                        .expect("if the authority is some then the URL is valid; qed"),
-                    None => Url::parse("http://router").unwrap(),
+                    Some(authority) => {
+                        Url::parse(&format!("http://{}{}", authority.as_str(), path.as_str()))
+                            .expect("if the authority is some then the URL is valid; qed")
+                    }
+                    None => Url::parse(&format!("http://router{}", path.as_str())).unwrap(),
                 };
 
                 let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
@@ -811,6 +821,44 @@ mod tests {
             }
             .to_response(true)
         );
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn router_request_path() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(|req| req.url().path() == "/graphql")
+            .returning(move |_| {
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(expected_response.clone()))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+
+        let _response = client
+            .post(format!("{}/graphql", server.listen_address()))
+            .body(
+                json!(
+                {
+                  "query": "query",
+                })
+                .to_string(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .json::<graphql::Response>()
+            .await
+            .unwrap();
+
         server.shutdown().await
     }
 
