@@ -318,10 +318,10 @@ impl Telemetry {
                 Self::setup_jaeger(spaceport_config, graph_config, config)
             }
             #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-            Some(OpenTelemetry::Otlp(otlp::Otlp::Tracing(tracing))) => {
-                Self::setup_otlp(spaceport_config, graph_config, tracing)
-            }
-            None => Self::setup_spaceport(spaceport_config, graph_config),
+            Some(OpenTelemetry::Otlp(otlp::Otlp {
+                tracing: Some(tracing),
+            })) => Self::setup_otlp(spaceport_config, graph_config, tracing),
+            _ => Self::setup_spaceport(spaceport_config, graph_config),
         }
     }
 
@@ -355,13 +355,22 @@ impl Telemetry {
     fn setup_otlp(
         spaceport_config: &Option<SpaceportConfig>,
         graph_config: &Option<StudioGraph>,
-        tracing: &Option<Tracing>,
+        tracing: &Tracing,
     ) -> Result<BoxedLayer, BoxError> {
-        let tracer = if let Some(tracing) = tracing.as_ref() {
-            tracing.tracer()?
-        } else {
-            Tracing::tracer_from_env()?
-        };
+        let mut pipeline = opentelemetry_otlp::new_pipeline().tracing();
+
+        pipeline = pipeline.with_exporter(tracing.exporter.exporter()?);
+
+        pipeline = pipeline.with_trace_config(
+            tracing
+                .trace_config
+                .clone()
+                .unwrap_or_default()
+                .trace_config(),
+        );
+
+        let tracer = pipeline.install_batch(opentelemetry::runtime::Tokio)?;
+
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
         opentelemetry::global::set_error_handler(handle_error)?;
         // It's difficult to extend the OTLP model with an additional exporter
