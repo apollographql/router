@@ -22,7 +22,7 @@
       "Cors": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
-      "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
+      "Override subgraph URLs": "/configuration/override-subgraph-urls",
       "OpenTelemetry": "/configuration/opentelemetry",
       "Spaceport": "/configuration/spaceport"
     },

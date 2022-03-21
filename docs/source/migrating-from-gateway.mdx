@@ -58,7 +58,7 @@ This method of doing in-process composition was deprecated with the introduction
 
 TODO
 
-- This is often used to override subgraph URLs at runtime.  Now you can use `override_subgraph_urls`.
+- This is often used to override subgraph URLs at runtime.  Now you can use [`override_subgraph_urls`](./configuration/override-subgraph-urls.mdx).
 
 - This function can return `RemoteGraphQLDataSource` classes which allow changing requests to subgraphs
   These are often used to change headers that are passed to subgraphs.  This can be done with `headers`.
@@ -95,7 +95,7 @@ Generally speaking, Apollo Router is trying to minimize the number of cases wher
 - OpenTelemetry instrumentation and distributed tracing support
 - Adjusting logging verbosity
 
-Prior to re-implementing existing Apollo Gateway plugin behavior in a new language (Rust), we encourage our community to start (or engage on existing) conversations about desired customizations in the [GitHub Discussions on the Router repository](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box and we'd like help to discuss their design.
+Prior to re-implementing existing Apollo Gateway plugin behavior in a new language (Rust), we encourage our community to start (or engage on existing) conversations about desired customizations in the [GitHub Discussions on the Router repository](https://github.com/apollographql/router/discussions/).  There are various core plugins we think the Apollo Router could offer out of the box, and we'd like help to discuss their design.
 
 For less common use-cases, we also want to help build an ecosystem of plugins that can exist for Apollo Router, allowing users to enable more custom behaviors and to be able to ship the functionality they need before native support is available.
 
