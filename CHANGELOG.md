@@ -49,7 +49,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🚀 Features
 
-- **Forbid mutations plugin** ([#641](https://github.com/apollographql/router/pull/641))
+- **Forbid mutations plugin** ([PR #641](https://github.com/apollographql/router/pull/641))
 
   The forbid mutations plugin allows you to configure the router so that it disallows mutations.  Assuming none of your `query` requests are mutating data or changing state (they shouldn't!) this plugin can be used to effectively make your graph read-only. This can come in handy when testing the router, for example, if you are mirroring/shadowing traffic when trying to validate a Gateway to Router migration! 😸
 
@@ -58,6 +58,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Add an _experimental_ core plugin to be able to extend Apollo Router functionality using [Rhai script](https://rhai.rs/). This allows users to write their own `*_service` function similar to how as you would with a native Rust plugin but without needing to compile a custom router. Rhai scripts have access to the request context and headers directly and can make simple manipulations on them.
 
   See our [Rhai script documentation](https://www.apollographql.com/docs/router/customizations/rhai) for examples and details!
+
+## 🐛 Fixes
+
+- **Correctly set the URL path of the HTTP request in `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
+
+  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
 
 ## 📚 Documentation
 
@@ -142,14 +148,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
 
   The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
->>>>>>> main
-
 
 ## 🐛 Fixes
-
-- **Take the current path of the http request and put it into the `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
-
-  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
 
 - **`Content-Type` of HTTP responses is now set to `application/json`** ([Issue #639](https://github.com/apollographql/router/issues/639))
 
