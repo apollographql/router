@@ -20,6 +20,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+# [v0.1.0-alpha.11] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+## 🐛 Fixes
+- **Header propagation by `name` only fixed** ([PR #709](https://github.com/apollographql/router/pull/709))
+  Previously `rename` and `default` values were required (even though they were correctly not flagged as required in the json schema).
+  The following will now work:
+  ```yaml
+  headers:
+    all:
+    - propagate:
+        named: test
+  ```
+## 🛠 Maintenance
+## 📚 Documentation
+
 # [v0.1.0-alpha.10] 2022-03-21
 
 ## ❗ BREAKING ❗

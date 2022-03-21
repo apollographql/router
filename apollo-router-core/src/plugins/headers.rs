@@ -55,22 +55,21 @@ struct Insert {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 enum Propagate {
-    Matching {
-        #[schemars(schema_with = "string_schema")]
-        #[serde(deserialize_with = "deserialize_regex")]
-        matching: Regex,
-    },
-
     Named {
         #[schemars(schema_with = "string_schema")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
         #[schemars(schema_with = "option_string_schema", default)]
-        #[serde(deserialize_with = "deserialize_option_header_name")]
+        #[serde(deserialize_with = "deserialize_option_header_name", default)]
         rename: Option<HeaderName>,
         #[schemars(schema_with = "option_string_schema", default)]
-        #[serde(deserialize_with = "deserialize_option_header_value")]
+        #[serde(deserialize_with = "deserialize_option_header_value", default)]
         default: Option<HeaderValue>,
+    },
+    Matching {
+        #[schemars(schema_with = "string_schema")]
+        #[serde(deserialize_with = "deserialize_regex")]
+        matching: Regex,
     },
 }
 
@@ -437,6 +436,25 @@ mod test {
 
     #[test]
     fn test_propagate_config() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            - propagate:
+                named: "test"
+        "#,
+        )
+        .unwrap();
+
+        serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            - propagate:
+                named: "test"
+                rename: "bif"
+        "#,
+        )
+        .unwrap();
+
         serde_yaml::from_str::<Config>(
             r#"
         all:

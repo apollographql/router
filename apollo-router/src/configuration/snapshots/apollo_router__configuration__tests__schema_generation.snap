@@ -92,18 +92,6 @@ expression: "&schema"
                       {
                         "type": "object",
                         "required": [
-                          "matching"
-                        ],
-                        "properties": {
-                          "matching": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
                           "named"
                         ],
                         "properties": {
@@ -117,6 +105,18 @@ expression: "&schema"
                           "rename": {
                             "type": "string",
                             "nullable": true
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "matching"
+                        ],
+                        "properties": {
+                          "matching": {
+                            "type": "string"
                           }
                         },
                         "additionalProperties": false
@@ -208,18 +208,6 @@ expression: "&schema"
                         {
                           "type": "object",
                           "required": [
-                            "matching"
-                          ],
-                          "properties": {
-                            "matching": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "required": [
                             "named"
                           ],
                           "properties": {
@@ -233,6 +221,18 @@ expression: "&schema"
                             "rename": {
                               "type": "string",
                               "nullable": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "matching"
+                          ],
+                          "properties": {
+                            "matching": {
+                              "type": "string"
                             }
                           },
                           "additionalProperties": false
