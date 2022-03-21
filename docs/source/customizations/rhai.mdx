@@ -1,31 +1,27 @@
 ---
-title: Writing simple logic in a scripting language
-description: Using rhai script to implement simple behaviors without compiling a custom plugin
+title: Rhai script plugins for the Apollo Router
+description: Extend router functionality without compiling a custom plugin
 ---
 
-import { Link } from 'gatsby';
+> ⚠️ Apollo Router support for Rhai scripting is currently experimental. For details, see [experimental limitations](#experimental-limitations).
 
----
+The Apollo Router provides experimental support for plugins that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
 
-The router supports simple customization (via YAML configuration) and more complex customization (via a Rust Plugin Extension), but what if you want to do something slightly more complex than configuration, but don't want to write a Rust plugin. That's where our Rhai plugin steps in.
+Rhai plugins hook into the same Apollo Router lifecycle events as [native Rust plugins](./native/).
 
-Rhai is a simple scripting language, [`Rhai`](http://rhai.rs), that provides basic capabilities. With Rhai it's easy to write simple scripts which manipulate strings, process headers and perform a variety of small ad-hoc programming tasks.
+## Experimental limitations
 
-Rhai scripting uses the same mechanisms as native Rust plugins and has access to the same life-cycle events.
+Like the rest of the Apollo Router, Rhai support is in active development. During this preview, functionality is limited.
 
-## Rhai support is experimental
+**What you can do:**
+* Manipulate request HTTP headers
 
-We are actively developing Rhai capability, and there is limited functionality right now.
+**What you can't do (yet):**
+* Execute calls to external services
+* Modify the body or status codes of requests/responses
+* Perform `checkpoint`-style short circuiting of requests
 
-What you can do:
-* Simple manipulation of headers.
-
-What you cannot do:
-* Calls to external services.
-* Modify the body or status codes of requests/responses.
-* `checkpoint` style short circuiting of requests.
-
-We will likely make breaking changes to the Rhai script functionality in the future. However, updating your scripts should not be a large task. 
+We might introduce breaking changes to Rhai script functionality prior to the full release of the Apollo Router. However, any required updates to your existing plugins will probably be minor.
 
 ## Configuration
 
@@ -56,7 +52,7 @@ Each of these functions are optional, just implement the ones where you wish to 
 
 ### Example 1
 
-Manipulate headers and the request context in addition to modifying the response.
+This example manipulates headers and the request context:
 
 ```javascript
 fn router_service_request(context) {
@@ -83,11 +79,11 @@ fn router_service_response(context) {
 
 ### Example 2
 
-Convert cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the examples/cookies-to-headers directory.
+This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
 
 ```javascript
-// This will convert all cookie pairs into headers.
-// If you only wish to convert certain cookies, you
+// This converts all cookie pairs into headers.
+// If you only want to convert certain cookies, you
 // can add logic to modify the processing.
 fn subgraph_service_request(context) {
     // Find our cookies
@@ -103,7 +99,7 @@ fn subgraph_service_request(context) {
             context.headers[k_v[0]] = k_v[1];
         }
     }
-    // Always return the context 
+    // Always return the context
     context
 }
 ```
