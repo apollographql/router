@@ -26,8 +26,8 @@ pub enum Otlp {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Tracing {
-    exporter: Exporter,
-    trace_config: Option<TraceConfig>,
+    pub exporter: Exporter,
+    pub trace_config: Option<TraceConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

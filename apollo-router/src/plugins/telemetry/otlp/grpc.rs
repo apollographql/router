@@ -11,15 +11,15 @@ use tonic::metadata::{KeyAndValueRef, MetadataKey, MetadataMap};
 #[serde(deny_unknown_fields)]
 pub struct GrpcExporter {
     #[serde(flatten)]
-    export_config: ExportConfig,
-    tls_config: Option<TlsConfig>,
+    pub export_config: ExportConfig,
+    pub tls_config: Option<TlsConfig>,
     #[serde(
         deserialize_with = "header_map_serde::deserialize",
         serialize_with = "header_map_serde::serialize",
         default
     )]
     #[schemars(schema_with = "option_metadata_map", default)]
-    metadata: Option<MetadataMap>,
+    pub metadata: Option<MetadataMap>,
 }
 
 fn option_metadata_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
