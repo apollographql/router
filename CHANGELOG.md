@@ -28,7 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Logs and error messages in Rust begin with lower case and do not have trailing punctuation. The codebase is now consistent with this scheme. 
 
-- **OTLP default service.name and service.namespace** ([#719](https://github.com/apollographql/router/issues/719))
+- **OTLP default service.name and service.namespace** ([PR #722](https://github.com/apollographql/router/pull/722))
 
   While the Jaeger yaml configuration would default to the "router" service.name and "apollo" service.namespace, it was not the case when using an OTLP configuration. This lead to UNKNOWN_SERVICE name in zipking traces, and hard to find Jaeger traces.
 
