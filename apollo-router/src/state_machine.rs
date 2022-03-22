@@ -9,6 +9,7 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::Schema;
 use futures::channel::mpsc;
 use futures::prelude::*;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -30,6 +31,17 @@ enum PrivateState<RS> {
     },
     Stopped,
     Errored(FederatedServerError),
+}
+
+impl<T> Display for PrivateState<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrivateState::Startup { .. } => write!(f, "startup"),
+            PrivateState::Running { .. } => write!(f, "running"),
+            PrivateState::Stopped => write!(f, "stopped"),
+            PrivateState::Errored { .. } => write!(f, "errored"),
+        }
+    }
 }
 
 /// A state machine that responds to events to control the lifecycle of the server.
@@ -198,7 +210,7 @@ where
                 <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
                     .await;
             }
-            tracing::debug!("transitioned to state {:?}", &new_state);
+            tracing::debug!("transitioned to state {}", &new_state);
             state = new_state;
 
             // If we've errored then exit even if there are potentially more messages

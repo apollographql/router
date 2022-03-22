@@ -90,29 +90,36 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             ) -> PluggableRouterServiceBuilder {
                 let plugin_registry = apollo_router_core::plugins();
                 match plugin_registry.get(name.as_str()) {
-                    Some(factory) => match factory.create_instance(configuration) {
-                        Ok(mut plugin) => {
-                            tracing::debug!("starting plugin: {}", name);
-                            match plugin.startup().await {
-                                Ok(_v) => {
-                                    tracing::debug!("started plugin: {}", name);
-                                    builder = builder.with_dyn_plugin(plugin);
-                                }
-                                Err(err) => {
-                                    (*errors).push(ConfigurationError::PluginStartup {
-                                        plugin: name,
-                                        error: err.to_string(),
-                                    });
+                    Some(factory) => {
+                        tracing::debug!(
+                            "creating plugin: '{}' with configuration:\n{:#}",
+                            name,
+                            configuration
+                        );
+                        match factory.create_instance(configuration) {
+                            Ok(mut plugin) => {
+                                tracing::debug!("starting plugin: {}", name);
+                                match plugin.startup().await {
+                                    Ok(_v) => {
+                                        tracing::debug!("started plugin: {}", name);
+                                        builder = builder.with_dyn_plugin(plugin);
+                                    }
+                                    Err(err) => {
+                                        (*errors).push(ConfigurationError::PluginStartup {
+                                            plugin: name,
+                                            error: err.to_string(),
+                                        });
+                                    }
                                 }
                             }
+                            Err(err) => {
+                                (*errors).push(ConfigurationError::PluginConfiguration {
+                                    plugin: name,
+                                    error: err.to_string(),
+                                });
+                            }
                         }
-                        Err(err) => {
-                            (*errors).push(ConfigurationError::PluginConfiguration {
-                                plugin: name,
-                                error: err.to_string(),
-                            });
-                        }
-                    },
+                    }
                     None => {
                         (*errors).push(ConfigurationError::PluginUnknown(name));
                     }

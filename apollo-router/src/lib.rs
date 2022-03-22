@@ -28,6 +28,7 @@ pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -481,6 +482,17 @@ pub enum State {
 
     /// The server has errored.
     Errored,
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Startup => write!(f, "startup"),
+            State::Running { .. } => write!(f, "running"),
+            State::Stopped => write!(f, "stopped"),
+            State::Errored => write!(f, "errored"),
+        }
+    }
 }
 
 /// A handle that allows the client to await for various server events.

@@ -112,7 +112,7 @@ impl ReportSpaceport {
                         }
                     },
                     _ = interval.tick() => {
-                        tracing::debug!("spaceport ticked");
+                        tracing::trace!("spaceport ticked");
                         task_total.store(0, Ordering::SeqCst);
                         process_all_graphs(&client, task_graph_usage.clone()).await;
                     }

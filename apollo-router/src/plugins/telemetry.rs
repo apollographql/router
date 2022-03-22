@@ -227,11 +227,9 @@ impl Plugin for Telemetry {
     }
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("reporting configuration {:?}!", configuration);
-
         // Graph can only be set via env variables.
         configuration.graph = studio_graph();
-
+        tracing::debug!("Apollo graph configuration: {:?}", configuration.graph);
         // Studio Agent Spaceport listener
         let (tx, mut rx) = tokio::sync::mpsc::channel::<SpaceportConfig>(1);
 
@@ -301,11 +299,6 @@ impl Plugin for Telemetry {
 
 impl Telemetry {
     fn try_build_layer(&self) -> Result<BoxedLayer, BoxError> {
-        tracing::debug!(
-            "spaceport: {:?}, graph: {:?}",
-            self.config.spaceport,
-            self.config.graph
-        );
         let spaceport_config = &self.config.spaceport;
         let graph_config = &self.config.graph;
 

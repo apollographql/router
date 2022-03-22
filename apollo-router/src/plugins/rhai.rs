@@ -140,7 +140,6 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("rhai {:#?}!", configuration.filename);
         let engine = Arc::new(Rhai::new_rhai_engine());
         let ast = engine.compile_file(configuration.filename)?;
         Ok(Self { ast, engine })
@@ -157,7 +156,7 @@ impl Plugin for Rhai {
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
             let this = self.clone();
-            tracing::debug!("RHAI plugin: router_service_request function found");
+            tracing::debug!("router_service_request function found");
 
             service = service
                 .map_request(move |mut request: RouterRequest| {
@@ -187,7 +186,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("{} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service
@@ -208,7 +207,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE)
         {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_RESPONSE);
+            tracing::debug!("{} function found", FUNCTION_NAME_RESPONSE);
             let this = self.clone();
             service = service
                 .map_response(move |mut response: QueryPlannerResponse| {
@@ -247,7 +246,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("{} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service
@@ -279,7 +278,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("{} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service
