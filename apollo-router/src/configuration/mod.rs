@@ -21,31 +21,31 @@ use typed_builder::TypedBuilder;
 /// Configuration error.
 #[derive(Debug, Error, Display)]
 pub enum ConfigurationError {
-    /// Could not read secret from file: {0}
+    /// could not read secret from file: {0}
     CannotReadSecretFromFile(std::io::Error),
-    /// Could not read secret from environment variable: {0}
+    /// could not read secret from environment variable: {0}
     CannotReadSecretFromEnv(std::env::VarError),
-    /// Missing environment variable: {0}
+    /// missing environment variable: {0}
     MissingEnvironmentVariable(String),
-    /// Invalid environment variable: {0}
+    /// invalid environment variable: {0}
     InvalidEnvironmentVariable(String),
-    /// Could not setup OTLP tracing: {0}
+    /// could not setup OTLP tracing: {0}
     OtlpTracing(opentelemetry::trace::TraceError),
-    /// The configuration could not be loaded because it requires the feature {0:?}
+    /// the configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
-    /// Unknown plugin {0}
+    /// unknown plugin {0}
     PluginUnknown(String),
-    /// Plugin {plugin} could not be configured: {error}
+    /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// Plugin {plugin} could not be started: {error}
+    /// plugin {plugin} could not be started: {error}
     PluginStartup { plugin: String, error: String },
-    /// Plugin {plugin} could not be stopped: {error}
+    /// plugin {plugin} could not be stopped: {error}
     PluginShutdown { plugin: String, error: String },
-    /// Unknown layer {0}
+    /// unknown layer {0}
     LayerUnknown(String),
-    /// Layer {layer} could not be configured: {error}
+    /// layer {layer} could not be configured: {error}
     LayerConfiguration { layer: String, error: String },
-    /// The configuration contained errors.
+    /// the configuration contained errors
     InvalidConfiguration,
 }
 

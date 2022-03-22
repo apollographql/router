@@ -51,7 +51,7 @@ impl Plugin for ContextData {
                     // This can only happen if the value could not be serialized.
                     // In this case we will never fail because we are storing a string which we
                     // know can be stored as Json.
-                    tracing::info!("Failed to set context data {}", e);
+                    tracing::info!("failed to set context data {}", e);
                 }
                 req
             })
@@ -59,7 +59,7 @@ impl Plugin for ContextData {
             .map_response(|resp| {
                 // Pick up a value from the context on the response.
                 if let Ok(Some(data)) = resp.context.get::<_, u64>("response_count") {
-                    tracing::info!("Subrequest count {}", data);
+                    tracing::info!("subrequest count {}", data);
                 }
                 resp
             })
@@ -75,7 +75,7 @@ impl Plugin for ContextData {
             .map_request(|req: SubgraphRequest| {
                 // Pick up a value from the context that was populated earlier.
                 if let Ok(Some(data)) = req.context.get::<_, String>("incoming_data") {
-                    tracing::info!("Hello {}", data); // Hello world!
+                    tracing::info!("hello {}", data); // Hello world!
                 }
                 req
             })

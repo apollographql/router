@@ -92,10 +92,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 match plugin_registry.get(name.as_str()) {
                     Some(factory) => match factory.create_instance(configuration) {
                         Ok(mut plugin) => {
-                            tracing::debug!("Starting plugin: {}", name);
+                            tracing::debug!("starting plugin: {}", name);
                             match plugin.startup().await {
                                 Ok(_v) => {
-                                    tracing::debug!("Started plugin: {}", name);
+                                    tracing::debug!("started plugin: {}", name);
                                     builder = builder.with_dyn_plugin(plugin);
                                 }
                                 Err(err) => {
@@ -129,15 +129,15 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         if !errors.is_empty() {
             // Shutdown all the plugins we started
             for plugin in builder.plugins().iter_mut().rev() {
-                tracing::debug!("Stopping plugin: {}", plugin.name());
+                tracing::debug!("stopping plugin: {}", plugin.name());
                 if let Err(err) = plugin.shutdown().await {
                     // If we can't shutdown a plugin, we terminate the router since we can't
                     // assume that it is safe to continue.
-                    tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
-                    tracing::error!("Terminating router...");
+                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
+                    tracing::error!("terminating router...");
                     std::process::exit(1);
                 } else {
-                    tracing::debug!("Stopped plugin: {}", plugin.name());
+                    tracing::debug!("stopped plugin: {}", plugin.name());
                 }
             }
             for error in errors {
@@ -218,17 +218,15 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysStartsAndStopsPlugin));
             Ok(())
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysStartsAndStopsPlugin));
             Ok(())
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
     }
@@ -249,17 +247,15 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStartPlugin));
             Err(Box::new(PluginError {}))
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysFailsToStartPlugin));
             Ok(())
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStartPlugin {})
         }
     }
@@ -280,17 +276,15 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStopPlugin));
             Ok(())
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysFailsToStopPlugin));
             Err(Box::new(PluginError {}))
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStopPlugin {})
         }
     }
@@ -311,20 +305,15 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStartAndStopPlugin));
             Err(Box::new(PluginError {}))
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!(
-                "shutting down: {}",
-                stringify!(AlwaysFailsToStartAndStopPlugin)
-            );
             Err(Box::new(PluginError {}))
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStartAndStopPlugin {})
         }
     }

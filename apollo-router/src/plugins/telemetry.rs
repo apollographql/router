@@ -227,7 +227,7 @@ impl Plugin for Telemetry {
     }
 
     fn new(mut configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("Reporting configuration {:?}!", configuration);
+        tracing::debug!("reporting configuration {:?}!", configuration);
 
         // Graph can only be set via env variables.
         configuration.graph = studio_graph();
@@ -330,7 +330,7 @@ impl Telemetry {
             let apollo_exporter =
                 Self::apollo_exporter_pipeline(spaceport_config, graph_config).install_batch()?;
             let agent = tracing_opentelemetry::layer().with_tracer(apollo_exporter);
-            tracing::debug!("Adding agent telemetry");
+            tracing::debug!("adding agent telemetry");
             Ok(Box::new(agent))
         } else {
             // If we don't have any reporting to do, just put in place our BaseLayer

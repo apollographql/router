@@ -140,7 +140,7 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("RHAI {:#?}!", configuration.filename);
+        tracing::debug!("rhai {:#?}!", configuration.filename);
         let engine = Arc::new(Rhai::new_rhai_engine());
         let ast = engine.compile_file(configuration.filename)?;
         Ok(Self { ast, engine })
@@ -187,7 +187,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service
@@ -247,7 +247,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service
@@ -279,7 +279,7 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
         {
-            tracing::debug!("RHAI plugin: {} function found", FUNCTION_NAME_REQUEST);
+            tracing::debug!("rhai plugin: {} function found", FUNCTION_NAME_REQUEST);
             let this = self.clone();
 
             service = service

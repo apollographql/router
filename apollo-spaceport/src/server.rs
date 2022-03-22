@@ -290,8 +290,8 @@ impl ReportSpaceport {
 async fn process_all_graphs(client: &Client, task_graph_usage: GraphUsageMap) {
     for result in extract_graph_usage(client, task_graph_usage).await {
         match result {
-            Ok(v) => tracing::debug!("Report submission succeeded: {:?}", v),
-            Err(e) => tracing::error!("Report submission failed: {}", e),
+            Ok(v) => tracing::debug!("report submission succeeded: {:?}", v),
+            Err(e) => tracing::error!("report submission failed: {}", e),
         }
     }
 }

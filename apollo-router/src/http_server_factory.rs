@@ -124,7 +124,7 @@ impl HttpServerHandle {
         let handle = factory
             .create(router, Arc::clone(&configuration), listener)
             .await?;
-        tracing::debug!("Restarted on {}", handle.listen_address());
+        tracing::debug!("restarted on {}", handle.listen_address());
 
         Ok(handle)
     }

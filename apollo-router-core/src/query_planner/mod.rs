@@ -110,7 +110,7 @@ impl PlanNode {
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
-            tracing::trace!("Executing plan:\n{:#?}", self);
+            tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
             let mut errors;
 
@@ -440,7 +440,7 @@ pub(crate) mod fetch {
                 // because we need to take ownership of the inner value
                 if let Value::Object(mut map) = data {
                     if let Some(entities) = map.remove("_entities") {
-                        tracing::trace!("Received entities: {:?}", &entities);
+                        tracing::trace!("received entities: {:?}", &entities);
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();

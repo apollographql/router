@@ -14,7 +14,7 @@ impl Plugin for OverrideSubgraphUrl {
     type Config = HashMap<String, Url>;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("OverrideSubgraphUrl {:#?}!", configuration);
+        tracing::debug!("overrideSubgraphUrl {:#?}!", configuration);
         Ok(OverrideSubgraphUrl {
             urls: configuration,
         })

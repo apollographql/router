@@ -375,7 +375,7 @@ impl Plugin for JwtAuth {
     }
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("JwtAuth configuration {:?}!", configuration);
+        tracing::debug!("jwtauth configuration {:?}", configuration);
         JwtAuth::new(configuration)
     }
 }
