@@ -125,7 +125,6 @@ pub async fn rt_main() -> Result<()> {
         return Ok(());
     }
 
-    println!("Log {}", opt.log_level);
     // This is more complex than I'd like it to be. Really, we just want to pass
     // a FmtSubscriber to set_global_subscriber(), but we can't because of the
     // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
