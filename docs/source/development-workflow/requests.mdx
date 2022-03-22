@@ -5,13 +5,13 @@ description: How to send requests to the Apollo Router over HTTP
 
 > Also check out this post from the Apollo blog: [Making GraphQL Requests using HTTP Methods](https://www.apollographql.com/blog/graphql/basics/making-graphql-requests-using-http-methods/)
 
-By default, almost every GraphQL IDE and client library takes care of sending operations in a format that Apollo Router supports. This article describes that format, which is also described on [graphql.org](https://graphql.org/learn/serving-over-http/) and in [this preliminary spec](https://github.com/graphql/graphql-over-http).
+By default, almost every GraphQL IDE and client library takes care of sending operations in a format that the Apollo Router supports. This article describes that format, which is also described on [graphql.org](https://graphql.org/learn/serving-over-http/) and in [this preliminary spec](https://github.com/graphql/graphql-over-http).
 
-Apollo Router accepts queries and mutations sent as POST requests. It also accepts queries sent as GET requests.
+The Apollo Router accepts queries and mutations sent as POST requests. It also accepts queries sent as GET requests.
 
 ## POST requests
 
-Apollo Router accepts POST requests with a JSON body. A valid request contains a `query` field, along with optional `variables` and an `operationName` (if `query` contains multiple possible operations).
+The Apollo Router accepts POST requests with a JSON body. A valid request contains a `query` field, along with optional `variables` and an `operationName` (if `query` contains multiple possible operations).
 
 Let's say we want to execute the following query:
 
@@ -44,13 +44,13 @@ curl --request POST \
   https://rover.apollo.dev/quickstart/products/graphql
 ```
 
-> Apollo Server's default landing page provides a `curl` command you can use to execute a test query on your own server:
+> The Apollo Router's default landing page provides a `curl` command you can use to execute a test query on your own server:
 >
-> <img class="screenshot" src="./images/as-landing-page-production.jpg" width="500" />
+> <img class="screenshot" src="../images/as-landing-page-production.jpg" width="500" />
 
 ## GET requests
 
-Apollo Router also accepts GET requests for queries (but not mutations). With a GET request, query details (`query`, `operationName`, `variables`) are provided as URL query parameters. The `variables` option is a URL-escaped JSON object.
+The Apollo Router also accepts GET requests for queries (but not mutations). With a GET request, query details (`query`, `operationName`, `variables`) are provided as URL query parameters. The `variables` option is a URL-escaped JSON object.
 
 Here's the same query from [POST requests](#post-requests) formatted for a `curl` GET request:
 

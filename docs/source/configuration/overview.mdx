@@ -113,7 +113,9 @@ Prints out the Apollo Router's version.
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed, the router will automatically restart when changes to the configuration file are made.
+
+This file enables you to customize the router's behavior in many ways:
 
 ### Listen address
 
@@ -138,7 +140,7 @@ server:
 
 ```
 
-### Overriding subgraph routing URLs
+### Subgraph routing URLs
 
 By default, the Apollo Router extracts the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
 
@@ -164,6 +166,14 @@ See [Configuring CORS in the Apollo Router](./cors).
 ### OpenTelemetry tracing
 
 See [OpenTelemetry in the Apollo Router](./opentelemetry/).
+
+### Automatic persisted queries (APQ)
+
+Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
+
+The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release of the Apollo Router.
+
+For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
 
 ### Plugins
 

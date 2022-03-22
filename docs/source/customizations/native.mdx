@@ -1,83 +1,33 @@
 ---
 title: Writing native Rust plugins for the Apollo Router
-description: Building and compiling a custom plugin for the Apollo Router with Rust
+description: Extend the Apollo Router with custom Rust code
 ---
 
 import { Link } from 'gatsby';
 
-Your organisation may have specific needs that cannot be expressed as generic functionality, and will therefore not be available via core Apollo Router functionality.
+Your federated graph might have specific requirements that aren't supported by the Apollo Router's built-in [configuration options](../configuration/overview/). For example, you might need to further customize the behavior of:
 
-For instance:
-* Bespoke authentication/authorization
-* Bespoke logging
-* Bespoke tracing
+* Authentication/authorization
+* Logging
+* Operation tracing
 
-The plugin mechanism allows you to add such functionality to the Apollo Router.
+In these cases, you can create custom plugins for the Apollo Router.
 
-## Router pipeline
+## Planning a plugin
 
-The router manages a pipeline for GraphQL data. That pipeline takes client Requests and returns Responses.
+When designing a new plugin, you first want to determine which of the Apollo Router's **services** the plugin should hook into to achieve its use case.
 
+For descriptions of these services, see [How router plugins work](./overview/#how-router-plugins-work).
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant RouterService
-    participant QueryPlannerService
-    participant ExecutionService
-    participant SubgraphService(s)
+## Building a plugin
 
-    Client->>RouterService: request
-    RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService: 
-    RouterService->>ExecutionService: execute
-    par
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService: 
-    and 
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService: 
-    and 
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService: 
-    end 
-    ExecutionService-->>RouterService: response
-    RouterService-->>Client: response
-```
+To demonstrate building a plugin, we'll walk through the [hello world example plugin](https://github.com/apollographql/router/tree/main/examples/hello-world) in the Router repo.
 
-Requests are processed in a structured fashion, each service taking input Requests and then passing the (potentially modified) Request onto the next service. After the final service finishes processing Responses are returned and the pipeline is reversed with each service now passing a (potentially modified) Response back to the client.
+### 1. Add modules
 
-Plugins add functionality by decorating services.
+Most plugins should start by including the following set of `use` declarations:
 
-## Designing your plugin
-
-The first decision to be made when designing your plugin is which of the four stages to implement. By default, each of the plugin stages simply passes the request/response to the next service, so it's fine if your plugin doesn't implement a stage. There are four options:
-
-**Router (router_service)**
-
-Implement this function if your plugin must interact at the earliest/latest stage of the pipeline. For example, this would be a good place to perform tasks such as JWT verification before allowing a Request to proceed further.
-
-**Query Planning (query_planning_service)**
-
-Implement this function if your plugin must interact with the query planning functionality. For example, if you wish to log query plan details.
-
-**Execution (execution_service)**
-
-Implement this function if your plugin must interact with the execution functionality. For example, if you wish to prevent a query from being executed based on a policy decision.
-
-**Subgraph (subgraph_service)**
-
-Implement this function if your plugin must interact with the subgraph functionality. For example, you wish to insert additional headers to pass to a subgraph.
-
-Typical use cases will involve interactions with `router_service` or `subgraph_service`. 
-
-## Implementing your plugin
-We are going to use the hello world example plugin: examples/hello-world to demonstrate our approach.
-
-### Using modules
-Typically, you will want to start with at least this set of modules:
-
-```rust
+```rust title="hello_world.rs"
 use apollo_router_core::plugin::Plugin;
 use apollo_router_core::{
     register_plugin, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
@@ -89,66 +39,68 @@ use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 ```
 
-The compiler will let you know if any of these things are not needed via helpful warnings. Depending on what your module is doing you may find that you are using modules from different crates as well.
+When your plugin is complete, the compiler will provide helpful warnings if any of these modules _aren't_ necessary. Your plugin can also `use` modules from other crates as needed.
 
-### Defining your configuration
-All plugins must have configuration. Minimally a boolean to specify enabled of not, but potentially anything that can be 
-deserialized by `serde`  
+### 2. Define your configuration
 
-Create your configuration struct:
-```rust
+All plugins require an associated configuration. At a minimum, this configuration contains a boolean that indicates whether the plugin is enabled, but it can include anything that can be deserialized by `serde`.
+
+Create your configuration struct like so:
+
+```rust title="hello_world.rs"
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin confguration here. It will automatically be deserialized from YAML.
+    // Put your plugin confguration here. It's deserialzed from YAML automatically.
 }
 ```
 
-Then define your plugin with the specifying the configuration as an associated type.
-```rust
+> **Note:** You need to `derive` `JsonSchema` so that your configuration can participate in [JSON schema generation](../configuration/overview/#configuration-awareness-in-your-text-editor).
+
+Then define the plugin itself and specify the configuration as an associated type:
+
+```rust title="hello_world.rs"
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
     type Config = Conf;
 }
 ```
 
-Note: You need to derive JsonSchema so that your configuration can participate in json schema generation.
+### 3. Implement the `Plugin` trait
 
-### Implementing the Plugin trait
+All router plugins must implement the `Plugin` trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 
-All plugins must implement the Plugin trait. It defines life-cycle hooks which allow decoration of services within the Apollo Router.
+The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 
-The trait itself provides default implementations of each hook that returns the service as is.
-
-```rust
-// This is a bare bones plugin that can be duplicated when creating your own.
+```rust title="hello_world.rs"
+// This is a bare-bones plugin that you can duplicate when creating your own.
 #[async_trait::async_trait]
 impl Plugin for HelloWorld {
     type Config = Conf;
 
-    // This will be invoked whenever a configuration is changed
-    // during router execution including at startup
+    // This is invoked whenever configuration is changed
+    // during router execution, including at startup
     async fn startup(&mut self) -> Result<(), BoxError> {
-        // Perform any startup code for your plugin here
-        // This will be called before any requests are served.
+        // Perform any startup code for your plugin here.
+        // This is called before any requests are served.
         Ok(())
     }
 
-    // This will be invoked whenever a configuration is changed
-    // during router execution including at shutdown
+    // This is invoked whenever configuration is changed
+    // during router execution, including at shutdown
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        // Perform any shutdown code for your plugin here
-        // No new requests will be served after this is called.
+        // Perform any shutdown code for your plugin here.
+        // No new requests are served after this is called.
         Ok(())
     }
 
-    // This will be invoked once when a router starts and compiled
-    // in plugins are registered
+    // This is invoked once after the router starts and compiled-in
+    // plugins are registered
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(HelloWorld { configuration })
     }
 
-    // Only implement those services you wish to modify. The default
-    // implementation will just return un-modified service
+    // Only define the hooks you need to modify. Each default hook
+    // implementation returns its associated service with no changes.
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -170,9 +122,9 @@ impl Plugin for HelloWorld {
         service
     }
 
-    // THIS SERVICE ALSO PASSES THE NAME OF THE SUBGRAPH SERVICE BEING INVOKED
-    // SINCE THIS SERVICE WILL BE INVOKED ONCE FOR EACH SUBGRAPH REQUIRED TO
-    // SATISFY A REQUEST
+    // Unlike other hooks, this hook also passes the name of the subgraph
+    // being invoked. That's because this service might invoke *multiple*
+    // subgraphs for a single request, and this is called once for each.
     fn subgraph_service(
         &mut self,
         name: &str,
@@ -183,107 +135,129 @@ impl Plugin for HelloWorld {
 }
 ```
 
+### 4. Define individual hooks
 
-### ServiceBuilder
+To define custom logic for a service hook, you can use [`ServiceBuilder`](https://docs.rs/tower/0.3.1/tower/builder/struct.ServiceBuilder.html).
 
-To decorate a service use `ServiceBuilder`.
+`ServiceBuilder` provides common building blocks that remove much of the complexity of writing a plugin. These building blocks are called layers:
 
-It provides common building blocks that removes much of the complexity of writing a plugin. These are called layers.
-
-```rust
-    fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        // Always use service builder to compose your plugins.
-        // It provides off the shelf building blocks for your plugin.
-        ServiceBuilder::new()
-            // Some example service builder methods:
-            // .map_request()
-            // .map_response()
-            // .rate_limit()
-            // .checkpoint()
-            // .timeout()
-            .service(service)
-            .boxed()
-    }
+```rust title="hello_world.rs"
+// Replaces the default definition in the example above
+fn router_service(
+    &mut self,
+    service: BoxService<RouterRequest, RouterResponse, BoxError>,
+) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+    // Always use service builder to compose your plugins.
+    // It provides off-the-shelf building blocks for your plugin.
+    ServiceBuilder::new()
+        // Some example service builder methods:
+        // .map_request()
+        // .map_response()
+        // .rate_limit()
+        // .checkpoint()
+        // .timeout()
+        .service(service)
+        .boxed()
+}
 ```
 
-[tower-rs](https://github.com/tower-rs), on which the router is based, comes with many "off the shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third party products.
+The [tower-rs](https://github.com/tower-rs) library (which the Apollo Router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
 
-Before implementing a layer yourself, always check if an existing layer implementation will fit your needs. Layer reuse is significantly easier than implementing layers from scratch.
+Before implementing a layer yourself, always check whether an existing layer implementation might fit your needs. Reusing layers is significantly faster than implementing layers from scratch.
 
-### Context
+### 5. Define necessary context
 
-Sometimes there is a need to propagate information between services. For instance:
+Sometimes you might need to pass custom information between services. For example:
 
-* Authentication information obtained at the `RouterService` is picked up by `SubgraphService(s)`.
-* Cache control headers at subgraph services are aggregated and returned to the client at the `RouterService`
+* Authentication information obtained by the `RouterService` might be required by `SubgraphService`s.
+* Cache control headers from `SubgraphService`s might be aggregated and returned to the client by the `RouterService`.
 
-When a request is received a context is created and propagated throughout the entire request. It can store anything that is Serde compatible. For instance, all simple types or a custom type.
+Whenever the Apollo Router receives a request, it creates a corresponding `context` object and passes it along to each service. This object can store anything that's Serde-compatible (e.g., all simple types or a custom type).
 
-#### Insert
+All of your plugin's hooks can interact with the `context` object using the following functions:
+
+#### `insert`
+
 ```rust
 context.insert("key1", 1)?;
-Serialization and deserialization happen automatically. You may sometimes need to specify the type in the case where the rust compiler cannot figure it out by itself.
 ```
 
-#### Get
+Adds a value to the `context` object. Serialization and deserialization happen automatically. You might sometimes need to specify the type in cases where the Rust compiler can't figure it out by itself.
+
+> If multiple threads might write a value to the same `context` key, use [`upsert`](#upsert) instead.
+
+#### `get`
+
 ```rust
 let value : u32 = context.get("key1")?;
-Upserts are guaranteed to happen serially. This is useful at the subgraph service where multiple requests are happening in parallel.
 ```
 
-#### Upsert
+Fetches a value from the `context` object.
+
+#### `upsert`
+
 ```rust
 context.upsert("key1", |v| v + 1, || 0)?;
 ```
-Use `upsert` if you need to merge several values. Rust is multi-threaded, and you will get unexpected results if multiple threads write to context at the same time. `upasert` prevents issues by guaranteeing that modifications happen serially.
 
-### Registering your plugin
-To enable the Apollo Router to discover your plugin it must be registered.
+Use `upsert` if you might need to resolve multiple simultaneous writes to a single `context` key (this is most likely for the `subgraph_service` hook, because it might be called by multiple threads in parallel). Rust is multi-threaded, and you will get unexpected results if multiple threads write to `context` at the same time. This function prevents issues by guaranteeing that modifications happen serially.
 
-Use the register_plugin!() macro provided by apollo-router-core. This takes 3 arguments:
-- a group name
-- a name
-- a struct implementing the Plugin trait
+### 6. Register your plugin
+
+To enable the Apollo Router to discover your plugin, you need to **register** the plugin.
+
+To do so, use the `register_plugin!()` macro provided by `apollo-router-core`. This takes 3 arguments:
+
+* A group name
+* A plugin name
+* A struct implementing the `Plugin` trait
 
 For example:
-```rust
+
+```rust title="hello_world.rs"
 register_plugin!("example", "hello_world", HelloWorld);
 ```
 
-Choose a group name that represents your organisation and a name that represents the functionality of your plugin.
+Choose a group name that represents your organization and a name that represents your plugin's functionality.
 
-### Plugin Configuration
-Once you have registered your plugin, you can add configuration for it to the router configuration with an entry in the `plugins:` section. For example:
+### 7. Configure your plugin
+
+After you register your plugin, you can add custom configuration for it to your [YAML configuration file](../configuration/overview/#configuration-file) in the `plugins:` section:
+
 ```yaml
 plugins:
   example.hello_world:
-  # Any additional details here are passed to the plugin as part of your configuration
+    # Any values here are passed to the plugin as part of your configuration
 ```
 
 ## Plugin Lifecycle
 
-Plugins follow a strict lifecycle which helps provides structure to the processing within the router.
+Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the Apollo Router's execution.
 
-### Plugin Creation
+### Creation
 
-When a router starts all known plugins are registered. At this time, the router will call the "new" method of all plugins. If any of these methods fail, the router will terminate with helpful error messages.  There is no sequencing for plugin registration, they may even execute in parallel, so do not rely on the existence of other plugins during initialization of your plugin.
+When the router starts, all plugins included in the executable are registered. At this time, the router calls the `new` method of all plugins. If any of these methods fail, the router terminates with helpful error messages. 
 
-### Plugin Startup
+There is no sequencing for plugin registration, and registrations might even execute in parallel. A plugin should _never_ rely on the existence of _another_ plugin during initialization.
 
-When a router is ready to start serving requests, all plugins are started. They are started in the order in which they are declared in the plugins section within the router configuration. Note that a registered plugin, which is not listed in the configuration will not be started. If a plugin fails to start the router will terminate with helpful error messages.
+### Startup
 
-### Plugin Shutdown
+When the router is ready to start serving requests, it calls each plugin's `startup` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#configuration-file).
 
-When a router is going to stop serving requests, all plugins are stopped. They are stopped in the reverse order to which they are started. During shutdown, plugin errors are logged and do not affect router execution.
+Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
 
-### Lifecycle Notes
+### Shutdown
 
-A router which is listening for configuration changes must also participate in lifecycle events. Before switching to an updated configuration, the router ensures that the new configuration is valid. This includes starting up replacement plugins for the new configuration. This behaviour means that a plugin should not assume that it is the only executing instance of a plugin in a single router. Once the new configuration is deemed to be valid, the router will shift to this configuration and existing configuration is dropped and existing plugins are shutdown. Errors during shutdown of previously configured plugins are logged and do not affect router execution.
+When the router is ready to stop serving requests, it calls each plugin's `shutdown` method. Plugins are stopped in the opposite of the order in which they were started. During shutdown, plugin errors are logged and do not affect router execution.
 
-### Plugin Testing
+### Lifecycle notes
+
+If a router is listening for dynamic changes to its configuration, it also triggers lifecycle events when those changes occur.
+
+Before switching to an updated configuration, the router ensures that the new configuration is valid. This process includes starting up replacement plugins for the new configuration. This means that a plugin should _not_ assume that it's the _only_ executing instance of that plugin in a single router.
+
+After the new configuration is deemed valid, the router shifts to it. The previous configuration is dropped and its corresponding plugins are shut down. Errors during the shutdown of these plugins are logged and do not affect router execution.
+
+### Testing plugins
 
 Unit testing of a plugin is typically most helpful and there are extensive examples of plugin testing in the examples and plugins directories.
-
