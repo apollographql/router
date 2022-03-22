@@ -169,12 +169,7 @@ See [OpenTelemetry in the Apollo Router](./opentelemetry/).
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
 
-The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.**
-
-The following APQ features currently available in Apollo Server might be supported in a future release of the Apollo Router:
-
-* Support for external data stores like Redis and Memcached
-* Automatic subgraph `@cacheControl` aggregation, so you don’t have to manually propagate `cache-control` headers from your subgraphs
+The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release of the Apollo Router.
 
 For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
 
