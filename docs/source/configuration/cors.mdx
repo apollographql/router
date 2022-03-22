@@ -15,22 +15,28 @@ server:
   # CORS (Cross Origin Resource Sharing)
   #
   cors:
+
     # Set to false to disallow any origin and rely exclusively on `origins`
     # (Defaults to true)
     allow_any_origin: false
+
     # List of accepted origins
     # (Ignored if allow_any_origin is true)
     origins:
       - https://studio.apollographql.com
+
     # Set to true to add the `Access-Control-Allow-Credentials` header
     # (Defaults to false)
     allow_credentials: true
+
     # The headers to allow.
     # (Defaults to [ Content-Type ], which is required for Apollo Studio)
     allow_headers: [ Content-Type, Authorization ]
+
     # Allowed request methods
     # (Defaults to [ GET, POST, OPTIONS ])
     methods: [ POST, OPTIONS ]
+
     # Which response headers are available to scripts running in the
     # browser in response to a cross-origin request.
     # (Defaults to empty array)

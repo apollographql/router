@@ -6,14 +6,14 @@ Apollo provides free **managed federation** support for graphs that use Apollo F
 
 With managed federation, your subgraphs each publish their schemas to the Apollo registry, which verifies that they successfully [compose](/federation/v2/federated-types/composition/) into a federated schema.
 
-On composition success, Studio updates your graph's latest configuration, which is available at a special endpoint (called the **uplink**) that your gateway regularly polls for updates:
+On composition success, Studio updates your graph's latest configuration, which is available at a special endpoint (called the **uplink**) that the Apollo Router can regularly poll for updates:
 
 ```mermaid
 graph LR;
   subgraph "Your infrastructure"
   serviceA[Products<br/>subgraph];
   serviceB[Reviews<br/>subgraph];
-  gateway([Gateway]);
+  gateway([Apollo<br/>Router]);
   end
   subgraph "Apollo cloud"
     registry{{Apollo Schema<br/>Registry}};

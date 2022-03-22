@@ -7,7 +7,7 @@ You can configure which HTTP headers the Apollo Router includes in its requests 
 
 You define header rules in your [YAML configuration file](./overview/#configuration-file), like so:
 
-```yaml{3-12}:title=router.yaml
+```yaml title="router.yaml"
 # ...other configuration...
 
 headers:
@@ -80,7 +80,7 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 
 Here's a complete example showing all the possible configuration options in use:
 
-```yaml:title=router.yaml
+```yaml title="router.yaml"
 headers:
   # Header rules for all subgraphs
   all:

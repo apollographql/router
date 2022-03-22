@@ -24,13 +24,13 @@ If you haven't yet, complete the first two steps from the Apollo Studio getting 
 
 ## 3. Modify your Apollo Router startup (if necessary)
 
-If you've already set up Apollo Federation _without_ Apollo Studio, you're probably passing a `--supergraph` (or `-s`) flag in the command (e.g., in container startup scripts) you use to start the router:
+If you've already set up Apollo Federation _without_ Apollo Studio, you're probably passing a `--supergraph` (or `-s`) flag in the command (e.g., in container startup scripts) you use to start the Apollo Router:
 
 ```sh
 router --config ./router.yaml --supergraph ./your-local-supergraph.graphql
 ```
 
-Your configuration file may use a different name, but the `--supergraph` option is specific to _non_-managed federation, in which supergraph schema composition is performed via the Rover CLI and provided as a file.
+Your configuration file might use a different name, but the `--supergraph` option is specific to _non_-managed federation, in which supergraph schema composition is performed via the Rover CLI and provided as a file.
 
 With managed federation, composition is instead performed by _Apollo_, and the router regularly polls Apollo for an updated schema. This enables you to add, remove, and modify your subgraphs via Apollo Studio's registry _without_ needing to restart your router.
 

@@ -35,7 +35,7 @@ plugins:
 
 ## Service hooks
 
-As with native plugins, there are 4 services, each with a request and a response, which can be used to inject extra behaviour into a router. The Rhai plugin implements eight functions (two for each service) as follows:
+Similar to native Rust plugins, Rhai plugins can hook into the Apollo Router's [four services](./overview/#how-router-plugins-work) that handle requests. _Unlike_ native Rust plugins, Rhai plugins use two different hooks for each service, one for handling request data and one for handling response data:
 
     - router_service_request
     - router_service_response
@@ -46,7 +46,9 @@ As with native plugins, there are 4 services, each with a request and a response
     - subgraph_service_request
     - subgraph_service_response
 
-Each of these functions are optional, just implement the ones where you wish to inject behaviour. Every listed function takes a `context` as parameter with `extensions` and `headers` inside and must return a `context`.
+Each of these hooks is optional—define only the functions you want to use custom logic for.
+
+Each function takes a single parameter: `context`, an object with `extensions` and `headers` fields. Each function must _return_ a `context` object with any necessary modifications.
 
 ## Examples
 
