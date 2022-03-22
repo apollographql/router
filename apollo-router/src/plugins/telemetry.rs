@@ -364,9 +364,14 @@ impl Telemetry {
         .build();
 
         let mut builder = opentelemetry::sdk::trace::TracerProvider::builder();
-        if let Some(trace_config) = &config.trace_config {
-            builder = builder.with_config(trace_config.trace_config());
-        }
+        builder = builder.with_config(
+            config
+                .trace_config
+                .clone()
+                .unwrap_or_default()
+                .trace_config(),
+        );
+
         // If we have apollo graph configuration, then we can export statistics
         // to the apollo ingress. If we don't, we can't and so no point configuring the
         // exporter.
