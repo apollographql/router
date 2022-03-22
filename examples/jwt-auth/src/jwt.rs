@@ -202,12 +202,10 @@ impl Plugin for JwtAuth {
     type Config = Conf;
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("starting: {}: {}", stringify!(JwtAuth), self.name());
         Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        tracing::debug!("shutting down: {}: {}", stringify!(JwtAuth), self.name());
         Ok(())
     }
 
@@ -375,7 +373,6 @@ impl Plugin for JwtAuth {
     }
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        tracing::debug!("JwtAuth configuration {:?}!", configuration);
         JwtAuth::new(configuration)
     }
 }

@@ -23,7 +23,7 @@ impl CacheResolver<String, Option<Arc<Query>>> for QueryCacheResolver {
             // Silently ignore cancelled tasks (never happen for blocking tasks).
             Err(err) if err.is_cancelled() => None,
             Err(err) => {
-                failfast_debug!("Parsing query task failed: {}", err);
+                failfast_debug!("parsing query task failed: {}", err);
                 None
             }
         };
@@ -47,7 +47,7 @@ impl QueryCache {
         match self.cm.get(key).await {
             Ok(v) => v,
             Err(err) => {
-                failfast_debug!("Parsing query task failed: {}", err);
+                failfast_debug!("parsing query task failed: {}", err);
                 None
             }
         }

@@ -18,3 +18,7 @@ crates/*/Cargo.lock
 .idea
 *.iml
 .vscode
+
+# Docs
+/docs/node_modules/
+/docs/.cache/

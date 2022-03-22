@@ -61,7 +61,7 @@ impl Plugin for ForbidAnonymousOperations {
                     Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
-                    tracing::info!("Operation is allowed!");
+                    tracing::info!("operation is allowed!");
                     Ok(ControlFlow::Continue(req))
                 }
             })

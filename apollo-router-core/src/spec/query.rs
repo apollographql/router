@@ -57,7 +57,7 @@ impl Query {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
         } else {
-            failfast_debug!("Invalid type for data in response.");
+            failfast_debug!("invalid type for data in response.");
         }
     }
 
@@ -73,7 +73,7 @@ impl Query {
             .collect::<Vec<_>>();
 
         if !errors.is_empty() {
-            failfast_debug!("Parsing error(s): {}", errors.join(", "));
+            failfast_debug!("parsing error(s): {}", errors.join(", "));
             return None;
         }
 
@@ -377,7 +377,7 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("Missing fragment named: {}", name);
+                        failfast_debug!("missing fragment named: {}", name);
                     }
                 }
             }
@@ -458,7 +458,7 @@ impl Query {
                         self.apply_selection_set(&fragment.selection_set, input, output, schema)?;
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("Missing fragment named: {}", name);
+                        failfast_debug!("missing fragment named: {}", name);
                     }
                 }
             }

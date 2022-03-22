@@ -9,6 +9,7 @@ use apollo_router_core::prelude::*;
 use apollo_router_core::Schema;
 use futures::channel::mpsc;
 use futures::prelude::*;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
@@ -30,6 +31,17 @@ enum PrivateState<RS> {
     },
     Stopped,
     Errored(FederatedServerError),
+}
+
+impl<T> Display for PrivateState<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrivateState::Startup { .. } => write!(f, "startup"),
+            PrivateState::Running { .. } => write!(f, "running"),
+            PrivateState::Stopped => write!(f, "stopped"),
+            PrivateState::Errored { .. } => write!(f, "errored"),
+        }
+    }
 }
 
 /// A state machine that responds to events to control the lifecycle of the server.
@@ -87,7 +99,7 @@ where
         mut self,
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), FederatedServerError> {
-        tracing::debug!("Starting");
+        tracing::debug!("starting");
         let mut state = Startup {
             configuration: None,
             schema: None,
@@ -133,7 +145,7 @@ where
 
                 // Running: Handle shutdown.
                 (Running { server_handle, .. }, Shutdown) => {
-                    tracing::debug!("Shutting down");
+                    tracing::debug!("shutting down");
                     match server_handle.shutdown().await {
                         Ok(_) => Stopped,
                         Err(err) => Errored(err),
@@ -150,7 +162,7 @@ where
                     },
                     UpdateSchema(new_schema),
                 ) => {
-                    tracing::info!("Reloading schema");
+                    tracing::info!("reloading schema");
                     self.reload_server(
                         configuration,
                         schema,
@@ -173,7 +185,7 @@ where
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
-                    tracing::info!("Reloading configuration");
+                    tracing::info!("reloading configuration");
                     self.reload_server(
                         configuration,
                         schema,
@@ -188,7 +200,7 @@ where
 
                 // Anything else we don't care about
                 (state, message) => {
-                    tracing::debug!("Ignoring message transition {:?}", message);
+                    tracing::debug!("ignoring message transition {:?}", message);
                     state
                 }
             };
@@ -198,7 +210,7 @@ where
                 <StateMachine<S, FA>>::notify_state_listener(&mut state_listener, new_public_state)
                     .await;
             }
-            tracing::debug!("Transitioned to state {:?}", &new_state);
+            tracing::debug!("transitioned to state {}", &new_state);
             state = new_state;
 
             // If we've errored then exit even if there are potentially more messages
@@ -206,13 +218,13 @@ where
                 break;
             }
         }
-        tracing::debug!("Stopped");
+        tracing::debug!("stopped");
 
         match state {
             Stopped => Ok(()),
             Errored(err) => Err(err),
             _ => {
-                panic!("Must finish on stopped or errored state.")
+                panic!("must finish on stopped or errored state")
             }
         }
     }
@@ -238,7 +250,7 @@ where
             schema: Some(schema),
         } = state
         {
-            tracing::debug!("Starting http");
+            tracing::debug!("starting http");
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
             let router = self

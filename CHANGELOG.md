@@ -20,6 +20,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+
+# [v0.1.0-preview.1] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+## 🐛 Fixes
+- **Log and error message formatting** ([PR #721](https://github.com/apollographql/router/pull/721))
+
+  Logs and error messages in Rust begin with lower case and do not have trailing punctuation. The codebase is now consistent with this scheme. 
+## 🛠 Maintenance
+## 📚 Documentation
+
 # [v0.1.0-preview.0] - 2022-03-22
 
 ## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
@@ -29,6 +40,7 @@ For more information on what's expected at this stage, please see our [release s
 ## 🐛 Fixes
 
 - **Header propagation by `name` only fixed** ([PR #709](https://github.com/apollographql/router/pull/709))
+
   Previously `rename` and `default` values were required (even though they were correctly not flagged as required in the json schema).
   The following will now work:
   ```yaml
