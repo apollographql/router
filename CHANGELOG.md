@@ -33,6 +33,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     - propagate:
         named: test
   ```
+- **Fix OTLP hang on reload** ([PR #711](https://github.com/apollographql/router/pull/711))
+  Fixes hang when OTLP exporter is configured and configuration hot reloads.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 

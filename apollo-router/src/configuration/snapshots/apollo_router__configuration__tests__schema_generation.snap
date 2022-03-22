@@ -492,153 +492,144 @@ expression: "&schema"
               ],
               "properties": {
                 "otlp": {
-                  "oneOf": [
-                    {
+                  "type": "object",
+                  "properties": {
+                    "tracing": {
                       "type": "object",
                       "required": [
-                        "tracing"
+                        "exporter"
                       ],
                       "properties": {
-                        "tracing": {
-                          "type": "object",
-                          "required": [
-                            "exporter"
-                          ],
-                          "properties": {
-                            "exporter": {
-                              "oneOf": [
-                                {
+                        "exporter": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "required": [
+                                "grpc"
+                              ],
+                              "properties": {
+                                "grpc": {
                                   "type": "object",
-                                  "required": [
-                                    "grpc"
-                                  ],
                                   "properties": {
-                                    "grpc": {
+                                    "endpoint": {
+                                      "default": null,
+                                      "type": "string",
+                                      "format": "uri",
+                                      "nullable": true
+                                    },
+                                    "metadata": {
+                                      "default": null,
+                                      "type": "object",
+                                      "additionalProperties": true,
+                                      "nullable": true
+                                    },
+                                    "protocol": {
+                                      "default": null,
+                                      "type": "string",
+                                      "enum": [
+                                        "Grpc",
+                                        "HttpBinary"
+                                      ],
+                                      "nullable": true
+                                    },
+                                    "timeout": {
+                                      "type": "integer",
+                                      "format": "uint64",
+                                      "minimum": 0.0,
+                                      "nullable": true
+                                    },
+                                    "tls_config": {
                                       "type": "object",
                                       "properties": {
-                                        "endpoint": {
-                                          "default": null,
-                                          "type": "string",
-                                          "format": "uri",
-                                          "nullable": true
-                                        },
-                                        "metadata": {
-                                          "default": null,
-                                          "type": "object",
-                                          "additionalProperties": true,
-                                          "nullable": true
-                                        },
-                                        "protocol": {
-                                          "default": null,
-                                          "type": "string",
-                                          "enum": [
-                                            "Grpc",
-                                            "HttpBinary"
+                                        "ca": {
+                                          "oneOf": [
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "env"
+                                              ],
+                                              "properties": {
+                                                "env": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "file"
+                                              ],
+                                              "properties": {
+                                                "file": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            }
                                           ],
                                           "nullable": true
                                         },
-                                        "timeout": {
-                                          "type": "integer",
-                                          "format": "uint64",
-                                          "minimum": 0.0,
+                                        "cert": {
+                                          "oneOf": [
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "env"
+                                              ],
+                                              "properties": {
+                                                "env": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "file"
+                                              ],
+                                              "properties": {
+                                                "file": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            }
+                                          ],
                                           "nullable": true
                                         },
-                                        "tls_config": {
-                                          "type": "object",
-                                          "properties": {
-                                            "ca": {
-                                              "oneOf": [
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "env"
-                                                  ],
-                                                  "properties": {
-                                                    "env": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
-                                                },
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "file"
-                                                  ],
-                                                  "properties": {
-                                                    "file": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
-                                                }
+                                        "domain_name": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "key": {
+                                          "oneOf": [
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "env"
                                               ],
-                                              "nullable": true
-                                            },
-                                            "cert": {
-                                              "oneOf": [
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "env"
-                                                  ],
-                                                  "properties": {
-                                                    "env": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
-                                                },
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "file"
-                                                  ],
-                                                  "properties": {
-                                                    "file": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
+                                              "properties": {
+                                                "env": {
+                                                  "type": "string"
                                                 }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "required": [
+                                                "file"
                                               ],
-                                              "nullable": true
-                                            },
-                                            "domain_name": {
-                                              "type": "string",
-                                              "nullable": true
-                                            },
-                                            "key": {
-                                              "oneOf": [
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "env"
-                                                  ],
-                                                  "properties": {
-                                                    "env": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
-                                                },
-                                                {
-                                                  "type": "object",
-                                                  "required": [
-                                                    "file"
-                                                  ],
-                                                  "properties": {
-                                                    "file": {
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "additionalProperties": false
+                                              "properties": {
+                                                "file": {
+                                                  "type": "string"
                                                 }
-                                              ],
-                                              "nullable": true
+                                              },
+                                              "additionalProperties": false
                                             }
-                                          },
-                                          "additionalProperties": false,
+                                          ],
                                           "nullable": true
                                         }
                                       },
@@ -646,78 +637,78 @@ expression: "&schema"
                                       "nullable": true
                                     }
                                   },
-                                  "additionalProperties": false
-                                }
-                              ]
-                            },
-                            "trace_config": {
-                              "type": "object",
-                              "properties": {
-                                "max_attributes_per_event": {
-                                  "type": "integer",
-                                  "format": "uint32",
-                                  "minimum": 0.0,
-                                  "nullable": true
-                                },
-                                "max_attributes_per_link": {
-                                  "type": "integer",
-                                  "format": "uint32",
-                                  "minimum": 0.0,
-                                  "nullable": true
-                                },
-                                "max_attributes_per_span": {
-                                  "type": "integer",
-                                  "format": "uint32",
-                                  "minimum": 0.0,
-                                  "nullable": true
-                                },
-                                "max_events_per_span": {
-                                  "type": "integer",
-                                  "format": "uint32",
-                                  "minimum": 0.0,
-                                  "nullable": true
-                                },
-                                "max_links_per_span": {
-                                  "type": "integer",
-                                  "format": "uint32",
-                                  "minimum": 0.0,
-                                  "nullable": true
-                                },
-                                "resource": {
-                                  "default": null,
-                                  "type": "object",
-                                  "additionalProperties": true,
-                                  "nullable": true
-                                },
-                                "sampler": {
-                                  "default": null,
-                                  "oneOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        "AlwaysOn",
-                                        "AlwaysOff"
-                                      ]
-                                    },
-                                    {
-                                      "description": "Respects the parent span's sampling decision or delegates a delegate sampler for root spans. Not supported via yaml config Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
-                                      "type": "object",
-                                      "required": [
-                                        "TraceIdRatioBased"
-                                      ],
-                                      "properties": {
-                                        "TraceIdRatioBased": {
-                                          "type": "number",
-                                          "format": "double"
-                                        }
-                                      },
-                                      "additionalProperties": false
-                                    }
-                                  ],
+                                  "additionalProperties": false,
                                   "nullable": true
                                 }
                               },
-                              "additionalProperties": false,
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "trace_config": {
+                          "type": "object",
+                          "properties": {
+                            "max_attributes_per_event": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 0.0,
+                              "nullable": true
+                            },
+                            "max_attributes_per_link": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 0.0,
+                              "nullable": true
+                            },
+                            "max_attributes_per_span": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 0.0,
+                              "nullable": true
+                            },
+                            "max_events_per_span": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 0.0,
+                              "nullable": true
+                            },
+                            "max_links_per_span": {
+                              "type": "integer",
+                              "format": "uint32",
+                              "minimum": 0.0,
+                              "nullable": true
+                            },
+                            "resource": {
+                              "default": null,
+                              "type": "object",
+                              "additionalProperties": true,
+                              "nullable": true
+                            },
+                            "sampler": {
+                              "default": null,
+                              "oneOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "AlwaysOn",
+                                    "AlwaysOff"
+                                  ]
+                                },
+                                {
+                                  "description": "Respects the parent span's sampling decision or delegates a delegate sampler for root spans. Not supported via yaml config Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                                  "type": "object",
+                                  "required": [
+                                    "TraceIdRatioBased"
+                                  ],
+                                  "properties": {
+                                    "TraceIdRatioBased": {
+                                      "type": "number",
+                                      "format": "double"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              ],
                               "nullable": true
                             }
                           },
@@ -725,9 +716,11 @@ expression: "&schema"
                           "nullable": true
                         }
                       },
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "nullable": true
                     }
-                  ]
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

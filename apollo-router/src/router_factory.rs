@@ -91,18 +91,21 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 let plugin_registry = apollo_router_core::plugins();
                 match plugin_registry.get(name.as_str()) {
                     Some(factory) => match factory.create_instance(configuration) {
-                        Ok(mut plugin) => match plugin.startup().await {
-                            Ok(_v) => {
-                                builder = builder.with_dyn_plugin(plugin);
+                        Ok(mut plugin) => {
+                            tracing::debug!("Starting plugin: {}", name);
+                            match plugin.startup().await {
+                                Ok(_v) => {
+                                    tracing::debug!("Started plugin: {}", name);
+                                    builder = builder.with_dyn_plugin(plugin);
+                                }
+                                Err(err) => {
+                                    (*errors).push(ConfigurationError::PluginStartup {
+                                        plugin: name,
+                                        error: err.to_string(),
+                                    });
+                                }
                             }
-                            Err(err) => {
-                                tracing::error!("starting plugin: {}, error: {}", name, err);
-                                (*errors).push(ConfigurationError::PluginStartup {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
-                        },
+                        }
                         Err(err) => {
                             (*errors).push(ConfigurationError::PluginConfiguration {
                                 plugin: name,
@@ -126,12 +129,15 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         if !errors.is_empty() {
             // Shutdown all the plugins we started
             for plugin in builder.plugins().iter_mut().rev() {
+                tracing::debug!("Stopping plugin: {}", plugin.name());
                 if let Err(err) = plugin.shutdown().await {
                     // If we can't shutdown a plugin, we terminate the router since we can't
                     // assume that it is safe to continue.
-                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                    tracing::error!("terminating router...");
+                    tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
+                    tracing::error!("Terminating router...");
                     std::process::exit(1);
+                } else {
+                    tracing::debug!("Stopped plugin: {}", plugin.name());
                 }
             }
             for error in errors {
@@ -164,8 +170,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             if let Err(err) = plugin.shutdown().await {
                 // If we can't shutdown a plugin, we terminate the router since we can't
                 // assume that it is safe to continue.
-                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                tracing::error!("terminating router...");
+                tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("Terminating router...");
                 std::process::exit(1);
             }
         }
