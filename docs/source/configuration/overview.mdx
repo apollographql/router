@@ -165,6 +165,19 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 See [OpenTelemetry in the Apollo Router](./opentelemetry/).
 
+### Automatic persisted queries (APQ)
+
+Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
+
+The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.**
+
+The following APQ features currently available in Apollo Server might be supported in a future release of the Apollo Router:
+
+* Support for external data stores like Redis and Memcached
+* Automatic subgraph `@cacheControl` aggregation, so you don’t have to manually propagate `cache-control` headers from your subgraphs
+
+For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
+
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section with arbitrary values in the configuration file:
