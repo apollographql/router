@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-version = "0.1.0-alpha.10"
+version = "0.1.0-preview.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
