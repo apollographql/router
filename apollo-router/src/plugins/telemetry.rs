@@ -348,6 +348,7 @@ impl Telemetry {
             .with_graph_config(graph_config)
     }
 
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     fn setup_otlp(
         spaceport_config: &Option<SpaceportConfig>,
         graph_config: &Option<StudioGraph>,
