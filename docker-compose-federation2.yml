@@ -58,7 +58,7 @@ services:
       - "9411:9411"
   prometheus:
     container_name: prometheus
-    image: prom/prometheus:v2.33.5
+    image: prom/prometheus:v2.34.0
     volumes:
       - ./dockerfiles/federation2-demo/opentelemetry/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
