@@ -22,6 +22,30 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [v0.1.0-preview.1] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+- **Telemetry attribute yaml ergonomics** ([PR #729](https://github.com/apollographql/router/pull/729))
+  
+  Trace config yaml ergonomics has been improved. To add attributes to your trace information now use the following format: 
+  ```yaml
+        trace_config:
+          attributes:
+            str: "a"
+            int: 1
+            float: 1.0
+            bool: true
+            str_arr:
+              - "a"
+              - "b"
+            int_arr:
+              - 1
+              - 2
+            float_arr:
+              - 1.0
+              - 2.0
+            bool_arr:
+              - true
+              - false
+  ```
+  
 ## 🚀 Features
 ## 🐛 Fixes
 - **Log and error message formatting** ([PR #721](https://github.com/apollographql/router/pull/721))
