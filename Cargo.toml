@@ -17,3 +17,9 @@ members = [
     "uplink",
     "xtask",
 ]
+
+# this makes build scripts and proc macros faster to compile
+[profile.dev.build-override]
+debug = false
+strip = "debuginfo"
+incremental = false
