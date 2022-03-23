@@ -1,13 +1,13 @@
 ---
-title: Rhai script plugins for the Apollo Router
+title: Rhai scripts for the Apollo Router
 description: Extend router functionality without compiling a custom plugin
 ---
 
 > ⚠️ Apollo Router support for Rhai scripting is currently experimental. For details, see [experimental limitations](#experimental-limitations).
 
-The Apollo Router provides experimental support for plugins that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
+The Apollo Router provides experimental support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
 
-Rhai plugins hook into the same Apollo Router lifecycle events as [native Rust plugins](./native/).
+Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
 
 ## Experimental limitations
 
@@ -21,7 +21,7 @@ Like the rest of the Apollo Router, Rhai support is in active development. Durin
 * Modify the body or status codes of requests/responses
 * Perform `checkpoint`-style short circuiting of requests
 
-We might introduce breaking changes to Rhai script functionality prior to the full release of the Apollo Router. However, any required updates to your existing plugins will probably be minor.
+We might introduce breaking changes to Rhai script functionality prior to the full release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
 
 ## Configuration
 
@@ -35,7 +35,7 @@ plugins:
 
 ## Service hooks
 
-Similar to native Rust plugins, Rhai plugins can hook into the Apollo Router's [four services](./overview/#how-router-plugins-work) that handle requests. _Unlike_ native Rust plugins, Rhai plugins use two different hooks for each service, one for handling request data and one for handling response data:
+Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. _Unlike_ native Rust plugins, Rhai scripts use two different hooks for each service, one for handling request data and one for handling response data:
 
     - router_service_request
     - router_service_response
