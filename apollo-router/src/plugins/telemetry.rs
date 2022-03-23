@@ -598,6 +598,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any(feature = "otlp-grpc"))]
     async fn attribute_serialization() {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
