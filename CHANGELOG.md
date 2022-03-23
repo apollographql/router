@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- # [x.x.x] (unreleased) - 2022-mm-dd
+<!--# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
@@ -14,17 +14,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+- **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
 
   Description! And a link to a [reference](http://url)
 
  -->
 
-# [v0.1.0-preview.1] (unreleased) - 2022-mm-dd
+<<<<<<< HEAD
+# [v0.1.0-preview.1] - 2022-03-23
+
+## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
 ## ❗ BREAKING ❗
-- **Telemetry attribute yaml ergonomics** ([PR #729](https://github.com/apollographql/router/pull/729))
-  
-  Trace config yaml ergonomics has been improved. To add attributes to your trace information now use the following format: 
+
+- **Improvements to telemetry attribute YAML ergonomics** ([PR #729](https://github.com/apollographql/router/pull/729))
+
+  Trace config YAML ergonomics have been improved. To add additional attributes to your trace information, you can now use the following format:
+
   ```yaml
         trace_config:
           attributes:
@@ -45,16 +50,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
               - true
               - false
   ```
-  
-## 🚀 Features
 ## 🐛 Fixes
+
 - **Log and error message formatting** ([PR #721](https://github.com/apollographql/router/pull/721))
 
-  Logs and error messages in Rust begin with lower case and do not have trailing punctuation. The codebase is now consistent with this scheme. 
+  Logs and error messages now begin with lower case and do not have trailing punctuation, per Rust conventions.
 
 - **OTLP default service.name and service.namespace** ([PR #722](https://github.com/apollographql/router/pull/722))
 
-  While the Jaeger yaml configuration would default to the "router" service.name and "apollo" service.namespace, it was not the case when using an OTLP configuration. This lead to UNKNOWN_SERVICE name in zipking traces, and hard to find Jaeger traces.
+  While the Jaeger YAML configuration would default to `router` for the `service.name` and to `apollo` for the `service.namespace`, it was not the case when using a configuration that utilized OTLP. This lead to an `UNKNOWN_SERVICE` name span in zipkin traces, and difficult to find Jaeger traces.
 
 # [v0.1.0-preview.0] - 2022-03-22
 
