@@ -26,9 +26,27 @@ flowchart BT;
 <p>
   <Button
     colorScheme="indigo"
-    to="/quickstart/"
+    to="/router/quickstart/"
     as={Link}
+    style={{
+      marginRight: '10px'
+    }}
   >
     Try it out!
   </Button>
+  <Button
+    colorScheme="gray"
+    to="/router/migrating-from-gateway/"
+    as={Link}
+  >
+    Migrate from @apollo/gateway
+  </Button>
 </p>
+
+## Features
+
+The Apollo Router provides the following features during this preview release, with more to come with the full release and beyond:
+
+* Full support for [Apollo Federation](/federation/) v1 and v2 (both managed and unmanaged)
+* Extensive declarative [configuration options](./configuration/overview) (header propagation, CORS settings, OpenTelemetry support, and more)
+* Support for further [customization](./customizations/overview/) via native Rust plugins and Rhai scripts

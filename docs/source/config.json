@@ -25,10 +25,10 @@
       "Setup": "/managed-federation/setup",
       "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
     },
-    "Plugins": {
+    "Customizations": {
       "Overview": "/customizations/overview",
-      "Native Rust": "/customizations/native",
-      "Rhai script (experimental)": "/customizations/rhai"
+      "Native Rust plugins": "/customizations/native",
+      "Rhai scripts (experimental)": "/customizations/rhai"
     },
     "Third-Party Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
