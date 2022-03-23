@@ -125,19 +125,23 @@ telemetry:
           max_links_per_span: 3
           max_attributes_per_event: 4
           max_attributes_per_link: 5
-          resource:
-            attrs:
-              key1:
-                String: value
-              key2:
-                Bool: true
-              key3:
-                I64: 42
-              key4:
-                F64: 42.0
-              key5:
-                Array:
-                  String:
-                    - value1
-                    - value2
+          
+          # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[] 
+          attributes:
+            str: "a"
+            int: 1
+            float: 1.0
+            bool: true
+            str_arr:
+              - "a"
+              - "b"
+            int_arr:
+              - 1
+              - 2
+            float_arr:
+              - 1.0
+              - 2.0
+            bool_arr:
+              - true
+              - false
 ```
