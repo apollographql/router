@@ -17,14 +17,14 @@ use futures::Future;
 use opentelemetry::sdk::trace::{BatchSpanProcessor, Sampler};
 use opentelemetry::sdk::Resource;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::KeyValue;
+use opentelemetry::{Array, KeyValue, Value};
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use otlp::Tracing;
 use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::net::SocketAddr;
@@ -85,12 +85,58 @@ pub struct TraceConfig {
     pub max_links_per_span: Option<u32>,
     pub max_attributes_per_event: Option<u32>,
     pub max_attributes_per_link: Option<u32>,
-    #[schemars(schema_with = "option_resource_schema", default)]
-    pub resource: Option<Resource>,
+    pub attributes: Option<BTreeMap<String, AttributeValue>>,
 }
 
-fn option_resource_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    Option::<HashMap<String, Value>>::json_schema(gen)
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum AttributeValue {
+    /// bool values
+    Bool(bool),
+    /// i64 values
+    I64(i64),
+    /// f64 values
+    F64(f64),
+    /// String values
+    String(String),
+    /// Array of homogeneous values
+    Array(AttributeArray),
+}
+
+impl From<AttributeValue> for opentelemetry::Value {
+    fn from(value: AttributeValue) -> Self {
+        match value {
+            AttributeValue::Bool(v) => Value::Bool(v),
+            AttributeValue::I64(v) => Value::I64(v),
+            AttributeValue::F64(v) => Value::F64(v),
+            AttributeValue::String(v) => Value::String(Cow::from(v)),
+            AttributeValue::Array(v) => Value::Array(v.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum AttributeArray {
+    /// Array of bools
+    Bool(Vec<bool>),
+    /// Array of integers
+    I64(Vec<i64>),
+    /// Array of floats
+    F64(Vec<f64>),
+    /// Array of strings
+    String(Vec<Cow<'static, str>>),
+}
+
+impl From<AttributeArray> for opentelemetry::Array {
+    fn from(array: AttributeArray) -> Self {
+        match array {
+            AttributeArray::Bool(v) => Array::Bool(v),
+            AttributeArray::I64(v) => Array::I64(v),
+            AttributeArray::F64(v) => Array::F64(v),
+            AttributeArray::String(v) => Array::String(v),
+        }
+    }
 }
 
 fn option_sampler_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -136,23 +182,23 @@ impl TraceConfig {
             trace_config = trace_config.with_max_attributes_per_link(n);
         }
 
-        let resource = self
-            .resource
-            .as_ref()
-            .map(|r| {
-                Resource::new(
-                    r.clone()
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v))
-                        .collect::<Vec<KeyValue>>(),
-                )
-            })
-            .unwrap_or_else(|| {
-                Resource::new(vec![
-                    KeyValue::new("service.name", default_service_name()),
-                    KeyValue::new("service.namespace", default_service_namespace()),
-                ])
-            });
+        let resource = Resource::new(vec![
+            KeyValue::new("service.name", default_service_name()),
+            KeyValue::new("service.namespace", default_service_namespace()),
+        ])
+        .merge(&mut Resource::new(
+            self.attributes
+                .clone()
+                .unwrap_or_default()
+                .iter()
+                .map(|(k, v)| {
+                    KeyValue::new(
+                        opentelemetry::Key::from(k.clone()),
+                        opentelemetry::Value::from(v.clone()),
+                    )
+                })
+                .collect::<Vec<KeyValue>>(),
+        ));
 
         trace_config = trace_config.with_resource(resource);
 
@@ -548,6 +594,39 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "opentelemetry": null }))
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn attribute_serialization() {
+        apollo_router_core::plugins()
+            .get("apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(&serde_json::json!({ "opentelemetry": {
+                           "otlp": {
+                             "tracing": {
+                               "exporter": {
+                                 "grpc": {
+                                   "protocol": "Grpc"
+                                 },
+                               },
+                               "trace_config": {
+                                 "attributes": {
+                                   "str": "a",
+                                   "int": 1,
+                                   "float": 1.0,
+                                   "bool": true,
+                                   "str_arr": ["a", "b"],
+                                   "int_arr": [1, 2],
+                                   "float_arr": [1.0, 2.0],
+                                   "bool_arr": [true, false]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ))
             .unwrap();
     }
 }
