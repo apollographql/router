@@ -1,152 +1,74 @@
 ---
-title: Extending Apollo Router functionality with Plugins
-description: Extending Apollo Router functionality 
+title: Customizations for the Apollo Router
+description: Extend the Apollo Router with custom functionality
 ---
 
-import { Link } from 'gatsby';
+You can write customizations for the Apollo Router to add functionality that isn't offered by default. For example, you can make an external call to fetch authentication data for each incoming request.
 
-TODO:
+## Customization types
 
-- Natively compiled Plugins
-- Scripted plugins
+The Apollo Router supports two types of customizations:
 
-- Request lifecycle
-- Plugin trait
+* [Native Rust plugins](./native/)
+* [Rhai scripts](./rhai/) (experimental)
 
----
+> Native Rust plugins require building a custom Apollo Router binary that includes your plugin code. This requires familiarity with building Rust projects. We also recommend looking at the [examples provided in the Apollo Router repo](https://github.com/apollographql/router/tree/main/examples).
 
-You can write custom plugins for Apollo Router to build functionality that isn't offered by default.  For example, make an external call to fetch some authentication data, or some complex logic.
+### Which customization type should I use?
 
-Custom plugins require that you build a router binary that includes your custom code. For this you should be generally familiar with building Rust projects, and have looked at the [examples provided in the router repo](https://github.com/apollographql/router/tree/main/examples).
+If your customization only needs to make basic changes to request or response headers, we recommend first checking whether a [Rhai script](./rhai/) can accomplish what you need.
 
-If you only need to make simple changes to a request or response then it's worth checking to see if [rhai](#rhai) script is enough to meet your needs. 
+If not, the [hello world](https://github.com/apollographql/router/blob/2b094d2eb47feab3f524bae53215a9c1c2cd0bea/examples/hello-world/src/hello_world.rs) example plugin is a helpful starting point for writing your first [native Rust plugin](./native/).
 
-If not, the [hello world](https://github.com/apollographql/router/blob/225915f6e084b13c3a0972f170cf4a1a6f8e7f28/examples/hello-world/src/hello_world.rs) plugin is a good getting started point for writing your first Rust router plugin.
+## How customizations work
 
-### Request life-cycle
-
-The router has a defined request life-cycle as illustrated here:
+Before building an Apollo Router customization, it helps first to understand how the router handles each incoming GraphQL request. During each request's execution, four **services** in the router communicate with each other as shown:
 
 ```mermaid
 sequenceDiagram
-    participant Client
+    actor Client
     participant RouterService
     participant QueryPlannerService
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>RouterService: request
-    RouterService->>QueryPlannerService: plan
-    QueryPlannerService-->>RouterService:
-    RouterService->>ExecutionService: execute
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
-    ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
-    ExecutionService-->>RouterService: response
-    RouterService-->>Client: response
+    Client->>RouterService: Sends request
+    RouterService->>QueryPlannerService: Fetches<br/>query plan
+    QueryPlannerService-->>RouterService: 
+    RouterService->>ExecutionService: Initiates query plan execution
+    par
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    and
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    and
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    end
+    ExecutionService-->>RouterService: Assembles and returns response
+    RouterService-->>Client: Returns response
 ```
+
+As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the response to the client.
+
+Apollo Router customizations can hook into _any combination_ of these services and modify the request, response, or related metadata as they're passed along.
+
+### Service descriptions
+
+Each Apollo Router service has a corresponding function that a customization can define to hook into that service:
+
+| Service | Function | Description |
+|---------|----------|-------------|
+| `RouterService` | `router_service` | <p>This service runs at the very beginning and very end of the request lifecycle.</p><p>Define `router_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further. </p>|
+| `QueryPlannerService` | `query_planning_service` | <p>This service handles generating the query plan for each incoming request. </p><p>Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).</p> |
+| `ExecutionService` | `execution_service` | <p>This service handles initiating the execution of a query plan after it's been generated.</p><p>Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).</p>|
+| `SubgraphService` | `subgraph_service` | This service handles communication between the Apollo Router and your subgraphs. Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph). |
+
+> _Most_ customizations use `router_service` and/or `subgraph_service`, whereas the other service functions are less common.
 
 Each service has a request and response data-structure that holds:
-1. A context object that was created at the start of the request and is propagated throughout the entire request life-cycle. It holds:
-    - The original request from the client.
-    - A bag of data that can be populated by plugins for communication across the request life-cycle.
-3. Any other specific data to that service, e.g., query plans, downstream requests/responses.
-
-
-### The `Plugin` trait
-
-All plugins must implement the Plugin trait. It defines life-cycle hooks which allow decoration of services within the Router.
-
-The trait itself provides default implementations of each hook that returns the service as is.
-
-Each plugin may have configuration. If specified, plugin config will automatically loaded and passed to the `new` method on initialization. You'll be able to configure your plugin via the Router configuration yaml.
-
-```rust=
-#[async_trait]
-pub trait Plugin: Send + Sync + 'static + Sized {
-    type Config: JsonSchema + DeserializeOwned;
-
-    fn new(config: Self::Config) -> Result<Self, BoxError>;
-
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
-
-    fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        service
-    }
-
-    fn query_planning_service(
-        &mut self,
-        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
-    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        service
-    }
-
-    fn execution_service(
-        &mut self,
-        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
-    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
-        service
-    }
-
-    fn subgraph_service(
-        &mut self,
-        _name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        service
-    }
-
-    fn name(&self) -> &'static str {
-        get_type_of(self)
-    }
-}
-```
-
-### `ServiceBuilder`
-
-A plugin may augment any of the services to provide extra functionality.
-ServiceBuilder provides common building blocks that removes much of the complexity of writing a plugin. These are called layers.
-
-```rust=
-    fn router_service(
-        &mut self,
-        service: BoxService<RouterRequest, RouterResponse, BoxError>,
-    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        // Always use service builder to compose your plugins.
-        // It provides off the shelf building blocks for your plugin.
-        ServiceBuilder::new()
-            // Some example service builder methods:
-            // .map_request()
-            // .map_response()
-            // .rate_limit()
-            // .checkpoint()
-            // .timeout()
-            .service(service)
-            .boxed()
-    }
-```
-
-Tower-rs, on which the router is based comes with many off the shelf layers. In addition Apollo provide layers that cover common functionality and integration with thrid party products.
-
-### Registering your plugin
-
-To enable the Router to discover your plugin it must be registered. Plugin configuration can then be added to the Router configuration yaml to activate your plugin.  
-
-```rust=
-register_plugin!(
-    "example",
-    "my_custom_plugin",
-    MyPlugin
-);
-```
+* A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
+    - The original request from the client
+    - A bag of data that can be populated by plugins for communication across the request lifecycle
+* Any other specific data to that service (e.g., query plans and downstream requests/responses)

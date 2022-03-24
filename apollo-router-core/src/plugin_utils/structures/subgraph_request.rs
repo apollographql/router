@@ -1,8 +1,10 @@
 use super::from_names_and_values;
 use crate::{fetch::OperationKind, http_compat, Context, Object, Request};
+use http::header::{HeaderName, HeaderValue};
 use http::Method;
 use reqwest::Url;
 use serde_json_bytes::Value;
+use std::str::FromStr;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -16,6 +18,7 @@ pub struct SubgraphRequest {
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
     extensions: Option<Object>,
     context: Option<Context<()>>,
+    headers: Option<Vec<(String, String)>>,
 }
 
 impl From<SubgraphRequest> for crate::SubgraphRequest {
@@ -26,10 +29,18 @@ impl From<SubgraphRequest> for crate::SubgraphRequest {
             variables: request.variables.unwrap_or_default(),
             extensions: request.extensions.unwrap_or_default(),
         };
-        let req_compat: http_compat::Request<Request> =
+        let mut req_compat: http_compat::Request<Request> =
             http_compat::RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
                 .body(gql_req)
                 .expect("won't fail because our url is valid; qed");
+
+        for (key, value) in request.headers.unwrap_or_default() {
+            req_compat.headers_mut().insert(
+                HeaderName::from_str(key.as_str()).expect("name must be valid"),
+                HeaderValue::from_str(value.as_str()).expect("value must be valid"),
+            );
+        }
+
         crate::SubgraphRequest {
             context: request
                 .context

@@ -9,7 +9,7 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // We don't need any in this example
 struct ContextData {}
 
-// Passing information via context is useful for storing things like authentication data or other
+// Passing information via context is useful for storing things like authentication data or
 // collecting cache control information.
 // Services are structured in a hierarchy:
 // ```
@@ -20,12 +20,12 @@ struct ContextData {}
 //                                      |------> ........
 // ```
 //
-// For each request a single instance of context is created and passed to all services.
+// For each request a single instance of `Context` is created and passed to all services.
 //
 // In this example we:
-// 1. Place some information in context at the incoming request of the router service. (world!)
+// 1. Place some information in `Context` at the incoming request of the router service. (world!)
 // 2. Pick up and print it out at subgraph request. (Hello world!)
-// 3. For each subgraph response merge the some information into the context. (response_count)
+// 3. For each subgraph response merge some information into the `Context`. (response_count)
 // 4. Pick up and print it out at router response. (response_count)
 //
 impl Plugin for ContextData {
@@ -51,7 +51,7 @@ impl Plugin for ContextData {
                     // This can only happen if the value could not be serialized.
                     // In this case we will never fail because we are storing a string which we
                     // know can be stored as Json.
-                    tracing::info!("Failed to set context data {}", e);
+                    tracing::info!("failed to set context data {}", e);
                 }
                 req
             })
@@ -59,7 +59,7 @@ impl Plugin for ContextData {
             .map_response(|resp| {
                 // Pick up a value from the context on the response.
                 if let Ok(Some(data)) = resp.context.get::<_, u64>("response_count") {
-                    tracing::info!("Subrequest count {}", data);
+                    tracing::info!("subrequest count {}", data);
                 }
                 resp
             })
@@ -75,7 +75,7 @@ impl Plugin for ContextData {
             .map_request(|req: SubgraphRequest| {
                 // Pick up a value from the context that was populated earlier.
                 if let Ok(Some(data)) = req.context.get::<_, String>("incoming_data") {
-                    tracing::info!("Hello {}", data); // Hello world!
+                    tracing::info!("hello {}", data); // Hello world!
                 }
                 req
             })

@@ -47,11 +47,11 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
         match planner_result {
             PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
             PlannerResult::QueryPlan { node: None } => {
-                failfast_debug!("Empty query plan");
+                failfast_debug!("empty query plan");
                 Err(QueryPlannerError::EmptyPlan)
             }
             PlannerResult::Other => {
-                failfast_debug!("Unhandled planner result");
+                failfast_debug!("unhandled planner result");
                 Err(QueryPlannerError::UnhandledPlannerResult)
             }
         }

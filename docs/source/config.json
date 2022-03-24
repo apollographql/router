@@ -6,7 +6,15 @@
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
-    "Migrating from Gateway": "/migrating-from-gateway",
+    "Migrating from @apollo/gateway": "/migrating-from-gateway",
+    "Configuration": {
+      "Overview": "/configuration/overview",
+      "CORS": "/configuration/cors",
+      "Logging": "/configuration/logging",
+      "Header propagation": "/configuration/header-propagation",
+      "OpenTelemetry": "/configuration/opentelemetry",
+      "Usage reporting": "/configuration/spaceport"
+    },
     "Development workflow": {
       "Build and run queries": "/development-workflow/build-run-queries",
       "Request format": "/development-workflow/requests",
@@ -17,25 +25,14 @@
       "Setup": "/managed-federation/setup",
       "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
     },
-    "Configuration": {
-      "Overview": "/configuration/overview",
-      "Logging": "/configuration/logging",
-      "Header propagation": "/configuration/header-propagation",
-      "Subgraph routing URLs": "/configuration/subgraph-routing-urls",
-      "OpenTelemetry": "/configuration/open-telemetry",
-      "Spaceport": "/configuration/spaceport"
-    },
     "Customizations": {
       "Overview": "/customizations/overview",
       "Native Rust plugins": "/customizations/native",
-      "rhai script": "/customizations/rhai"
+      "Rhai scripts (experimental)": "/customizations/rhai"
     },
     "Third-Party Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
-    },
-    "TODO(Not Categorized)": {
-      "Build from source": "/build-from-source",
     }
   }
 }

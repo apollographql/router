@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- # [x.x.x] (unreleased) - 2022-mm-dd
+<!--# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
@@ -14,7 +14,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+- **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
 
   Description! And a link to a [reference](http://url)
 
@@ -32,7 +32,117 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🛠 Maintenance
 ## 📚 Documentation
 
+# [v0.1.0-preview.1] - 2022-03-23
 
+## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
+## ❗ BREAKING ❗
+
+- **Improvements to telemetry attribute YAML ergonomics** ([PR #729](https://github.com/apollographql/router/pull/729))
+
+  Trace config YAML ergonomics have been improved. To add additional attributes to your trace information, you can now use the following format:
+
+  ```yaml
+        trace_config:
+          attributes:
+            str: "a"
+            int: 1
+            float: 1.0
+            bool: true
+            str_arr:
+              - "a"
+              - "b"
+            int_arr:
+              - 1
+              - 2
+            float_arr:
+              - 1.0
+              - 2.0
+            bool_arr:
+              - true
+              - false
+  ```
+## 🐛 Fixes
+
+- **Log and error message formatting** ([PR #721](https://github.com/apollographql/router/pull/721))
+
+  Logs and error messages now begin with lower case and do not have trailing punctuation, per Rust conventions.
+
+- **OTLP default service.name and service.namespace** ([PR #722](https://github.com/apollographql/router/pull/722))
+
+  While the Jaeger YAML configuration would default to `router` for the `service.name` and to `apollo` for the `service.namespace`, it was not the case when using a configuration that utilized OTLP. This lead to an `UNKNOWN_SERVICE` name span in zipkin traces, and difficult to find Jaeger traces.
+
+# [v0.1.0-preview.0] - 2022-03-22
+
+## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
+
+For more information on what's expected at this stage, please see our [release stages](https://www.apollographql.com/docs/resources/release-stages/#preview).
+
+## 🐛 Fixes
+
+- **Header propagation by `name` only fixed** ([PR #709](https://github.com/apollographql/router/pull/709))
+
+  Previously `rename` and `default` values were required (even though they were correctly not flagged as required in the json schema).
+  The following will now work:
+  ```yaml
+  headers:
+    all:
+    - propagate:
+        named: test
+  ```
+- **Fix OTLP hang on reload** ([PR #711](https://github.com/apollographql/router/pull/711))
+
+  Fixes hang when OTLP exporter is configured and configuration hot reloads.
+
+# [v0.1.0-alpha.10] 2022-03-21
+
+## ❗ BREAKING ❗
+
+- **Header propagation `remove`'s `name` is now `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
+
+  This merely renames the `remove` options' `name` setting to be instead `named` to be a bit more intuitively named and consistent with its partner configuration, `propagate`.
+
+  _Previous configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      name: "Remove" # Was: "name"
+  ```
+  _New configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      named: "Remove" # Now: "named"
+  ```
+
+- **Command-line flag vs Environment variable precedence changed** ([PR #693](https://github.com/apollographql/router/pull/693))
+
+  For logging related verbosity overrides, the `RUST_LOG` environment variable no longer takes precedence over the command line argument.  The full order of precedence is now command-line argument overrides environment variable overrides the default setting.
+
+## 🚀 Features
+
+- **Forbid mutations plugin** ([PR #641](https://github.com/apollographql/router/pull/641))
+
+  The forbid mutations plugin allows you to configure the router so that it disallows mutations.  Assuming none of your `query` requests are mutating data or changing state (they shouldn't!) this plugin can be used to effectively make your graph read-only. This can come in handy when testing the router, for example, if you are mirroring/shadowing traffic when trying to validate a Gateway to Router migration! 😸
+
+- **⚠️ Add experimental Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+
+  Add an _experimental_ core plugin to be able to extend Apollo Router functionality using [Rhai script](https://rhai.rs/). This allows users to write their own `*_service` function similar to how as you would with a native Rust plugin but without needing to compile a custom router. Rhai scripts have access to the request context and headers directly and can make simple manipulations on them.
+
+  See our [Rhai script documentation](https://www.apollographql.com/docs/router/customizations/rhai) for examples and details!
+
+## 🐛 Fixes
+
+- **Correctly set the URL path of the HTTP request in `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
+
+  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
+
+## 📚 Documentation
+
+- **We have incorporated a substantial amount of documentation** (via many, many PRs!)
+
+  See our improved documentation [on our website](https://www.apollographql.com/docs/router/).
 
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
@@ -76,6 +186,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
 
+
+- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
+
   Both `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow` instead of the `Step` enum.  `ControlFlow` has two variants, `Continue` and `Break`.
 
 - **The `reporting` configuration changes to `telemetry`** ([PR #651](https://github.com/apollographql/router/pull/651))
@@ -108,7 +221,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
 
   The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
-
 
 ## 🐛 Fixes
 

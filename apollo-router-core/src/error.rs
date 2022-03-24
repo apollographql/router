@@ -17,37 +17,37 @@ use typed_builder::TypedBuilder;
 #[serde(tag = "type")]
 #[ignore_extra_doc_attributes]
 pub enum FetchError {
-    /// Query references unknown service '{service}'.
+    /// query references unknown service '{service}'
     ValidationUnknownServiceError {
         /// The service that was unknown.
         service: String,
     },
 
-    /// Invalid type for variable: '{name}'
+    /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
         /// Name of the variable.
         name: String,
     },
 
-    /// Query could not be planned: {reason}
+    /// query could not be planned: {reason}
     ValidationPlanningError {
         /// The failure reason.
         reason: String,
     },
 
-    /// Response was malformed: {reason}
+    /// response was malformed: {reason}
     MalformedResponse {
         /// The reason the serialization failed.
         reason: String,
     },
 
-    /// Service '{service}' returned no response.
+    /// service '{service}' returned no response.
     SubrequestNoResponse {
         /// The service that returned no response.
         service: String,
     },
 
-    /// Service '{service}' response was malformed: {reason}
+    /// service '{service}' response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
         service: String,
@@ -56,7 +56,7 @@ pub enum FetchError {
         reason: String,
     },
 
-    /// Service '{service}' returned a PATCH response which was not expected.
+    /// service '{service}' returned a PATCH response which was not expected
     SubrequestUnexpectedPatchResponse {
         /// The service that returned the PATCH response.
         service: String,
@@ -64,7 +64,7 @@ pub enum FetchError {
 
     /// HTTP fetch failed from '{service}': {reason}
     ///
-    /// Note that this relates to a transport error and not a GraphQL error.
+    /// note that this relates to a transport error and not a GraphQL error
     SubrequestHttpError {
         /// The service failed.
         service: String,
@@ -73,16 +73,16 @@ pub enum FetchError {
         reason: String,
     },
 
-    /// Subquery requires field '{field}' but it was not found in the current response.
+    /// subquery requires field '{field}' but it was not found in the current response
     ExecutionFieldNotFound {
         /// The field that is not found.
         field: String,
     },
 
-    /// Invalid content: {reason}
+    /// invalid content: {reason}
     ExecutionInvalidContent { reason: String },
 
-    /// Could not find path: {reason}
+    /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
 }
 

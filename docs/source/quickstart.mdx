@@ -3,7 +3,7 @@ title: Apollo Router quickstart
 description: Run the Apollo Router with Apollo-hosted subgraphs
 ---
 
-Hello! This tutorial walks you through installing Apollo Router and running it in front of some Apollo-hosted example subgraphs.
+Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
 ## 1. Download and extract the Apollo Router binary
 
@@ -13,7 +13,7 @@ Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographq
 * macOS (x86_64)
 * Windows (x86_64)
 
-> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](./build-from-source/).
+> If a tarball for your system or architecture isn't available, you can [build and run Apollo Router from source](https://github.com/apollographql/router/blob/HEAD/DEVELOPMENT.md#development-1).  You can also [open an issue on GitHub](https://github.com/apollographql/router/issues/new/choose) for us to consider adding new architectures.
 
 After downloading, extract the file by running the following from a new project directory, substituting the path to the tarball:
 
@@ -58,7 +58,7 @@ If you do, you'll get the following:
     $ ./router --supergraph starstuff.graphql
 ```
 
-This is because Apollo Router requires a supergraph schema as input! Let's obtain one.
+This is because Apollo Router requires a supergraph schema and we aren't providing it one! Let's fix that.
 
 ## 2. Download the example supergraph schema
 
@@ -154,7 +154,7 @@ type User
 
 This file is all that Apollo Router needs to communicate with our subgraphs!
 
-## 3. Run Apollo Router with the default configuration
+## 3. Run the router with the default configuration
 
 Now from your project root, run the following:
 
@@ -169,11 +169,11 @@ The console output should look like the following:
 2022-03-14T11:56:56.000707Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
 ```
 
-That's it! Visit `http://127.0.0.1:4000` to open the [Apollo Sandbox Explorer](/studio/explorer/sandbox/). You can inspect the entire federated graph and run your first queries against Apollo Router!
+That's it! Visit `http://127.0.0.1:4000` to open [Apollo Sandbox](/studio/explorer/sandbox/). You can inspect the entire federated graph and run your first queries against the Apollo Router!
 
 ## Next steps
 
 Now that you know how to run Apollo Router with a supergraph schema, you can:
 
-* Setup [Apollo Managed Federation](./managed-federation/overview)
+* Set up [managed federation](./managed-federation/overview)
 * Learn about [additional configuration options](./configuration/overview)

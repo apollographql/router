@@ -1,34 +1,36 @@
 ---
-title: Sending headers to subgraphs
-description: Configuring the HTTP headers which are sent to subgraphs
+title: Sending HTTP headers to subgraphs
+description: Configure which headers the Apollo Router sends to which subgraphs
 ---
 
+You can configure which HTTP headers the Apollo Router includes in its requests to each of your subgraphs. You can define header rules for individual subgraphs, along with rules that apply to _all_ subgraphs.
 
+You define header rules in your [YAML configuration file](./overview/#configuration-file), like so:
 
-You can customize which HTTP headers the Apollo Router includes in its requests to your subgraphs. Transformations can be specified on all or per-subgraph basis in your [YAML configuration file](#configuration-file).
-
-```yaml{3-12}:title=config.router.yaml
+```yaml title="router.yaml"
 # ...other configuration...
 
 headers:
-  all:
+  all: # Header rules for all subgraphs
     - propagate:
         matching: ^upstream-header-.*
     - remove:
         named: "x-legacy-account-id"
   subgraphs:
-    products:
+    products: # Header rules for just the products subgraph
     - insert:
         name: "router-subgraph-name"
         value: "products"
 
 ```
 
-The following transformations are possible:
+## Supported header rules
+
+The Apollo Router supports the following types of header rules:
 
 ### `propagate`
 
-Enables you to selectively propagate headers that were included in the client's request to the router.
+Enables you to selectively pass along headers that were included in the client's request to the router.
 
 You can specify which headers to propagate based on a matching [regex pattern](https://docs.rs/regex/latest/regex/):
 
@@ -36,10 +38,10 @@ You can specify which headers to propagate based on a matching [regex pattern](h
 - propagate:
     matching: .*
 ```
-> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length` when propagating by pattern.
+> **Note:** The Apollo Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
 
 
-You can also provide a static string with the `named` option. These `named` configurations have additional flexibility, because they support the following options:
+Alternatively, you can provide a static string via the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
 - `default`: A value to set if _no_ value was sent by the client
 - `rename`: Renames the header's key to the provided value
@@ -53,9 +55,7 @@ You can also provide a static string with the `named` option. These `named` conf
 
 ### `remove`
 
-Enables you to selectively remove headers that were included in the client's request to the router. This option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
-
-> **Note:** The Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers), such as `Content-Length`.
+Enables you to selectively remove headers that were included in the client's request to the router. Like [`propagate`](#propagate), this option can match either a static string or a [regular expression](https://docs.rs/regex/latest/regex/).
 
 ```yaml
 # Do not send this subgraph the "Cookie" header.
@@ -76,41 +76,41 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
     value: "indeed"
 ```
 
-### Example
+## Example
 
-Here's a complete example showing all the possible configuration options in use.
+Here's a complete example showing all the possible configuration options in use:
 
-```yaml:title=config.router.yaml
+```yaml title="router.yaml"
 headers:
-  # All subgraph configuration.
+  # Header rules for all subgraphs
   all:
-  # Propagate matching headers.
+  # Propagate matching headers
   - propagate:
       matching: ^upstream-header-.*
-  # Propagate matching headers.
+  # Propagate matching headers
   - propagate:
       named: "some-header"
       default: "default-value"
       rename: "destination-header"
-  # Remove the "x-legacy-account-id" header.
+  # Remove the "x-legacy-account-id" header
   - remove:
       named: "x-legacy-account-id"
-  # Remove matching headers.
+  # Remove matching headers
   - remove:
       matching: ^x-deprecated-.*
-  # Insert the 'my-company' header.
+  # Insert the 'my-company' header
   - insert:
       name: "my-company"
       value: "acme"
-  # Subgraph-specific configuration.
+  # Subgraph-specific header rules
   subgraphs:
     products:
-      # Calls to the products subgraph will have the "router-subgraph-name" header set to `products`.
+      # Calls to the products subgraph have the "router-subgraph-name" header set to `products`.
       - insert:
           name: "router-subgraph-name"
           value: "products"
     accounts:
-      # Calls to the accounts subgraph will have the "router-subgraph-name" header set to `accounts`.
+      # Calls to the accounts subgraph have the "router-subgraph-name" header set to `accounts`.
       - insert:
           name: "router-subgraph-name"
           value: "accounts"

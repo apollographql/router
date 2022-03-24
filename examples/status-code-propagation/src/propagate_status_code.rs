@@ -104,7 +104,7 @@ mod tests {
     // This test ensures the router will be able to
     // find our `propagate_status_code` plugin,
     // and deserialize an yml configuration with a list of status_codes into it
-    // see config.router.yaml for more information
+    // see `router.yaml` for more information
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()

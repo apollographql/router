@@ -128,9 +128,9 @@ impl reqwest_middleware::Middleware for LoggingMiddleware {
         extensions: &mut task_local_extensions::Extensions,
         next: reqwest_middleware::Next<'_>,
     ) -> reqwest_middleware::Result<reqwest::Response> {
-        tracing::trace!("Request to service {}: {:?}", self.service, req);
+        tracing::trace!("request to service {}: {:?}", self.service, req);
         let res = next.run(req, extensions).await;
-        tracing::trace!("Response from service {}: {:?}", self.service, res);
+        tracing::trace!("response from service {}: {:?}", self.service, res);
         res
     }
 }

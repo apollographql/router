@@ -12,6 +12,8 @@ services:
     command: npm run start
     environment:
       - JAEGER_HOST=jaeger
+    depends_on:
+      - jaeger
 
   jaeger:
     image: jaegertracing/all-in-one:latest

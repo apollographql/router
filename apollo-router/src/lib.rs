@@ -6,7 +6,7 @@ mod executable;
 mod files;
 mod http_server_factory;
 mod layers;
-mod plugins;
+pub mod plugins;
 mod reload;
 pub mod router_factory;
 mod state_machine;
@@ -28,6 +28,7 @@ pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -42,43 +43,43 @@ type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
 pub enum FederatedServerError {
-    /// Failed to start server.
+    /// failed to start server
     StartupError,
 
-    /// Failed to stop HTTP Server.
+    /// failed to stop HTTP Server
     HttpServerLifecycleError,
 
-    /// Configuration was not supplied.
+    /// configuration was not supplied
     NoConfiguration,
 
-    /// Schema was not supplied.
+    /// schema was not supplied
     NoSchema,
 
-    /// Could not deserialize configuration: {0}
+    /// could not deserialize configuration: {0}
     DeserializeConfigError(serde_yaml::Error),
 
-    /// Could not read configuration: {0}
+    /// could not read configuration: {0}
     ReadConfigError(std::io::Error),
 
-    /// Could not read schema: {0}
+    /// could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
 
-    /// Could not create the HTTP pipeline: {0}
+    /// could not create the HTTP pipeline: {0}
     ServiceCreationError(tower::BoxError),
 
-    /// Could not create the HTTP server: {0}
+    /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
 
-    /// Could not configure spaceport: {0}
+    /// could not configure spaceport: {0}
     ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 
-    /// No reload handle available
+    /// no reload handle available
     NoReloadTracingHandleError,
 
-    /// Could not set global subscriber: {0}
+    /// could not set global subscriber: {0}
     SetGlobalSubscriberError(SetGlobalDefaultError),
 
-    /// Could not reload tracing layer: {0}
+    /// could not reload tracing layer: {0}
     ReloadTracingLayerError(ReloadError),
 }
 
@@ -483,6 +484,17 @@ pub enum State {
     Errored,
 }
 
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Startup => write!(f, "startup"),
+            State::Running { .. } => write!(f, "running"),
+            State::Stopped => write!(f, "stopped"),
+            State::Errored => write!(f, "errored"),
+        }
+    }
+}
+
 /// A handle that allows the client to await for various server events.
 pub struct FederatedServerHandle {
     result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
@@ -549,16 +561,16 @@ impl FederatedServerHandle {
             .for_each(|state| {
                 match state {
                     State::Startup => {
-                        tracing::info!(r#"Starting Apollo Router"#)
+                        tracing::info!("starting Apollo Router")
                     }
                     State::Running { address, .. } => {
-                        tracing::info!("Listening on {} 🚀", address)
+                        tracing::info!("listening on {} 🚀", address)
                     }
                     State::Stopped => {
-                        tracing::info!("Stopped")
+                        tracing::info!("stopped")
                     }
                     State::Errored => {
-                        tracing::info!("Stopped with error")
+                        tracing::info!("stopped with error")
                     }
                 }
                 future::ready(())

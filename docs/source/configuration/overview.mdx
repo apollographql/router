@@ -1,18 +1,16 @@
 ---
 title: Configuring the Apollo Router
-description: High-performance graph routing for federated graphs
+description: YAML configuration
 ---
 
 import { Link } from "gatsby";
-
----
 
 > For installation instructions, see the [quickstart](../quickstart/).
 
 You run Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
 ```bash
-./router --config configuration.yaml --supergraph supergraph-schema.graphql
+./router --config router.yaml --supergraph supergraph-schema.graphql
 ```
 
 Options are described below.
@@ -37,12 +35,9 @@ Options are described below.
 </td>
 <td>
 
-The path to the Apollo Router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas),
-absolute or relative to the current directory.
+**Required.** The absolute or relative path to the Apollo Router's [supergraph schema](https://www.apollographql.com/docs/federation/#federated-schemas).
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
-
-**Required**
 
 </td>
 </tr>
@@ -69,7 +64,7 @@ The absolute or relative path to the router's optional [YAML configuration file]
 
 The log level, which can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 
-Default: `info`
+The default value is `info`.
 
 </td>
 </tr>
@@ -82,10 +77,7 @@ Default: `info`
 </td>
 <td>
 
-Prints out a JSON schema of the configuration file, including plugin configuration (see below)
-
-</td>
-</tr>
+Prints out a JSON schema of the configuration file, including plugin configuration (see below).
 
 </td>
 </tr>
@@ -98,8 +90,7 @@ Prints out a JSON schema of the configuration file, including plugin configurati
 </td>
 <td>
 
-Watches for changes in the schema and configuration file, and reloads them automatically
-without downtime
+If provided, the router watches for changes to the schema and configuration files and reloads them automatically without downtime.
 
 </td>
 </tr>
@@ -112,7 +103,7 @@ without downtime
 </td>
 <td>
 
-Prints out the Apollo Router's version
+Prints out the Apollo Router's version.
 
 </td>
 </tr>
@@ -120,89 +111,86 @@ Prints out the Apollo Router's version
 </tbody>
 </table>
 
-## Configuration-awareness in your text editor
-
-The Apollo Router is able to produce a JSON schema for use in your text editor. It significantly eases the burden of making
-sure that your yaml file is correctly formatted, and even gives you content assist.
-
-To generate the schema use:
-```bash
-router --schema > configuration_schema.json
-```
-
-One you have generated the schema configure your text editor. Here are some instructions for well known editors:
-* [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
-* [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
-* [Sublime](https://github.com/sublimelsp/LSP-yaml)
-* [Vim](https://github.com/Quramy/vison)
-* [VsCode](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
-
 ## Configuration file
 
-Apollo Router takes an optional YAML configuration file as input via the `--config` option. All supported configuration options are shown below:
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed, the router will automatically restart when changes to the configuration file are made.
+
+This file enables you to customize the router's behavior in many ways:
 
 ### Listen address
 
-By default, the Apollo Router starts a HTTP server listening on `127.0.0.1:4000`. This can be
-changed in the configuration file:
+By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address like so:
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 #
 # server: Configuration of the HTTP server
 #
 server:
   # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
+  # (Defaults to 127.0.0.1:4000)
+  listen: 127.0.0.1:5000
 ```
 
 It can also listen on a Unix socket (not supported on Windows):
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 server:
-  # absolute path to a Unix socket
+  # Absolute path to a Unix socket
   listen: /tmp/router.sock
 
 ```
 
-### Cross Origin Resource Sharing (CORS)
+### Subgraph routing URLs
 
-The Apollo Router can configure [Cross Origin Resource Sharing policies](../cors) throughits configuration file.
+By default, the Apollo Router extracts the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
+
+However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so in your [YAML configuration file](./overview/#configuration-file) with the `override_subgraph_url` option:
+
+```yaml
+override_subgraph_url:
+  accounts: http://localhost:8080
+```
+
+In this example, the `accounts` subgraph URL is overridden to point to `http://localhost:8080`. The URL specified in the supergraph schema is ignored.
+
+Subgraphs _not_ included in the `override_subgraph_url` list continue to use the routing URL specified in the supergraph schema.
+
+### HTTP header rules
+
+See [Sending HTTP headers to subgraphs](./header-propagation/).
+
+### Cross-Origin Resource Sharing (CORS)
+
+See [Configuring CORS in the Apollo Router](./cors).
 
 ### OpenTelemetry tracing
 
-The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for
-[Jaeger](https://www.jaegertracing.io/) and the
-[OpenTelemetry Protocol (OTLP)](https://aws-otel.github.io/docs/components/otlp-exporter)
-over HTTP or gRPC. The router generates traces that include the various phases of executing
-a GraphQL operation and associated dependencies.
+See [OpenTelemetry in the Apollo Router](./opentelemetry/).
 
-You can set it up in the configuration file's [OpenTelemetry section](../open-telemetry).
+### Automatic persisted queries (APQ)
+
+Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
+
+The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release of the Apollo Router.
+
+For more information on APQ, including client configuration, see [this article](https://www.apollographql.com/docs/apollo-server/performance/apq/).
 
 ### Plugins
 
-The Apollo Router can be customized through [plugins](../customizations/overview). Any plugin
-can have its specific section in the configuration file:
+You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section with arbitrary values in the configuration file:
 
-```yaml title="configuration.router.yaml"
+```yaml title="router.yaml"
 plugins:
   example.plugin:
     var1: "hello"
     var2: 1
 ```
 
-To activate a plugin without configuration option, it can be added as follows:
+### Reusing configuration
 
-```yaml title="configuration.router.yaml"
-plugins:
-  example.plugin:
-```
+You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
 
-### Avoiding repetition using YAML anchors and aliases
-
-You can avoid repeating sections of configuration multiple times in your configuration file using standard YAML anchors and aliasing techniques:
-
-```yaml {5,9} title="configuration.yaml"
+```yaml {4,8} title="router.yaml"
 headers:
   subgraphs:
     products:
@@ -213,4 +201,23 @@ headers:
       - insert: *insert_custom_header
 ```
 
-Here the content under `&insert_custom_header` would be reused under `*insert_custom_header`.
+Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
+
+
+## Configuration awareness in your text editor
+
+The Apollo Router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
+
+Generate the schema with the following command:
+
+```bash
+./router --schema > configuration_schema.json
+```
+
+After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
+
+* [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+* [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+* [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+* [Sublime](https://github.com/sublimelsp/LSP-yaml)
+* [Vim](https://github.com/Quramy/vison)

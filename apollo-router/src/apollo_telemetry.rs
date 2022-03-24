@@ -450,7 +450,7 @@ fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
     // If we can't parse the query, we definitely can't normalize it, so
     // just return the appropriate error.
     if ast.errors().len() > 0 {
-        tracing::warn!("Could not parse query: {}", query);
+        tracing::warn!("could not parse query: {}", query);
         return GRAPHQL_PARSE_FAILURE.to_string();
     }
     let doc = ast.document();
@@ -487,7 +487,7 @@ fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
     let mut required_definitions: Vec<_> = doc.definitions().into_iter().filter(filter).collect();
     tracing::debug!("required definitions: {:?}", required_definitions);
     if required_definitions.len() != 1 {
-        tracing::warn!("Could not find required definition: {}", query);
+        tracing::warn!("could not find required definition: {}", query);
         return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
     }
     tracing::debug!(

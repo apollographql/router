@@ -25,9 +25,10 @@ pub struct Opt {
     #[structopt(
         long = "log",
         default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info,reqwest_tracing=info",
-        alias = "loglevel"
+        alias = "log-level",
+        env = "RUST_LOG"
     )]
-    env_filter: String,
+    log_level: String,
 
     /// Reload configuration and schema files automatically.
     #[structopt(short, long)]
@@ -128,10 +129,8 @@ pub async fn rt_main() -> Result<()> {
     // a FmtSubscriber to set_global_subscriber(), but we can't because of the
     // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
     // for more details.
-    let env_filter = std::env::var("RUST_LOG").ok().unwrap_or(opt.env_filter);
-
     let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&env_filter).context("could not parse log")?);
+        .with_env_filter(EnvFilter::try_new(&opt.log_level).context("could not parse log")?);
 
     let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
         RouterSubscriber::TextSubscriber(builder.finish())
@@ -141,7 +140,7 @@ pub async fn rt_main() -> Result<()> {
 
     set_global_subscriber(subscriber)?;
 
-    GLOBAL_ENV_FILTER.set(env_filter).unwrap();
+    GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
 
     tracing::info!(
         "{}@{}",
