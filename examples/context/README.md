@@ -14,7 +14,7 @@ collecting cache control information.
 The request lifecycle looks like this:
 ```mermaid
 sequenceDiagram
-    participant Client
+    actor Client
     participant RouterService
     participant QueryPlannerService
     participant ExecutionService
