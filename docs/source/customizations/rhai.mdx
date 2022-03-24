@@ -21,7 +21,7 @@ Like the rest of the Apollo Router, Rhai support is in active development. Durin
 * Modify the body or status codes of requests/responses
 * Perform `checkpoint`-style short circuiting of requests
 
-We might introduce breaking changes to Rhai script functionality prior to the full release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
+> ⚠️ As Rhai script is experimental, we may introduce breaking changes to Rhai script functionality after the general availability (GA) release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
 
 ## Configuration
 
@@ -37,14 +37,14 @@ plugins:
 
 Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. _Unlike_ native Rust plugins, Rhai scripts use two different hooks for each service, one for handling request data and one for handling response data:
 
-    - router_service_request
-    - router_service_response
-    - query_planning_service_request
-    - query_planning_service_response
-    - execution_service_request
-    - execution_service_response
-    - subgraph_service_request
-    - subgraph_service_response
+  - `router_service_request`
+  - `router_service_response`
+  - `query_planning_service_request`
+  - `query_planning_service_response`
+  - `execution_service_request`
+  - `execution_service_response`
+  - `subgraph_service_request`
+  - `subgraph_service_response`
 
 Each of these hooks is optional—define only the functions you want to use custom logic for.
 
