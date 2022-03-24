@@ -604,6 +604,9 @@ struct Operation {
 }
 
 impl Operation {
+    // clippy false positive due to the bytes crate
+    // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
+    #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
     fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Option<Self> {
         let name = operation.name().map(|x| x.text().to_string());
