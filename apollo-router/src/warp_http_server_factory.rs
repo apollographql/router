@@ -788,7 +788,7 @@ mod tests {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
-                .to_response(true);
+                .to_response();
                 Ok(http::Response::builder()
                     .status(200)
                     .body(ResponseBody::GraphQL(example_response))
@@ -819,7 +819,7 @@ mod tests {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
-            .to_response(true)
+            .to_response()
         );
         server.shutdown().await
     }

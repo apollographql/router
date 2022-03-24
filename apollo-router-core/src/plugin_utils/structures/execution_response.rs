@@ -11,7 +11,6 @@ pub struct ExecutionResponse {
     label: Option<String>,
     data: Option<Value>,
     path: Option<Path>,
-    has_next: Option<bool>,
     #[builder(setter(!strip_option))]
     errors: Vec<Error>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
@@ -35,7 +34,6 @@ impl From<ExecutionResponse> for crate::ExecutionResponse {
                 label: execution_response.label,
                 data: execution_response.data.unwrap_or_default(),
                 path: execution_response.path,
-                has_next: execution_response.has_next,
                 errors: execution_response.errors,
                 extensions: execution_response.extensions.unwrap_or_default(),
             })

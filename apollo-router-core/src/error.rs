@@ -99,12 +99,11 @@ impl FetchError {
     }
 
     /// Convert the error to an appropriate response.
-    pub fn to_response(&self, primary: bool) -> Response {
+    pub fn to_response(&self) -> Response {
         Response {
             label: Default::default(),
             data: Default::default(),
             path: Default::default(),
-            has_next: primary.then(|| false),
             errors: vec![self.to_graphql_error(None)],
             extensions: Default::default(),
         }
@@ -262,7 +261,7 @@ impl From<CacheResolverError> for QueryPlannerError {
 
 impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
-        FetchError::from(err).to_response(true)
+        FetchError::from(err).to_response()
     }
 }
 

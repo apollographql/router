@@ -11,7 +11,6 @@ pub struct RouterResponse {
     label: Option<String>,
     data: Option<Value>,
     path: Option<Path>,
-    has_next: Option<bool>,
     #[builder(setter(!strip_option))]
     errors: Vec<Error>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
@@ -36,7 +35,6 @@ impl RouterResponse {
                         label: this.label,
                         data: this.data.unwrap_or_default(),
                         path: this.path,
-                        has_next: this.has_next,
                         errors: this.errors,
                         extensions: this.extensions.unwrap_or_default(),
                     }
