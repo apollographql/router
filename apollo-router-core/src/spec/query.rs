@@ -13,8 +13,6 @@ pub struct Query {
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     operations: Vec<Operation>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    operation_type_map: HashMap<OperationType, String>,
 }
 
 impl Query {
@@ -109,41 +107,10 @@ impl Query {
             })
             .collect();
 
-        let operation_type_map = document
-            .definitions()
-            .filter_map(|definition| match definition {
-                ast::Definition::SchemaDefinition(definition) => {
-                    Some(definition.root_operation_type_definitions())
-                }
-                ast::Definition::SchemaExtension(extension) => {
-                    Some(extension.root_operation_type_definitions())
-                }
-                _ => None,
-            })
-            .flatten()
-            .map(|definition| {
-                // Spec: https://spec.graphql.org/draft/#sec-Schema
-                let type_name = definition
-                    .named_type()
-                    .expect("the node NamedType is not optional in the spec; qed")
-                    .name()
-                    .expect("the node Name is not optional in the spec; qed")
-                    .text()
-                    .to_string();
-                let operation_type = OperationType::from(
-                    definition
-                        .operation_type()
-                        .expect("the node NamedType is not optional in the spec; qed"),
-                );
-                (operation_type, type_name)
-            })
-            .collect();
-
         Some(Query {
             string,
             fragments,
             operations,
-            operation_type_map,
         })
     }
 
