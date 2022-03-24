@@ -56,6 +56,17 @@ impl Fragments {
                             Skip::No
                         })
                         .unwrap_or(Skip::No);
+                    let include = fragment_definition
+                        .directives()
+                        .map(|directives| {
+                            for directive in directives.directives() {
+                                if let Some(include) = parse_include(&directive) {
+                                    return include;
+                                }
+                            }
+                            Include::Yes
+                        })
+                        .unwrap_or(Include::Yes);
 
                     Some((
                         name,
@@ -63,6 +74,7 @@ impl Fragments {
                             type_condition,
                             selection_set,
                             skip,
+                            include,
                         },
                     ))
                 }
@@ -84,4 +96,5 @@ pub(crate) struct Fragment {
     pub(crate) type_condition: String,
     pub(crate) selection_set: Vec<Selection>,
     pub(crate) skip: Skip,
+    pub(crate) include: Include,
 }

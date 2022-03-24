@@ -334,12 +334,22 @@ impl Query {
                     selection_set,
                     field_type,
                     skip,
+                    include,
                 } => {
                     if skip
                         .should_skip(variables)
                         // validate_variables should have already checked that
                         // the variable is present and it is of the correct type
                         .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    if !include
+                        .should_include(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(true)
                     {
                         continue;
                     }
@@ -379,6 +389,7 @@ impl Query {
                             type_condition,
                             selection_set,
                             skip,
+                            include,
                         },
                     known_type,
                 } => {
@@ -387,6 +398,15 @@ impl Query {
                         // validate_variables should have already checked that
                         // the variable is present and it is of the correct type
                         .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    if !include
+                        .should_include(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(true)
                     {
                         continue;
                     }
@@ -407,6 +427,7 @@ impl Query {
                     name,
                     known_type,
                     skip,
+                    include,
                 } => {
                     if skip
                         .should_skip(variables)
@@ -416,9 +437,20 @@ impl Query {
                     {
                         continue;
                     }
+                    if !include
+                        .should_include(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
 
                     if let Some(fragment) = self.fragments.get(name) {
                         if fragment.skip.should_skip(variables).unwrap_or(false) {
+                            continue;
+                        }
+                        if !fragment.include.should_include(variables).unwrap_or(true) {
                             continue;
                         }
 
@@ -463,6 +495,7 @@ impl Query {
                     selection_set,
                     field_type,
                     skip: _,
+                    include: _,
                 } => {
                     if let Some(input_value) = input.get_mut(name.as_str()) {
                         // if there's already a value for that key in the output it means either:
@@ -495,6 +528,7 @@ impl Query {
                             type_condition,
                             selection_set,
                             skip: _,
+                            include: _,
                         },
                     known_type: _,
                 } => {
@@ -512,6 +546,7 @@ impl Query {
                     name,
                     known_type: _,
                     skip: _,
+                    include: _,
                 } => {
                     if let Some(fragment) = self.fragments.get(name) {
                         // top level objects will not provide a __typename field
@@ -3235,6 +3270,395 @@ mod tests {
                 "get": {
                     "id": "a",
                     "name": "Chair",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn include() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+            review: Review
+        }
+
+        type Review {
+            id: String!
+            body: String
+        }";
+
+        // duplicate operation name
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    name @include(if: false)
+                }
+                get @include(if: true) {
+                    id 
+                    review {
+                        id
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                    "review": {
+                        "id": "b",
+                    }
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "review": {
+                        "id": "b",
+                    }
+                },
+            }},
+        );
+
+        // skipped non null
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id @include(if: false)
+                    name
+                }
+            }",
+            json! {{
+                "get": {
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // inline fragment
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ... on Product @include(if: false) {
+                        name
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ... on Product @include(if: true) {
+                        name
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // directive on fragment spread
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test @include(if: true)
+                }
+            }
+
+            fragment test on Product {
+                nom: name
+                name @skip(if: true)
+            }
+            ",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test @include(if: false)
+                }
+            }
+
+            fragment test on Product {
+                nom: name
+                name @include(if: false)
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        // directive on fragment
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test
+                }
+            }
+
+            fragment test on Product @include(if: true) {
+                nom: name
+                name @include(if: false)
+            }
+            ",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    id
+                    ...test
+                }
+            }
+
+            fragment test on Product @include(if: false) {
+                nom: name
+                name @include(if: false)
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "nom": "Chaise",
+                    "name": "Chair",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        // variables
+        // duplicate operation name
+        assert_format_response!(
+            schema,
+            "query Example($shouldInclude: Boolean) {
+                get {
+                    id
+                    name @include(if: $shouldInclude)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldInclude": false
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query Example($shouldInclude: Boolean) {
+                get {
+                    id
+                    name @include(if: $shouldInclude)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldInclude": true
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+
+        // default variable value
+        assert_format_response!(
+            schema,
+            "query Example($shouldInclude: Boolean = false) {
+                get {
+                    id
+                    name @include(if: $shouldInclude)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{ }},
+            json! {{
+                "get": {
+                    "id": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query Example($shouldInclude: Boolean = false) {
+                get {
+                    id
+                    name @include(if: $shouldInclude)
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+            Some("Example"),
+            json! {{
+                "shouldInclude": true
+            }},
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Chair",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn skip_and_include() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+        }";
+
+        // combine skip and include
+        // both of them must accept the field
+        // ref: https://spec.graphql.org/October2021/#note-f3059
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    a:name @skip(if:true) @include(if: true)
+                    b:name @skip(if:true) @include(if: false)
+                    c:name @skip(if:false) @include(if: true)
+                    d:name @skip(if:false) @include(if: false)
+                }
+
+            }",
+            json! {{
+                "get": {
+                    "a": "a",
+                    "b": "b",
+                    "c": "c",
+                    "d": "d",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "c": "c",
                 },
             }},
         );

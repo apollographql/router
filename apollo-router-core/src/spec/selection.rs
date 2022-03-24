@@ -9,6 +9,7 @@ pub(crate) enum Selection {
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
         skip: Skip,
+        include: Include,
     },
     InlineFragment {
         fragment: Fragment,
@@ -18,6 +19,7 @@ pub(crate) enum Selection {
         name: String,
         known_type: Option<String>,
         skip: Skip,
+        include: Include,
     },
 }
 
@@ -83,12 +85,24 @@ impl Selection {
                         Skip::No
                     })
                     .unwrap_or(Skip::No);
+                let include = field
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(include) = parse_include(&directive) {
+                                return include;
+                            }
+                        }
+                        Include::Yes
+                    })
+                    .unwrap_or(Include::Yes);
 
                 Some(Self::Field {
                     name: name.into(),
                     selection_set,
                     field_type,
                     skip,
+                    include,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
@@ -129,6 +143,17 @@ impl Selection {
                         Skip::No
                     })
                     .unwrap_or(Skip::No);
+                let include = inline_fragment
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(include) = parse_include(&directive) {
+                                return include;
+                            }
+                        }
+                        Include::Yes
+                    })
+                    .unwrap_or(Include::Yes);
 
                 let known_type = current_type.inner_type_name() == Some(type_condition.as_str());
                 Some(Self::InlineFragment {
@@ -136,6 +161,7 @@ impl Selection {
                         type_condition,
                         selection_set,
                         skip,
+                        include,
                     },
                     known_type,
                 })
@@ -161,11 +187,23 @@ impl Selection {
                         Skip::No
                     })
                     .unwrap_or(Skip::No);
+                let include = fragment_spread
+                    .directives()
+                    .map(|directives| {
+                        for directive in directives.directives() {
+                            if let Some(include) = parse_include(&directive) {
+                                return include;
+                            }
+                        }
+                        Include::Yes
+                    })
+                    .unwrap_or(Include::Yes);
 
                 Some(Self::FragmentSpread {
                     name,
                     known_type: current_type.inner_type_name().map(|s| s.to_string()),
                     skip,
+                    include,
                 })
             }
         }
@@ -222,6 +260,62 @@ impl Skip {
             Skip::Yes => Some(true),
             Skip::No => Some(false),
             Skip::Variable(variable_name) => variables
+                .get(variable_name.as_str())
+                .and_then(|v| v.as_bool()),
+        }
+    }
+}
+
+pub(crate) fn parse_include(directive: &ast::Directive) -> Option<Include> {
+    if directive
+        .name()
+        .map(|name| &name.text().to_string() == "include")
+        .unwrap_or(false)
+    {
+        if let Some(argument) = directive
+            .arguments()
+            .and_then(|args| args.arguments().next())
+        {
+            if argument
+                .name()
+                .map(|name| &name.text().to_string() == "if")
+                .unwrap_or(false)
+            {
+                // invalid argument values should have been already validated
+                let res = match argument.value() {
+                    Some(Value::BooleanValue(b)) => {
+                        match (b.true_token().is_some(), b.false_token().is_some()) {
+                            (true, false) => Some(Include::Yes),
+                            (false, true) => Some(Include::No),
+                            _ => None,
+                        }
+                    }
+                    Some(Value::Variable(variable)) => variable
+                        .name()
+                        .map(|name| Include::Variable(name.text().to_string())),
+                    _ => None,
+                };
+                return res;
+            }
+        }
+    }
+
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Include {
+    Yes,
+    No,
+    Variable(String),
+}
+
+impl Include {
+    pub(crate) fn should_include(&self, variables: &Object) -> Option<bool> {
+        match self {
+            Include::Yes => Some(true),
+            Include::No => Some(false),
+            Include::Variable(variable_name) => variables
                 .get(variable_name.as_str())
                 .and_then(|v| v.as_bool()),
         }
