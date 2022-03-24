@@ -20,6 +20,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+# [x.x.x] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+
+- **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
+
+  The Router now understands the [@skip](https://spec.graphql.org/October2021/#sec--skip) and [@include](https://spec.graphql.org/October2021/#sec--include) directives in queries, to add or remove fields depending on variables. It works in post processing, by filtering fields after aggregating the subgraph responses.
+
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+
+
+
 # [v0.1.0-alpha.9] 2022-03-16
 ## ❗ BREAKING ❗
 
