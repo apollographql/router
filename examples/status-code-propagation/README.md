@@ -15,7 +15,7 @@ This implementation makes use of `map_response` and `Context` to pass informatio
 The request lifecycle looks like this:
 ```mermaid
 sequenceDiagram
-    participant Client
+    actor Client
     participant RouterService
     participant QueryPlannerService
     participant ExecutionService
