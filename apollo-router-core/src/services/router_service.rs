@@ -95,7 +95,7 @@ where
                 })
             });
         }
-
+        let context_cloned = req.context.clone();
         let fut = async move {
             let context = req.context;
             let body = context.request.body();
@@ -152,6 +152,7 @@ where
                     message: error.to_string(),
                     ..Default::default()
                 }])
+                .context(context_cloned.into())
                 .build()
                 .with_status(StatusCode::INTERNAL_SERVER_ERROR))
         });

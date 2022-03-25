@@ -470,17 +470,22 @@ where
                     .map(|response| {
                         tracing::trace_span!("serialize_response")
                             .in_scope(|| {
-                                response.map(|body| {
-                                    Bytes::from(
-                                        serde_json::to_vec(&body)
+                                response.map(|body| match body {
+                                    ResponseBody::GraphQL(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
                                             .expect("responsebody is serializable; qed"),
-                                    )
+                                    ),
+                                    ResponseBody::RawJSON(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::RawString(res) => Bytes::from(res),
                                 })
                             })
                             .into()
                     })
                     .unwrap_or_else(|e| {
-                        tracing::error!("router serivce call failed: {}", e);
+                        tracing::error!("router service call failed: {}", e);
                         http::Response::builder()
                             .status(StatusCode::INTERNAL_SERVER_ERROR)
                             .body(Bytes::from_static(b"router service call failed"))

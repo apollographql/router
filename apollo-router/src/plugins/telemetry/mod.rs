@@ -1,5 +1,6 @@
+pub mod metrics;
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-mod otlp;
+pub mod otlp;
 
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::apollo_telemetry::StudioGraph;
@@ -8,6 +9,8 @@ use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
 use crate::subscriber::{replace_layer, BaseLayer, BoxedLayer};
+use apollo_router_core::RouterRequest;
+use apollo_router_core::RouterResponse;
 use apollo_router_core::SubgraphRequest;
 use apollo_router_core::SubgraphResponse;
 use apollo_router_core::{register_plugin, Plugin};
@@ -33,6 +36,9 @@ use std::str::FromStr;
 use tower::util::BoxService;
 use tower::Layer;
 use tower::{BoxError, ServiceExt};
+
+use self::metrics::MetricsConfiguration;
+use self::metrics::MetricsPlugin;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -222,6 +228,7 @@ struct Telemetry {
     config: Conf,
     tx: tokio::sync::mpsc::Sender<SpaceportConfig>,
     opentracing_layer: Option<OpenTracingLayer>,
+    metrics_plugin: Option<MetricsPlugin>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -235,6 +242,8 @@ struct Conf {
     pub opentelemetry: Option<OpenTelemetry>,
 
     pub opentracing: Option<OpenTracingConfig>,
+
+    pub metrics: Option<MetricsConfiguration>,
 }
 
 fn studio_graph() -> Option<StudioGraph> {
@@ -323,12 +332,30 @@ impl Plugin for Telemetry {
         if let Some(opentracing_conf) = &configuration.opentracing {
             opentracing_layer = OpenTracingLayer::new(opentracing_conf.clone()).into();
         }
+        let mut metrics_plugin = None;
+        if let Some(metrics_conf) = &configuration.metrics {
+            metrics_plugin = MetricsPlugin::new(metrics_conf.clone())?.into();
+        }
+
+        println!("OKKKK {}", metrics_plugin.is_some());
 
         Ok(Telemetry {
             config: configuration,
             tx,
             opentracing_layer,
+            metrics_plugin,
         })
+    }
+
+    fn router_service(
+        &mut self,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
+    ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        println!("ici {}", self.metrics_plugin.is_some());
+        match &mut self.metrics_plugin {
+            Some(metrics_plugin) => metrics_plugin.router_service(service),
+            None => service,
+        }
     }
 
     fn subgraph_service(
