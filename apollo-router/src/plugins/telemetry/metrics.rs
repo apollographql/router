@@ -55,7 +55,6 @@ impl Plugin for MetricsPlugin {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        println!("heeere");
         let http_counter = self.http_counter.clone();
         let registry = self.exporter.registry().clone();
         let prometheus_endpoint = match &self.conf.exporter {
@@ -79,7 +78,7 @@ impl Plugin for MetricsPlugin {
                         let mut result = Vec::new();
                         encoder.encode(&metric_families, &mut result).unwrap();
                         *response.response.body_mut() =
-                            ResponseBody::RawString(String::from_utf8_lossy(&result).into_owned());
+                            ResponseBody::Text(String::from_utf8_lossy(&result).into_owned());
                         *response.response.status_mut() = StatusCode::OK;
                     }
                 }

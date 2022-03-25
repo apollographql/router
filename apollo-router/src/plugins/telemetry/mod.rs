@@ -337,8 +337,6 @@ impl Plugin for Telemetry {
             metrics_plugin = MetricsPlugin::new(metrics_conf.clone())?.into();
         }
 
-        println!("OKKKK {}", metrics_plugin.is_some());
-
         Ok(Telemetry {
             config: configuration,
             tx,
@@ -351,7 +349,6 @@ impl Plugin for Telemetry {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        println!("ici {}", self.metrics_plugin.is_some());
         match &mut self.metrics_plugin {
             Some(metrics_plugin) => metrics_plugin.router_service(service),
             None => service,

@@ -38,6 +38,7 @@ pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
     RawString(String),
+    Text(String),
 }
 
 impl TryFrom<ResponseBody> for Response {
@@ -52,6 +53,7 @@ impl TryFrom<ResponseBody> for Response {
             ResponseBody::RawString(_) => {
                 Err("wrong ResponseBody kind: expected Response, found RawString")
             }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
         }
     }
 }
@@ -68,6 +70,7 @@ impl TryFrom<ResponseBody> for String {
                 Err("wrong ResponseBody kind: expected RawString, found GraphQL")
             }
             ResponseBody::RawString(res) => Ok(res),
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawString, found Text"),
         }
     }
 }
@@ -84,6 +87,7 @@ impl TryFrom<ResponseBody> for serde_json::Value {
             ResponseBody::RawString(_) => {
                 Err("wrong ResponseBody kind: expected RawJSON, found RawString")
             }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
         }
     }
 }

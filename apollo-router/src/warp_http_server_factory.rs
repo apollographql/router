@@ -479,7 +479,11 @@ where
                                         serde_json::to_vec(&res)
                                             .expect("responsebody is serializable; qed"),
                                     ),
-                                    ResponseBody::RawString(res) => Bytes::from(res),
+                                    ResponseBody::RawString(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::Text(res) => Bytes::from(res),
                                 })
                             })
                             .into()
