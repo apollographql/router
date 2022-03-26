@@ -28,7 +28,7 @@ anyhow = "1.0.55"
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac" }
 apollo-router-core = { path = "../apollo-router-core" }
 apollo-uplink = { path = "../uplink" }
-async-trait = "0.1.52"
+async-trait = "0.1.53"
 atty = "0.2.14"
 bytes = "1.1.0"
 derivative = "2.2.0"
