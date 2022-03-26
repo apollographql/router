@@ -419,7 +419,7 @@ pub(crate) mod fetch {
                 .map(|error| Error {
                     locations: error.locations,
                     path: error.path.map(|path| current_dir.join(path)),
-                    message: String::new(),
+                    message: error.message,
                     extensions: Object::default(),
                 })
                 .collect();
