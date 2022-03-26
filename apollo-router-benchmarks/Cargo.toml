@@ -25,5 +25,5 @@ name = "basic_composition"
 harness = false
 
 [dependencies]
-async-trait = "0.1.52"
+async-trait = "0.1.53"
 tower = "0.4.12"
