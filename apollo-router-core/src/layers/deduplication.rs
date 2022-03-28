@@ -48,7 +48,6 @@ where
                     // entry, we will never get a value and wait indefinitely, so we check that that task
                     // is still present, and if it is not, we clean up the wait map and retry
                     if !subscriber.is_valid() {
-                        drop(subscriber);
                         locked_wait_map.remove(&request.http_request);
 
                         continue;
@@ -105,7 +104,7 @@ where
 
                     // Our use case is very specific, so we are sure that
                     // we won't get any errors here.
-                    tokio::task::spawn_blocking(move || {
+                    let _ = tokio::task::spawn_blocking(move || {
                         tx.send(broadcast_value)
                     }).await
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
