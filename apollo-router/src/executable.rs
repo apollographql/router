@@ -6,6 +6,7 @@ use crate::{
     ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
+use clap::Parser;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
@@ -13,18 +14,17 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
-use structopt::StructOpt;
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
 static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 #[structopt(name = "router", about = "Apollo federation router")]
 pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
-    #[structopt(
+    #[clap(
         long = "log",
         default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info,reqwest_tracing=info",
         alias = "log-level",
@@ -33,35 +33,35 @@ pub struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     watch: bool,
 
     /// Configuration location relative to the project directory.
-    #[structopt(short, long = "config", parse(from_os_str), env)]
+    #[clap(short, long = "config", parse(from_os_str), env)]
     configuration_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
-    #[structopt(short, long = "supergraph", parse(from_os_str), env)]
+    #[clap(short, long = "supergraph", parse(from_os_str), env)]
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[structopt(long)]
+    #[clap(long)]
     schema: bool,
 
     /// Your Apollo key
-    #[structopt(long, env)]
+    #[clap(long, env)]
     apollo_key: Option<String>,
 
     /// Your Apollo graph reference
-    #[structopt(long, env)]
+    #[clap(long, env)]
     apollo_graph_ref: Option<String>,
 
     /// The endpoint polled to fetch the latest supergraph schema.
-    #[structopt(long, env)]
+    #[clap(long, env)]
     apollo_schema_config_delivery_endpoint: Option<Url>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
-    #[structopt(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
+    #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
     apollo_schema_poll_interval: Duration,
 }
 
@@ -129,7 +129,7 @@ pub fn main() -> Result<()> {
 /// }
 /// ```
 pub async fn rt_main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     if opt.schema {
         let settings = SchemaSettings::draft2019_09().with(|s| {
