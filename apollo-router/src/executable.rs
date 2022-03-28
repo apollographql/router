@@ -6,14 +6,14 @@ use crate::{
     ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
-use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::{env, fmt};
 use tracing_subscriber::EnvFilter;
 use url::Url;
 
@@ -130,6 +130,8 @@ pub fn main() -> Result<()> {
 /// ```
 pub async fn rt_main() -> Result<()> {
     let opt = Opt::parse();
+
+    copy_args_to_env();
 
     if opt.schema {
         let settings = SchemaSettings::draft2019_09().with(|s| {
@@ -271,4 +273,19 @@ pub async fn rt_main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn copy_args_to_env() {
+    // Copy all the args to env.
+    // This way, Clap is still responsible for the definitive view of what the current options are.
+    // But if we have code that relies on env variable then it will still work.
+    // Env variables should disappear over time as we move to plugins.
+    let matches = Opt::command().get_matches();
+    Opt::command().get_arguments().for_each(|a| {
+        if let Some(env) = a.get_env() {
+            if let Some(value) = matches.value_of_os(a.get_id()) {
+                env::set_var(env, value);
+            }
+        }
+    });
 }
