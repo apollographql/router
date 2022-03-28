@@ -1,7 +1,7 @@
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
-use tokio::sync::broadcast::{self, Sender};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tower::{BoxError, Layer, ServiceExt};
 
 pub struct QueryDeduplicationLayer;
@@ -17,8 +17,7 @@ where
     }
 }
 
-type WaitMap =
-    Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
+type WaitMap = Arc<Mutex<HashMap<http_compat::Request<Request>, Subscriber>>>;
 
 pub struct QueryDeduplicationService<S> {
     service: S,
@@ -44,9 +43,18 @@ where
         loop {
             let mut locked_wait_map = wait_map.lock().await;
             match locked_wait_map.get_mut(&request.http_request) {
-                Some(waiter) => {
+                Some(subscriber) => {
+                    // if the task that's doing the request was canceled before cleaning up the wait map
+                    // entry, we will never get a value and wait indefinitely, so we check that that task
+                    // is still present, and if it is not, we clean up the wait map and retry
+                    if !subscriber.is_valid() {
+                        drop(subscriber);
+                        locked_wait_map.remove(&request.http_request);
+
+                        continue;
+                    }
                     // Register interest in key
-                    let mut receiver = waiter.subscribe();
+                    let mut receiver = subscriber.subscribe();
                     drop(locked_wait_map);
 
                     match receiver.recv().await {
@@ -64,12 +72,25 @@ where
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
-                    locked_wait_map.insert(request.http_request.clone(), tx.clone());
+                    locked_wait_map
+                        .insert(request.http_request.clone(), Subscriber::new(tx.clone()));
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
                     let http_request = request.http_request.clone();
-                    let res = service.ready_oneshot().await?.call(request).await;
+                    let mut s = match service.ready_oneshot().await {
+                        Ok(s) => s,
+                        // we need to clean up the wait map if ready_oneshot failed
+                        Err(e) => {
+                            let mut locked_wait_map = wait_map.lock().await;
+                            locked_wait_map.remove(&http_request);
+                            return Err(e);
+                        }
+                    };
+
+                    // if the task is canceled while in call(), we will not get to the next part that
+                    // removes the sender
+                    let res = s.call(request).await;
 
                     {
                         let mut locked_wait_map = wait_map.lock().await;
@@ -86,7 +107,6 @@ where
                     // we won't get any errors here.
                     tokio::task::spawn_blocking(move || {
                         tx.send(broadcast_value)
-                            .expect("there is always at least one receiver alive, the _rx guard; qed")
                     }).await
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
@@ -126,5 +146,28 @@ where
         } else {
             Box::pin(async move { service.call(request).await })
         }
+    }
+}
+
+struct Subscriber {
+    receiver_count: usize,
+    sender: Sender<Result<SubgraphResponse, String>>,
+}
+
+impl Subscriber {
+    fn new(sender: Sender<Result<SubgraphResponse, String>>) -> Self {
+        Self {
+            receiver_count: 1,
+            sender,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.receiver_count == self.sender.receiver_count()
+    }
+
+    fn subscribe(&mut self) -> Receiver<Result<SubgraphResponse, String>> {
+        self.receiver_count += 1;
+        self.sender.subscribe()
     }
 }
