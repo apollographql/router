@@ -3633,4 +3633,65 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn skip_and_include_multi_operation() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        type Product {
+            id: String!
+            name: String
+        }";
+
+        // combine skip and include
+        // both of them must accept the field
+        // ref: https://spec.graphql.org/October2021/#note-f3059
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    a:name @skip(if:false)
+                }
+                get {
+                    a:name @skip(if:true)
+                }
+            }",
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    a:name @skip(if:true)
+                }
+                get {
+                    a:name @skip(if:false)
+                }
+            }",
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+        );
+    }
 }
