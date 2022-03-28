@@ -28,6 +28,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   `hasNext` is a field in the response that may be used in future to support features such as defer and stream. However, we are some way off supporting this and including it now may break clients. It has been removed.
 
+- **Extend Apollo uplink configurability** ([PR #741](https://github.com/apollographql/router/pull/741))
+  Uplink url and poll interval can now be configured via command line arg and env variable:
+  ```bash
+    --apollo-schema-config-delivery-endpoint <apollo-schema-config-delivery-endpoint>
+      The endpoint polled to fetch the latest supergraph schema [env: APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT=]
+
+    --apollo-schema-poll-interval <apollo-schema-poll-interval>
+      The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_SCHEMA_POLL_INTERVAL=]  [default: 10s]
+  ```
+  In addition, other existing uplink env variables are now also configurable via arg. 
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
