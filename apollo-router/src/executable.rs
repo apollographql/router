@@ -12,8 +12,10 @@ use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 use structopt::StructOpt;
 use tracing_subscriber::EnvFilter;
+use url::Url;
 
 static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
@@ -45,6 +47,22 @@ pub struct Opt {
     /// Prints the configuration schema.
     #[structopt(long)]
     schema: bool,
+
+    /// Your Apollo key
+    #[structopt(long, env)]
+    apollo_key: Option<String>,
+
+    /// Your Apollo graph reference
+    #[structopt(long, env)]
+    apollo_graph_ref: Option<String>,
+
+    /// The endpoint polled to fetch the latest supergraph schema.
+    #[structopt(long, env)]
+    apollo_schema_config_delivery_endpoint: Option<Url>,
+
+    /// The time between polls to Apollo uplink. Minimum 10s.
+    #[structopt(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
+    apollo_schema_poll_interval: Duration,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -168,7 +186,7 @@ pub async fn rt_main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
-    let schema = match (opt.supergraph_path, std::env::var("APOLLO_KEY")) {
+    let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
@@ -181,13 +199,17 @@ pub async fn rt_main() -> Result<()> {
                 delay: None,
             }
         }
-        (None, Ok(apollo_key)) => {
-            let apollo_graph_ref = std::env::var("APOLLO_GRAPH_REF")
-            .map_err(|_| anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
+        (None, Some(apollo_key)) => {
+            let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
+            if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
+                return Err(anyhow!("Apollo poll interval must be at least 10s"));
+            }
 
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
+                url: opt.apollo_schema_config_delivery_endpoint,
+                poll_interval: opt.apollo_schema_poll_interval,
             }
         }
         _ => {

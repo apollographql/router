@@ -36,6 +36,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
+use url::Url;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
@@ -108,14 +109,20 @@ pub enum SchemaKind {
         delay: Option<Duration>,
     },
 
-    /// A YAML file that may be watched for changes.
-    #[display(fmt = "File")]
+    /// Apollo managed federation.
+    #[display(fmt = "Registry")]
     Registry {
         /// The Apollo key: <YOUR_GRAPH_API_KEY>
         apollo_key: String,
 
         /// The apollo graph reference: <YOUR_GRAPH_ID>@<VARIANT>
         apollo_graph_ref: String,
+
+        /// The endpoint polled to fetch its latest supergraph schema.
+        url: Option<Url>,
+
+        /// The duration between polling
+        poll_interval: Duration,
     },
 }
 
@@ -166,30 +173,27 @@ impl SchemaKind {
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-            } => apollo_uplink::stream_supergraph(
-                apollo_key,
-                apollo_graph_ref,
-                //FIXME: make it configurable
-                Duration::from_secs(10),
-            )
-            .filter_map(|res| {
-                future::ready(match res {
-                    Ok(schema_result) => schema_result
-                        .schema
-                        .parse()
-                        .map_err(|e| {
-                            tracing::error!("could not parse schema: {:?}", e);
-                        })
-                        .ok(),
+                url,
+                poll_interval,
+            } => apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, url, poll_interval)
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema_result) => schema_result
+                            .schema
+                            .parse()
+                            .map_err(|e| {
+                                tracing::error!("could not parse schema: {:?}", e);
+                            })
+                            .ok(),
 
-                    Err(e) => {
-                        tracing::error!("error downloading the schema from Uplink: {:?}", e);
-                        None
-                    }
+                        Err(e) => {
+                            tracing::error!("error downloading the schema from Uplink: {:?}", e);
+                            None
+                        }
+                    })
                 })
-            })
-            .map(|schema| UpdateSchema(Box::new(schema)))
-            .boxed(),
+                .map(|schema| UpdateSchema(Box::new(schema)))
+                .boxed(),
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }
