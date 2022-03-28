@@ -159,7 +159,7 @@ dependencies = [
  "test-span",
  "thiserror",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tonic",
  "tower",
  "tower-http",
@@ -347,7 +347,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -770,7 +770,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -824,7 +824,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -1448,7 +1448,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -1904,7 +1904,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -2270,7 +2270,7 @@ dependencies = [
  "strum 0.24.0",
  "strum_macros 0.24.0",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -3294,7 +3294,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -4655,16 +4655,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64910e1b9c1901aaf5375561e35b9c057d95ff41a44ede043a03e09279eabaf1"
+checksum = "0edfdeb067411dba2044da6d1cb2df793dd35add7888d73c16e3381ded401764"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
- "log",
  "pin-project-lite",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4735,7 +4735,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower-layer",
  "tower-service",
  "tracing",
