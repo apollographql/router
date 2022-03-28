@@ -283,7 +283,11 @@ fn copy_args_to_env() {
     let matches = Opt::command().get_matches();
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
-            if let Some(value) = matches.value_of_os(a.get_id()) {
+            if a.is_allow_invalid_utf8_set() {
+                if let Some(value) = matches.value_of_os(a.get_id()) {
+                    env::set_var(env, value);
+                }
+            } else if let Some(value) = matches.value_of(a.get_id()) {
                 env::set_var(env, value);
             }
         }
