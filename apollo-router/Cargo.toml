@@ -76,7 +76,7 @@ tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
 typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
-axum = { version = "0.4.8", features = ["headers", "json"] }
+axum = { git = "https://github.com/tokio-rs/axum.git" } # { version = "0.4.8", features = ["headers", "json"] }
 # warp = { version = "0.3.2", default-features = false, features = [
 #     "compression",
 # ] }

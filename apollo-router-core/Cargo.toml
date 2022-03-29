@@ -16,7 +16,7 @@ failfast = []
 apollo-parser = "0.2.4"
 async-trait = "0.1.53"
 atty = "0.2.14"
-axum-core = "0.1.2"
+axum-core = { git = "https://github.com/tokio-rs/axum.git" }                                                                     # { version = "0.1.2" }
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }
 derivative = "2.2.0"
@@ -63,7 +63,9 @@ insta = "1.12.0"
 mockall = "0.11.0"
 serde_yaml = "0.8.23"
 static_assertions = "1"
-test-log = { version = "0.2.10", default-features = false, features = ["trace"] }
+test-log = { version = "0.2.10", default-features = false, features = [
+    "trace",
+] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
