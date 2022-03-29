@@ -99,6 +99,7 @@ where
         let fut = async move {
             let context = req.context;
             let body = context.request.body();
+            let variables = body.variables.clone();
             let query = query_cache
                 .get_query(
                     body.query
@@ -135,6 +136,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
+                            (*variables).clone(),
                             schema.api_schema(),
                         )
                     });
