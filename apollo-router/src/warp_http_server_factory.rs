@@ -1,18 +1,19 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
-use apollo_router_core::prelude::*;
+use apollo_router_core::http_compat::{self, Request, RequestBuilder, Response};
 use apollo_router_core::ResponseBody;
+use apollo_router_core::{prelude::*, Handler};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use http::HeaderValue;
+use http::{HeaderValue, Method};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
 use reqwest::Url;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,6 +55,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
+        custom_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -75,9 +77,66 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(service.clone()))
+            let custom_routes = custom_handlers.into_iter().fold(
+                get_health_request().boxed(),
+                move |acc, (endpoint, custom_handler)| {
+                    let endpoint_cloned = endpoint.clone();
+                    let route = warp::get()
+                        .and(warp::any().map(move || endpoint_cloned.clone()))
+                        .and(warp::any().map(move || custom_handler.clone()))
+                        .and(warp::path(endpoint))
+                        .and(warp::path::end())
+                        .and(warp::host::optional())
+                        .and(warp::body::bytes())
+                        .and_then(
+                            move |endpoint: String,
+                                  handler: Handler,
+                                  authority: Option<Authority>,
+                                  body: Bytes| async move {
+                                let res = (*handler)(
+                                    http_compat::RequestBuilder::new(
+                                        Method::GET,
+                                        Url::parse(&format!(
+                                            "http://{}/{}",
+                                            authority.unwrap().as_str(),
+                                            endpoint
+                                        ))
+                                        .expect(
+                                            "if the authority is some then the URL is valid; qed",
+                                        ),
+                                    )
+                                    .body(body)
+                                    .unwrap(),
+                                );
+                                let response_body = res.into_body();
+                                let res: Box<dyn Reply> = match response_body {
+                                    ResponseBody::GraphQL(res) => Box::new(warp::reply::json(
+                                        &serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    )),
+                                    ResponseBody::RawJSON(res) => Box::new(warp::reply::json(
+                                        &serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    )),
+                                    ResponseBody::RawString(res) => Box::new(warp::reply::json(
+                                        &serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    )),
+                                    ResponseBody::Text(res) => Box::new(res),
+                                };
+
+                                Ok::<_, Rejection>(res)
+                            },
+                        )
+                        .boxed();
+
+                    acc.or(route).unify().boxed()
+                },
+            );
+
+            let routes = get_graphql_request_or_redirect(service.clone())
                 .or(post_graphql_request(service.clone()))
+                .or(custom_routes)
                 .with(cors)
                 .with(with::default_header(
                     CONTENT_TYPE,
@@ -632,6 +691,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -678,6 +738,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");

@@ -1,10 +1,14 @@
-use apollo_router_core::{Plugin, ResponseBody, RouterRequest, RouterResponse};
+use apollo_router_core::{
+    http_compat, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
+};
 use http::StatusCode;
 use opentelemetry::{global, metrics::Counter, KeyValue};
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, TextEncoder};
+use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tower::{util::BoxService, BoxError, ServiceExt};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -37,9 +41,22 @@ pub struct MetricsPlugin {
 impl Plugin for MetricsPlugin {
     type Config = MetricsConfiguration;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         let exporter = opentelemetry_prometheus::exporter().init();
         let meter = global::meter("apollo/router");
+
+        if let MetricsExporter::Prometheus(prom_exporter_cfg) = &mut config.exporter {
+            prom_exporter_cfg.endpoint = prom_exporter_cfg
+                .endpoint
+                .trim_start_matches('/')
+                .to_string();
+
+            if Url::parse(&format!("http://test/{}", prom_exporter_cfg.endpoint)).is_err() {
+                return Err(BoxError::from(
+                    "cannot use your endpoint set for prometheus as a path in an URL",
+                ));
+            }
+        }
 
         Ok(Self {
             exporter,
@@ -56,11 +73,6 @@ impl Plugin for MetricsPlugin {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let http_counter = self.http_counter.clone();
-        let registry = self.exporter.registry().clone();
-        let prometheus_endpoint = match &self.conf.exporter {
-            MetricsExporter::Prometheus(prom) => Some(format!("/graphql{}", prom.endpoint.clone())),
-            MetricsExporter::OLTP(_) => None,
-        };
 
         service
             .map_request(move |req: RouterRequest| {
@@ -70,21 +82,38 @@ impl Plugin for MetricsPlugin {
                 );
                 req
             })
-            .map_response(move |mut response: RouterResponse| {
-                if let Some(prometheus_endpoint) = prometheus_endpoint {
-                    if response.context.request.url().path() == prometheus_endpoint {
-                        let encoder = TextEncoder::new();
-                        let metric_families = registry.gather();
-                        let mut result = Vec::new();
-                        encoder.encode(&metric_families, &mut result).unwrap();
-                        *response.response.body_mut() =
-                            ResponseBody::Text(String::from_utf8_lossy(&result).into_owned());
-                        *response.response.status_mut() = StatusCode::OK;
-                    }
-                }
-
-                response
-            })
             .boxed()
+    }
+
+    fn custom_endpoint(&self) -> Option<(String, Handler)> {
+        let prometheus_endpoint = match &self.conf.exporter {
+            MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
+            MetricsExporter::OLTP(_) => None,
+        };
+
+        match prometheus_endpoint {
+            Some(endpoint) => {
+                let registry = self.exporter.registry().clone();
+
+                let handler = move |_req| {
+                    let encoder = TextEncoder::new();
+                    let metric_families = registry.gather();
+                    let mut result = Vec::new();
+                    encoder.encode(&metric_families, &mut result).unwrap();
+
+                    http_compat::Response {
+                        inner: http::Response::builder()
+                            .status(StatusCode::OK)
+                            .body(ResponseBody::Text(
+                                String::from_utf8_lossy(&result).into_owned(),
+                            ))
+                            .unwrap(),
+                    }
+                };
+
+                Some((endpoint, Arc::new(handler)))
+            }
+            None => None,
+        }
     }
 }

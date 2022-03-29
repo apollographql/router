@@ -9,6 +9,7 @@ use crate::configuration::{default_service_name, default_service_namespace};
 use crate::layers::opentracing::OpenTracingConfig;
 use crate::layers::opentracing::OpenTracingLayer;
 use crate::subscriber::{replace_layer, BaseLayer, BoxedLayer};
+use apollo_router_core::Handler;
 use apollo_router_core::RouterRequest;
 use apollo_router_core::RouterResponse;
 use apollo_router_core::SubgraphRequest;
@@ -363,6 +364,13 @@ impl Plugin for Telemetry {
         match &self.opentracing_layer {
             Some(opentracing_layer) => opentracing_layer.layer(service).boxed(),
             None => service,
+        }
+    }
+
+    fn custom_endpoint(&self) -> Option<(String, Handler)> {
+        match &self.metrics_plugin {
+            Some(metrics_plugin) => metrics_plugin.custom_endpoint(),
+            None => None,
         }
     }
 }

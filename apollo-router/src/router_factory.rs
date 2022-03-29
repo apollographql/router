@@ -1,4 +1,4 @@
-use crate::configuration::{Configuration, ConfigurationError};
+use crate::configuration::Configuration;
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::{
     http_compat::{Request, Response},
@@ -6,6 +6,7 @@ use apollo_router_core::{
 };
 use apollo_router_core::{prelude::*, Context};
 use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -32,6 +33,7 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
+        plugins: HashMap<String, Box<dyn DynPlugin>>,
         schema: Arc<graphql::Schema>,
         previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError>;
@@ -65,13 +67,11 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
     async fn create<'a>(
         &'a mut self,
-        configuration: Arc<Configuration>,
+        _configuration: Arc<Configuration>,
+        plugins: HashMap<String, Box<dyn DynPlugin>>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
-        let mut errors: Vec<ConfigurationError> = Vec::default();
-        let configuration = (*configuration).clone();
-
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
 
         for (name, _) in schema.subgraphs() {
@@ -81,76 +81,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
-        {
-            async fn process_plugin(
-                mut builder: PluggableRouterServiceBuilder,
-                errors: &mut Vec<ConfigurationError>,
-                name: String,
-                configuration: &serde_json::Value,
-            ) -> PluggableRouterServiceBuilder {
-                let plugin_registry = apollo_router_core::plugins();
-                match plugin_registry.get(name.as_str()) {
-                    Some(factory) => {
-                        tracing::debug!(
-                            "creating plugin: '{}' with configuration:\n{:#}",
-                            name,
-                            configuration
-                        );
-                        match factory.create_instance(configuration) {
-                            Ok(mut plugin) => {
-                                tracing::debug!("starting plugin: {}", name);
-                                match plugin.startup().await {
-                                    Ok(_v) => {
-                                        tracing::debug!("started plugin: {}", name);
-                                        builder = builder.with_dyn_plugin(plugin);
-                                    }
-                                    Err(err) => {
-                                        (*errors).push(ConfigurationError::PluginStartup {
-                                            plugin: name,
-                                            error: err.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                (*errors).push(ConfigurationError::PluginConfiguration {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
-                        }
-                    }
-                    None => {
-                        (*errors).push(ConfigurationError::PluginUnknown(name));
-                    }
-                }
-                builder
-            }
-
-            // Process the plugins.
-            for (name, configuration) in configuration.plugins().iter() {
-                let name = name.clone();
-                builder = process_plugin(builder, &mut errors, name, configuration).await;
-            }
-        }
-        if !errors.is_empty() {
-            // Shutdown all the plugins we started
-            for plugin in builder.plugins().iter_mut().rev() {
-                tracing::debug!("stopping plugin: {}", plugin.name());
-                if let Err(err) = plugin.shutdown().await {
-                    // If we can't shutdown a plugin, we terminate the router since we can't
-                    // assume that it is safe to continue.
-                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                    tracing::error!("terminating router...");
-                    std::process::exit(1);
-                } else {
-                    tracing::debug!("stopped plugin: {}", plugin.name());
-                }
-            }
-            for error in errors {
-                tracing::error!("{:#}", error);
-            }
-            return Err(Box::new(ConfigurationError::InvalidConfiguration));
+        for (_, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin);
         }
 
         // This **must** run after:
@@ -194,6 +126,7 @@ mod test {
     use apollo_router_core::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use std::collections::HashMap;
     use std::error::Error;
     use std::fmt;
     use std::sync::Arc;
@@ -398,7 +331,7 @@ mod test {
         let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
 
         let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
+            .create(Arc::new(config), HashMap::new(), Arc::new(schema), None)
             .await;
         service.map(|_| ())
     }

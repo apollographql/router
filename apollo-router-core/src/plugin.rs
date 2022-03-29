@@ -1,20 +1,24 @@
 use crate::{
-    ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse, RouterRequest,
-    RouterResponse, SubgraphRequest, SubgraphResponse,
+    http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use async_trait::async_trait;
+use bytes::Bytes;
 use once_cell::sync::Lazy;
 use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tower::util::BoxService;
 use tower::BoxError;
 
 type InstanceFactory = fn(&serde_json::Value) -> Result<Box<dyn DynPlugin>, BoxError>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+pub type Handler =
+    Arc<dyn Fn(http_compat::Request<Bytes>) -> http_compat::Response<ResponseBody> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct PluginFactory {
@@ -101,6 +105,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         service
     }
 
+    fn custom_endpoint(&self) -> Option<(String, Handler)> {
+        None
+    }
+
     fn name(&self) -> &'static str {
         get_type_of(self)
     }
@@ -137,7 +145,7 @@ pub trait DynPlugin: Send + Sync + 'static {
         _name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
-
+    fn custom_endpoint(&self) -> Option<(String, Handler)>;
     fn name(&self) -> &'static str;
 }
 
@@ -183,6 +191,9 @@ where
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
+    }
+    fn custom_endpoint(&self) -> Option<(String, Handler)> {
+        self.custom_endpoint()
     }
 
     fn name(&self) -> &'static str {
