@@ -57,14 +57,12 @@ impl Plugin for TrafficShaping {
 
         if let Some(config) = final_config {
             ServiceBuilder::new()
-                .option_layer(
-                    config
-                        .dedup
-                        .unwrap_or_default()
-                        .then(QueryDeduplicationLayer::default),
-                )
-                //Buffer is required because dedup layer requires a clone service.
-                .buffer(20_000)
+                .option_layer(config.dedup.unwrap_or_default().then(|| {
+                    //Buffer is required because dedup layer requires a clone service.
+                    ServiceBuilder::new()
+                        .layer(QueryDeduplicationLayer::default())
+                        .buffer(20_000)
+                }))
                 .service(service)
                 .boxed()
         } else {
