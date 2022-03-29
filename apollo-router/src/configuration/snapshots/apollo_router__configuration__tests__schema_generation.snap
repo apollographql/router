@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 429
+assertion_line: 439
 expression: "&schema"
 ---
 {
@@ -279,7 +279,8 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": null
+        "cors": null,
+        "introspection": true
       },
       "type": "object",
       "properties": {
@@ -342,6 +343,11 @@ expression: "&schema"
           },
           "additionalProperties": false,
           "nullable": true
+        },
+        "introspection": {
+          "description": "introspection queries enabled by default",
+          "default": true,
+          "type": "boolean"
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",

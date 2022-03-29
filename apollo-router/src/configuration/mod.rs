@@ -214,6 +214,12 @@ pub struct Server {
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+
+    /// introspection queries
+    /// enabled by default
+    #[serde(default = "default_introspection")]
+    #[builder(default_code = "default_introspection()", setter(into))]
+    pub introspection: bool,
 }
 
 /// Listening address.
@@ -308,6 +314,10 @@ fn default_cors_headers() -> Vec<String> {
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+}
+
+fn default_introspection() -> bool {
+    true
 }
 
 impl Default for Server {
