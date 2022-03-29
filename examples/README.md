@@ -7,7 +7,7 @@ Make sure to look at the docs for:
 ## Yaml configuration ([documentation](https://www.apollographql.com/docs/router/configuration/overview))
 Built in functionality in the Apollo Router.
 
-* [Header manipulation](./header-manpiulation)
+* [Header manipulation](./header-manipulation)
 * [Telemetry](./telemetry)
 * [Forbid mutations](./forbid_mutations)
 * [Unix sockets](./unix-sockets)

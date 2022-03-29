@@ -14,7 +14,7 @@ failfast = []
 
 [dependencies]
 apollo-parser = "0.2.4"
-async-trait = "0.1.52"
+async-trait = "0.1.53"
 atty = "0.2.14"
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }

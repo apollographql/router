@@ -24,11 +24,6 @@ pub struct Response {
     #[builder(default)]
     pub path: Option<Path>,
 
-    /// The optional indicator that there may be more data in the form of a patch response.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[builder(default)]
-    pub has_next: Option<bool>,
-
     /// The optional graphql errors encountered.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     #[builder(default)]
@@ -100,17 +95,11 @@ impl Response {
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
-        let has_next = extract_key_value_from_object!(object, "has_next", Value::Bool(b) => b)
-            .map_err(|err| FetchError::SubrequestMalformedResponse {
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            })?;
 
         Ok(Response {
             label,
             data,
             path,
-            has_next,
             errors,
             extensions,
         })
@@ -308,7 +297,6 @@ mod tests {
                   }
                 }))
                 .path(Path::from("hero/heroFriends/1/name"))
-                .has_next(true)
                 .errors(vec![Error {
                     message: "Name for character with ID 1002 could not be fetched.".into(),
                     locations: vec!(Location { line: 6, column: 7 }),

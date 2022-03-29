@@ -6,6 +6,7 @@ use supergraph_sdl::FetchErrorCode;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
+use url::Url;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com/graphql";
 const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
@@ -47,6 +48,7 @@ pub struct Schema {
 pub fn stream_supergraph(
     api_key: String,
     graph_ref: String,
+    url: Option<Url>,
     interval: Duration,
 ) -> impl Stream<Item = Result<Schema, Error>> {
     let (sender, receiver) = channel(2);
@@ -60,6 +62,7 @@ pub fn stream_supergraph(
                 api_key.to_string(),
                 graph_ref.to_string(),
                 composition_id.clone(),
+                &url,
             )
             .await
             {
@@ -115,6 +118,7 @@ pub async fn fetch_supergraph(
     api_key: String,
     graph_ref: String,
     composition_id: Option<String>,
+    url: &Option<Url>,
 ) -> Result<supergraph_sdl::ResponseData, Error> {
     let variables = supergraph_sdl::Variables {
         api_key,
@@ -123,12 +127,15 @@ pub async fn fetch_supergraph(
     };
     let request_body = SupergraphSdl::build_query(variables);
 
-    let response = match http_request(GCP_URL, &request_body).await {
-        Ok(response) => response,
-        Err(e) => {
-            tracing::error!("could not get schema from GCP, trying AWS: {:?}", e);
-            http_request(AWS_URL, &request_body).await?
-        }
+    let response = match url {
+        Some(url) => http_request(url.as_str(), &request_body).await?,
+        None => match http_request(GCP_URL, &request_body).await {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::error!("could not get schema from GCP, trying AWS: {:?}", e);
+                http_request(AWS_URL, &request_body).await?
+            }
+        },
     };
 
     match response.data {

@@ -11,7 +11,6 @@ pub struct SubgraphResponse {
     label: Option<String>,
     data: Option<Value>,
     path: Option<Path>,
-    has_next: Option<bool>,
     #[builder(setter(!strip_option))]
     errors: Vec<Error>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
@@ -35,7 +34,6 @@ impl From<SubgraphResponse> for crate::SubgraphResponse {
                 label: subgraph_response.label,
                 data: subgraph_response.data.unwrap_or_default(),
                 path: subgraph_response.path,
-                has_next: subgraph_response.has_next,
                 errors: subgraph_response.errors,
                 extensions: subgraph_response.extensions.unwrap_or_default(),
             })
