@@ -124,6 +124,7 @@ dependencies = [
  "async-trait",
  "atty",
  "bytes",
+ "clap 3.1.6",
  "derivative",
  "derive_more",
  "directories",
@@ -131,6 +132,7 @@ dependencies = [
  "futures",
  "hotwatch",
  "http",
+ "humantime",
  "hyper",
  "insta",
  "itertools",
@@ -152,13 +154,12 @@ dependencies = [
  "serde_yaml",
  "startup",
  "static_assertions",
- "structopt",
  "tempfile",
  "test-log",
  "test-span",
  "thiserror",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tonic",
  "tower",
  "tower-http",
@@ -287,6 +288,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -345,7 +347,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -416,9 +418,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.52"
+version = "0.1.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061a7acccaa286c011ddc30970520b98fa40e00c9d644633fb26b5fc63a265e3"
+checksum = "ed6aa3524a2dfcf9fe180c51eae2b58738348d819517ceadf95789c51fff7600"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -668,13 +670,9 @@ version = "2.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0610544180c38b88101fecf2dd634b174a62eef6946f84dfc6a7127512b381c"
 dependencies = [
- "ansi_term",
- "atty",
  "bitflags",
- "strsim 0.8.0",
  "textwrap 0.11.0",
  "unicode-width",
- "vec_map",
 ]
 
 [[package]]
@@ -689,7 +687,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "os_str_bytes",
- "strsim 0.10.0",
+ "strsim",
  "termcolor",
  "textwrap 0.15.0",
 ]
@@ -772,7 +770,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -826,7 +824,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -1450,7 +1448,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -1906,7 +1904,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -2272,7 +2270,7 @@ dependencies = [
  "strum 0.24.0",
  "strum_macros 0.24.0",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -3296,7 +3294,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower",
  "tracing",
  "tracing-subscriber 0.3.9",
@@ -4171,12 +4169,6 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
-
-[[package]]
-name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
@@ -4663,16 +4655,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64910e1b9c1901aaf5375561e35b9c057d95ff41a44ede043a03e09279eabaf1"
+checksum = "0edfdeb067411dba2044da6d1cb2df793dd35add7888d73c16e3381ded401764"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
- "log",
  "pin-project-lite",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4743,7 +4735,7 @@ dependencies = [
  "rand",
  "slab",
  "tokio",
- "tokio-util 0.7.0",
+ "tokio-util 0.7.1",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5076,12 +5068,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vec_map"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"

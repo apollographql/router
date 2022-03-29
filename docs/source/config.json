@@ -9,6 +9,7 @@
     "Migrating from @apollo/gateway": "/migrating-from-gateway",
     "Configuration": {
       "Overview": "/configuration/overview",
+      "Health check": "/configuration/health-checks",
       "CORS": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",

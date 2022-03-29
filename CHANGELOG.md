@@ -23,10 +23,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 <!--# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+- **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
+
+  The Router now understands the [@skip](https://spec.graphql.org/October2021/#sec--skip) and [@include](https://spec.graphql.org/October2021/#sec--include) directives in queries, to add or remove fields depending on variables. It works in post processing, by filtering fields after aggregating the subgraph responses.
+
 ## 🐛 Fixes
 - **Remove `hasNext` from our response objects** ([PR #733](https://github.com/apollographql/router/pull/733))
 
   `hasNext` is a field in the response that may be used in future to support features such as defer and stream. However, we are some way off supporting this and including it now may break clients. It has been removed.
+
+- **Extend Apollo uplink configurability** ([PR #741](https://github.com/apollographql/router/pull/741))
+  Uplink url and poll interval can now be configured via command line arg and env variable:
+  ```bash
+    --apollo-schema-config-delivery-endpoint <apollo-schema-config-delivery-endpoint>
+      The endpoint polled to fetch the latest supergraph schema [env: APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT=]
+
+    --apollo-schema-poll-interval <apollo-schema-poll-interval>
+      The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_SCHEMA_POLL_INTERVAL=]  [default: 10s]
+  ```
+  In addition, other existing uplink env variables are now also configurable via arg. 
 
 ## 🛠 Maintenance
 ## 📚 Documentation
