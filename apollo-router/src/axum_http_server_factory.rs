@@ -4,14 +4,14 @@ use crate::FederatedServerError;
 use apollo_router_core::http_compat;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
-use axum::extract::{Extension, RawQuery};
+use axum::extract::{Extension, OriginalUri, RawQuery};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
-use http::HeaderValue;
+use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use serde_json::json;
@@ -306,6 +306,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
 async fn redirect_or_run_graphql_operation(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
     Extension(service): Extension<
         Buffer<
             BoxService<
@@ -325,7 +326,7 @@ async fn redirect_or_run_graphql_operation(
         if let Ok(request) =
             graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
         {
-            return run_graphql_request(service, http::Method::GET, request, headers)
+            return run_graphql_request(service, Method::GET, request, headers, uri)
                 .await
                 .into_response();
         }
@@ -335,7 +336,7 @@ async fn redirect_or_run_graphql_operation(
 }
 
 async fn run_graphql_operation(
-    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
     Extension(service): Extension<
         Buffer<
@@ -347,8 +348,9 @@ async fn run_graphql_operation(
             http_compat::Request<graphql::Request>,
         >,
     >,
+    header_map: HeaderMap,
 ) -> impl IntoResponse {
-    run_graphql_request(service, http::Method::POST, request, headers)
+    run_graphql_request(service, Method::POST, request, header_map, uri)
         .await
         .into_response()
 }
@@ -382,9 +384,10 @@ async fn run_graphql_request(
         >,
         http_compat::Request<graphql::Request>,
     >,
-    method: http::Method,
+    method: Method,
     request: graphql::Request,
     header_map: HeaderMap,
+    uri: Uri,
 ) -> impl IntoResponse {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
@@ -405,11 +408,18 @@ async fn run_graphql_request(
 
     match service.ready_oneshot().await {
         Ok(mut service) => {
+            // TODO: come on :/
+            let uri = format!(
+                "http://{}{}",
+                header_map.get("host").unwrap().to_str().unwrap(),
+                &uri
+            );
             let mut http_request = http::Request::builder()
                 .method(method)
+                .uri(uri)
                 .body(request)
                 .unwrap();
-            *http_request.headers_mut() = header_map;
+            *http_request.headers_mut() = header_map.clone();
 
             service
                 .call(
