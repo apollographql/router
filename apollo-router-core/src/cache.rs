@@ -92,14 +92,17 @@ where
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
-                    // Our use case is very specific, so we are sure
-                    // that we won't get any errors here.
-                    let (recv_key, recv_value) = receiver
-                        .recv()
-                        .await
-                        .expect("we ensured our receiver was valid before receiving; qed");
-                    debug_assert_eq!(recv_key, key);
-                    return recv_value;
+                    match receiver.recv().await {
+                        Ok((recv_key, recv_value)) => {
+                            debug_assert_eq!(recv_key, key);
+                            return recv_value;
+                        }
+                        // there was an issue with the broadcast channel, retry fetching
+                        Err(_) => {
+                            locked_wait_map = self.wait_map.lock().await;
+                            continue;
+                        }
+                    }
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);

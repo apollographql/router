@@ -63,15 +63,18 @@ where
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
 
-                    return receiver
-                        .recv()
-                        .await
-                        .expect("we ensured our receiver was valid before receiving; qed")
-                        .map(|response| SubgraphResponse {
-                            response: response.response,
-                            context: request.context,
-                        })
-                        .map_err(|e| e.into());
+                    match receiver.recv().await {
+                        Ok(value) => {
+                            return value
+                                .map(|response| SubgraphResponse {
+                                    response: response.response,
+                                    context: request.context,
+                                })
+                                .map_err(|e| e.into())
+                        }
+                        // there was an issue with the broadcast channel, retry fetching
+                        Err(_) => continue,
+                    }
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
