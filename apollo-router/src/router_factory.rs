@@ -73,6 +73,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let configuration = (*configuration).clone();
 
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        if configuration.server.introspection {
+            builder = builder.with_naive_introspection();
+        }
 
         for (name, _) in schema.subgraphs() {
             let dedup_layer = QueryDeduplicationLayer;
