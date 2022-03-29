@@ -8,6 +8,7 @@ use std::{
 use tokio::sync::broadcast::{self, Sender};
 use tower::{BoxError, Layer, ServiceExt};
 
+#[derive(Default)]
 pub struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer

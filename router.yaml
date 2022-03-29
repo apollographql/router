@@ -1,0 +1,7 @@
+plugins:
+  experimental.traffic_shaping:
+    all:
+      dedup: true
+    subgraphs:
+      products:
+        dedup: true

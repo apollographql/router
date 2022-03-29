@@ -38,11 +38,16 @@ server:
 ```
 
 ## 🐛 Fixes
+- **Move query dedup to an experimental `traffic_shaping` plugin** ([PR #753](https://github.com/apollographql/router/pull/753))
+
+  The experimental `traffic_shaping` plugin will be a central location where we can add things such as rate limiting and retry.
+
 - **Remove `hasNext` from our response objects** ([PR #733](https://github.com/apollographql/router/pull/733))
 
   `hasNext` is a field in the response that may be used in future to support features such as defer and stream. However, we are some way off supporting this and including it now may break clients. It has been removed.
 
 - **Extend Apollo uplink configurability** ([PR #741](https://github.com/apollographql/router/pull/741))
+
   Uplink url and poll interval can now be configured via command line arg and env variable:
   ```bash
     --apollo-schema-config-delivery-endpoint <apollo-schema-config-delivery-endpoint>

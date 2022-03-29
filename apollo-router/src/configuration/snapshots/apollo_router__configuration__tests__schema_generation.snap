@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 439
 expression: "&schema"
 ---
 {
@@ -271,6 +270,33 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "experimental.traffic_shaping": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "object",
+              "properties": {
+                "dedup": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              },
+              "nullable": true
+            },
+            "subgraphs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "dedup": {
+                    "type": "boolean",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
