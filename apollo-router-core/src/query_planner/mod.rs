@@ -307,11 +307,9 @@ pub(crate) mod fetch {
                 let mut values = Vec::new();
                 data.select_values_and_paths(current_dir, |path, value| {
                     if let Value::Object(content) = value {
-                        if let Ok(object) = select_object(content, requires, schema) {
-                            if let Some(value) = object {
-                                paths.push(path);
-                                values.push(value);
-                            }
+                        if let Ok(Some(value)) = select_object(content, requires, schema) {
+                            paths.push(path);
+                            values.push(value);
                         }
                     }
                 });
