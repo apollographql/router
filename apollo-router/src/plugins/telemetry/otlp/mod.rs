@@ -18,8 +18,8 @@ use std::time::Duration;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Otlp {
+    // TODO: in a future iteration we should get rid of tracing and put tracing at the root level cf https://github.com/apollographql/router/issues/683
     pub tracing: Option<Tracing>,
-    // TODO metrics
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -28,6 +28,7 @@ pub struct Tracing {
     pub exporter: Exporter,
     pub trace_config: Option<TraceConfig>,
 }
+// TODO metrics
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -45,6 +46,33 @@ impl Exporter {
             Exporter::Grpc(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
             #[cfg(feature = "otlp-http")]
             Exporter::Http(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
+        }
+    }
+
+    pub fn metrics_exporter(
+        &self,
+    ) -> Result<opentelemetry_otlp::MetricsExporter, ConfigurationError> {
+        match &self {
+            #[cfg(feature = "otlp-grpc")]
+            Exporter::Grpc(_exporter) => {
+                // let grpc_exporter = exporter.clone().unwrap_or_default();
+                // let tonic_exporter = grpc_exporter.exporter()?;
+                todo!("TonicConfig struct is not already public in opentelemetry_otlp");
+                // opentelemetry_otlp::MetricsExporter::new(
+                //     *tonic_exporter.export_config(),
+                //     tonic_config,
+                //     export_selector,
+                // );
+            }
+            #[cfg(feature = "otlp-http")]
+            Exporter::Http(_exporter) => {
+                todo!("TonicConfig struct is not already public in opentelemetry_otlp");
+                // opentelemetry_otlp::MetricsExporter::new(
+                //     *tonic_exporter.export_config(),
+                //     tonic_config,
+                //     export_selector,
+                // );
+            }
         }
     }
 }

@@ -31,6 +31,8 @@ pub enum ConfigurationError {
     InvalidEnvironmentVariable(String),
     /// could not setup OTLP tracing: {0}
     OtlpTracing(opentelemetry::trace::TraceError),
+    /// invalid url: {0}
+    InvalidURL(#[from] url::ParseError),
     /// the configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
     /// unknown plugin {0}

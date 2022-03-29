@@ -2961,6 +2961,7 @@ dependencies = [
  "prost-build",
  "serde",
  "thiserror",
+ "tokio",
  "tonic",
  "tonic-build",
 ]

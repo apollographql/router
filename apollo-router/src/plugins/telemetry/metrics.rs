@@ -20,7 +20,8 @@ pub struct MetricsConfiguration {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum MetricsExporter {
     Prometheus(PrometheusConfiguration),
-    OLTP(OltpConfiguration),
+    // TODO, there are already todos in the oltp mod
+    // OLTP(OltpConfiguration),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -28,14 +29,11 @@ pub struct PrometheusConfiguration {
     endpoint: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct OltpConfiguration {}
-
 #[derive(Debug)]
 pub struct MetricsPlugin {
     exporter: PrometheusExporter,
     conf: MetricsConfiguration,
-    http_counter: Counter<u64>,
+    http_requests_total: Counter<u64>,
 }
 
 impl Plugin for MetricsPlugin {
@@ -45,6 +43,8 @@ impl Plugin for MetricsPlugin {
         let exporter = opentelemetry_prometheus::exporter().init();
         let meter = global::meter("apollo/router");
 
+        // TODO to delete when oltp is implemented
+        #[allow(irrefutable_let_patterns)]
         if let MetricsExporter::Prometheus(prom_exporter_cfg) = &mut config.exporter {
             prom_exporter_cfg.endpoint = prom_exporter_cfg
                 .endpoint
@@ -61,7 +61,7 @@ impl Plugin for MetricsPlugin {
         Ok(Self {
             exporter,
             conf: config,
-            http_counter: meter
+            http_requests_total: meter
                 .u64_counter("http_requests_total")
                 .with_description("Total number of HTTP requests made")
                 .init(),
@@ -72,7 +72,7 @@ impl Plugin for MetricsPlugin {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let http_counter = self.http_counter.clone();
+        let http_counter = self.http_requests_total.clone();
 
         service
             .map_request(move |req: RouterRequest| {
@@ -88,7 +88,7 @@ impl Plugin for MetricsPlugin {
     fn custom_endpoint(&self) -> Option<(String, Handler)> {
         let prometheus_endpoint = match &self.conf.exporter {
             MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
-            MetricsExporter::OLTP(_) => None,
+            // MetricsExporter::OLTP(_) => None,
         };
 
         match prometheus_endpoint {

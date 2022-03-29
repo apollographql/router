@@ -49,6 +49,7 @@ opentelemetry-jaeger = { version = "0.16.0", features = [
 ] }
 opentelemetry-otlp = { version = "0.10.0", default-features = false, features = [
     "serialize",
+    "metrics"
 ], optional = true }
 opentelemetry-prometheus = "0.10.0"
 prometheus = "0.13"
