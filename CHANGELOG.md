@@ -53,6 +53,10 @@ server:
   ```
   In addition, other existing uplink env variables are now also configurable via arg. 
 
+- Make deduplication and caching more robust against cancellation [PR #752](https://github.com/apollographql/router/pull/752)
+
+  Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
