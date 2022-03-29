@@ -4,15 +4,14 @@ use super::state_machine::PrivateState::{Errored, Running, Startup, Stopped};
 use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
-use crate::configuration::{Configuration, ConfigurationError};
+use crate::configuration::Configuration;
+use apollo_router_core::Schema;
 use apollo_router_core::{prelude::*, Handler};
-use apollo_router_core::{DynPlugin, Schema};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use tower::BoxError;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -256,15 +255,18 @@ where
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
 
-            // Process the plugins.
-            let plugin_instances = process_plugins(configuration.clone())
+            let router = self
+                .router_factory
+                .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
                     tracing::error!("Cannot create the router: {}", err);
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
 
-            let handlers: HashMap<String, Handler> = plugin_instances
+            let custom_handlers: HashMap<String, Handler> = self
+                .router_factory
+                .plugins()
                 .iter()
                 .filter_map(|(plugin_name, plugin)| {
                     plugin_name
@@ -274,23 +276,9 @@ where
                 })
                 .collect();
 
-            let router = self
-                .router_factory
-                .create(
-                    configuration.clone(),
-                    plugin_instances,
-                    schema.clone(),
-                    None,
-                )
-                .await
-                .map_err(|err| {
-                    tracing::error!("Cannot create the router: {}", err);
-                    Errored(FederatedServerError::ServiceCreationError(err))
-                })?;
-
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None, handlers)
+                .create(router.clone(), configuration.clone(), None, custom_handlers)
                 .await
                 .map_err(|err| {
                     tracing::error!("Cannot start the router: {}", err);
@@ -321,41 +309,35 @@ where
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
-        // Process the plugins.
-        let plugin_instances = process_plugins(new_configuration.clone())
-            .await
-            .map_err(|err| {
-                tracing::error!("Cannot create the router: {}", err);
-                Errored(FederatedServerError::ServiceCreationError(err))
-            })?;
-
-        let handlers: HashMap<String, Handler> = plugin_instances
-            .iter()
-            .filter_map(|(plugin_name, plugin)| {
-                plugin_name
-                    .starts_with("apollo.")
-                    .then(|| plugin.custom_endpoint())
-                    .flatten()
-            })
-            .collect();
 
         match self
             .router_factory
             .create(
                 new_configuration.clone(),
-                plugin_instances,
                 new_schema.clone(),
                 Some(&router_service),
             )
             .await
         {
             Ok(new_router_service) => {
+                let custom_handlers: HashMap<String, Handler> = self
+                    .router_factory
+                    .plugins()
+                    .iter()
+                    .filter_map(|(plugin_name, plugin)| {
+                        plugin_name
+                            .starts_with("apollo.")
+                            .then(|| plugin.custom_endpoint())
+                            .flatten()
+                    })
+                    .collect();
+
                 let server_handle = server_handle
                     .restart(
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
-                        handlers,
+                        custom_handlers,
                     )
                     .await
                     .map_err(|err| {
@@ -382,79 +364,6 @@ where
                 })
             }
         }
-    }
-}
-
-async fn process_plugins(
-    configuration: Arc<Configuration>,
-) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
-    let mut errors = Vec::new();
-    let plugin_registry = apollo_router_core::plugins();
-    let mut plugin_instances = HashMap::with_capacity(configuration.plugins().len());
-
-    for (name, configuration) in configuration.plugins().iter() {
-        let name = name.clone();
-        match plugin_registry.get(name.as_str()) {
-            Some(factory) => {
-                tracing::debug!(
-                    "creating plugin: '{}' with configuration:\n{:#}",
-                    name,
-                    configuration
-                );
-                match factory.create_instance(configuration) {
-                    Ok(mut plugin) => {
-                        tracing::debug!("starting plugin: {}", name);
-                        match plugin.startup().await {
-                            Ok(_v) => {
-                                tracing::debug!("started plugin: {}", name);
-                                plugin_instances.insert(name.clone(), plugin);
-                            }
-                            Err(err) => {
-                                tracing::debug!("stopping plugin: {}", plugin.name());
-                                if let Err(err) = plugin.shutdown().await {
-                                    // If we can't shutdown a plugin, we terminate the router since we can't
-                                    // assume that it is safe to continue.
-                                    tracing::error!(
-                                        "could not stop plugin: {}, error: {}",
-                                        plugin.name(),
-                                        err
-                                    );
-                                    tracing::error!("terminating router...");
-                                    std::process::exit(1);
-                                } else {
-                                    tracing::debug!("stopped plugin: {}", plugin.name());
-                                }
-                                errors.push(ConfigurationError::PluginStartup {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                })
-                            }
-                        }
-                    }
-                    Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                        plugin: name,
-                        error: err.to_string(),
-                    }),
-                }
-            }
-            None => errors.push(ConfigurationError::PluginUnknown(name)),
-        }
-    }
-
-    if !errors.is_empty() {
-        for error in &errors {
-            tracing::error!("{:#}", error);
-        }
-
-        Err(BoxError::from(
-            errors
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<String>>()
-                .join("\n"),
-        ))
-    } else {
-        Ok(plugin_instances)
     }
 }
 
@@ -686,7 +595,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _| Err(BoxError::from("Error")));
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
@@ -713,7 +622,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| {
+            .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
                 Ok(router)
@@ -722,7 +631,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _| Err(BoxError::from("Error")));
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -762,10 +671,11 @@ mod tests {
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                plugins: HashMap<String, Box<dyn DynPlugin>>,
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
             ) -> Result<MockMyRouter, BoxError>;
+
+            fn plugins(&self) -> &[(String, Box<dyn DynPlugin>)];
         }
     }
 
@@ -893,7 +803,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(expect_times_called)
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
                 Ok(router)

@@ -164,7 +164,7 @@ where
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     buffer: usize,
-    plugins: Vec<Box<dyn DynPlugin>>,
+    plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
@@ -183,19 +183,24 @@ impl PluggableRouterServiceBuilder {
 
     pub fn with_plugin<E: DynPlugin + Plugin>(
         mut self,
+        plugin_name: String,
         plugin: E,
     ) -> PluggableRouterServiceBuilder {
-        self.plugins.push(Box::new(plugin));
+        self.plugins.push((plugin_name, Box::new(plugin)));
         self
     }
 
-    pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
-        self.plugins.push(plugin);
+    pub fn with_dyn_plugin(
+        mut self,
+        plugin_name: String,
+        plugin: Box<dyn DynPlugin>,
+    ) -> PluggableRouterServiceBuilder {
+        self.plugins.push((plugin_name, plugin));
         self
     }
 
     // Consume the builder and retrieve its plugins
-    pub fn plugins(self) -> Vec<Box<dyn DynPlugin>> {
+    pub fn plugins(self) -> Vec<(String, Box<dyn DynPlugin>)> {
         self.plugins
     }
 
@@ -223,7 +228,7 @@ impl PluggableRouterServiceBuilder {
         mut self,
     ) -> (
         BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-        Vec<Box<dyn DynPlugin>>,
+        Vec<(String, Box<dyn DynPlugin>)>,
     ) {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
@@ -246,7 +251,7 @@ impl PluggableRouterServiceBuilder {
                     plan_cache_limit,
                 )
                 .boxed(),
-                |acc, e| e.query_planning_service(acc),
+                |acc, (_, e)| e.query_planning_service(acc),
             ),
         );
 
@@ -259,7 +264,7 @@ impl PluggableRouterServiceBuilder {
                     .plugins
                     .iter_mut()
                     .rev()
-                    .fold(s, |acc, e| e.subgraph_service(&name, acc));
+                    .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
 
                 let service = ServiceBuilder::new().buffer(self.buffer).service(service);
 
@@ -279,7 +284,7 @@ impl PluggableRouterServiceBuilder {
                             .subgraph_services(subgraphs)
                             .build()
                             .boxed(),
-                        |acc, e| e.execution_service(acc),
+                        |acc, (_, e)| e.execution_service(acc),
                     ),
                 )
                 .boxed(),
@@ -336,7 +341,7 @@ impl PluggableRouterServiceBuilder {
                             .naive_introspection(naive_introspection)
                             .build()
                             .boxed(),
-                        |acc, e| e.router_service(acc),
+                        |acc, (_, e)| e.router_service(acc),
                     ),
                 )
                 .boxed(),

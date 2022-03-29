@@ -363,6 +363,39 @@ expression: "&schema"
     "telemetry": {
       "type": "object",
       "properties": {
+        "metrics": {
+          "type": "object",
+          "required": [
+            "exporter"
+          ],
+          "properties": {
+            "exporter": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "prometheus"
+                  ],
+                  "properties": {
+                    "prometheus": {
+                      "type": "object",
+                      "required": [
+                        "endpoint"
+                      ],
+                      "properties": {
+                        "endpoint": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "nullable": true
+        },
         "opentelemetry": {
           "oneOf": [
             {
