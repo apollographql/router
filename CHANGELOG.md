@@ -44,6 +44,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ```
   In addition, other existing uplink env variables are now also configurable via arg. 
 
+- Make deduplication more robust against cancellation [PR #746](https://github.com/apollographql/router/pull/746)
+
+  Cancelling a request could put the router in an unresponsive state, where the deduplication layer would make subgraph requests hang.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
