@@ -148,6 +148,8 @@ where
     }
 }
 
+// instances of Subscriber are always manipualted under the wait map's lock
+// so we do not need to synchronize access on receiver_count
 struct Subscriber {
     receiver_count: usize,
     sender: Sender<Result<SubgraphResponse, String>>,
