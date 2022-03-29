@@ -11,34 +11,103 @@ use bytes::Bytes;
 
 use crate::ResponseBody;
 
-#[derive(Debug, Default)]
+use http::{header::HeaderName, request::Builder, HeaderMap, HeaderValue, Method, Version};
+use url::{ParseError, Url};
+
+#[derive(Debug)]
 pub struct Request<T> {
-    pub inner: http::Request<T>,
+    // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
+    // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
+    pub(super) url: Url,
+    inner: http::Request<T>,
 }
 
 impl<T> Request<T> {
+    /// Update the associated URL
     pub fn set_url(&mut self, url: url::Url) -> Result<(), http::Error> {
         *self.inner.uri_mut() = http::Uri::try_from(url.as_str())?;
+        self.url = url;
         Ok(())
     }
 
+    /// Returns a reference to the associated URL.
+    pub fn url(&self) -> &url::Url {
+        &self.url
+    }
+
+    /// Returns a reference to the associated HTTP method.
+    pub fn method(&self) -> &Method {
+        self.inner.method()
+    }
+
+    /// Returns a mutable reference to the associated HTTP method.
+    pub fn method_mut(&mut self) -> &mut Method {
+        self.inner.method_mut()
+    }
+
+    /// Returns the associated version.
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+
+    /// Returns a mutable reference to the associated version.
+    pub fn version_mut(&mut self) -> &mut Version {
+        self.inner.version_mut()
+    }
+
+    /// Returns a reference to the associated header field map.
+    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
+        self.inner.headers()
+    }
+
+    /// Returns a mutable reference to the associated header field map.
+    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+        self.inner.headers_mut()
+    }
+
+    /// Returns a reference to the associated HTTP body.
+    pub fn body(&self) -> &T {
+        self.inner.body()
+    }
+
+    /// Returns a mutable reference to the associated HTTP body.
+    pub fn body_mut(&mut self) -> &mut T {
+        self.inner.body_mut()
+    }
+
+    /// Consumes the request, returning just the body.
+    pub fn into_body(self) -> T {
+        self.inner.into_body()
+    }
+
+    /// Consumes the request returning the head and body parts.
     pub fn into_parts(self) -> (http::request::Parts, T) {
         self.inner.into_parts()
     }
 
-    pub fn map<F, U>(self, f: F) -> Request<U>
+    /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
+    pub fn map<F, U>(self, f: F) -> Result<Request<U>, ParseError>
     where
         F: FnOnce(T) -> U,
     {
-        self.inner.map(f).into()
+        let new_req = self.inner.map(f);
+        Ok(Request {
+            url: Url::parse(&new_req.uri().to_string())?,
+            inner: new_req,
+        })
     }
 }
 
-impl<T> Deref for Request<T> {
-    type Target = http::Request<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+impl<T> Request<T>
+where
+    T: Default,
+{
+    // Only used for plugin_utils and tests
+    pub fn mock() -> Request<T> {
+        Request {
+            url: Url::parse("http://default").unwrap(),
+            inner: http::Request::default(),
+        }
     }
 }
 
@@ -60,13 +129,10 @@ impl<T: Clone> Clone for Request<T> {
         let req = req
             .body(self.inner.body().clone())
             .expect("cloning a valid request creates a valid request");
-        Self { inner: req }
-    }
-}
-
-impl<T> DerefMut for Request<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+        Self {
+            inner: req,
+            url: self.url.clone(),
+        }
     }
 }
 
@@ -116,15 +182,70 @@ impl<T: PartialEq> PartialEq for Request<T> {
 
 impl<T: PartialEq> Eq for Request<T> {}
 
-impl<T> From<http::Request<T>> for Request<T> {
-    fn from(inner: http::Request<T>) -> Self {
-        Request { inner }
-    }
-}
-
 impl<T> From<Request<T>> for http::Request<T> {
     fn from(request: Request<T>) -> Self {
         request.inner
+    }
+}
+
+impl<T> TryFrom<http::Request<T>> for Request<T> {
+    type Error = ParseError;
+    fn try_from(request: http::Request<T>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            url: request.uri().to_string().parse()?,
+            inner: request,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct RequestBuilder {
+    url: Url,
+    inner: Builder,
+}
+
+impl RequestBuilder {
+    pub fn new(method: reqwest::Method, url: Url) -> Self {
+        // Enforce the need for a method and an url
+        let builder = Builder::new().method(method).uri(
+            http::Uri::try_from(url.as_str())
+                .expect("Url has already been parsed without errors; qed"),
+        );
+        Self {
+            url,
+            inner: builder,
+        }
+    }
+
+    /// Set the HTTP version for this request.
+    pub fn version(self, version: Version) -> Self {
+        Self {
+            url: self.url,
+            inner: self.inner.version(version),
+        }
+    }
+
+    /// Appends a header to this request builder.
+    pub fn header<K, V>(self, key: K, value: V) -> Self
+    where
+        HeaderName: TryFrom<K>,
+        <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
+        HeaderValue: TryFrom<V>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        Self {
+            url: self.url,
+            inner: self.inner.header(key, value),
+        }
+    }
+
+    /// "Consumes" this builder, using the provided `body` to return a
+    /// constructed `Request`.
+    pub fn body<T>(self, body: T) -> http::Result<Request<T>> {
+        Ok(Request {
+            url: self.url,
+            inner: self.inner.body(body)?,
+        })
     }
 }
 

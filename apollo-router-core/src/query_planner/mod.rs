@@ -110,7 +110,7 @@ impl PlanNode {
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
-            tracing::trace!("Executing plan:\n{:#?}", self);
+            tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
             let mut errors;
 
@@ -370,16 +370,21 @@ pub(crate) mod fetch {
             .await?;
 
             let subgraph_request = SubgraphRequest {
-                http_request: http::Request::builder()
-                    .method(http::Method::POST)
-                    .body(
-                        Request::builder()
-                            .query(operation)
-                            .variables(Arc::new(variables.clone()))
-                            .build(),
-                    )
-                    .unwrap()
-                    .into(),
+                http_request: http_compat::RequestBuilder::new(
+                    http::Method::POST,
+                    schema
+                        .subgraphs()
+                        .find_map(|(name, url)| (name == service_name).then(|| url))
+                        .expect("we can unwrap here because we already checked the subgraph url")
+                        .clone(),
+                )
+                .body(
+                    Request::builder()
+                        .query(operation)
+                        .variables(Arc::new(variables.clone()))
+                        .build(),
+                )
+                .expect("it won't fail because the url is correct and already checked; qed"),
                 context: context.clone(),
                 operation_kind: *operation_kind,
             };
@@ -435,7 +440,7 @@ pub(crate) mod fetch {
                 // because we need to take ownership of the inner value
                 if let Value::Object(mut map) = data {
                     if let Some(entities) = map.remove("_entities") {
-                        tracing::trace!("Received entities: {:?}", &entities);
+                        tracing::trace!("received entities: {:?}", &entities);
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();

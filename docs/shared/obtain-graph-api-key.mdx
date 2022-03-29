@@ -1,0 +1,19 @@
+<ExpansionPanel title="How to obtain a graph API key">
+
+> **API keys are secret credentials.** Never share them outside your organization or commit them to version control. Delete and replace API keys that you believe are compromised.
+>
+> API keys are not available for [development graphs](https://www.apollographql.com/docs/studio/dev-graphs/).
+
+1. Go to [studio.apollographql.com](https://studio.apollographql.com/) and click the graph you want to obtain an API key for.
+
+2. **If a "Publish your Schema" dialog appears**, select the **From Apollo Server** tab. Copy the value that appears after `APOLLO_KEY=` in the instructions (it begins with `service:`), and you're all set.
+
+    **Otherwise**, proceed to the next step.
+
+3. Open your graph's Settings page and scroll down to the API Keys section. Either copy an existing key or click **Create New Key**. Give your key a name, such as `Production`. This helps you keep track of each API key's use.
+
+    > If you don't see the API Keys section, you don't have sufficient permissions for your graph. Only organization members with the `Org Admin` or `Graph Admin` role can manage graph API keys. [Learn more about member roles.](https://www.apollographql.com/docs/studio/org/members/)
+
+4. Copy the key's value.
+
+</ExpansionPanel>

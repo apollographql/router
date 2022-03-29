@@ -1,0 +1,17 @@
+version: 4.0.0
+server:
+  cors:
+    origins:
+      - "https://studio.apollographql.com/"
+telemetry:
+  opentelemetry:
+    jaeger:
+
+override_subgraph_url:
+
+plugins:
+  # this plugin doesn't have any configuration
+  # mention it here and you're set!
+  example.context_data:
+
+

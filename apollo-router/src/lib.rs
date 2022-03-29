@@ -3,15 +3,19 @@
 mod apollo_telemetry;
 mod axum_http_server_factory;
 pub mod configuration;
+mod executable;
 mod files;
 mod http_server_factory;
 mod layers;
-mod plugins;
+pub mod plugins;
+mod reload;
 pub mod router_factory;
 mod state_machine;
 // mod warp_http_server_factory;
+pub mod subscriber;
 
 use crate::apollo_telemetry::SpaceportConfig;
+use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
 // use crate::warp_http_server_factory::WarpHttpServerFactory;
@@ -22,10 +26,11 @@ use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
 use displaydoc::Display as DisplayDoc;
+pub use executable::{main, rt_main};
 use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
-use once_cell::sync::OnceCell;
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -33,108 +38,51 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
-use tracing::Subscriber;
-use tracing_subscriber::fmt::format::{DefaultFields, Format};
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::reload::{Error as ReloadError, Handle, Layer as ReloadLayer};
-use tracing_subscriber::{EnvFilter, FmtSubscriber, Layer};
+use url::Url;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
-
-pub(crate) type BoxedLayer = Box<dyn Layer<FmtSubscriberEnv> + Send + Sync>;
-
-pub type FmtSubscriberEnv = FmtSubscriber<DefaultFields, Format, EnvFilter>;
-
-struct BaseLayer;
-
-// We don't actually need our BaseLayer to do anything. It exists as a holder
-// for the layers set by the reporting.rs plugin
-impl<S> Layer<S> for BaseLayer where S: Subscriber + for<'span> LookupSpan<'span> {}
-
-static RELOAD_HANDLE: OnceCell<Handle<BoxedLayer, FmtSubscriberEnv>> = OnceCell::new();
-
-pub fn set_global_subscriber(subscriber: FmtSubscriberEnv) -> Result<(), FederatedServerError> {
-    RELOAD_HANDLE
-        .get_or_try_init(move || {
-            // First create a boxed BaseLayer
-            let cl: BoxedLayer = Box::new(BaseLayer {});
-
-            // Now create a reloading layer from that
-            let (reloading_layer, handle) = ReloadLayer::new(cl);
-
-            // Box up our reloading layer
-            let rl: BoxedLayer = Box::new(reloading_layer);
-
-            // Compose that with our subscriber
-            // let composed: Layered<BoxedLayer, FmtSubscriber> = rl.with_subscriber(subscriber);
-            let composed = rl.with_subscriber(subscriber);
-
-            // Set our subscriber as the global subscriber
-            tracing::subscriber::set_global_default(composed)?;
-
-            tracing::info!("Global subscriber configured successfully");
-
-            // Return our handle to store in OnceCell
-            Ok(handle)
-        })
-        .map_err(FederatedServerError::SetGlobalSubscriberError)?;
-    Ok(())
-}
-
-pub fn replace_layer(new_layer: BoxedLayer) -> Result<(), FederatedServerError> {
-    match RELOAD_HANDLE.get() {
-        Some(hdl) => {
-            hdl.reload(new_layer)
-                .map_err(FederatedServerError::ReloadTracingLayerError)?;
-        }
-        None => {
-            return Err(FederatedServerError::NoReloadTracingHandleError);
-        }
-    }
-    Ok(())
-}
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
 /// Error types for FederatedServer.
 #[derive(Error, Debug, DisplayDoc)]
 pub enum FederatedServerError {
-    /// Failed to start server.
+    /// failed to start server
     StartupError,
 
-    /// Failed to stop HTTP Server.
+    /// failed to stop HTTP Server
     HttpServerLifecycleError,
 
-    /// Configuration was not supplied.
+    /// configuration was not supplied
     NoConfiguration,
 
-    /// Schema was not supplied.
+    /// schema was not supplied
     NoSchema,
 
-    /// Could not deserialize configuration: {0}
+    /// could not deserialize configuration: {0}
     DeserializeConfigError(serde_yaml::Error),
 
-    /// Could not read configuration: {0}
+    /// could not read configuration: {0}
     ReadConfigError(std::io::Error),
 
-    /// Could not read schema: {0}
+    /// could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
 
-    /// Could not create the HTTP pipeline: {0}
+    /// could not create the HTTP pipeline: {0}
     ServiceCreationError(tower::BoxError),
 
-    /// Could not create the HTTP server: {0}
+    /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
 
-    /// Could not configure spaceport: {0}
+    /// could not configure spaceport: {0}
     ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
 
-    /// No reload handle available
+    /// no reload handle available
     NoReloadTracingHandleError,
 
-    /// Could not set global subscriber: {0}
+    /// could not set global subscriber: {0}
     SetGlobalSubscriberError(SetGlobalDefaultError),
 
-    /// Could not reload tracing layer: {0}
+    /// could not reload tracing layer: {0}
     ReloadTracingLayerError(ReloadError),
 }
 
@@ -163,14 +111,20 @@ pub enum SchemaKind {
         delay: Option<Duration>,
     },
 
-    /// A YAML file that may be watched for changes.
-    #[display(fmt = "File")]
+    /// Apollo managed federation.
+    #[display(fmt = "Registry")]
     Registry {
         /// The Apollo key: <YOUR_GRAPH_API_KEY>
         apollo_key: String,
 
         /// The apollo graph reference: <YOUR_GRAPH_ID>@<VARIANT>
         apollo_graph_ref: String,
+
+        /// The endpoint polled to fetch its latest supergraph schema.
+        url: Option<Url>,
+
+        /// The duration between polling
+        poll_interval: Duration,
     },
 }
 
@@ -221,30 +175,27 @@ impl SchemaKind {
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-            } => apollo_uplink::stream_supergraph(
-                apollo_key,
-                apollo_graph_ref,
-                //FIXME: make it configurable
-                Duration::from_secs(10),
-            )
-            .filter_map(|res| {
-                future::ready(match res {
-                    Ok(schema_result) => schema_result
-                        .schema
-                        .parse()
-                        .map_err(|e| {
-                            tracing::error!("could not parse schema: {:?}", e);
-                        })
-                        .ok(),
+                url,
+                poll_interval,
+            } => apollo_uplink::stream_supergraph(apollo_key, apollo_graph_ref, url, poll_interval)
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema_result) => schema_result
+                            .schema
+                            .parse()
+                            .map_err(|e| {
+                                tracing::error!("could not parse schema: {:?}", e);
+                            })
+                            .ok(),
 
-                    Err(e) => {
-                        tracing::error!("error downloading the schema from Uplink: {:?}", e);
-                        None
-                    }
+                        Err(e) => {
+                            tracing::error!("error downloading the schema from Uplink: {:?}", e);
+                            None
+                        }
+                    })
                 })
-            })
-            .map(|schema| UpdateSchema(Box::new(schema)))
-            .boxed(),
+                .map(|schema| UpdateSchema(Box::new(schema)))
+                .boxed(),
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }
@@ -539,6 +490,17 @@ pub enum State {
     Errored,
 }
 
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Startup => write!(f, "startup"),
+            State::Running { .. } => write!(f, "running"),
+            State::Stopped => write!(f, "stopped"),
+            State::Errored => write!(f, "errored"),
+        }
+    }
+}
+
 /// A handle that allows the client to await for various server events.
 pub struct FederatedServerHandle {
     result: Pin<Box<dyn Future<Output = Result<(), FederatedServerError>> + Send>>,
@@ -605,16 +567,16 @@ impl FederatedServerHandle {
             .for_each(|state| {
                 match state {
                     State::Startup => {
-                        tracing::info!(r#"Starting Apollo Router"#)
+                        tracing::info!("starting Apollo Router")
                     }
                     State::Running { address, .. } => {
-                        tracing::info!("Listening on {} 🚀", address)
+                        tracing::info!("listening on {} 🚀", address)
                     }
                     State::Stopped => {
-                        tracing::info!("Stopped")
+                        tracing::info!("stopped")
                     }
                     State::Errored => {
-                        tracing::info!("Stopped with error")
+                        tracing::info!("stopped with error")
                     }
                 }
                 future::ready(())

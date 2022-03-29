@@ -19,14 +19,14 @@ pub fn generate_valid_operation(input: &[u8]) -> Result<String> {
             .map(|err| err.message())
             .collect::<Vec<&str>>()
             .join("\n");
-        debug!("Parser errors ========== \n{:?}", errors);
+        debug!("parser errors ========== \n{:?}", errors);
         debug!("========================");
         panic!("cannot parse the supergraph");
     }
 
     let mut u = Unstructured::new(input);
     let mut gql_doc = DocumentBuilder::with_document(&mut u, Document::from(tree.document()))?;
-    let operation_def = gql_doc.operation_definition_from_schema()?;
+    let operation_def = gql_doc.operation_definition()?.unwrap();
 
     Ok(operation_def.into())
 }

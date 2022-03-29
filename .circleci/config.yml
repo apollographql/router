@@ -7,7 +7,7 @@ orbs:
   # defined in this orb. For reference, the orb can be found here:
   # https://github.com/CircleCI-Public/rust-orb
   rust: circleci/rust@1.6.0
-  gh: circleci/github-cli@2.0.0
+  gh: circleci/github-cli@2.1.0
 
 executors:
   rust_linux: &rust_linux_executor
@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v7-{{ checksum "rust-toolchain.toml" }}
+    default: v8-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:

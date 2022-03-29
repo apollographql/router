@@ -1,0 +1,15 @@
+server:
+  cors:
+    origins:
+      - "https://studio.apollographql.com/"
+plugins:
+  example.propagate_status_code:
+    # Status codes are represented in order,
+    # if a subgraph returns a 400
+    # and an other one returns a 401
+    # the response status code will be 401
+    status_codes:
+      - 401
+      - 403
+      - 400
+      - 500

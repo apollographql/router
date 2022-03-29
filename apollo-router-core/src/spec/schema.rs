@@ -1,6 +1,7 @@
 use crate::*;
 use apollo_parser::ast;
 use itertools::Itertools;
+use reqwest::Url;
 use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
@@ -8,11 +9,11 @@ use std::collections::{HashMap, HashSet};
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
-    subgraphs: HashMap<String, String>,
+    subgraphs: HashMap<String, Url>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
+    pub(crate) input_types: HashMap<String, InputObjectType>,
     pub(crate) custom_scalars: HashSet<String>,
-    pub(crate) fragments: Fragments,
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
 }
@@ -169,8 +170,25 @@ impl std::str::FromStr for Schema {
                                                     }
                                                 }
                                                 if let (Some(name), Some(url)) = (name, url) {
-                                                    // FIXME: return an error on name collisions
-                                                    subgraphs.insert(name, url);
+                                                    if url.is_empty() {
+                                                        return Err(
+                                                            SchemaError::MissingSubgraphUrl(name),
+                                                        );
+                                                    }
+                                                    if subgraphs
+                                                        .insert(
+                                                            name.clone(),
+                                                            Url::parse(&url).map_err(|err| {
+                                                                SchemaError::UrlParse(
+                                                                    name.clone(),
+                                                                    err,
+                                                                )
+                                                            })?,
+                                                        )
+                                                        .is_some()
+                                                    {
+                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{}'", name)));
+                                                    }
                                                 }
                                             }
                                         }
@@ -238,6 +256,54 @@ impl std::str::FromStr for Schema {
                 ast::Definition::InterfaceTypeExtension,
             );
 
+            macro_rules! implement_input_object_type_or_interface_map {
+                ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
+                    let mut map = document
+                        .definitions()
+                        .filter_map(|definition| {
+                            if let $ast_ty(definition) = definition {
+                                let instance = <$ty>::from(definition);
+                                Some((instance.name.clone(), instance))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<HashMap<String, $ty>>();
+
+                    document
+                        .definitions()
+                        .filter_map(|definition| {
+                            if let $ast_extension_ty(extension) = definition {
+                                Some(<$ty>::from(extension))
+                            } else {
+                                None
+                            }
+                        })
+                        .for_each(|extension| {
+                            if let Some(instance) = map.get_mut(&extension.name) {
+                                instance.fields.extend(extension.fields);
+                            } else {
+                                failfast_debug!(
+                                    concat!(
+                                        "Extension exists for {:?} but ",
+                                        stringify!($ty),
+                                        " could not be found."
+                                    ),
+                                    extension.name,
+                                );
+                            }
+                        });
+
+                    map
+                }};
+            }
+
+            let input_types = implement_input_object_type_or_interface_map!(
+                InputObjectType,
+                ast::Definition::InputObjectTypeDefinition,
+                ast::Definition::InputObjectTypeExtension,
+            );
+
             let custom_scalars = document
                 .definitions()
                 .filter_map(|definition| match definition {
@@ -297,30 +363,17 @@ impl std::str::FromStr for Schema {
                 })
                 .collect();
 
-            let mut schema = Schema {
+            Ok(Schema {
                 subtype_map,
                 string: schema.to_owned(),
                 subgraphs,
                 object_types,
+                input_types,
                 interfaces,
                 custom_scalars,
-                fragments: Fragments::default(),
                 enums,
                 api_schema: None,
-            };
-            if let Some(fragments) = Fragments::from_ast(&document, &schema) {
-                schema.fragments = fragments;
-
-                Ok(schema)
-            } else {
-                // empty error here, waiting for apollo-rs semantic analysis to provide meaningful
-                // errors when parsing Fragments
-                let errors = ParseErrors {
-                    raw_schema: schema.string.clone(),
-                    errors: vec![],
-                };
-                Err(SchemaError::Parse(errors))
-            }
+            })
         }
     }
 }
@@ -344,7 +397,7 @@ impl Schema {
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
-    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &String)> {
+    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Url)> {
         self.subgraphs.iter()
     }
 
@@ -362,8 +415,8 @@ impl Schema {
             subgraphs: Default::default(),
             object_types: Default::default(),
             interfaces: Default::default(),
+            input_types: Default::default(),
             custom_scalars: Default::default(),
-            fragments: Default::default(),
             enums: Default::default(),
             api_schema: None,
         }
@@ -387,27 +440,6 @@ macro_rules! implement_object_type_or_interface {
         }
 
         impl $name {
-            pub(crate) fn validate_object(
-                &self,
-                object: &Object,
-                schema: &Schema,
-            ) -> Result<(), InvalidObject> {
-                self
-                    .fields
-                    .iter()
-                    .try_for_each(|(name, ty)| {
-                        let value = object.get(name.as_str()).unwrap_or(&Value::Null);
-                        ty.validate_value(value, schema)
-                    })
-                    .map_err(|_| InvalidObject)?;
-
-                self
-                    .interfaces
-                    .iter()
-                    .flat_map(|name| schema.interfaces.get(name))
-                    .try_for_each(|interface| interface.validate_object(object, schema))
-            }
-
             pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {
                 self.fields.get(name)
             }
@@ -474,6 +506,73 @@ implement_object_type_or_interface!(
     pub(crate) Interface =>
     ast::InterfaceTypeDefinition,
     ast::InterfaceTypeExtension,
+);
+
+macro_rules! implement_input_object_type_or_interface {
+    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
+        #[derive(Debug)]
+        $visibility struct $name {
+            name: String,
+            fields: HashMap<String, FieldType>,
+        }
+
+        impl $name {
+            pub(crate) fn validate_object(
+                &self,
+                object: &Object,
+                schema: &Schema,
+            ) -> Result<(), InvalidObject> {
+                self
+                    .fields
+                    .iter()
+                    .try_for_each(|(name, ty)| {
+                        let value = object.get(name.as_str()).unwrap_or(&Value::Null);
+                        ty.validate_value(value, schema)
+                    })
+                    .map_err(|_| InvalidObject)
+            }
+        }
+
+        $(
+        impl From<$ast_ty> for $name {
+            fn from(definition: $ast_ty) -> Self {
+                let name = definition
+                    .name()
+                    .expect("the node Name is not optional in the spec; qed")
+                    .text()
+                    .to_string();
+                let fields = definition
+                    .input_fields_definition()
+                    .iter()
+                    .flat_map(|x| x.input_value_definitions())
+                    .map(|x| {
+                        let name = x
+                            .name()
+                            .expect("the node Name is not optional in the spec; qed")
+                            .text()
+                            .to_string();
+                        let ty = x
+                            .ty()
+                            .expect("the node Type is not optional in the spec; qed")
+                            .into();
+                        (name, ty)
+                    })
+                    .collect();
+
+                $name {
+                    name,
+                    fields,
+                }
+            }
+        }
+        )+
+    };
+}
+
+implement_input_object_type_or_interface!(
+    pub(crate) InputObjectType =>
+    ast::InputObjectTypeDefinition,
+    ast::InputObjectTypeExtension,
 );
 
 #[cfg(test)]

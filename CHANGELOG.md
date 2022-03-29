@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- # [x.x.x] (unreleased) - 2021-mm-dd
+<!--# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
@@ -14,34 +14,297 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Example section entry format
 
-- **Headline** via [#PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER)
+- **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
 
   Description! And a link to a [reference](http://url)
 
  -->
- 
-# [v0.1.0-alpha.8] Not yet released
+
+<!--# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+
+- **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
+
+  The Router now understands the [@skip](https://spec.graphql.org/October2021/#sec--skip) and [@include](https://spec.graphql.org/October2021/#sec--include) directives in queries, to add or remove fields depending on variables. It works in post processing, by filtering fields after aggregating the subgraph responses.
+
+## 🐛 Fixes
+- **Remove `hasNext` from our response objects** ([PR #733](https://github.com/apollographql/router/pull/733))
+
+  `hasNext` is a field in the response that may be used in future to support features such as defer and stream. However, we are some way off supporting this and including it now may break clients. It has been removed.
+
+- **Extend Apollo uplink configurability** ([PR #741](https://github.com/apollographql/router/pull/741))
+  Uplink url and poll interval can now be configured via command line arg and env variable:
+  ```bash
+    --apollo-schema-config-delivery-endpoint <apollo-schema-config-delivery-endpoint>
+      The endpoint polled to fetch the latest supergraph schema [env: APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT=]
+
+    --apollo-schema-poll-interval <apollo-schema-poll-interval>
+      The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_SCHEMA_POLL_INTERVAL=]  [default: 10s]
+  ```
+  In addition, other existing uplink env variables are now also configurable via arg. 
+
+## 🛠 Maintenance
+## 📚 Documentation
+
+# [v0.1.0-preview.1] - 2022-03-23
+
+## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
+## ❗ BREAKING ❗
+
+- **Improvements to telemetry attribute YAML ergonomics** ([PR #729](https://github.com/apollographql/router/pull/729))
+
+  Trace config YAML ergonomics have been improved. To add additional attributes to your trace information, you can now use the following format:
+
+  ```yaml
+        trace_config:
+          attributes:
+            str: "a"
+            int: 1
+            float: 1.0
+            bool: true
+            str_arr:
+              - "a"
+              - "b"
+            int_arr:
+              - 1
+              - 2
+            float_arr:
+              - 1.0
+              - 2.0
+            bool_arr:
+              - true
+              - false
+  ```
+## 🐛 Fixes
+
+- **Log and error message formatting** ([PR #721](https://github.com/apollographql/router/pull/721))
+
+  Logs and error messages now begin with lower case and do not have trailing punctuation, per Rust conventions.
+
+- **OTLP default service.name and service.namespace** ([PR #722](https://github.com/apollographql/router/pull/722))
+
+  While the Jaeger YAML configuration would default to `router` for the `service.name` and to `apollo` for the `service.namespace`, it was not the case when using a configuration that utilized OTLP. This lead to an `UNKNOWN_SERVICE` name span in zipkin traces, and difficult to find Jaeger traces.
+
+# [v0.1.0-preview.0] - 2022-03-22
+
+## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
+
+For more information on what's expected at this stage, please see our [release stages](https://www.apollographql.com/docs/resources/release-stages/#preview).
+
+## 🐛 Fixes
+
+- **Header propagation by `name` only fixed** ([PR #709](https://github.com/apollographql/router/pull/709))
+
+  Previously `rename` and `default` values were required (even though they were correctly not flagged as required in the json schema).
+  The following will now work:
+  ```yaml
+  headers:
+    all:
+    - propagate:
+        named: test
+  ```
+- **Fix OTLP hang on reload** ([PR #711](https://github.com/apollographql/router/pull/711))
+
+  Fixes hang when OTLP exporter is configured and configuration hot reloads.
+
+# [v0.1.0-alpha.10] 2022-03-21
+
+## ❗ BREAKING ❗
+
+- **Header propagation `remove`'s `name` is now `named`** ([PR #674](https://github.com/apollographql/router/pull/674))
+
+  This merely renames the `remove` options' `name` setting to be instead `named` to be a bit more intuitively named and consistent with its partner configuration, `propagate`.
+
+  _Previous configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      name: "Remove" # Was: "name"
+  ```
+  _New configuration_
+
+  ```yaml
+    # Remove a named header
+    - remove:
+      named: "Remove" # Now: "named"
+  ```
+
+- **Command-line flag vs Environment variable precedence changed** ([PR #693](https://github.com/apollographql/router/pull/693))
+
+  For logging related verbosity overrides, the `RUST_LOG` environment variable no longer takes precedence over the command line argument.  The full order of precedence is now command-line argument overrides environment variable overrides the default setting.
+
+## 🚀 Features
+
+- **Forbid mutations plugin** ([PR #641](https://github.com/apollographql/router/pull/641))
+
+  The forbid mutations plugin allows you to configure the router so that it disallows mutations.  Assuming none of your `query` requests are mutating data or changing state (they shouldn't!) this plugin can be used to effectively make your graph read-only. This can come in handy when testing the router, for example, if you are mirroring/shadowing traffic when trying to validate a Gateway to Router migration! 😸
+
+- **⚠️ Add experimental Rhai plugin** ([PR #484](https://github.com/apollographql/router/pull/484))
+
+  Add an _experimental_ core plugin to be able to extend Apollo Router functionality using [Rhai script](https://rhai.rs/). This allows users to write their own `*_service` function similar to how as you would with a native Rust plugin but without needing to compile a custom router. Rhai scripts have access to the request context and headers directly and can make simple manipulations on them.
+
+  See our [Rhai script documentation](https://www.apollographql.com/docs/router/customizations/rhai) for examples and details!
+
+## 🐛 Fixes
+
+- **Correctly set the URL path of the HTTP request in `RouterRequest`** ([Issue #699](https://github.com/apollographql/router/issues/699))
+
+  Previously, we were not setting the right HTTP path on the `RouterRequest` so when writing a plugin with `router_service` you always had an empty path `/` on `RouterRequest`.
+
+## 📚 Documentation
+
+- **We have incorporated a substantial amount of documentation** (via many, many PRs!)
+
+  See our improved documentation [on our website](https://www.apollographql.com/docs/router/).
+
+# [v0.1.0-alpha.9] 2022-03-16
+## ❗ BREAKING ❗
+
+- **Header propagation configuration changes** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  Header manipulation configuration is now a core-plugin and configured at the _top-level_ of the Router's configuration file, rather than its previous location within service-level layers.  Some keys have also been renamed.  For example:
+
+  **Previous configuration**
+
+  ```yaml
+  subgraphs:
+    products:
+      layers:
+        - headers_propagate:
+            matching:
+              regex: .*
+  ```
+
+  **New configuration**
+
+  ```yaml
+  headers:
+    subgraphs:
+      products:
+        - propagate:
+          matching: ".*"
+  ```
+
+- **Move Apollo plugins to top-level configuration** ([PR #623](https://github.com/apollographql/router/pull/623))
+
+  Previously plugins were all under the `plugins:` section of the YAML config.  However, these "core" plugins are now promoted to the top-level of the config. This reflects the fact that these plugins provide core functionality even though they are implemented as plugins under the hood and further reflects the fact that they receive special treatment in terms of initialization order (they are initialized first before members of `plugins`).
+
+- **Remove configurable layers** ([PR #603](https://github.com/apollographql/router/pull/603))
+
+  Having `plugins` _and_ `layers` as configurable items in YAML was creating confusion as to when it was appropriate to use a `layer` vs a `plugin`.  As the layer API is a subset of the plugin API, `plugins` has been kept, however the `layer` option has been dropped.
+
+- **Plugin names have dropped the `com.apollographql` prefix** ([PR #602](https://github.com/apollographql/router/pull/600))
+
+  Previously, core plugins were prefixed with `com.apollographql.`.  This is no longer the case and, when coupled with the above moving of the core plugins to the top-level, the prefixing is no longer present.  This means that, for example, `com.apollographql.telemetry` would now be just `telemetry`.
+
+- **Use `ControlFlow` in checkpoints** ([PR #602](https://github.com/apollographql/router/pull/602))
+
+
+- **Add Rhai plugin** ([PR #548](https://github.com/apollographql/router/pull/484))
+
+  Both `checkpoint` and `async_checkpoint` now `use std::ops::ControlFlow` instead of the `Step` enum.  `ControlFlow` has two variants, `Continue` and `Break`.
+
+- **The `reporting` configuration changes to `telemetry`** ([PR #651](https://github.com/apollographql/router/pull/651))
+
+  All configuration that was previously under the `reporting` header is now under a `telemetry` key.
+## :sparkles: Features
+
+- **Header propagation now supports "all" subgraphs** ([PR #599](https://github.com/apollographql/router/pull/599))
+
+  It is now possible to configure header propagation rules for *all* subgraphs without needing to explicitly name each subgraph.  You can accomplish this by using the `all` key, under the (now relocated; see above _breaking changes_) `headers` section.
+
+  ```yaml
+  headers:
+    all:
+    - propagate:
+      matching: "aaa.*"
+    - propagate:
+      named: "bbb"
+      default: "def"
+      rename: "ccc"
+    - insert:
+      name: "ddd"
+      value: "eee"
+    - remove:
+      matching: "fff.*"
+    - remove:
+      name: "ggg"
+  ```
+
+- **Update to latest query planner from Federation 2** ([PR #653](https://github.com/apollographql/router/pull/653))
+
+  The Router now uses the `@apollo/query-planner@2.0.0-preview.5` query planner, bringing the most recent version of Federation 2.
+
+## 🐛 Fixes
+
+- **`Content-Type` of HTTP responses is now set to `application/json`** ([Issue #639](https://github.com/apollographql/router/issues/639))
+
+  Previously, we were not setting a `content-type` on HTTP responses.  While plugins can still set a different `content-type` if they'd like, we now ensure that a `content-type` of `application/json` is set when one was not already provided.
+
+- **GraphQL Enums in query parameters** ([Issue #612](https://github.com/apollographql/router/issues/612))
+
+  Enums in query parameters were handled correctly in the response formatting, but not in query validation.  We now have a new test and a fix.
+
+- **OTel trace propagation works again** ([PR #620](https://github.com/apollographql/router/pull/620))
+
+  When we re-worked our OTel implementation to be a plugin, the ability to trace across processes (into subgraphs) was lost. This fix restores this capability.  We are working to improve our end-to-end testing of this to prevent further regressions.
+
+- **Reporting plugin schema generation** ([PR #607](https://github.com/apollographql/router/pull/607))
+
+  Previously our `reporting` plugin configuration was not able to participate in JSON Schema generation. This is now broadly correct and makes writing a syntactically-correct schema much easier.
+
+  To generate a schema, you can still run the same command as before:
+
+  ```
+  router --schema > apollo_configuration_schema.json
+  ```
+
+  Then, follow the instructions for associating it with your development environment.
+
+- **Input object validation** ([PR #658](https://github.com/apollographql/router/pull/658))
+
+  Variable validation was incorrectly using output objects instead of input objects
+
+# [v0.1.0-alpha.8] 2022-03-08
 
 ## :sparkles: Features
 
-- **Add opentracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
-  Opentracing support has been added into the reporting plugin. You're know able to have span propagation via headers with 2 different formats supported by opentracing (`zipkin_b3` and `jaeger`).
+- **Request lifecycle checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
 
-- **Sync and async checkpoints** ([PR #558](https://github.com/apollographql/router/pull/548) and [PR #580](https://github.com/apollographql/router/pull/548))
-  You can now write plugins that can act as check points in the services! Checkpoints allow you to make checks, and either return early with a Response, or forward a Request down the query pipeline.
+    Checkpoints in the request pipeline now allow plugin authors (which includes us!) to check conditions during a request's lifecycle and circumvent further execution if desired.
+    
+    Using `Step` return types within the checkpoint it's possible to influence what happens (including changing things like the HTTP status code, etc.).  A caching layer, for example, could return `Step::Return(response)` if a cache "hit" occurred and `Step::Continue(request)` (to allow normal processing to continue) in the event of a cache "miss".
+    
+    These can be either synchronous or asynchronous.  To see examples, see:
+    
+    - A [synchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/forbid-anonymous-operations)
+    - An [asynchronous example](https://github.com/apollographql/router/tree/190afe181bf2c50be1761b522fcbdcc82b81d6ca/examples/async-allow-client-id)
+
+- **Contracts support** ([PR #573](https://github.com/apollographql/router/pull/573))
+
+  The Apollo Router now supports [Apollo Studio Contracts](https://www.apollographql.com/docs/studio/contracts/)!
+
+- **Add OpenTracing support** ([PR #548](https://github.com/apollographql/router/pull/548))
+
+  OpenTracing support has been added into the reporting plugin.  You're now able to have span propagation (via headers) via two common formats supported by the `opentracing` crate: `zipkin_b3` and `jaeger`.
+
 
 ## :bug: Fixes
 
+- **Configuration no longer requires `router_url`** ([PR #553](https://github.com/apollographql/router/pull/553))
+
+  When using Managed Federation or directly providing a Supergraph file, it is no longer necessary to provide a `routing_url` value.  Instead, the values provided by the Supergraph or Studio will be used and the `routing_url` can be used only to override specific URLs for specific subgraphs.
+
 - **Fix plugin ordering** ([PR #559](https://github.com/apollographql/router/issues/559))
-  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (for instance, Reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the router lifecycle. This change now ensures that Reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration. 
 
-- **Propagate router query lifecycle errors**([PR #537](https://github.com/apollographql/router/issues/537))
-  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occured during query planning and query execution will be displayed as graphql errors, instead of an empty payload.
+  Plugins need to execute in sequence of declaration *except* for certain "core" plugins (e.g., reporting) which must execute early in the plugin sequence to make sure they are in place as soon as possible in the Router lifecycle. This change now ensures that the reporting plugin executes first and that all other plugins are executed in the order of declaration in configuration.
 
-## :nail_care: Improvements
+- **Propagate Router operation lifecycle errors** ([PR #537](https://github.com/apollographql/router/issues/537))
 
-- **Introduce Checkpoint and Step** ([PR #558](https://github.com/apollographql/router/pull/558))
-  Layers and Extensions writers (which includes us!) now have a mechanism that allows them to let the service orchestrator know whether a service call should be propagated further down the service stack, or it has been fullfilled already and it can bail out. A caching layer for example could return Step::Return(response) if the cache hit was successful, and Step::Continue(request) if the cache missed.
+  Our recent extension rework was missing a key part: Error propagation and handling! This change makes sure errors that occurred during query planning and query execution will be displayed as GraphQL errors instead of an empty payload.
+
 
 # [v0.1.0-alpha.7] 2022-02-25
 

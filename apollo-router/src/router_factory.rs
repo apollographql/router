@@ -1,18 +1,16 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use apollo_router_core::deduplication::QueryDeduplicationLayer;
-use apollo_router_core::DynPlugin;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ReqwestSubgraphService, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
+use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-
-const REPORTING_MODULE_NAME: &str = "com.apollographql.reporting";
 
 /// Factory for creating a RouterService
 ///
@@ -72,41 +70,14 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
         let mut errors: Vec<ConfigurationError> = Vec::default();
-        let mut configuration = (*configuration).clone();
-        if let Err(mut e) = configuration.load_subgraphs(&schema) {
-            errors.append(&mut e);
-        }
+        let configuration = (*configuration).clone();
 
-        let configuration = add_default_plugins(configuration);
+        let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
 
-        let mut builder = PluggableRouterServiceBuilder::new(schema);
-
-        for (name, subgraph) in &configuration.subgraphs {
+        for (name, _) in schema.subgraphs() {
             let dedup_layer = QueryDeduplicationLayer;
-            let mut subgraph_service = BoxService::new(dedup_layer.layer(
-                ReqwestSubgraphService::new(name.to_string(), subgraph.routing_url.clone()),
-            ));
-
-            for layer in &subgraph.layers {
-                match layer.as_object().and_then(|o| o.iter().next()) {
-                    Some((kind, config)) => match apollo_router_core::layers().get(kind) {
-                        None => {
-                            errors.push(ConfigurationError::LayerUnknown(kind.to_owned()));
-                        }
-                        Some(factory) => match factory.create_instance(config) {
-                            Ok(layer) => subgraph_service = layer.layer(subgraph_service),
-                            Err(err) => errors.push(ConfigurationError::LayerConfiguration {
-                                layer: kind.to_string(),
-                                error: err.to_string(),
-                            }),
-                        },
-                    },
-                    None => errors.push(ConfigurationError::LayerConfiguration {
-                        layer: "unknown".into(),
-                        error: "layer must be an object".into(),
-                    }),
-                }
-            }
+            let subgraph_service =
+                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -119,26 +90,36 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             ) -> PluggableRouterServiceBuilder {
                 let plugin_registry = apollo_router_core::plugins();
                 match plugin_registry.get(name.as_str()) {
-                    Some(factory) => match factory.create_instance(configuration) {
-                        Ok(mut plugin) => match plugin.startup().await {
-                            Ok(_v) => {
-                                builder = builder.with_dyn_plugin(plugin);
+                    Some(factory) => {
+                        tracing::debug!(
+                            "creating plugin: '{}' with configuration:\n{:#}",
+                            name,
+                            configuration
+                        );
+                        match factory.create_instance(configuration) {
+                            Ok(mut plugin) => {
+                                tracing::debug!("starting plugin: {}", name);
+                                match plugin.startup().await {
+                                    Ok(_v) => {
+                                        tracing::debug!("started plugin: {}", name);
+                                        builder = builder.with_dyn_plugin(plugin);
+                                    }
+                                    Err(err) => {
+                                        (*errors).push(ConfigurationError::PluginStartup {
+                                            plugin: name,
+                                            error: err.to_string(),
+                                        });
+                                    }
+                                }
                             }
                             Err(err) => {
-                                tracing::error!("starting plugin: {}, error: {}", name, err);
-                                (*errors).push(ConfigurationError::PluginStartup {
+                                (*errors).push(ConfigurationError::PluginConfiguration {
                                     plugin: name,
                                     error: err.to_string(),
                                 });
                             }
-                        },
-                        Err(err) => {
-                            (*errors).push(ConfigurationError::PluginConfiguration {
-                                plugin: name,
-                                error: err.to_string(),
-                            });
                         }
-                    },
+                    }
                     None => {
                         (*errors).push(ConfigurationError::PluginUnknown(name));
                     }
@@ -146,31 +127,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 builder
             }
 
-            // If it was required, we ensured that the Reporting plugin was in the
-            // list of plugins above. Now make sure that we process that plugin
-            // before any other plugins.
-            let already_processed = match configuration.plugins.plugins.get(REPORTING_MODULE_NAME) {
-                Some(reporting_configuration) => {
-                    builder = process_plugin(
-                        builder,
-                        &mut errors,
-                        REPORTING_MODULE_NAME.to_string(),
-                        reporting_configuration,
-                    )
-                    .await;
-                    vec![REPORTING_MODULE_NAME]
-                }
-                None => vec![],
-            };
-
-            // Process the remaining plugins. We use already_processed to skip
-            // those plugins we already processed.
-            for (name, configuration) in configuration
-                .plugins
-                .plugins
-                .iter()
-                .filter(|(name, _)| !already_processed.contains(&name.as_str()))
-            {
+            // Process the plugins.
+            for (name, configuration) in configuration.plugins().iter() {
                 let name = name.clone();
                 builder = process_plugin(builder, &mut errors, name, configuration).await;
             }
@@ -178,12 +136,15 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         if !errors.is_empty() {
             // Shutdown all the plugins we started
             for plugin in builder.plugins().iter_mut().rev() {
+                tracing::debug!("stopping plugin: {}", plugin.name());
                 if let Err(err) = plugin.shutdown().await {
                     // If we can't shutdown a plugin, we terminate the router since we can't
                     // assume that it is safe to continue.
                     tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
                     tracing::error!("terminating router...");
                     std::process::exit(1);
+                } else {
+                    tracing::debug!("stopped plugin: {}", plugin.name());
                 }
             }
             for error in errors {
@@ -216,36 +177,13 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             if let Err(err) = plugin.shutdown().await {
                 // If we can't shutdown a plugin, we terminate the router since we can't
                 // assume that it is safe to continue.
-                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                tracing::error!("terminating router...");
+                tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("Terminating router...");
                 std::process::exit(1);
             }
         }
         Ok(service)
     }
-}
-
-fn add_default_plugins(mut configuration: Configuration) -> Configuration {
-    // Because studio usage reporting requires the Reporting plugin,
-    // we must force the addition of the Reporting plugin if APOLLO_KEY
-    // is set.
-    if std::env::var("APOLLO_KEY").is_ok() {
-        // If the user has not specified Reporting configuration, then
-        // insert a valid "minimal" configuration which allows
-        // studio usage reporting to function
-        if !configuration
-            .plugins
-            .plugins
-            .contains_key(REPORTING_MODULE_NAME)
-        {
-            configuration.plugins.plugins.insert(
-                REPORTING_MODULE_NAME.to_string(),
-                serde_json::json!({ "opentelemetry": null }),
-            );
-        }
-    }
-
-    configuration
 }
 
 #[cfg(test)]
@@ -287,23 +225,21 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysStartsAndStopsPlugin));
             Ok(())
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysStartsAndStopsPlugin));
             Ok(())
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -318,23 +254,21 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStartPlugin));
             Err(Box::new(PluginError {}))
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysFailsToStartPlugin));
             Ok(())
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStartPlugin {})
         }
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_start",
         AlwaysFailsToStartPlugin
     );
@@ -349,23 +283,21 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStopPlugin));
             Ok(())
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!("shutting down: {}", stringify!(AlwaysFailsToStopPlugin));
             Err(Box::new(PluginError {}))
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStopPlugin {})
         }
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_stop",
         AlwaysFailsToStopPlugin
     );
@@ -380,26 +312,21 @@ mod test {
         type Config = Conf;
 
         async fn startup(&mut self) -> Result<(), BoxError> {
-            tracing::info!("starting: {}", stringify!(AlwaysFailsToStartAndStopPlugin));
             Err(Box::new(PluginError {}))
         }
 
         async fn shutdown(&mut self) -> Result<(), BoxError> {
-            tracing::info!(
-                "shutting down: {}",
-                stringify!(AlwaysFailsToStartAndStopPlugin)
-            );
             Err(Box::new(PluginError {}))
         }
 
         fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::info!("Hello {}!", configuration.name);
+            tracing::debug!("{}", configuration.name);
             Ok(AlwaysFailsToStartAndStopPlugin {})
         }
     }
 
     register_plugin!(
-        "com.apollographql.test",
+        "apollo.test",
         "always_fails_to_start_and_stop",
         AlwaysFailsToStartAndStopPlugin
     );
@@ -412,31 +339,11 @@ mod test {
     }
 
     #[tokio::test]
-    #[test_log::test]
-    async fn test_yaml_layers() {
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            subgraphs:
-                foo:
-                    routing_url: https://foo
-                    layers:
-                        - headers_insert:
-                              name: "foo"
-                              value: "foo"
-                            
-        "#,
-        )
-        .unwrap();
-        let service = create_service(config).await;
-        assert!(service.is_ok())
-    }
-
-    #[tokio::test]
     async fn test_yaml_plugins_always_starts_and_stops() {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_starts_and_stops:
+                apollo.test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -450,7 +357,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_start:
+                apollo.test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -464,7 +371,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_stop:
+                apollo.test.always_fails_to_stop:
                     name: albert
         "#,
         )
@@ -478,7 +385,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                com.apollographql.test.always_fails_to_start_and_stop:
+                apollo.test.always_fails_to_start_and_stop:
                     name: albert
         "#,
         )

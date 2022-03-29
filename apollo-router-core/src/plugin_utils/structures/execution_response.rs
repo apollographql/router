@@ -1,5 +1,5 @@
-use super::{from_names_and_values, CompatRequest};
-use crate::{Context, Error, Object, Path};
+use super::from_names_and_values;
+use crate::{http_compat::Request, Context, Error, Object, Path};
 use http::{Response, StatusCode};
 use serde_json_bytes::Value;
 use std::sync::Arc;
@@ -11,7 +11,6 @@ pub struct ExecutionResponse {
     label: Option<String>,
     data: Option<Value>,
     path: Option<Path>,
-    has_next: Option<bool>,
     #[builder(setter(!strip_option))]
     errors: Vec<Error>,
     #[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
@@ -20,7 +19,7 @@ pub struct ExecutionResponse {
     status: StatusCode,
     #[builder(default, setter(!strip_option))]
     headers: Vec<(String, String)>,
-    context: Option<Context<CompatRequest>>,
+    context: Option<Context>,
 }
 
 impl From<ExecutionResponse> for crate::ExecutionResponse {
@@ -35,7 +34,6 @@ impl From<ExecutionResponse> for crate::ExecutionResponse {
                 label: execution_response.label,
                 data: execution_response.data.unwrap_or_default(),
                 path: execution_response.path,
-                has_next: execution_response.has_next,
                 errors: execution_response.errors,
                 extensions: execution_response.extensions.unwrap_or_default(),
             })
@@ -46,7 +44,7 @@ impl From<ExecutionResponse> for crate::ExecutionResponse {
             response,
             context: execution_response
                 .context
-                .unwrap_or_else(|| Context::new().with_request(Arc::new(Default::default()))),
+                .unwrap_or_else(|| Context::new().with_request(Arc::new(Request::mock()))),
         }
     }
 }

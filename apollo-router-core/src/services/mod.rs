@@ -1,4 +1,4 @@
-pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer, Step};
+pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
@@ -9,6 +9,7 @@ use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use static_assertions::assert_impl_all;
 use std::convert::Infallible;
+use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -31,7 +32,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
     GraphQL(Response),
@@ -119,6 +120,7 @@ pub struct RouterRequest {
 }
 
 assert_impl_all!(RouterResponse: Send);
+#[derive(Clone)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
     pub context: Context,
@@ -196,12 +198,14 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     fn checkpoint<S, Request>(
         self,
-        checkpoint_fn: fn(
-            Request,
-        ) -> Result<
-            Step<Request, <S as Service<Request>>::Response>,
-            <S as Service<Request>>::Error,
-        >,
+        checkpoint_fn: impl Fn(
+                Request,
+            ) -> Result<
+                ControlFlow<<S as Service<Request>>::Response, Request>,
+                <S as Service<Request>>::Error,
+            > + Send
+            + Sync
+            + 'static,
     ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
     where
         S: Service<Request> + Send + 'static,
@@ -219,7 +223,7 @@ pub trait ServiceBuilderExt<L>: Sized {
                 Request,
             ) -> BoxFuture<
                 'static,
-                Result<Step<Request, <S as Service<Request>>::Response>, BoxError>,
+                Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
             > + Send
             + Sync
             + 'static,

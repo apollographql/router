@@ -80,13 +80,14 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        if let Some(response) =
-            self.naive_introspection.get(
-                req.context.request.body().query.as_ref().expect(
-                    "com.apollographql.ensure-query-is-present has checked this already; qed",
-                ),
-            )
-        {
+        if let Some(response) = self.naive_introspection.get(
+            req.context
+                .request
+                .body()
+                .query
+                .as_ref()
+                .expect("apollo.ensure-query-is-present has checked this already; qed"),
+        ) {
             return Box::pin(async move {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(response)).into(),
@@ -98,8 +99,14 @@ where
         let fut = async move {
             let context = req.context;
             let body = context.request.body();
+            let variables = body.variables.clone();
             let query = query_cache
-                .get_query(body.query.as_ref().expect("com.apollographql.ensure-query-is-present has checked this already; qed").as_str())
+                .get_query(
+                    body.query
+                        .as_ref()
+                        .expect("apollo.ensure-query-is-present has checked this already; qed")
+                        .as_str(),
+                )
                 .await;
 
             if let Some(err) = query
@@ -129,6 +136,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
+                            (*variables).clone(),
                             schema.api_schema(),
                         )
                     });

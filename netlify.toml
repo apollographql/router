@@ -1,19 +1,19 @@
 [build]
-  base    = "docs"
-  publish = "public"
-  command = "gatsby build"
-  # Netlify tries to short-circuit when the build hasn't changed, but it's
-  # presently wrong.  I would encourage removing this eventually, but for now,
-  # we'll check to see if `/bin/false` returns true (it won't) as a gauge.
-  ignore  = "/bin/false"
+  ignore = "exit 0"
+
 [build.environment]
-  NODE_VERSION = "14"
-  NPM_VERSION  = "7"
-[context.production.environment]
-  PREFIX_PATHS = "true"
-[context.branch-deploy.environment]
-  PREFIX_PATHS = "true"
-[dev]
-  command = "npm run build"
-[context.dev.environment]
-  SKIP_INDEXING = "false"
+  NODE_VERSION = "16"
+
+[context.deploy-preview.build]
+  base = "docs"
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF ."
+  command = """\
+  cd ../
+  rm -rf monodocs
+  git clone https://github.com/apollographql/docs --branch main --single-branch monodocs
+  cd monodocs
+  npm i
+  cp -r ../docs local
+  DOCS_LOCAL=true npm run build \
+  """
+  publish = "../monodocs/public"

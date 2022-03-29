@@ -1,6 +1,0 @@
-server:
-  cors:
-    origins:
-      - "https://studio.apollographql.com/"
-plugins:
-  com.example.forbid_anonymous_operations:

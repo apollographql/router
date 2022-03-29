@@ -5,7 +5,13 @@
 
 # Apollo Router
 
-The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/).
+The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/) written in Rust that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
+
+Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.  Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes.  Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format.  We will clearly convey such changes in the release notes.
+
+New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest).  The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
+
+Currently, we're publishing new releases every 1-2 weeks.
 
 ## Getting started
 
@@ -13,26 +19,19 @@ Follow the [quickstart tutorial](https://www.apollographql.com/docs/router/quick
 
 See [the documentation](https://www.apollographql.com/docs/router) for more details.
 
-## Status
-
-🚧 Apollo Router is experimental software.  We're working on it!  See our [release stages](https://www.apollographql.com/docs/resources/release-stages/) for more information.
-
-The Apollo Router can serve queries but is not yet feature complete nor fully compliant with the GraphQL specification.
-
-We'd encourage you to experiment with it, report troubles and offer your feedback on it!
-
 ## Usage
 
-Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/supergraphs/) to be passed as the `--supergraph` argument and [optional configuration](https://www.apollographql.com/docs/router/configuration/).
+Apollo Router requires [a supergraph file](https://www.apollographql.com/docs/rover/supergraphs/) to be passed as the `--supergraph` argument and [an optional configuration file](https://www.apollographql.com/docs/router/configuration/).
 to be supplied. These are either located in the current directory or explicitly
 specified via flag, either by an absolute path, or a path relative to the current
 directory.
 
 ```
 OPTIONS:
-    -c, --config <configuration-path>    Configuration file location [env:
-                                         CONFIGURATION_PATH=]
-    -s, --supergraph <supergraph-path>   Supergraph Schema location [env: SUPERGRAPH_PATH=]
+    -c, --config <configuration-path>    Configuration file location
+    -s, --supergraph <supergraph-path>   Supergraph Schema location
+    -w, --watch                          Watches for changes in the supergraph and configuration file
+        --schema                         Prints out a JSON schema of the configuration file
 ```
 
 ## Who is Apollo?

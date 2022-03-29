@@ -1,16 +1,11 @@
 ---
-title: Apollo Router
-sidebar_title: Overview
-description: Overview
+title: Apollo Router preview
+description: High-performance graph routing for federated graphs
 ---
 
-import { Button } from '@apollo/space-kit/Button';
 import { Link } from 'gatsby';
-import { colors } from 'gatsby-theme-apollo-core';
 
-> ⚠️ **The Apollo Router is in public pre-alpha.** Until it is generally available, do not use it in business-critical graphs. [Learn about release stages.](https://www.apollographql.com/docs/resources/release-stages/#open-source-release-stages)
-
-The **Apollo Router** is a configurable, high-performance **graph router** for a federated graph. It slots into any existing [Apollo Federation](https://www.apollographql.com/docs/federation/) architecture (v1 or v2), replacing your Node.js gateway that uses the `@apollo/gateway` library:
+The **Apollo Router** is a configurable, high-performance **graph router** for a federated graph. It slots into any existing [Apollo Federation](/federation/) architecture (v1 or v2), replacing your Node.js gateway that uses the `@apollo/gateway` library:
 
 ```mermaid
 flowchart BT;
@@ -30,10 +25,28 @@ flowchart BT;
 
 <p>
   <Button
-    size="default"
-    color={colors.primary}
-    as={<Link to="/quickstart/" />}
+    colorScheme="indigo"
+    to="/router/quickstart/"
+    as={Link}
+    style={{
+      marginRight: '10px'
+    }}
   >
     Try it out!
   </Button>
+  <Button
+    colorScheme="gray"
+    to="/router/migrating-from-gateway/"
+    as={Link}
+  >
+    Migrate from @apollo/gateway
+  </Button>
 </p>
+
+## Features
+
+The Apollo Router provides the following features during this preview release, with more to come with the full release and beyond:
+
+* Full support for [Apollo Federation](/federation/) v1 and v2 (both managed and unmanaged)
+* Extensive declarative [configuration options](./configuration/overview) (header propagation, CORS settings, OpenTelemetry support, and more)
+* Support for further [customization](./customizations/overview/) via native Rust plugins and Rhai scripts

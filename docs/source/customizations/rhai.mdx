@@ -1,0 +1,107 @@
+---
+title: Rhai scripts for the Apollo Router
+description: Extend router functionality without compiling a custom plugin
+---
+
+> ⚠️ Apollo Router support for Rhai scripting is currently experimental. For details, see [experimental limitations](#experimental-limitations).
+
+The Apollo Router provides experimental support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
+
+Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
+
+## Experimental limitations
+
+Like the rest of the Apollo Router, Rhai support is in active development. During this preview, functionality is limited.
+
+**What you can do:**
+* Manipulate request HTTP headers
+
+**What you can't do (yet):**
+* Execute calls to external services
+* Modify the body or status codes of requests/responses
+* Perform `checkpoint`-style short circuiting of requests
+
+> ⚠️ As Rhai script is experimental, we may introduce breaking changes to Rhai script functionality after the general availability (GA) release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
+
+## Configuration
+
+```yaml
+plugins:
+  experimental.rhai:
+    # Currently there can only be a single rhai file.  If there are multiple
+    # customizations, keep them all in a single file.
+    filename: "location_of_your_rhai_script.rhai"
+```
+
+## Service hooks
+
+Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. _Unlike_ native Rust plugins, Rhai scripts use two different hooks for each service, one for handling request data and one for handling response data:
+
+  - `router_service_request`
+  - `router_service_response`
+  - `query_planning_service_request`
+  - `query_planning_service_response`
+  - `execution_service_request`
+  - `execution_service_response`
+  - `subgraph_service_request`
+  - `subgraph_service_response`
+
+Each of these hooks is optional—define only the functions you want to use custom logic for.
+
+Each function takes a single parameter: `context`, an object with `extensions` and `headers` fields. Each function must _return_ a `context` object with any necessary modifications.
+
+## Examples
+
+### Example 1
+
+This example manipulates headers and the request context:
+
+```javascript
+fn router_service_request(context) {
+    // Verify that x-custom-header is present and has the expected value
+    if context.headers["x-custom-header"] != "CUSTOM_VALUE" {
+        throw "Error: you did not provide the right custom header";
+    }
+    context
+}
+
+fn router_service_response(context) {
+    context.headers["test-header"] = "here is a test";
+    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        context.headers.greetings = "hello";
+    }
+    let value = context.extensions.test + 10;
+    context.headers["coming_from_extensions"] = `value_${value}`;
+    context.extensions.test = 42;
+    context.extensions.addition = "Here is a new element in the context";
+
+    context
+}
+```
+
+### Example 2
+
+This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
+
+```javascript
+// This converts all cookie pairs into headers.
+// If you only want to convert certain cookies, you
+// can add logic to modify the processing.
+fn subgraph_service_request(context) {
+    // Find our cookies
+    let cookies = context.headers["Cookie"].split(';');
+    for cookie in cookies {
+        // Split our cookies into name and value
+        let k_v = cookie.split('=', 2);
+        if k_v.len() == 2 {
+            // trim off any whitespace
+            k_v[0].trim();
+            k_v[1].trim();
+            // update our headers
+            context.headers[k_v[0]] = k_v[1];
+        }
+    }
+    // Always return the context
+    context
+}
+```

@@ -1,6 +1,7 @@
+use std::ops::ControlFlow;
+
 use apollo_router_core::{
-    checkpoint::Step, plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse,
-    ServiceBuilderExt,
+    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -13,7 +14,7 @@ struct ForbidAnonymousOperations {}
 impl Plugin for ForbidAnonymousOperations {
     // We either forbid anonymous operations,
     // Or we don't. This is the reason why we don't need
-    // to deserialize any configuration from a .yml file.
+    // to deserialize any configuration from a .yaml file.
     //
     // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = ();
@@ -30,8 +31,8 @@ impl Plugin for ForbidAnonymousOperations {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         // `ServiceBuilder` provides us with a `checkpoint` method.
         //
-        // This method allows us to return Step::Continue(request) if we want to let the request through,
-        // or Step::Return(response) with a crafted response if we don't want the request to go through.
+        // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
+        // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
             .checkpoint(|req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
@@ -57,11 +58,11 @@ impl Plugin for ForbidAnonymousOperations {
                         }])
                         .build()
                         .with_status(StatusCode::BAD_REQUEST);
-                    Ok(Step::Return(res))
+                    Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
-                    tracing::info!("Operation is allowed!");
-                    Ok(Step::Continue(req))
+                    tracing::info!("operation is allowed!");
+                    Ok(ControlFlow::Continue(req))
                 }
             })
             .service(service)
@@ -75,7 +76,7 @@ impl Plugin for ForbidAnonymousOperations {
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_plugin!(
-    "com.example",
+    "example",
     "forbid_anonymous_operations",
     ForbidAnonymousOperations
 );
@@ -95,11 +96,11 @@ mod tests {
     // This test ensures the router will be able to
     // find our `forbid_anonymous_operations` plugin,
     // and deserialize an empty yml configuration into it
-    // see config.yml for more information
+    // see router.yml for more information
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()
-            .get("com.example.forbid_anonymous_operations")
+            .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
             .unwrap();

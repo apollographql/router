@@ -1,16 +1,21 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
-use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener};
+use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, Response};
+use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
+use http::header::CONTENT_TYPE;
+use http::uri::Authority;
+use http::HeaderValue;
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
+use reqwest::Url;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
@@ -20,8 +25,10 @@ use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use warp::path::FullPath;
 use warp::{
     http::{header::HeaderMap, StatusCode},
+    reply::with,
     Filter,
 };
 use warp::{Rejection, Reply};
@@ -71,7 +78,11 @@ impl HttpServerFactory for WarpHttpServerFactory {
             let routes = get_health_request()
                 .or(get_graphql_request_or_redirect(service.clone()))
                 .or(post_graphql_request(service.clone()))
-                .with(cors);
+                .with(cors)
+                .with(with::default_header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                ));
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
@@ -90,18 +101,13 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 listener
             } else {
                 match listen_address {
-                    #[cfg(unix)]
-                    ListenAddr::SocketAddr(addr) => tokio_util::either::Either::Left(
+                    ListenAddr::SocketAddr(addr) => Listener::Tcp(
                         TcpListener::bind(addr)
                             .await
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
-                    #[cfg(not(unix))]
-                    ListenAddr::SocketAddr(addr) => TcpListener::bind(addr)
-                        .await
-                        .map_err(FederatedServerError::ServerCreationError)?,
                     #[cfg(unix)]
-                    ListenAddr::UnixSocket(path) => tokio_util::either::Either::Right(
+                    ListenAddr::UnixSocket(path) => Listener::Unix(
                         UnixListener::bind(path)
                             .map_err(FederatedServerError::ServerCreationError)?,
                     ),
@@ -120,6 +126,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 tokio::pin!(shutdown_receiver);
 
                 let connection_shutdown = Arc::new(Notify::new());
+                let mut max_open_file_warning = None;
 
                 loop {
                     tokio::select! {
@@ -130,76 +137,140 @@ impl HttpServerFactory for WarpHttpServerFactory {
                             let svc = svc.clone();
                             let connection_shutdown = connection_shutdown.clone();
 
-                            tokio::task::spawn(async move {
-                                macro_rules! serve_connection {
-                                    ($stream:expr) => {{
-                                        let connection = Http::new()
-                                            .http1_keep_alive(true)
-                                            .serve_connection($stream, svc);
+                            match res {
+                                Ok(res) => {
+                                    if max_open_file_warning.is_some(){
+                                        tracing::info!("can accept connections again");
+                                        max_open_file_warning = None;
+                                    }
 
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                                /*if let Err(http_err) = res {
-                                                    tracing::error!(
-                                                        "Error while serving HTTP connection: {}",
-                                                        http_err
+                                    tokio::task::spawn(async move{
+                                        match res {
+                                            NetworkStream::Tcp(stream) => {
+                                                stream
+                                                    .set_nodelay(true)
+                                                    .expect(
+                                                        "this should not fail unless the socket is invalid",
                                                     );
-                                                }*/
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                c.graceful_shutdown();
+                                                    let connection = Http::new()
+                                                    .http1_keep_alive(true)
+                                                    .serve_connection(stream, svc);
 
-                                                if let Err(_http_err) = connection.await {
-                                                    /*tracing::error!(
-                                                        "Error while serving HTTP connection: {}",
-                                                        http_err
-                                                    );*/
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
+                                                    }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
+
+                                                        let _= connection.await;
+                                                    }
+                                                }
+                                            }
+                                            #[cfg(unix)]
+                                            NetworkStream::Unix(stream) => {
+                                                let connection = Http::new()
+                                                .http1_keep_alive(true)
+                                                .serve_connection(stream, svc);
+
+                                                tokio::pin!(connection);
+                                                tokio::select! {
+                                                    // the connection finished first
+                                                    _res = &mut connection => {
+                                                    }
+                                                    // the shutdown receiver was triggered first,
+                                                    // so we tell the connection to do a graceful shutdown
+                                                    // on the next request, then we wait for it to finish
+                                                    _ = connection_shutdown.notified() => {
+                                                        let c = connection.as_mut();
+                                                        c.graceful_shutdown();
+
+                                                        let _= connection.await;
+                                                    }
                                                 }
                                             }
                                         }
-                                    }};
+                                    });
                                 }
 
-                                // we unwrap the result of accept() here to avoid stopping
-                                // the entire server on an issue with that socket
-                                // Unfortunately, the error here could also be linked
-                                // to the listen socket (no RAM for kernel buffers, no
-                                // more file descriptors, network interface is down...)
-                                // ideally we'd want to handle the errors in the server task
-                                // with varying behaviours
-                                #[cfg(unix)]
-                                match res.unwrap() {
-                                    tokio_util::either::Either::Left((stream, _addr)) => {
-                                        stream
-                                            .set_nodelay(true)
-                                            .expect(
-                                                "this should not fail unless the socket is invalid",
-                                            );
-                                        serve_connection!(stream);
-                                    }
-                                    tokio_util::either::Either::Right((stream, _addr)) => {
-                                        serve_connection!(stream);
-                                    }
-                                };
-                                #[cfg(not(unix))]
-                                {
-                                    let (stream, _addr) = res.unwrap();
-                                    stream
-                                        .set_nodelay(true)
-                                        .expect(
-                                            "this should not fail unless the socket is invalid",
-                                        );
-                                    serve_connection!(stream);
-                                };
+                                Err(e) => match e.kind() {
+                                    // this is already handled by moi and tokio
+                                    //std::io::ErrorKind::WouldBlock => todo!(),
 
+                                    // should be treated as EAGAIN
+                                    // https://man7.org/linux/man-pages/man2/accept.2.html
+                                    // Linux accept() (and accept4()) passes already-pending network
+                                    // errors on the new socket as an error code from accept().  This
+                                    // behavior differs from other BSD socket implementations.  For
+                                    // reliable operation the application should detect the network
+                                    // errors defined for the protocol after accept() and treat them
+                                    // like EAGAIN by retrying.  In the case of TCP/IP, these are
+                                    // ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH,
+                                    // EOPNOTSUPP, and ENETUNREACH.
+                                    //
+                                    // those errors are not supported though: needs the unstable io_error_more feature
+                                    // std::io::ErrorKind::NetworkDown => todo!(),
+                                    // std::io::ErrorKind::HostUnreachable => todo!(),
+                                    // std::io::ErrorKind::NetworkUnreachable => todo!(),
 
-                            });
+                                    //ECONNABORTED
+                                    std::io::ErrorKind::ConnectionAborted|
+                                    //EINTR
+                                    std::io::ErrorKind::Interrupted|
+                                    // EINVAL
+                                    std::io::ErrorKind::InvalidInput|
+                                    std::io::ErrorKind::PermissionDenied |
+                                    std::io::ErrorKind::TimedOut |
+                                    std::io::ErrorKind::ConnectionReset|
+                                    std::io::ErrorKind::NotConnected => {
+                                        // the socket was invalid (maybe timedout waiting in accept queue, or was closed)
+                                        // we should ignore that and get to the next one
+                                        continue;
+                                    }
+
+                                    // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
+                                    std::io::ErrorKind::Other => {
+                                        match e.raw_os_error() {
+                                            Some(libc::EMFILE) | Some(libc::ENFILE) => {
+                                                match max_open_file_warning {
+                                                    None => {
+                                                        tracing::error!("reached the max open file limit, cannot accept any new connection");
+                                                        max_open_file_warning = Some(Instant::now());
+                                                    }
+                                                    Some(last) => if Instant::now() - last < Duration::from_secs(60) {
+                                                        tracing::error!("still at the max open file limit, cannot accept any new connection");
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        continue;
+                                    }
+
+                                    /* we should ignore the remaining errors as they're not supposed
+                                    to happen with the accept() call
+                                    std::io::ErrorKind::NotFound => todo!(),
+                                    std::io::ErrorKind::AddrInUse => todo!(),
+                                    std::io::ErrorKind::AddrNotAvailable => todo!(),
+                                    std::io::ErrorKind::BrokenPipe => todo!(),
+                                    std::io::ErrorKind::AlreadyExists => todo!(),
+                                    std::io::ErrorKind::InvalidData => todo!(),
+                                    std::io::ErrorKind::WriteZero => todo!(),
+
+                                    std::io::ErrorKind::Unsupported => todo!(),
+                                    std::io::ErrorKind::UnexpectedEof => todo!(),
+                                    std::io::ErrorKind::OutOfMemory => todo!(),*/
+                                    _ => {
+                                        continue;
+                                    }
+
+                                }
+                            }
                         }
                     }
                 }
@@ -219,7 +290,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address.into(),
+                actual_listen_address,
             ))
         })
     }
@@ -244,14 +315,28 @@ where
                 .unify(),
         )
         .and(warp::header::headers_cloned())
+        .and(warp::host::optional())
+        .and(warp::path::full())
         .and_then(
-            move |accept: Option<String>, query: String, header_map: HeaderMap| {
+            move |accept: Option<String>,
+                  query: String,
+                  header_map: HeaderMap,
+                  authority: Option<Authority>,
+                  path: FullPath| {
                 let service = service.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         display_home_page()
                     } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-                        run_graphql_request(service, http::Method::GET, request, header_map).await
+                        run_graphql_request(
+                            service,
+                            authority,
+                            http::Method::GET,
+                            path,
+                            request,
+                            header_map,
+                        )
+                        .await
                     } else {
                         Box::new(warp::reply::with_status(
                             "Invalid GraphQL request",
@@ -298,14 +383,28 @@ where
         .and(warp::path::end().or(warp::path("graphql")).unify())
         .and(warp::body::json())
         .and(warp::header::headers_cloned())
-        .and_then(move |request: graphql::Request, header_map: HeaderMap| {
-            let service = service.clone();
-            async move {
-                let reply =
-                    run_graphql_request(service, http::Method::POST, request, header_map).await;
-                Ok::<_, warp::reject::Rejection>(reply)
-            }
-        })
+        .and(warp::path::full())
+        .and(warp::host::optional())
+        .and_then(
+            move |request: graphql::Request,
+                  header_map: HeaderMap,
+                  path: FullPath,
+                  authority: Option<Authority>| {
+                let service = service.clone();
+                async move {
+                    let reply = run_graphql_request(
+                        service,
+                        authority,
+                        http::Method::POST,
+                        path,
+                        request,
+                        header_map,
+                    )
+                    .await;
+                    Ok::<_, warp::reject::Rejection>(reply)
+                }
+            },
+        )
 }
 
 // graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
@@ -321,7 +420,9 @@ where
 )]
 fn run_graphql_request<RS>(
     service: RS,
+    authority: Option<Authority>,
     method: http::Method,
+    path: FullPath,
     request: graphql::Request,
     header_map: HeaderMap,
 ) -> impl Future<Output = Box<dyn Reply>> + Send
@@ -352,14 +453,19 @@ where
     async move {
         match service.ready_oneshot().await {
             Ok(mut service) => {
-                let mut http_request = http::Request::builder()
-                    .method(method)
-                    .body(request)
-                    .unwrap();
+                let uri = match authority {
+                    Some(authority) => {
+                        Url::parse(&format!("http://{}{}", authority.as_str(), path.as_str()))
+                            .expect("if the authority is some then the URL is valid; qed")
+                    }
+                    None => Url::parse(&format!("http://router{}", path.as_str())).unwrap(),
+                };
+
+                let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
                 *http_request.headers_mut() = header_map;
 
                 let response = service
-                    .call(http_request.into())
+                    .call(http_request)
                     .await
                     .map(|response| {
                         tracing::trace_span!("serialize_response")
@@ -514,7 +620,6 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,
@@ -561,7 +666,6 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,
@@ -684,7 +788,7 @@ mod tests {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
-                .to_response(true);
+                .to_response();
                 Ok(http::Response::builder()
                     .status(200)
                     .body(ResponseBody::GraphQL(example_response))
@@ -715,8 +819,46 @@ mod tests {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
-            .to_response(true)
+            .to_response()
         );
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn router_request_path() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(|req| req.url().path() == "/graphql")
+            .returning(move |_| {
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(expected_response.clone()))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+
+        let _response = client
+            .post(format!("{}/graphql", server.listen_address()))
+            .body(
+                json!(
+                {
+                  "query": "query",
+                })
+                .to_string(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .json::<graphql::Response>()
+            .await
+            .unwrap();
+
         server.shutdown().await
     }
 
