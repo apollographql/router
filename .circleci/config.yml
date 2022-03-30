@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v8-{{ checksum "rust-toolchain.toml" }}
+    default: v1-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -249,9 +249,11 @@ commands:
   build_all_permutations:
     steps:
       - build_common_permutations
-      - rust/build:
-          with_cache: false
-          crate: --locked --no-default-features -p apollo-router -p apollo-router-core
+      - run:
+          name: cargo check workspace and benchmarks
+          command: |
+            set -e -o pipefail
+            cargo check --locked --all --benches
   build_workspace:
     parameters:
       os:
