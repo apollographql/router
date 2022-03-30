@@ -292,7 +292,7 @@ pub(crate) mod fetch {
             current_dir: &Path,
             context: &Context,
             schema: &Schema,
-        ) -> Result<Variables, FetchError> {
+        ) -> Option<Variables> {
             let body = context.request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -306,29 +306,23 @@ pub(crate) mod fetch {
                 let mut paths = Vec::new();
                 let mut values = Vec::new();
                 data.select_values_and_paths(current_dir, |path, value| {
-                    match value {
-                        Value::Object(content) => {
-                            let object = select_object(content, requires, schema)?;
-                            if let Some(value) = object {
-                                paths.push(path);
-                                values.push(value)
-                            }
-                        }
-                        _ => {
-                            return Err(FetchError::ExecutionInvalidContent {
-                                reason: "not an object".to_string(),
-                            })
+                    if let Value::Object(content) = value {
+                        if let Ok(Some(value)) = select_object(content, requires, schema) {
+                            paths.push(path);
+                            values.push(value);
                         }
                     }
-                    Ok(())
-                })?;
-                let representations = Value::Array(values);
+                });
 
-                variables.insert("representations", representations);
+                if values.is_empty() {
+                    return None;
+                }
 
-                Ok(Variables { variables, paths })
+                variables.insert("representations", Value::Array(values));
+
+                Some(Variables { variables, paths })
             } else {
-                Ok(Variables {
+                Some(Variables {
                     variables: variable_usages
                         .iter()
                         .filter_map(|key| {
@@ -359,7 +353,7 @@ pub(crate) mod fetch {
                 ..
             } = self;
 
-            let Variables { variables, paths } = Variables::new(
+            let Variables { variables, paths } = match Variables::new(
                 &self.requires,
                 self.variable_usages.as_ref(),
                 data,
@@ -367,7 +361,13 @@ pub(crate) mod fetch {
                 context,
                 schema,
             )
-            .await?;
+            .await
+            {
+                Some(variables) => variables,
+                None => {
+                    return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
+                }
+            };
 
             let subgraph_request = SubgraphRequest {
                 http_request: http_compat::RequestBuilder::new(
