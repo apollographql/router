@@ -249,9 +249,9 @@ commands:
   build_all_permutations:
     steps:
       - build_common_permutations
-      - rust/build:
+      - rust/check:
           with_cache: false
-          crate: --locked --no-default-features --all --benches
+          crate: --locked --all --benches
   build_workspace:
     parameters:
       os:
