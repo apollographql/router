@@ -251,7 +251,7 @@ commands:
       - build_common_permutations
       - rust/build:
           with_cache: false
-          crate: --locked --no-default-features -p apollo-router -p apollo-router-core
+          crate: --locked --no-default-features --all --benches
   build_workspace:
     parameters:
       os:
