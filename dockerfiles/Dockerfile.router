@@ -1,0 +1,21 @@
+# Build is required to extract the release files
+FROM --platform=linux/amd64 alpine:latest AS build
+
+ARG ROUTER_RELEASE
+
+ADD https://github.com/apollographql/router/releases/download/v${ROUTER_RELEASE}/router-${ROUTER_RELEASE}-x86_64-linux.tar.gz /tmp/router.tar.gz
+
+WORKDIR /tmp
+
+RUN tar xvzf router.tar.gz -C /
+
+RUN mkdir /dist/config && mkdir /dist/schema
+
+# Actually build our image using distroless
+FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11
+
+COPY --from=build --chown=root:root /dist /dist
+
+WORKDIR /dist
+
+CMD ["./router", "--config", "./config/router.yaml", "--supergraph", "./schema/local.graphql"]

@@ -405,6 +405,14 @@ jobs:
             - prepare_rust_env
             - build_workspace:
                 os: linux
+            - setup_remote_docker:
+                version: 20.10.11
+            - run: |
+                ROUTER_RELEASE=0.1.0-preview.1
+                docker build --build-arg ROUTER_RELEASE=$ROUTER_RELEASE --no-cache -f dockerfiles/Dockerfile.router -t router:v$ROUTER_RELEASE .
+                # docker build -t CircleCI-Public/circleci-demo-docker:$TAG .
+                # echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                # docker push CircleCI-Public/circleci-demo-docker:$TAG
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
