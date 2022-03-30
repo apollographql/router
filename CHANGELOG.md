@@ -24,7 +24,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-- **Container images are now available** ([PR #XXX](https://github.com/apollographql/router/pull/XXX))
+- **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
   We now build container images that can be accessed at:
     ghcr.io/apollographql/router
