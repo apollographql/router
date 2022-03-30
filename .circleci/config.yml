@@ -249,9 +249,11 @@ commands:
   build_all_permutations:
     steps:
       - build_common_permutations
-      - rust/check:
-          with_cache: false
-          crate: --locked --all --benches
+      - run:
+          name: cargo check workspace and benchmarks
+          command: |
+            set -e -o pipefail
+            cargo check --locked --all --benches
   build_workspace:
     parameters:
       os:
