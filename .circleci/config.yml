@@ -405,25 +405,6 @@ jobs:
             - prepare_rust_env
             - build_workspace:
                 os: linux
-            - setup_remote_docker:
-                version: 20.10.11
-                docker_layer_caching: true
-            - run:
-                name: Docker build
-                command: |
-                  VERSION=v0.1.0-preview.1
-                  ROUTER_RELEASE=${VERSION:1}
-                  ROUTER_TAG=ghcr.io/apollographql/router
-                  # Build debug image
-                  docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug .
-                  # Build release image
-                  docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-                  # NB: GH token expires 30/3/2023
-                  echo ${GITHUB_DOCKER_TOKEN} | docker login ghcr.io -u garypen --password-stdin
-                  # Push debug image
-                  docker push ${ROUTER_TAG}:${VERSION}-debug
-                  # Push release image
-                  docker push ${ROUTER_TAG}:${VERSION}
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
