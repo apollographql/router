@@ -414,13 +414,13 @@ jobs:
                   ROUTER_RELEASE=0.1.0-preview.1
                   ROUTER_TAG=ghcr.io/apollographql/router
                   # Build release image
-                  docker build --build-arg ROUTER_RELEASE=$ROUTER_RELEASE -f dockerfiles/Dockerfile.router -t $ROUTER_TAG:v$ROUTER_RELEASE .
+                  docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE} .
                   # Build debug image
-                  docker build --build-arg ROUTER_RELEASE=$ROUTER_RELEASE --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t $ROUTER_TAG:v${ROUTER_RELEASE}-debug .
+                  docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug .
                   # NB: GH token expires 30/3/2023
-                  echo $GITHUB_DOCKER_TOKEN | docker login ghcr.io -u garypen --password-stdin
-                  docker push $ROUTER_TAG:v$ROUTER_RELEASE
-                  docker push $ROUTER_TAG:v$ROUTER_RELEASE:debug
+                  echo ${GITHUB_DOCKER_TOKEN} | docker login ghcr.io -u garypen --password-stdin
+                  docker push ${ROUTER_TAG}:v${ROUTER_RELEASE}
+                  docker push ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug
       - when:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
