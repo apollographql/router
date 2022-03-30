@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 443
 expression: "&schema"
 ---
 {
@@ -316,7 +317,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "allow_any_origin": {
-              "description": "Set to false to disallow any origin and rely exclusively on `origins`.\n\n/!\\ Defaults to true Having this set to true is the only way to allow Origin: null.",
+              "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
               "default": null,
               "type": "boolean",
               "nullable": true
@@ -359,7 +360,7 @@ expression: "&schema"
               }
             },
             "origins": {
-              "description": "The origin(s) to allow requests from. Use `https://studio.apollographql.com/` to allow Apollo Studio to function.",
+              "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
               "default": [],
               "type": "array",
               "items": {
