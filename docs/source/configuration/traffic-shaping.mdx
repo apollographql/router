@@ -1,0 +1,35 @@
+---
+title: Traffic shaping
+description: Configuring traffic shaping
+---
+
+import { Link } from "gatsby";
+
+> ⚠️ Apollo Router support for traffic shaping is currently experimental.
+
+The Apollo Router provides experimental support for traffic shaping.
+
+Currently features are limited, but are expected to grow over time:
+
+* **Sub-query deduplication** - Identical, in-flight, non-mutation sub-queries are compressed into a single request.
+
+## Configuration
+To configure traffic shaping add the `traffic_shaping` plugin to `your router.yaml`:
+
+```yaml title="router.yaml"
+plugins:
+  experimental.traffic_shaping:
+    all:
+      dedup: true # Enable dedup for all subgraphs.
+    subgraphs: 
+      products:
+        dedup: false # Disable dedup for products.
+```
+
+Note that configuration in the `subgraphs` section will take precedence over that in the `all` section.
+
+### Sub-query deduplication
+
+Deduplication will cause any identical, in-flight, non-mutation sub-queries to be merged into a single request. This can reduce network bandwidth and CPU at your subgraph.
+
+Note that only in flight requests are deduplicated.
