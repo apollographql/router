@@ -20,8 +20,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-<!--# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+- **CORS default Configuration** ([#40](https://github.com/apollographql/router/issues/40))
+
+  The Router will allow only the https://studio.apollographql.com origin by default, instead of any origin.
+  This behavior can still be tweaked in the [YAML configuration](https://www.apollographql.com/docs/router/configuration/cors)
+
 ## 🚀 Features
 
 - **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
@@ -69,7 +75,7 @@ server:
 ## 🛠 Maintenance
 ## 📚 Documentation
 
-# [v0.1.0-preview.1] - 2022-03-23
+<!--# [v0.1.0-preview.1] - 2022-03-23
 
 ## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
 ## ❗ BREAKING ❗
