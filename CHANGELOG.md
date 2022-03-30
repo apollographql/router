@@ -53,6 +53,10 @@ server:
   ```
   In addition, other existing uplink env variables are now also configurable via arg. 
 
+- **Make deduplication and caching more robust against cancellation** [PR #752](https://github.com/apollographql/router/pull/752)
+
+  Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
+
 - **Relax variables selection for subgraph queries** ([PR #755](https://github.com/apollographql/router/pull/755))
 
   federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response

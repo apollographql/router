@@ -6,6 +6,7 @@ use std::cmp::Eq;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
+use std::sync::{Arc, Weak};
 use tokio::sync::broadcast::{self, Sender};
 
 /// A caching map optimised for slow value resolution.
@@ -21,7 +22,7 @@ pub struct CachingMap<K, V> {
     cached: Mutex<LruCache<K, Result<V, CacheResolverError>>>,
     #[allow(clippy::type_complexity)]
     #[derivative(Debug = "ignore")]
-    wait_map: Mutex<HashMap<K, Sender<(K, Result<V, CacheResolverError>)>>>,
+    wait_map: Mutex<HashMap<K, Weak<Sender<(K, Result<V, CacheResolverError>)>>>>,
     cache_limit: usize,
     #[derivative(Debug = "ignore")]
     resolver: Box<dyn CacheResolver<K, V> + Send + Sync>,
@@ -76,50 +77,65 @@ where
         // miss a broadcast.
         drop(locked_cache);
 
-        match locked_wait_map.get_mut(&key) {
-            Some(waiter) => {
-                // Register interest in key
-                let mut receiver = waiter.subscribe();
-                drop(locked_wait_map);
-                // Our use case is very specific, so we are sure
-                // that we won't get any errors here.
-                let (recv_key, recv_value) = receiver.recv().await.expect(
-                    "the sender won't ever be dropped before all the receivers finish; qed",
-                );
-                debug_assert_eq!(recv_key, key);
-                recv_value
-            }
-            None => {
-                let (tx, _rx) = broadcast::channel(1);
-                locked_wait_map.insert(key.clone(), tx.clone());
-                drop(locked_wait_map);
-                // This is the potentially high duration operation where we ask our resolver to
-                // resolve the key (retrieve a value) for us
-                // No cache locks are held here
-                let value = self.resolver.retrieve(key.clone()).await;
-
-                // this is a separate block used to release the locks after editing the cache and wait map,
-                // but before broadcasting the value
-                {
-                    // Update our cache
-                    let mut locked_cache = self.cached.lock().await;
-                    locked_cache.put(key.clone(), value.clone());
-                    // Update our wait list
-                    let mut locked_wait_map = self.wait_map.lock().await;
-                    locked_wait_map.remove(&key);
+        loop {
+            match locked_wait_map.get_mut(&key) {
+                Some(weak_waiter) => {
+                    // Try to upgrade our weak Arc. If we can't, the sender must have
+                    // been cancelled, so remove the entry from the map and try again.
+                    let waiter = match Weak::upgrade(weak_waiter) {
+                        Some(waiter) => waiter,
+                        None => {
+                            locked_wait_map.remove(&key);
+                            continue;
+                        }
+                    };
+                    // Register interest in key
+                    let mut receiver = waiter.subscribe();
+                    drop(locked_wait_map);
+                    match receiver.recv().await {
+                        Ok((recv_key, recv_value)) => {
+                            debug_assert_eq!(recv_key, key);
+                            return recv_value;
+                        }
+                        // there was an issue with the broadcast channel, retry fetching
+                        Err(_) => {
+                            locked_wait_map = self.wait_map.lock().await;
+                            continue;
+                        }
+                    }
                 }
+                None => {
+                    let (tx, _rx) = broadcast::channel(1);
+                    let tx = Arc::new(tx);
+                    locked_wait_map.insert(key.clone(), Arc::downgrade(&tx));
+                    drop(locked_wait_map);
+                    // This is the potentially high duration operation where we ask our resolver to
+                    // resolve the key (retrieve a value) for us
+                    // No cache locks are held here
+                    let value = self.resolver.retrieve(key.clone()).await;
 
-                // Let our waiters know
-                let broadcast_value = value.clone();
-                // Our use case is very specific, so we are sure that
-                // we won't get any errors here.
-                tokio::task::spawn_blocking(move || {
-                    tx.send((key, broadcast_value))
-                        .expect("there is always at least one receiver alive, the _rx guard; qed")
-                })
-                .await
-                .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
-                value
+                    // this is a separate block used to release the locks after editing the cache and wait map,
+                    // but before broadcasting the value
+                    {
+                        // Update our cache
+                        let mut locked_cache = self.cached.lock().await;
+                        locked_cache.put(key.clone(), value.clone());
+                        // Update our wait list
+                        let mut locked_wait_map = self.wait_map.lock().await;
+                        locked_wait_map.remove(&key);
+                    }
+
+                    // Let our waiters know
+                    let broadcast_value = value.clone();
+                    // We may get errors here, for instance if a task is cancelled,
+                    // so just ignore the result of send
+                    let _ = tokio::task::spawn_blocking(move || {
+                        tx.send((key, broadcast_value))
+                    })
+                    .await
+                    .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
+                    return value;
+                }
             }
         }
     }
