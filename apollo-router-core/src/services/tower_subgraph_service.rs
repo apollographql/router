@@ -49,17 +49,10 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
         let mut client = self.client.clone();
         let service_name = (*self.service).to_owned();
 
-        //FIXME: header propagation
         Box::pin(async move {
             let (parts, body) = http_request.into_parts();
 
-            let body = serde_json::to_string(&body).map_err(|error| {
-                //FIXME: another error here?
-                graphql::FetchError::SubrequestMalformedResponse {
-                    service: service_name.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
+            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
             let mut request = http::request::Request::from_parts(parts, body.into());
             let app_json: HeaderValue = "application/json".parse().unwrap();
@@ -75,7 +68,6 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                 )
             });
 
-            println!("tower[{}] will send {:?}", line!(), request);
             let response = client.call(request).await.map_err(|err| {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
@@ -84,7 +76,6 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                     reason: err.to_string(),
                 }
             })?;
-            println!("tower[{}] ", line!());
 
             let body = hyper::body::to_bytes(response.into_body())
                 .instrument(tracing::debug_span!("aggregate_response_data"))
@@ -97,11 +88,6 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-            println!(
-                "tower[{}]body:\n{}",
-                line!(),
-                std::str::from_utf8(&body).unwrap()
-            );
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
@@ -112,7 +98,6 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                         }
                     })
                 })?;
-            println!("tower[{}] res={:?}", line!(), graphql);
 
             Ok(graphql::SubgraphResponse {
                 response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),

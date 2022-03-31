@@ -1,7 +1,6 @@
 use apollo_router_core::{
-    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
-    ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    TowerSubgraphService, ValueExt,
+    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
