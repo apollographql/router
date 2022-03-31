@@ -190,7 +190,7 @@ pub struct RequestBuilder {
 }
 
 impl RequestBuilder {
-    pub fn new(method: reqwest::Method, url: Url) -> Self {
+    pub fn new(method: http::method::Method, url: Url) -> Self {
         // Enforce the need for a method and an url
         let builder = Builder::new().method(method).uri(
             http::Uri::try_from(url.as_str())

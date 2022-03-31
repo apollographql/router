@@ -1,9 +1,9 @@
 use crate::*;
 use apollo_parser::ast;
 use itertools::Itertools;
-use reqwest::Url;
 use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
+use url::Url;
 
 #[derive(Debug)]
 pub struct Schema {

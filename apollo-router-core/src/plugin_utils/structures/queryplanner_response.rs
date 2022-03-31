@@ -1,9 +1,9 @@
 use super::CompatRequest;
 use crate::{http_compat::RequestBuilder, Context, QueryPlan};
 use http::Method;
-use reqwest::Url;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
+use url::Url;
 
 #[derive(Default, Clone, TypedBuilder)]
 #[builder(field_defaults(default, setter(strip_option)))]

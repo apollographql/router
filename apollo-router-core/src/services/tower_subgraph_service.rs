@@ -11,9 +11,8 @@ use std::{str::FromStr, sync::Arc};
 use tower::{BoxError, ServiceBuilder};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use typed_builder::TypedBuilder;
 
-#[derive(TypedBuilder, Clone)]
+#[derive(Clone)]
 pub struct TowerSubgraphService {
     client: hyper::Client<HttpConnector>,
     service: Arc<String>,

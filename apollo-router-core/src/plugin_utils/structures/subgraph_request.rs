@@ -2,11 +2,11 @@ use super::from_names_and_values;
 use crate::{fetch::OperationKind, http_compat, Context, Object, Request};
 use http::header::{HeaderName, HeaderValue};
 use http::Method;
-use reqwest::Url;
 use serde_json_bytes::Value;
 use std::str::FromStr;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
+use url::Url;
 
 #[derive(Default, Clone, TypedBuilder)]
 #[builder(field_defaults(default, setter(strip_option)))]

@@ -65,9 +65,9 @@ mod forbid_http_get_mutations_tests {
         Context, QueryPlan,
     };
     use http::{Method, StatusCode};
-    use reqwest::Url;
     use serde_json::json;
     use tower::ServiceExt;
+    use url::Url;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {
