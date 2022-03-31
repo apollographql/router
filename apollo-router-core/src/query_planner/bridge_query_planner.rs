@@ -91,7 +91,7 @@ impl QueryPlanner for BridgeQueryPlanner {
             .planner
             .plan(query, operation)
             .await
-            .map_err(QueryPlannerError::RouterBridgeError)??;
+            .map_err(QueryPlannerError::RouterBridgeError)?;
 
         if let Some(data) = planner_result.data {
             match data {
