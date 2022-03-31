@@ -1,7 +1,9 @@
+mod bridge_query_planner;
 mod caching_query_planner;
 mod router_bridge_query_planner;
 mod selection;
 use crate::prelude::graphql::*;
+pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;

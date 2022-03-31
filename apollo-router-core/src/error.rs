@@ -234,7 +234,10 @@ pub enum QueryPlannerError {
     /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
     EmptyPlan,
 
-    /// Unhandled planner result.
+    /// Planner Errors: {0}
+    PlannerErrors(serde_json::Value),
+
+    /// Unhandled planner result
     UnhandledPlannerResult,
 
     /// Router Bridge error: {0}

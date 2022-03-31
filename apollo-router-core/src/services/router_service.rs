@@ -3,9 +3,9 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, /*CachingQueryPlanner,*/ DynPlugin, ExecutionRequest, ExecutionResponse,
-    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    plugin_utils, BridgeQueryPlanner, /*CachingQueryPlanner,*/ DynPlugin, ExecutionRequest,
+    ExecutionResponse, NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
     SubgraphResponse,
 };
 use futures::{future::BoxFuture, TryFutureExt};
@@ -252,7 +252,8 @@ impl PluggableRouterServiceBuilder {
         let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
             self.plugins.iter_mut().rev().fold(
                 // CachingQueryPlanner::new(
-                RouterBridgeQueryPlanner::new(self.schema.clone())
+                BridgeQueryPlanner::new(self.schema.clone())
+                    .await
                     // plan_cache_limit,
                     // )
                     .boxed(),
