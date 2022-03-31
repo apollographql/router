@@ -30,6 +30,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🚀 Features
 
+- **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
+
+  We now build container images More details at:
+    https://github.com/apollographql/router/pkgs/container/router
+
+  You can use the images with docker, for example, as follows:
+    e.g.: docker pull ghcr.io/apollographql/router:v0.1.0-preview.1
+
+  The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
+
+  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) --entrypoint=sh.
+
+  For more details about thse images, see the docs.
+
 - **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
 
   The Router now understands the [@skip](https://spec.graphql.org/October2021/#sec--skip) and [@include](https://spec.graphql.org/October2021/#sec--include) directives in queries, to add or remove fields depending on variables. It works in post processing, by filtering fields after aggregating the subgraph responses.
