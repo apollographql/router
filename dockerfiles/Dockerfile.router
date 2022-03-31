@@ -15,6 +15,8 @@ RUN tar xvzf router.tar.gz -C /
 # Make directories for config and schema
 RUN mkdir /dist/config && mkdir /dist/schema
 
+COPY router.yaml /dist/config
+
 # Final image uses distroless
 FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11${DEBUG_IMAGE}
 
