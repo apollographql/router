@@ -9,6 +9,8 @@ The default behaviour of the router images is suitable for a quickstart or devel
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace "<image version>" with your chosen version. e.g.: "v0.1.0-preview.1"
+
 ## Override the configuration
 
 If you wish to override the default configuration, then you need to provide the new configuration:
@@ -19,7 +21,7 @@ docker run -p 4000:4000 \
   --env APOLLO_KEY="<your key>" \
   --mount "type=bind,source=/router.yaml,target=/dist/config/router.yaml" \
   --rm \
-  ghcr.io/apollographql/router:v0.1.0-preview.1
+  ghcr.io/apollographql/router:<image version>
 ```
 
 In this case we are mounting a file from our local system's root directory (Note: that path must be absolute) over the top of the default configuration in the image. 
@@ -32,7 +34,7 @@ docker run -p 4000:4000 \
   --env APOLLO_KEY="<your key>" \
   --mount "type=bind,source=/router.yaml,target=/tmp/router.yaml" \
   --rm \
-  ghcr.io/apollographql/router:v0.1.0-preview.1 -c /tmp/router.yaml
+  ghcr.io/apollographql/router:<image version> -c /tmp/router.yaml
 ```
 
 Here, we are mounting our configuration into the /tmp directory and changing the router startup to let it know that it can find configuration in /tmp/router.yaml.
@@ -50,7 +52,7 @@ docker run -p 4000:4000 \
   --interactive \
   --tty \
   --entrypoint=sh
-  ghcr.io/apollographql/router:v0.1.0-preview.1-debug
+  ghcr.io/apollographql/router:<image version>-debug
 /dist # pwd
 /dist
 /dist # ls
@@ -69,7 +71,7 @@ If we don't want to use uplink to retrieve our subgraph, we can manually specify
 docker run -p 4000:4000 \
   --mount "type=bind,source=/docker.graphql,target=/dist/schema/local.graphql" \
   --rm \
-  ghcr.io/apollographql/router:v0.1.0-preview.1 -c config/router.yaml -s schema/local.graphql
+  ghcr.io/apollographql/router:<image version> -c config/router.yaml -s schema/local.graphql
 ```
 
 Note: In this example we have to mount the local definition of the supergraph into our image AND specify the location of the file. It doesn't have to be mounted in the /dist/schema directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
