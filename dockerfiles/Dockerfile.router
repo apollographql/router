@@ -1,7 +1,7 @@
+ARG DEBUG_IMAGE
 # Build is required to extract the release files
 FROM --platform=linux/amd64 alpine:latest AS build
 
-ARG DEBUG_IMAGE
 ARG ROUTER_RELEASE
 
 # Pull release from GH
@@ -18,9 +18,14 @@ RUN mkdir /dist/config && mkdir /dist/schema
 # Final image uses distroless
 FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11${DEBUG_IMAGE}
 
+LABEL org.opencontainers.image.authors="ApolloGraphQL https://github.com/apollographql/router"
+
 # Copy in the extracted/created files
 COPY --from=build --chown=root:root /dist /dist
 
 WORKDIR /dist
 
-CMD ["./router", "--config", "./config/router.yaml", "--supergraph", "./schema/local.graphql"]
+# Default executable is the router
+ENTRYPOINT ["./router"]
+
+CMD ["--config", "./config/router.yaml"]
