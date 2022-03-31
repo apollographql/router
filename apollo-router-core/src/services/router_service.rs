@@ -3,10 +3,10 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, /*BridgeQueryPlanner, CachingQueryPlanner,*/ DynPlugin, ExecutionRequest,
+    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
     ExecutionResponse, NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse,
-    Schema, SubgraphRequest, SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
+    SubgraphResponse,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -242,22 +242,19 @@ impl PluggableRouterServiceBuilder {
         // various iterators that we create for folding and leave
         // the plugins in their original order.
 
-        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        // let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-        //     .ok()
-        //     .and_then(|x| x.parse().ok())
-        //     .unwrap_or(100);
+        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
+            .ok()
+            .and_then(|x| x.parse().ok())
+            .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
             self.plugins.iter_mut().rev().fold(
-                // CachingQueryPlanner::new(
-                RouterBridgeQueryPlanner::new(self.schema.clone())
-                    // BridgeQueryPlanner::new(self.schema.clone())
-                    //     .await
-                    // plan_cache_limit,
-                    // )
-                    .boxed(),
+                CachingQueryPlanner::new(
+                    BridgeQueryPlanner::new(self.schema.clone()).await,
+                    plan_cache_limit,
+                )
+                .boxed(),
                 |acc, e| e.query_planning_service(acc),
             ),
         );
