@@ -264,7 +264,7 @@ where
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
 
-            let custom_handlers: HashMap<String, Handler> = self
+            let plugin_handlers: HashMap<String, Handler> = self
                 .router_factory
                 .plugins()
                 .iter()
@@ -273,12 +273,13 @@ where
                         .starts_with("apollo.")
                         .then(|| plugin.custom_endpoint())
                         .flatten()
+                        .map(|h| (plugin_name.clone(), h))
                 })
                 .collect();
 
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None, custom_handlers)
+                .create(router.clone(), configuration.clone(), None, plugin_handlers)
                 .await
                 .map_err(|err| {
                     tracing::error!("Cannot start the router: {}", err);
@@ -320,7 +321,7 @@ where
             .await
         {
             Ok(new_router_service) => {
-                let custom_handlers: HashMap<String, Handler> = self
+                let plugin_handlers: HashMap<String, Handler> = self
                     .router_factory
                     .plugins()
                     .iter()
@@ -329,6 +330,7 @@ where
                             .starts_with("apollo.")
                             .then(|| plugin.custom_endpoint())
                             .flatten()
+                            .map(|handler| (plugin_name.clone(), handler))
                     })
                     .collect();
 
@@ -337,7 +339,7 @@ where
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
-                        custom_handlers,
+                        plugin_handlers,
                     )
                     .await
                     .map_err(|err| {
@@ -723,7 +725,7 @@ mod tests {
             _service: RS,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
-            _custom_handlers: HashMap<String, Handler>,
+            _plugin_handlers: HashMap<String, Handler>,
         ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
         where
             RS: Service<

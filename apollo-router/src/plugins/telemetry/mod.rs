@@ -367,7 +367,7 @@ impl Plugin for Telemetry {
         }
     }
 
-    fn custom_endpoint(&self) -> Option<(String, Handler)> {
+    fn custom_endpoint(&self) -> Option<Handler> {
         match &self.metrics_plugin {
             Some(metrics_plugin) => metrics_plugin.custom_endpoint(),
             None => None,

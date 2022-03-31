@@ -46,6 +46,13 @@ impl WarpHttpServerFactory {
     }
 }
 
+#[derive(Debug)]
+struct CustomRejection {
+    #[allow(dead_code)]
+    msg: String,
+}
+impl warp::reject::Reject for CustomRejection {}
+
 impl HttpServerFactory for WarpHttpServerFactory {
     type Future =
         Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
@@ -55,7 +62,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
-        custom_handlers: HashMap<String, Handler>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -77,55 +84,63 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let custom_routes = custom_handlers.into_iter().fold(
+            let plugin_routes = plugin_handlers.into_iter().fold(
                 get_health_request().boxed(),
-                move |acc, (endpoint, custom_handler)| {
-                    let endpoint_cloned = endpoint.clone();
+                move |acc, (plugin_name, custom_handler)| {
                     let route = warp::get()
-                        .and(warp::any().map(move || endpoint_cloned.clone()))
+                        .and(warp::path::full())
                         .and(warp::any().map(move || custom_handler.clone()))
-                        .and(warp::path(endpoint))
-                        .and(warp::path::end())
+                        .and(warp::path("plugins"))
+                        .and(warp::path(plugin_name))
                         .and(warp::host::optional())
                         .and(warp::body::bytes())
                         .and_then(
-                            move |endpoint: String,
+                            move |path: FullPath,
                                   handler: Handler,
                                   authority: Option<Authority>,
                                   body: Bytes| async move {
-                                let res = (*handler)(
-                                    http_compat::RequestBuilder::new(
+                                let res = handler.oneshot(http_compat::RequestBuilder::new(
                                         Method::GET,
                                         Url::parse(&format!(
-                                            "http://{}/{}",
+                                            "http://{}{}",
                                             authority.unwrap().as_str(),
-                                            endpoint
+                                            path.as_str()
                                         ))
                                         .expect(
                                             "if the authority is some then the URL is valid; qed",
                                         ),
                                     )
                                     .body(body)
-                                    .unwrap(),
-                                );
-                                let response_body = res.into_body();
-                                let res: Box<dyn Reply> = match response_body {
-                                    ResponseBody::GraphQL(res) => Box::new(warp::reply::json(
-                                        &serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    )),
-                                    ResponseBody::RawJSON(res) => Box::new(warp::reply::json(
-                                        &serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    )),
-                                    ResponseBody::RawString(res) => Box::new(warp::reply::json(
-                                        &serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    )),
-                                    ResponseBody::Text(res) => Box::new(res),
+                                    .expect("we know the body is already well formatted because it's coming from warp; qed"))
+                                    .await.map_err(|err| warp::reject::custom(CustomRejection { msg: err.to_string() }))?;
+
+                                let is_json = match res.body() {
+                                    ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)  => true,
+                                    ResponseBody::Text(_) => false,
                                 };
 
-                                Ok::<_, Rejection>(res)
+                                let res = res.map(|body| match body {
+                                    ResponseBody::GraphQL(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::RawJSON(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::RawString(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::Text(res) => Bytes::from(res),
+                                });
+
+
+                                if is_json {
+                                    Ok::<_, Rejection>(Box::new(warp::reply::with_header(res.inner, "Content-Type", "application/json")) as Box<dyn Reply>)
+                                } else {
+                                    Ok::<_, Rejection>(Box::new(res.inner) as Box<dyn Reply>)
+                                }
                             },
                         )
                         .boxed();
@@ -136,7 +151,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
             let routes = get_graphql_request_or_redirect(service.clone())
                 .or(post_graphql_request(service.clone()))
-                .or(custom_routes)
+                .or(plugin_routes)
                 .with(cors)
                 .with(with::default_header(
                     CONTENT_TYPE,

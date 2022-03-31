@@ -25,7 +25,7 @@ pub(crate) trait HttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
-        custom_handlers: HashMap<String, Handler>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -87,7 +87,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RS,
         configuration: Arc<Configuration>,
-        custom_handlers: HashMap<String, Handler>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Result<Self, FederatedServerError>
     where
         SF: HttpServerFactory,
@@ -128,7 +128,7 @@ impl HttpServerHandle {
                 router,
                 Arc::clone(&configuration),
                 listener,
-                custom_handlers,
+                plugin_handlers,
             )
             .await?;
         tracing::debug!("restarted on {}", handle.listen_address());
