@@ -7,7 +7,7 @@ import { Link } from 'gatsby';
 
 The default behaviour of the router images is suitable for a quickstart or development scenario. You'll need to know how to customize this default behaviour if you wish to do any of the following.
 
-Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command will be generally helpful.
+Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
 ## Override the configuration
 
@@ -73,5 +73,4 @@ docker run -p 4000:4000 \
 ```
 
 Note: In this example we have to mount the local definition of the supergraph into our image AND specify the location of the file. It doesn't have to be mounted in the /dist/schema directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
-
 
