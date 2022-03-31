@@ -7,6 +7,8 @@ import { Link } from 'gatsby';
 
 The default behaviour of the router images is suitable for a quickstart or development scenario. You'll need to know how to customize this default behaviour if you wish to do any of the following.
 
+Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command will be generally helpful.
+
 ## Override the configuration
 
 If you wish to override the default configuration, then you need to provide the new configuration:
@@ -35,7 +37,7 @@ docker run -p 4000:4000 \
 
 Here, we are mounting our configuration into the /tmp directory and changing the router startup to let it know that it can find configuration in /tmp/router.yaml.
 
-## Debugging our container
+## Debugging your container
 
 If you run the debug image, then it's easy to debug your container:
 

@@ -32,7 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   You can use the images with docker, for example, as follows:
     e.g.: docker pull ghcr.io/apollographql/router:v0.1.0-preview.1
 
-  The images are based on (distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
+  The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
 
   We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) --entrypoint=sh.
 
