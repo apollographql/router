@@ -1,7 +1,7 @@
 use apollo_router_core::{
     http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
     ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    ValueExt,
+    TowerSubgraphService, ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -477,7 +477,7 @@ async fn setup_router_and_registry() -> (
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = ReqwestSubgraphService::new(name.to_owned()).map_request(
+        let service = TowerSubgraphService::new(name.to_owned()).map_request(
             move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());

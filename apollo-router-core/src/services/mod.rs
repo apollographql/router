@@ -22,7 +22,9 @@ mod execution_service;
 pub mod http_compat;
 mod reqwest_subgraph_service;
 mod router_service;
+mod tower_subgraph_service;
 pub use reqwest_subgraph_service::ReqwestSubgraphService;
+pub use tower_subgraph_service::TowerSubgraphService;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
