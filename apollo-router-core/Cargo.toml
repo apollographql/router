@@ -36,7 +36,7 @@ regex = "1.5.5"
 reqwest = { version = "0.11.10" }
 reqwest-middleware = "0.1.5"
 reqwest-tracing = { version = "0.2.1", features = ["opentelemetry_0_17"] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "22d75b7c0fee33e4076f6993a74876f7533fe2bb" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "1b13413d6381478c7e89fa088c6d9f31e8734efa" }
 schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }

@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     router_builder = router_builder.with_subgraph_service("accounts", subgraph_service);
 
     // We can now build our service stack...
-    let (router_service, _) = router_builder.build().await;
+    let (router_service, _) = router_builder.build().await?;
 
     // ...then create a GraphQL request...
     let request = plugin_utils::RouterRequest::builder()

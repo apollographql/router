@@ -105,8 +105,6 @@ where
 mod tests {
     use super::*;
     use mockall::{mock, predicate::*};
-    use router_bridge::plan::PlanningErrors;
-    use std::sync::Arc;
     use test_log::test;
 
     mock! {
@@ -139,9 +137,7 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::PlanningErrors(Arc::new(
-                PlanningErrors { errors: Vec::new() },
-            ))));
+            .return_const(Err(QueryPlannerError::from(Vec::new())));
 
         let planner = CachingQueryPlanner::new(delegate, 10);
 

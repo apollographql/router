@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::plan::PlanningErrors;
+pub use router_bridge::planner::BridgeError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -222,8 +222,11 @@ pub enum JsonExtError {
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
+    /// Couldn't instantiate QueryPlanner: {0}
+    QueryPlannerError(BridgeErrors),
+
     /// Query planning had errors: {0}
-    PlanningErrors(Arc<PlanningErrors>),
+    PlanningErrors(BridgeErrors),
 
     /// Query planning panicked: {0}
     JoinError(Arc<JoinError>),
@@ -234,9 +237,6 @@ pub enum QueryPlannerError {
     /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
     EmptyPlan,
 
-    /// Planner Errors: {0}
-    PlannerErrors(serde_json::Value),
-
     /// Unhandled planner result
     UnhandledPlannerResult,
 
@@ -244,9 +244,25 @@ pub enum QueryPlannerError {
     RouterBridgeError(router_bridge::error::Error),
 }
 
-impl From<PlanningErrors> for QueryPlannerError {
-    fn from(err: PlanningErrors) -> Self {
-        QueryPlannerError::PlanningErrors(Arc::new(err))
+#[derive(Debug, Clone)]
+pub struct BridgeErrors(Arc<Vec<BridgeError>>);
+
+impl std::fmt::Display for BridgeErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "Bridge errors: {}",
+            self.0
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
+    }
+}
+
+impl From<Vec<BridgeError>> for QueryPlannerError {
+    fn from(err: Vec<BridgeError>) -> Self {
+        QueryPlannerError::PlanningErrors(BridgeErrors(Arc::new(err)))
     }
 }
 

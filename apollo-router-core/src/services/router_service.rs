@@ -231,10 +231,14 @@ impl PluggableRouterServiceBuilder {
 
     pub async fn build(
         mut self,
-    ) -> (
-        BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-        Vec<Box<dyn DynPlugin>>,
-    ) {
+    ) -> Result<
+        (
+            BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+            Vec<Box<dyn DynPlugin>>,
+        ),
+        // TODO: Make it an actual BuildError ?
+        crate::QueryPlannerError,
+    > {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -248,16 +252,14 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(
-                    BridgeQueryPlanner::new(self.schema.clone()).await,
-                    plan_cache_limit,
-                )
-                .boxed(),
-                |acc, e| e.query_planning_service(acc),
-            ),
-        );
+        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone()).await?;
+        let query_planner_service =
+            ServiceBuilder::new()
+                .buffer(self.buffer)
+                .service(self.plugins.iter_mut().rev().fold(
+                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
+                    |acc, e| e.query_planning_service(acc),
+                ));
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -357,6 +359,6 @@ impl PluggableRouterServiceBuilder {
             self.buffer,
         );
 
-        (router_service.boxed_clone(), self.plugins)
+        Ok((router_service.boxed_clone(), self.plugins))
     }
 }

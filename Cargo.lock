@@ -90,15 +90,6 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "027e04c63b91ac33053684910a90018a0e96d45d52c4489cf4c12b4cb240802d"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.2.4"
 source = "git+https://github.com/apollographql/apollo-rs.git?rev=06b039f4be6e04557b762d09078f7a9e07ee40a2#06b039f4be6e04557b762d09078f7a9e07ee40a2"
 dependencies = [
  "rowan",
@@ -108,6 +99,15 @@ dependencies = [
 name = "apollo-parser"
 version = "0.2.4"
 source = "git+https://github.com/apollographql/apollo-rs.git?rev=e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac#e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
+name = "apollo-parser"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3f8fe8c9fb08c1e99bf4a50698adcd807cafba2d2aacc49d8ffc79123fce59"
 dependencies = [
  "rowan",
 ]
@@ -196,7 +196,7 @@ dependencies = [
 name = "apollo-router-core"
 version = "0.1.0-preview.1"
 dependencies = [
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "async-trait",
  "atty",
  "bytes",
@@ -337,7 +337,7 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -779,7 +779,7 @@ name = "compose-your-graphql-router"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -838,7 +838,7 @@ name = "context-data"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -1500,7 +1500,7 @@ name = "forbid-anonymous-operations"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -1863,9 +1863,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.12"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62eeb471aa3e3c9197aa4bfeabfe02982f6dc96f750486c0bb0009ac58b26d2b"
+checksum = "37a82c6d637fc9515a4694bbf1cb2457b79d81ce52b3108bdeea58b07dd34a57"
 dependencies = [
  "bytes",
  "fnv",
@@ -1876,7 +1876,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util 0.6.9",
+ "tokio-util 0.7.1",
  "tracing",
 ]
 
@@ -1954,7 +1954,7 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
@@ -2316,7 +2316,7 @@ name = "jwt-auth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
@@ -3377,7 +3377,7 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "dashmap",
@@ -3747,7 +3747,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=22d75b7c0fee33e4076f6993a74876f7533fe2bb#22d75b7c0fee33e4076f6993a74876f7533fe2bb"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=1b13413d6381478c7e89fa088c6d9f31e8734efa#1b13413d6381478c7e89fa088c6d9f31e8734efa"
 dependencies = [
  "anyhow",
  "async-channel",

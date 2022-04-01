@@ -10,30 +10,19 @@ use std::sync::Arc;
 use tower::BoxError;
 use tower::Service;
 
-#[derive(Deserialize, Debug)]
-struct BridgePlannerResult {
-    data: Option<PlannerResult>,
-    error: Option<serde_json::Value>,
-}
-
 #[derive(Debug, Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
 pub struct BridgeQueryPlanner {
-    planner: Arc<Planner<BridgePlannerResult>>,
+    planner: Arc<Planner<PlannerResult>>,
 }
 
 impl BridgeQueryPlanner {
-    pub async fn new(schema: Arc<Schema>) -> Self {
-        Self {
-            // TODO: Error handling
-            planner: Arc::new(
-                Planner::new(schema.as_str().to_string())
-                    .await
-                    .expect("couldn't instantiate query planner"),
-            ),
-        }
+    pub async fn new(schema: Arc<Schema>) -> Result<Self, QueryPlannerError> {
+        Ok(Self {
+            planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+        })
     }
 }
 
@@ -87,31 +76,24 @@ impl QueryPlanner for BridgeQueryPlanner {
         operation: Option<String>,
         _options: QueryPlanOptions,
     ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
-        let planner_result: BridgePlannerResult = self
+        let planner_result = self
             .planner
             .plan(query, operation)
             .await
-            .map_err(QueryPlannerError::RouterBridgeError)?;
+            .map_err(QueryPlannerError::RouterBridgeError)?
+            .into_result()
+            .map_err(|e| QueryPlannerError::from(e))?;
 
-        if let Some(data) = planner_result.data {
-            match data {
-                PlannerResult::QueryPlan { node: Some(node) } => {
-                    Ok(Arc::new(QueryPlan { root: node }))
-                }
-                PlannerResult::QueryPlan { node: None } => {
-                    failfast_debug!("empty query plan");
-                    Err(QueryPlannerError::EmptyPlan)
-                }
-                PlannerResult::Other => {
-                    failfast_debug!("unhandled planner result");
-                    Err(QueryPlannerError::UnhandledPlannerResult)
-                }
+        match planner_result {
+            PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
+            PlannerResult::QueryPlan { node: None } => {
+                failfast_debug!("empty query plan");
+                Err(QueryPlannerError::EmptyPlan)
             }
-        } else {
-            failfast_debug!("unhandled planner result");
-            Err(QueryPlannerError::PlannerErrors(
-                planner_result.error.unwrap_or(serde_json::Value::Null),
-            ))
+            PlannerResult::Other => {
+                failfast_debug!("unhandled planner result");
+                Err(QueryPlannerError::UnhandledPlannerResult)
+            }
         }
     }
 }
@@ -136,7 +118,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = BridgeQueryPlanner::new(Arc::new(example_schema())).await;
+        let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap();
         let result = planner
             .get(
                 include_str!("testdata/query.graphql").into(),
@@ -166,18 +150,15 @@ mod tests {
             "empty_query_plan_should_be_a_planner_error",
             BridgeQueryPlanner::new(Arc::new(example_schema()))
                 .await
-                .get(
-                    include_str!("testdata/unknown_introspection_query.graphql").into(),
-                    None,
-                    Default::default(),
-                )
-                .await
+                .unwrap_err()
         )
     }
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = BridgeQueryPlanner::new(Arc::new(example_schema())).await;
+        let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap();
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
