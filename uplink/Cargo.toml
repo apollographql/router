@@ -1,6 +1,6 @@
 [package]
 name = "apollo-uplink"
-version = "0.1.0-preview.1"
+version = "0.1.0-preview.2"
 edition = "2021"
 build = "build.rs"
 
