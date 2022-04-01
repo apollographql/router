@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
+
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
+
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
@@ -84,7 +90,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ```
   In addition, other existing uplink env variables are now also configurable via arg. 
 
-- **Make deduplication and caching more robust against cancellation** [PR #752](https://github.com/apollographql/router/pull/752) [PR #758](https://github.com/apollographql/router/pull/758)
+- **Make deduplication and caching more robust against cancellation** [PR #752](https://github.com/apollographql/router/pull/752)
 
   Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
 
