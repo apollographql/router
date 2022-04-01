@@ -161,7 +161,7 @@ The time between polls to Apollo uplink. Minimum 10s.
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed, the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed (or the `HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 

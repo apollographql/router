@@ -33,7 +33,7 @@ pub struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(short, long)]
+    #[clap(short, long, env = "HOT_RELOAD")]
     watch: bool,
 
     /// Configuration location relative to the project directory.

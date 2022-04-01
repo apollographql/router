@@ -30,6 +30,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🚀 Features
 
+- **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
+  You can now ust the HOT_RELOAD=true environment variable to have the router watch for configuration and schema changes and automatically reload.
+
 - **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
   We now build container images More details at:
