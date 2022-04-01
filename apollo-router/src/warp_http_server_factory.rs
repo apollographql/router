@@ -113,11 +113,8 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     .body(body)
                                     .expect("we know the body is already well formatted because it's coming from warp; qed"))
                                     .await.map_err(|err| warp::reject::custom(CustomRejection { msg: err.to_string() }))?;
-
-                                let is_json = match res.body() {
-                                    ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)  => true,
-                                    ResponseBody::Text(_) => false,
-                                };
+                                    
+                                let is_json = matches!(res.body(), ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_));
 
                                 let res = res.map(|body| match body {
                                     ResponseBody::GraphQL(res) => Bytes::from(

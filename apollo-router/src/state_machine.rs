@@ -269,8 +269,7 @@ where
                 .plugins()
                 .iter()
                 .filter_map(|(plugin_name, plugin)| {
-                    plugin_name
-                        .starts_with("apollo.")
+                    (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
                         .then(|| plugin.custom_endpoint())
                         .flatten()
                         .map(|h| (plugin_name.clone(), h))
@@ -326,11 +325,11 @@ where
                     .plugins()
                     .iter()
                     .filter_map(|(plugin_name, plugin)| {
-                        plugin_name
-                            .starts_with("apollo.")
-                            .then(|| plugin.custom_endpoint())
-                            .flatten()
-                            .map(|handler| (plugin_name.clone(), handler))
+                        (plugin_name.starts_with("apollo.")
+                            || plugin_name.starts_with("experimental."))
+                        .then(|| plugin.custom_endpoint())
+                        .flatten()
+                        .map(|handler| (plugin_name.clone(), handler))
                     })
                     .collect();
 
