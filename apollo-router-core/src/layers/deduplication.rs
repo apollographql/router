@@ -7,6 +7,7 @@ use tokio::sync::{
 };
 use tower::{BoxError, Layer, ServiceExt};
 
+#[derive(Default)]
 pub struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer

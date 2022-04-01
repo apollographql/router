@@ -1,0 +1,34 @@
+---
+title: Containerizing the Apollo Router
+description: Running the router in a container
+---
+
+import { Link } from "gatsby";
+
+> Find our more about the router images [here](https://github.com/apollographql/router/pkgs/container/router).
+
+We supply default and debug images for each release. Both images contain the same router build. Debug images additionally contain a "busybox" to help with container debugging.
+
+The simplest way to run the image, using for example docker, is as follows:
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --rm \
+  ghcr.io/apollographql/router:<image version>
+```
+
+Note: The exact image version to use is your choice depending on which release you wish to use. Replace `<image version>` with your chosen version. e.g.: `v0.1.0-preview.1`
+
+This will download your supergraph and use a default configuration which listens for connections on port 4000. If you wish to do anything more complex, it's possible to override configuration, supergraph location, or use any of the available router parameters or configuration. See [configuration](../configuration/overview/) for more details about router configuration and parameters.
+
+For more examples of using the images in different environments, take a look at our [docker](./docker/) or [kubernetes](./kubernetes/) guides.
+
+## Default behaviour of the image.
+
+The router is located in a /dist directory. A default configuration file, router.yaml, is located in the /dist/config directory. There is also a /dist/schema directory for convenient mounting of locally defined supergraph schema. Licensing details are also in the /dist directory.
+
+## Image build
+
+The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.

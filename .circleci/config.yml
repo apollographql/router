@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v8-{{ checksum "rust-toolchain.toml" }}
+    default: v1-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -249,9 +249,11 @@ commands:
   build_all_permutations:
     steps:
       - build_common_permutations
-      - rust/build:
-          with_cache: false
-          crate: --locked --no-default-features -p apollo-router -p apollo-router-core
+      - run:
+          name: cargo check workspace and benchmarks
+          command: |
+            set -e -o pipefail
+            cargo check --locked --all --benches
   build_workspace:
     parameters:
       os:
@@ -647,6 +649,24 @@ jobs:
       - run:
           command: >
             gh release create $VERSION --notes-file CHANGELOG.md --title $VERSION artifacts/*
+      - setup_remote_docker:
+          version: 20.10.11
+          docker_layer_caching: true
+      - run:
+          name: Docker build
+          command: |
+            ROUTER_RELEASE=${VERSION:1}
+            ROUTER_TAG=ghcr.io/apollographql/router
+            # Build debug image
+            docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:v${ROUTER_RELEASE}-debug .
+            # Build release image
+            docker build --build-arg ROUTER_RELEASE=${ROUTER_RELEASE} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+            # NB: GH token expires 30/3/2023
+            echo ${GITHUB_DOCKER_TOKEN} | docker login ghcr.io -u garypen --password-stdin
+            # Push debug image
+            docker push ${ROUTER_TAG}:${VERSION}-debug
+            # Push release image
+            docker push ${ROUTER_TAG}:${VERSION}
 
 workflows:
   ci_checks:
