@@ -34,7 +34,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features
 
 - **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
-  You can now ust the ROUTER_HOT_RELOAD=true environment variable to have the router watch for configuration and schema changes and automatically reload.
+  You can now ust the `ROUTER_HOT_RELOAD=true` environment variable to have the router watch for configuration and schema changes and automatically reload.
 
 - **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
@@ -46,7 +46,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
 
-  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) --entrypoint=sh.
+  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) `--entrypoint=sh`.
 
   For more details about thse images, see the docs.
 
