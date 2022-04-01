@@ -68,6 +68,11 @@ pub trait Plugin: Send + Sync + 'static + Sized {
     async fn startup(&mut self) -> Result<(), BoxError> {
         Ok(())
     }
+
+    // This method may be removed in future, do not use!
+    #[deprecated]
+    fn ready(&mut self) {}
+
     async fn shutdown(&mut self) -> Result<(), BoxError> {
         Ok(())
     }
@@ -115,6 +120,10 @@ pub trait DynPlugin: Send + Sync + 'static {
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
+    // This method may be removed in future, do not use!
+    #[deprecated]
+    fn ready(&mut self);
+
     async fn shutdown(&mut self) -> Result<(), BoxError>;
 
     fn router_service(
@@ -152,6 +161,10 @@ where
         self.startup().await
     }
 
+    #[allow(deprecated)]
+    fn ready(&mut self) {
+        self.ready()
+    }
     async fn shutdown(&mut self) -> Result<(), BoxError> {
         self.shutdown().await
     }

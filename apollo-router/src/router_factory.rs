@@ -5,6 +5,9 @@ use apollo_router_core::{
 };
 use apollo_router_core::{prelude::*, Context};
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
+use envmnt::types::ExpandOptions;
+use envmnt::ExpansionType;
+use serde_json::Value;
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -96,7 +99,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                             name,
                             configuration
                         );
-                        match factory.create_instance(configuration) {
+                        // expand any env variables in the config before processing.
+                        let configuration = expand_env_variables(configuration);
+                        match factory.create_instance(&configuration) {
                             Ok(mut plugin) => {
                                 tracing::debug!("starting plugin: {}", name);
                                 match plugin.startup().await {
@@ -153,13 +158,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             return Err(Box::new(ConfigurationError::InvalidConfiguration));
         }
 
-        // This **must** run after:
-        //  - the Reporting plugin is initialized.
-        //  - all configuration errors are checked
-        // and **before** build() is called.
-        //
-        // This is because our tracing configuration is initialized by
-        // the startup() method of our Reporting plugin.
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let service = ServiceBuilder::new().buffer(20_000).service(
@@ -172,6 +170,16 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );
+
+        // We're good to go with the new service. Let the plugins know that this is about to happen.
+        // This is needed so tha the Telemetry plugin can swap in the new propagator.
+        // The alternative is that we introduce another service on Plugin that wraps the request
+        // as a much earlier stage.
+        for plugin in &mut self.plugins {
+            #[allow(deprecated)]
+            plugin.ready();
+        }
+
         // If we get here, everything is good so shutdown our previous plugins
         for mut plugin in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
@@ -183,6 +191,29 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             }
         }
         Ok(service)
+    }
+}
+
+fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+    let mut configuration = configuration.clone();
+    visit(&mut configuration);
+    configuration
+}
+
+fn visit(value: &mut serde_json::Value) {
+    match value {
+        Value::String(value) => {
+            *value = envmnt::expand(
+                value,
+                Some(
+                    ExpandOptions::new()
+                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
+                ),
+            );
+        }
+        Value::Array(a) => a.iter_mut().for_each(visit),
+        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        _ => {}
     }
 }
 

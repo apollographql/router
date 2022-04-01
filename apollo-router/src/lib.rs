@@ -1,11 +1,9 @@
 //! Starts a server that will handle http graphql requests.
 
-mod apollo_telemetry;
 pub mod configuration;
 mod executable;
 mod files;
 mod http_server_factory;
-mod layers;
 pub mod plugins;
 mod reload;
 pub mod router_factory;
@@ -13,7 +11,7 @@ mod state_machine;
 pub mod subscriber;
 mod warp_http_server_factory;
 
-use crate::apollo_telemetry::SpaceportConfig;
+use crate::plugins::telemetry::tracing::apollo_telemetry::SpaceportConfig;
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;

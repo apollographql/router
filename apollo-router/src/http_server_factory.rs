@@ -106,7 +106,7 @@ impl HttpServerHandle {
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
         let listener = self.server_future.await;
-        tracing::info!("previous server is closed");
+        tracing::info!("previous server stopped");
 
         // we keep the TCP listener if it is compatible with the new configuration
         let listener = if self.listen_address != configuration.server.listen {

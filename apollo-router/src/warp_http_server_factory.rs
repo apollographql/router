@@ -11,7 +11,8 @@ use http::uri::Authority;
 use http::{HeaderValue, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
-use opentelemetry::propagation::Extractor;
+use opentelemetry::global;
+use opentelemetry::trace::TraceContextExt;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -21,10 +22,9 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::path::FullPath;
 use warp::{
     http::{header::HeaderMap, StatusCode},
@@ -85,15 +85,14 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 ));
 
             // generate a hyper service from warp routes
-            let svc = warp::service(routes);
-
             let svc = ServiceBuilder::new()
                 // generate a tracing span that covers request parsing and response serializing
                 .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                    TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
+                        DefaultMakeSpan::new().level(Level::INFO),
+                    )),
                 )
-                .service(svc);
+                .service(warp::service(routes));
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -445,11 +444,6 @@ where
         );
     }
 
-    // retrieve and reuse the potential trace id from the caller
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
-    });
-
     async move {
         match service.ready_oneshot().await {
             Ok(mut service) => {
@@ -507,24 +501,26 @@ fn prefers_html(accept_header: String) -> bool {
         .any(|a| a == "text/html")
 }
 
-struct HeaderMapCarrier<'a>(&'a HeaderMap);
+#[derive(Clone)]
+struct PropagatingMakeSpan(DefaultMakeSpan);
 
-impl<'a> Extractor for HeaderMapCarrier<'a> {
-    fn get(&self, key: &str) -> Option<&str> {
-        if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
-            tracing::trace!(
-                "found OpenTelemetry key in user's request: {}={}",
-                key,
-                value
-            );
-            Some(value)
+impl<B> MakeSpan<B> for PropagatingMakeSpan {
+    fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // Before we make the span we need to attach span info that may have come in from the request.
+        let context = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
+        });
+
+        // If there was no span from the request then it will default to the NOOP span.
+        // Attaching the NOOP span has the effect of preventing further tracing.
+        if context.span().span_context().is_valid() {
+            // We have a valid remote span, attach it to the current thread before creating the root span.
+            let _context_guard = context.attach();
+            self.0.make_span(request)
         } else {
-            None
+            // No remote span, we can go ahead and create the span without context.
+            self.0.make_span(request)
         }
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(|x| x.as_str()).collect()
     }
 }
 
