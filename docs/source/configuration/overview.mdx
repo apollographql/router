@@ -13,7 +13,7 @@ You run Apollo Router with the following command (assuming you're in the same di
 ./router --config router.yaml --supergraph supergraph-schema.graphql
 ```
 
-Options are described below.
+Options are described below. Some may also be configured via env variable, however command line arg always takes precedence.
 
 ## Options
 
@@ -30,7 +30,7 @@ Options are described below.
 <tr class="required">
 <td>
 
-##### `-s` / `--supergraph`
+##### `-s` / `--supergraph` <br/><br/> `SUPERGRAPH_PATH`
 
 </td>
 <td>
@@ -45,7 +45,7 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <tr>
 <td style="min-width: 150px;">
 
-##### `-c` / `--config`
+##### `-c` / `--config` <br/><br/> `CONFIGURATION_PATH`
 
 </td>
 <td>
@@ -57,7 +57,7 @@ The absolute or relative path to the router's optional [YAML configuration file]
 <tr>
 <td style="min-width: 150px;">
 
-##### `--log`
+##### `--log` <br/><br/> `RUST_LOG`
 
 </td>
 <td>
@@ -85,7 +85,7 @@ Prints out a JSON schema of the configuration file, including plugin configurati
 <tr>
 <td style="min-width: 150px;">
 
-##### `-w` / `--watch`
+##### `--hr` / `--hot-reload`
 
 </td>
 <td>
@@ -107,13 +107,61 @@ Prints out the Apollo Router's version.
 
 </td>
 </tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-graph-ref` <br/><br/> `APOLLO_GRAPH_REF`
+
+</td>
+<td>
+
+Your Apollo graph reference.
+
+</td>
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key` <br/><br/> `APOLLO_KEY`
+
+</td>
+<td>
+
+Your Apollo key.
+
+</td>
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-schema-config-delivery-endpoint` <br/><br/> `APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`
+
+</td>
+<td>
+
+The endpoint polled to fetch the latest supergraph schema.
+
+</td>
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-schema-poll-interval` <br/><br/> `APOLLO_SCHEMA_POLL_INTERVAL`
+
+</td>
+<td>
+
+The time between polls to Apollo uplink. Minimum 10s.
+
+</td>
+</tr>
 
 </tbody>
 </table>
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--watch` flag is also passed, the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--hot-reload` flag is also passed (or the `ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 

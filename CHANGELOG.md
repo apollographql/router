@@ -20,18 +20,82 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-<!--# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
+
+- **CORS default Configuration** ([#40](https://github.com/apollographql/router/issues/40))
+
+  The Router will allow only the https://studio.apollographql.com origin by default, instead of any origin.
+  This behavior can still be tweaked in the [YAML configuration](https://www.apollographql.com/docs/router/configuration/cors)
+
+- **Hot reload flag** ([766](https://github.com/apollographql/router/issues/766))
+  The `--watch` (or `-w`) flag that enables hot reload was renamed to `--hr` or `--hot-reload`
+
 ## 🚀 Features
+
+- **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
+  You can now use the `ROUTER_HOT_RELOAD=true` environment variable to have the router watch for configuration and schema changes and automatically reload.
+
+- **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
+
+  We now build container images More details at:
+    https://github.com/apollographql/router/pkgs/container/router
+
+  You can use the images with docker, for example, as follows:
+    e.g.: docker pull ghcr.io/apollographql/router:v0.1.0-preview.1
+
+  The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
+
+  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) `--entrypoint=sh`.
+
+  For more details about these images, see the docs.
+
+- **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
+
+  The Router now understands the [@skip](https://spec.graphql.org/October2021/#sec--skip) and [@include](https://spec.graphql.org/October2021/#sec--include) directives in queries, to add or remove fields depending on variables. It works in post processing, by filtering fields after aggregating the subgraph responses.
+
+- **Add an option to deactivate introspection** ([PR #749](https://github.com/apollographql/router/pull/749))
+
+  While schema introspection is useful in development, we might not want to expose the entire schema in production,
+  so the router can be configured to forbid introspection queries as follows:
+  ```yaml
+  server:
+    introspection: false
+  ```
+
 ## 🐛 Fixes
+- **Move query dedup to an experimental `traffic_shaping` plugin** ([PR #753](https://github.com/apollographql/router/pull/753))
+
+  The experimental `traffic_shaping` plugin will be a central location where we can add things such as rate limiting and retry.
+
 - **Remove `hasNext` from our response objects** ([PR #733](https://github.com/apollographql/router/pull/733))
 
   `hasNext` is a field in the response that may be used in future to support features such as defer and stream. However, we are some way off supporting this and including it now may break clients. It has been removed.
 
+- **Extend Apollo uplink configurability** ([PR #741](https://github.com/apollographql/router/pull/741))
+
+  Uplink url and poll interval can now be configured via command line arg and env variable:
+  ```bash
+    --apollo-schema-config-delivery-endpoint <apollo-schema-config-delivery-endpoint>
+      The endpoint polled to fetch the latest supergraph schema [env: APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT=]
+
+    --apollo-schema-poll-interval <apollo-schema-poll-interval>
+      The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_SCHEMA_POLL_INTERVAL=]  [default: 10s]
+  ```
+  In addition, other existing uplink env variables are now also configurable via arg. 
+
+- **Make deduplication and caching more robust against cancellation** [PR #752](https://github.com/apollographql/router/pull/752)
+
+  Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
+
+- **Relax variables selection for subgraph queries** ([PR #755](https://github.com/apollographql/router/pull/755))
+
+  Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
-# [v0.1.0-preview.1] - 2022-03-23
+<!--# [v0.1.0-preview.1] - 2022-03-23
 
 ## 🎉 **The Apollo Router has graduated to its Preview phase!** 🎉
 ## ❗ BREAKING ❗

@@ -1,5 +1,4 @@
 use crate::configuration::{Configuration, ConfigurationError};
-use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::{
     http_compat::{Request, Response},
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
@@ -10,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
 /// Factory for creating a RouterService
@@ -73,11 +72,12 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        if configuration.server.introspection {
+            builder = builder.with_naive_introspection();
+        }
 
         for (name, _) in schema.subgraphs() {
-            let dedup_layer = QueryDeduplicationLayer;
-            let subgraph_service =
-                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
+            let subgraph_service = BoxService::new(ReqwestSubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }

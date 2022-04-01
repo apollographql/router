@@ -214,6 +214,12 @@ pub struct Server {
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+
+    /// introspection queries
+    /// enabled by default
+    #[serde(default = "default_introspection")]
+    #[builder(default_code = "default_introspection()", setter(into))]
+    pub introspection: bool,
 }
 
 /// Listening address.
@@ -267,9 +273,9 @@ impl fmt::Display for ListenAddr {
 pub struct Cors {
     #[serde(default)]
     #[builder(default)]
-    /// Set to false to disallow any origin and rely exclusively on `origins`.
+    /// Set to true to allow any origin.
     ///
-    /// /!\ Defaults to true
+    /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
     pub allow_any_origin: Option<bool>,
 
@@ -291,9 +297,9 @@ pub struct Cors {
     pub expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
-    /// Use `https://studio.apollographql.com/` to allow Apollo Studio to function.
+    /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
     #[serde(default)]
-    #[builder(default)]
+    #[builder(default_code = "default_origins()")]
     pub origins: Vec<String>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
@@ -302,12 +308,20 @@ pub struct Cors {
     pub methods: Vec<String>,
 }
 
+fn default_origins() -> Vec<String> {
+    vec!["https://studio.apollographql.com/".into()]
+}
+
 fn default_cors_headers() -> Vec<String> {
     vec!["Content-Type".into()]
 }
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+}
+
+fn default_introspection() -> bool {
+    true
 }
 
 impl Default for Server {
@@ -324,7 +338,7 @@ impl Cors {
             .expose_headers(self.allow_headers.iter().map(std::string::String::as_str))
             .allow_methods(self.methods.iter().map(std::string::String::as_str));
 
-        if self.allow_any_origin.unwrap_or(true) {
+        if self.allow_any_origin.unwrap_or_default() {
             cors.allow_any_origin()
         } else {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
@@ -568,5 +582,19 @@ mod tests {
                 schema_error
             );
         }
+    }
+
+    #[test]
+    fn cors_defaults() {
+        let cors = Cors::builder().build();
+
+        assert_eq!(
+            ["https://studio.apollographql.com/"],
+            cors.origins.as_slice()
+        );
+        assert!(
+            !cors.allow_any_origin.unwrap_or_default(),
+            "Allow any origin should be disabled by default"
+        );
     }
 }

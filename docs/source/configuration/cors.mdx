@@ -5,7 +5,7 @@ sidebar_title: CORS
 
 import { Link } from 'gatsby';
 
-The Apollo Router supports [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) (CORS) to indicate which origins it accepts requests from. **By default, the router accepts requests from all origins**.
+The Apollo Router supports [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) (CORS) to indicate which origins it accepts requests from. **By default, the router accepts requests from the Apollo studio**.
 
 If your environment has security requirements around CORS, you can specify them in the router's [configuration file](./overview/#configuration-file):
 
@@ -16,14 +16,15 @@ server:
   #
   cors:
 
-    # Set to false to disallow any origin and rely exclusively on `origins`
-    # (Defaults to true)
-    allow_any_origin: false
+    # Set to true to allow any origin
+    # (Defaults to false)
+    allow_any_origin: true
 
     # List of accepted origins
     # (Ignored if allow_any_origin is true)
+    # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
     origins:
-      - https://studio.apollographql.com
+      - https://www.my-frontend.com
 
     # Set to true to add the `Access-Control-Allow-Credentials` header
     # (Defaults to false)

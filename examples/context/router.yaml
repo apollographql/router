@@ -1,8 +1,4 @@
 version: 4.0.0
-server:
-  cors:
-    origins:
-      - "https://studio.apollographql.com/"
 telemetry:
   opentelemetry:
     jaeger:
@@ -13,5 +9,3 @@ plugins:
   # this plugin doesn't have any configuration
   # mention it here and you're set!
   example.context_data:
-
-

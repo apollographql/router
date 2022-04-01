@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 429
+assertion_line: 443
 expression: "&schema"
 ---
 {
@@ -271,6 +271,33 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "experimental.traffic_shaping": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "object",
+              "properties": {
+                "dedup": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              },
+              "nullable": true
+            },
+            "subgraphs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "dedup": {
+                    "type": "boolean",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -279,7 +306,8 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": null
+        "cors": null,
+        "introspection": true
       },
       "type": "object",
       "properties": {
@@ -289,7 +317,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "allow_any_origin": {
-              "description": "Set to false to disallow any origin and rely exclusively on `origins`.\n\n/!\\ Defaults to true Having this set to true is the only way to allow Origin: null.",
+              "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
               "default": null,
               "type": "boolean",
               "nullable": true
@@ -332,7 +360,7 @@ expression: "&schema"
               }
             },
             "origins": {
-              "description": "The origin(s) to allow requests from. Use `https://studio.apollographql.com/` to allow Apollo Studio to function.",
+              "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
               "default": [],
               "type": "array",
               "items": {
@@ -342,6 +370,11 @@ expression: "&schema"
           },
           "additionalProperties": false,
           "nullable": true
+        },
+        "introspection": {
+          "description": "introspection queries enabled by default",
+          "default": true,
+          "type": "boolean"
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",

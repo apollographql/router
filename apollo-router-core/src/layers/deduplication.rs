@@ -1,9 +1,14 @@
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
-use std::{collections::HashMap, sync::Arc, task::Poll};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+    task::Poll,
+};
 use tokio::sync::broadcast::{self, Sender};
 use tower::{BoxError, Layer, ServiceExt};
 
+#[derive(Default)]
 pub struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer
@@ -17,8 +22,9 @@ where
     }
 }
 
-type WaitMap =
-    Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
+type WaitMap = Arc<
+    Mutex<HashMap<http_compat::Request<Request>, Weak<Sender<Result<SubgraphResponse, String>>>>>,
+>;
 
 pub struct QueryDeduplicationService<S> {
     service: S,
@@ -44,7 +50,16 @@ where
         loop {
             let mut locked_wait_map = wait_map.lock().await;
             match locked_wait_map.get_mut(&request.http_request) {
-                Some(waiter) => {
+                Some(weak_waiter) => {
+                    // Try to upgrade our weak Arc. If we can't, the sender must have
+                    // been cancelled, so remove the entry from the map and try again.
+                    let waiter = match Weak::upgrade(weak_waiter) {
+                        Some(waiter) => waiter,
+                        None => {
+                            locked_wait_map.remove(&request.http_request);
+                            continue;
+                        }
+                    };
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
@@ -64,12 +79,24 @@ where
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
-                    locked_wait_map.insert(request.http_request.clone(), tx.clone());
+                    let tx = Arc::new(tx);
+                    // Store a Weak reference to our Sender. If we are cancelled, then the
+                    // client will be unable to upgrade their Weak reference and will know
+                    // to clean up the wait_map and try again.
+                    locked_wait_map.insert(request.http_request.clone(), Arc::downgrade(&tx));
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
                     let http_request = request.http_request.clone();
-                    let res = service.ready_oneshot().await?.call(request).await;
+                    let res = match service.ready_oneshot().await {
+                        Ok(mut s) => s.call(request).await,
+                        Err(e) => {
+                            // Clean up wait map if ready_oneshot failed
+                            let mut locked_wait_map = wait_map.lock().await;
+                            locked_wait_map.remove(&http_request);
+                            return Err(e);
+                        }
+                    };
 
                     {
                         let mut locked_wait_map = wait_map.lock().await;
@@ -82,11 +109,10 @@ where
                         .map(|response| response.clone())
                         .map_err(|e| e.to_string());
 
-                    // Our use case is very specific, so we are sure that
-                    // we won't get any errors here.
-                    tokio::task::spawn_blocking(move || {
+                    // We may get errors here, for instance if a task is cancelled,
+                    // so just ignore the result of send
+                    let _ = tokio::task::spawn_blocking(move || {
                         tx.send(broadcast_value)
-                            .expect("there is always at least one receiver alive, the _rx guard; qed")
                     }).await
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 

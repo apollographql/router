@@ -30,7 +30,7 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
     ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
-    naive_introspection: NaiveIntrospection,
+    naive_introspection: Option<NaiveIntrospection>,
 }
 
 impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
@@ -80,25 +80,28 @@ where
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        if let Some(response) = self.naive_introspection.get(
-            req.context
-                .request
-                .body()
-                .query
-                .as_ref()
-                .expect("apollo.ensure-query-is-present has checked this already; qed"),
-        ) {
-            return Box::pin(async move {
-                Ok(RouterResponse {
-                    response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: req.context.into(),
-                })
-            });
+        if let Some(naive_introspection) = self.naive_introspection.as_ref() {
+            if let Some(response) = naive_introspection.get(
+                req.context
+                    .request
+                    .body()
+                    .query
+                    .as_ref()
+                    .expect("apollo.ensure-query-is-present has checked this already; qed"),
+            ) {
+                return Box::pin(async move {
+                    Ok(RouterResponse {
+                        response: http::Response::new(ResponseBody::GraphQL(response)).into(),
+                        context: req.context.into(),
+                    })
+                });
+            }
         }
         let context_cloned = req.context.clone();
         let fut = async move {
             let context = req.context;
             let body = context.request.body();
+            let variables = body.variables.clone();
             let query = query_cache
                 .get_query(
                     body.query
@@ -135,6 +138,7 @@ where
                         query.format_response(
                             response.response.body_mut(),
                             operation_name.as_deref(),
+                            (*variables).clone(),
                             schema.api_schema(),
                         )
                     });
@@ -169,6 +173,7 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
+    naive_introspection: bool,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -178,6 +183,7 @@ impl PluggableRouterServiceBuilder {
             buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
             subgraph_services: Default::default(),
+            naive_introspection: false,
         }
     }
 
@@ -221,6 +227,11 @@ impl PluggableRouterServiceBuilder {
     {
         self.subgraph_services
             .push((name.to_string(), service.boxed()));
+        self
+    }
+
+    pub fn with_naive_introspection(mut self) -> PluggableRouterServiceBuilder {
+        self.naive_introspection = true;
         self
     }
 
@@ -297,13 +308,18 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
         let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
-        // NaiveIntrospection instantiation can potentially block for some time
-        // We don't need to use the api schema here because on the deno side we always convert to API schema
-        let naive_introspection = {
+        let naive_introspection = if self.naive_introspection {
+            // NaiveIntrospection instantiation can potentially block for some time
+            // We don't need to use the api schema here because on the deno side we always convert to API schema
+
             let schema = self.schema.clone();
-            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
-                .await
-                .expect("NaiveIntrospection instantiation panicked")
+            Some(
+                tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
+                    .await
+                    .expect("NaiveIntrospection instantiation panicked"),
+            )
+        } else {
+            None
         };
 
         /*FIXME

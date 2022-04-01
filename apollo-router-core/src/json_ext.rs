@@ -72,10 +72,11 @@ pub trait ValueExt {
     /// Select all values matching a `Path`.
     ///
     /// the function passed as argument will be called with the values found and their Path
+    /// if it encounters an invalid value, it will ignore it and continue
     #[track_caller]
-    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F) -> Result<(), FetchError>
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, f: F)
     where
-        F: FnMut(Path, &'a Value) -> Result<(), FetchError>;
+        F: FnMut(Path, &'a Value);
 }
 
 impl ValueExt for Value {
@@ -314,41 +315,32 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
-    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F) -> Result<(), FetchError>
+    fn select_values_and_paths<'a, F>(&'a self, path: &'a Path, mut f: F)
     where
-        F: FnMut(Path, &'a Value) -> Result<(), FetchError>,
+        F: FnMut(Path, &'a Value),
     {
         iterate_path(&Path::default(), &path.0, self, &mut f)
     }
 }
 
-fn iterate_path<'a, F>(
-    parent: &Path,
-    path: &'a [PathElement],
-    data: &'a Value,
-    f: &mut F,
-) -> Result<(), FetchError>
+fn iterate_path<'a, F>(parent: &Path, path: &'a [PathElement], data: &'a Value, f: &mut F)
 where
-    F: FnMut(Path, &'a Value) -> Result<(), FetchError>,
+    F: FnMut(Path, &'a Value),
 {
     match path.get(0) {
         None => f(parent.clone(), data),
-        Some(PathElement::Flatten) => match data.as_array() {
-            None => Err(FetchError::ExecutionInvalidContent {
-                reason: "not an array".to_string(),
-            }),
-            Some(array) => {
+        Some(PathElement::Flatten) => {
+            if let Some(array) = data.as_array() {
                 for (i, value) in array.iter().enumerate() {
                     iterate_path(
                         &parent.join(Path::from(i.to_string())),
                         &path[1..],
                         value,
                         f,
-                    )?;
+                    );
                 }
-                Ok(())
             }
-        },
+        }
         Some(PathElement::Index(i)) => {
             if let Value::Array(a) = data {
                 if let Some(value) = a.get(*i) {
@@ -358,30 +350,14 @@ where
                         value,
                         f,
                     )
-                } else {
-                    Err(FetchError::ExecutionPathNotFound {
-                        reason: format!("index {} not found", i),
-                    })
                 }
-            } else {
-                Err(FetchError::ExecutionInvalidContent {
-                    reason: "not an array".to_string(),
-                })
             }
         }
         Some(PathElement::Key(k)) => {
             if let Value::Object(o) = data {
                 if let Some(value) = o.get(k.as_str()) {
                     iterate_path(&parent.join(Path::from(k)), &path[1..], value, f)
-                } else {
-                    Err(FetchError::ExecutionPathNotFound {
-                        reason: format!("key {} not found", k),
-                    })
                 }
-            } else {
-                Err(FetchError::ExecutionInvalidContent {
-                    reason: "not an object".to_string(),
-                })
             }
         }
     }
@@ -567,8 +543,7 @@ mod tests {
         let mut v = Vec::new();
         data.select_values_and_paths(path, |_path, value| {
             v.push(value);
-            Ok(())
-        })?;
+        });
         Ok(v)
     }
 
