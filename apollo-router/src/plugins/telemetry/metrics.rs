@@ -21,6 +21,8 @@ use std::{
 };
 use tower::{service_fn, steer::Steer, util::BoxService, BoxError, Service, ServiceExt};
 
+use super::otlp::Metrics as OltpConfiguration;
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MetricsConfiguration {
     exporter: MetricsExporter,
@@ -30,8 +32,7 @@ pub struct MetricsConfiguration {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum MetricsExporter {
     Prometheus(PrometheusConfiguration),
-    // TODO, there are already todos in the otlp mod
-    // OTLP(OtlpConfiguration),
+    OTLP(Box<OltpConfiguration>),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -41,12 +42,13 @@ pub struct PrometheusConfiguration {
 
 #[derive(Debug)]
 pub struct MetricsPlugin {
-    exporter: PrometheusExporter,
+    exporter: Option<PrometheusExporter>,
     conf: MetricsConfiguration,
     http_requests_total: Counter<u64>,
     http_requests_duration: ValueRecorder<f64>,
 }
 
+#[async_trait::async_trait]
 impl Plugin for MetricsPlugin {
     type Config = MetricsConfiguration;
 
@@ -54,18 +56,16 @@ impl Plugin for MetricsPlugin {
         let exporter = opentelemetry_prometheus::exporter().init();
         let meter = global::meter("apollo/router");
 
-        // TODO to delete when otlp is implemented
-        #[allow(irrefutable_let_patterns)]
         if let MetricsExporter::Prometheus(prom_exporter_cfg) = &config.exporter {
             if Url::parse(&format!("http://test:8080{}", prom_exporter_cfg.endpoint)).is_err() {
                 return Err(BoxError::from(
-                    "cannot use your endpoint set for prometheus as a path in an URL, your path need to be absolute (starting with a '/'",
+                    "cannot use your endpoint set for prometheus as a path in an URL, your path need to be absolute (starting with a '/')",
                 ));
             }
         }
 
         Ok(Self {
-            exporter,
+            exporter: exporter.into(),
             conf: config,
             http_requests_total: meter
                 .u64_counter("http_requests_total")
@@ -76,6 +76,11 @@ impl Plugin for MetricsPlugin {
                 .with_description("The HTTP request latencies in seconds.")
                 .init(),
         })
+    }
+
+    async fn startup(&mut self) -> Result<(), BoxError> {
+        todo!("implement start of otlp");
+        Ok(())
     }
 
     fn router_service(
@@ -121,12 +126,12 @@ impl Plugin for MetricsPlugin {
     fn custom_endpoint(&self) -> Option<Handler> {
         let prometheus_endpoint = match &self.conf.exporter {
             MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
-            // MetricsExporter::Otlp(_) => None,
+            MetricsExporter::OTLP(_) => None,
         };
 
-        match prometheus_endpoint {
-            Some(endpoint) => {
-                let registry = self.exporter.registry().clone();
+        match (prometheus_endpoint, &self.exporter) {
+            (Some(endpoint), Some(exporter)) => {
+                let registry = exporter.registry().clone();
 
                 let not_found_handler = service_fn(|_req: http_compat::Request<Bytes>| async {
                     Ok::<_, BoxError>(http_compat::Response {
@@ -160,7 +165,7 @@ impl Plugin for MetricsPlugin {
 
                 Some(svc.boxed().into())
             }
-            None => None,
+            _ => None,
         }
     }
 }
