@@ -20,6 +20,37 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
+ # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+- **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
+
+  The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
+
+  Example of configuration to export an endpoint (configured with the path `/plugins/apollo.telemetry/metrics`) with metrics in `Prometheus` format:
+
+  ```yaml
+  plugins:
+  apollo.telemetry:
+    metrics:
+      exporter:
+        prometheus:
+          endpoint: "/metrics"
+  ```
+  
+## 🐛 Fixes
+- **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  Before this fix, if you wrote a query with only whitespaces inside, it wasn't detected as an empty query.
+
+- **Keep the original context in `RouterResponse` when returning an error** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  This fix keeps the original http request in `RouterResponse` when there is an error.
+
+
+## 🛠 Maintenance
+## 📚 Documentation
+
 # [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 

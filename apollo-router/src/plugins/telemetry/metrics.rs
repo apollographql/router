@@ -4,13 +4,21 @@ use apollo_router_core::{
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use http::{Method, StatusCode};
-use opentelemetry::{global, metrics::Counter, KeyValue};
+use opentelemetry::{
+    global,
+    metrics::{Counter, ValueRecorder},
+    KeyValue,
+};
 use opentelemetry_prometheus::PrometheusExporter;
 use prometheus::{Encoder, Registry, TextEncoder};
 use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::task::{Context, Poll};
+use serde_json_bytes::from_value;
+use std::{
+    task::{Context, Poll},
+    time::SystemTime,
+};
 use tower::{service_fn, steer::Steer, util::BoxService, BoxError, Service, ServiceExt};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -22,8 +30,8 @@ pub struct MetricsConfiguration {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum MetricsExporter {
     Prometheus(PrometheusConfiguration),
-    // TODO, there are already todos in the oltp mod
-    // OLTP(OltpConfiguration),
+    // TODO, there are already todos in the otlp mod
+    // OTLP(OtlpConfiguration),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -36,6 +44,7 @@ pub struct MetricsPlugin {
     exporter: PrometheusExporter,
     conf: MetricsConfiguration,
     http_requests_total: Counter<u64>,
+    http_requests_duration: ValueRecorder<f64>,
 }
 
 impl Plugin for MetricsPlugin {
@@ -45,7 +54,7 @@ impl Plugin for MetricsPlugin {
         let exporter = opentelemetry_prometheus::exporter().init();
         let meter = global::meter("apollo/router");
 
-        // TODO to delete when oltp is implemented
+        // TODO to delete when otlp is implemented
         #[allow(irrefutable_let_patterns)]
         if let MetricsExporter::Prometheus(prom_exporter_cfg) = &config.exporter {
             if Url::parse(&format!("http://test:8080{}", prom_exporter_cfg.endpoint)).is_err() {
@@ -62,6 +71,10 @@ impl Plugin for MetricsPlugin {
                 .u64_counter("http_requests_total")
                 .with_description("Total number of HTTP requests made")
                 .init(),
+            http_requests_duration: meter
+                .f64_value_recorder("http_request_duration_seconds")
+                .with_description("The HTTP request latencies in seconds.")
+                .init(),
         })
     }
 
@@ -69,15 +82,38 @@ impl Plugin for MetricsPlugin {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        const METRICS_REQUEST_TIME: &str = "METRICS_REQUEST_TIME";
         let http_counter = self.http_requests_total.clone();
+        let http_request_duration = self.http_requests_duration.clone();
 
         service
-            .map_request(move |req: RouterRequest| {
-                http_counter.add(
-                    1,
-                    &[KeyValue::new("url", req.context.request.url().to_string())],
-                );
+            .map_request(|req: RouterRequest| {
+                let request_start = SystemTime::now();
+                req.context
+                    .insert(METRICS_REQUEST_TIME, request_start)
+                    .unwrap();
+
                 req
+            })
+            .map_response(move |res| {
+                let request_start: SystemTime = from_value(
+                    res.context
+                        .extensions
+                        .get(METRICS_REQUEST_TIME)
+                        .unwrap()
+                        .clone(),
+                )
+                .unwrap();
+                let kvs = &[
+                    KeyValue::new("url", res.context.request.url().to_string()),
+                    KeyValue::new("status", res.response.status().as_u16().to_string()),
+                ];
+                http_request_duration.record(
+                    request_start.elapsed().map_or(0.0, |d| d.as_secs_f64()),
+                    kvs,
+                );
+                http_counter.add(1, kvs);
+                res
             })
             .boxed()
     }
@@ -85,7 +121,7 @@ impl Plugin for MetricsPlugin {
     fn custom_endpoint(&self) -> Option<Handler> {
         let prometheus_endpoint = match &self.conf.exporter {
             MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
-            // MetricsExporter::OLTP(_) => None,
+            // MetricsExporter::Otlp(_) => None,
         };
 
         match prometheus_endpoint {
