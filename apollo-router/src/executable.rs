@@ -217,32 +217,34 @@ pub async fn rt_main() -> Result<()> {
         _ => {
             return Err(anyhow!(
                 r#"
-    💫 Apollo Router requires a supergraph to be set using '--supergraph':
+===
+APOLLO ROUTER v{whatever}
 
-        $ ./router --supergraph <file>`
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-        Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
-        and APOLLO_GRAPH_REF environment variables to your graph's settings.
-        
-          $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-          
-        For more on Apollo Studio and Managed Federation, see our documentation:
-        
-          https://www.apollographql.com/docs/router/managed-federation/
+👉 DO ONE:
 
-    🪐 The supergraph can be built or downloaded from the Apollo Registry
-       using the Rover CLI. To find out how, see:
+  * Pass a local schema file with the '--supergraph' option:
 
-        https://www.apollographql.com/docs/rover/supergraphs/.
+      $ ./router --supergraph <file_path>
 
-    🧪 If you're just experimenting, you can download and use an example
-       supergraph with pre-deployed subgraphs:
+  * Fetch a registered schema from Apollo Studio by setting
+    these environment variables:
 
-        $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
-       Then run the Apollo Router with that supergraph:
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/router/managed-federation/setup
 
-        $ ./router --supergraph starstuff.graphql
+🔬 TESTING THINGS OUT?
+
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the Apollo Router with the supergraph schema:
+
+    $ ./router --supergraph starstuff.graphql
 
     "#,
             ));
