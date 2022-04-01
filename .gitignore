@@ -22,3 +22,6 @@ crates/*/Cargo.lock
 # Docs
 /docs/node_modules/
 /docs/.cache/
+
+# Dynamically retrieve proto file
+apollo-spaceport/proto/reports.proto
