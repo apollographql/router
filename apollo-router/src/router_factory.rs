@@ -69,7 +69,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        // plugins: HashMap<String, Box<dyn DynPlugin>>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
@@ -131,7 +130,7 @@ async fn process_plugins(
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
     let plugin_registry = apollo_router_core::plugins();
-    let mut plugin_instances = HashMap::with_capacity(configuration.plugins().len());
+    let mut plugin_instances = Vec::with_capacity(configuration.plugins().len());
 
     for (name, configuration) in configuration.plugins().iter() {
         let name = name.clone();
@@ -148,28 +147,12 @@ async fn process_plugins(
                         match plugin.startup().await {
                             Ok(_v) => {
                                 tracing::debug!("started plugin: {}", name);
-                                plugin_instances.insert(name.clone(), plugin);
+                                plugin_instances.push((name.clone(), plugin));
                             }
-                            Err(err) => {
-                                tracing::debug!("stopping plugin: {}", plugin.name());
-                                if let Err(err) = plugin.shutdown().await {
-                                    // If we can't shutdown a plugin, we terminate the router since we can't
-                                    // assume that it is safe to continue.
-                                    tracing::error!(
-                                        "could not stop plugin: {}, error: {}",
-                                        plugin.name(),
-                                        err
-                                    );
-                                    tracing::error!("terminating router...");
-                                    std::process::exit(1);
-                                } else {
-                                    tracing::debug!("stopped plugin: {}", plugin.name());
-                                }
-                                errors.push(ConfigurationError::PluginStartup {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                })
-                            }
+                            Err(err) => errors.push(ConfigurationError::PluginStartup {
+                                plugin: name,
+                                error: err.to_string(),
+                            }),
                         }
                     }
                     Err(err) => errors.push(ConfigurationError::PluginConfiguration {
@@ -183,6 +166,20 @@ async fn process_plugins(
     }
 
     if !errors.is_empty() {
+        // Shutdown all the plugins we started
+        for (_plugin_name, plugin) in plugin_instances.iter_mut().rev() {
+            tracing::debug!("stopping plugin: {}", plugin.name());
+            if let Err(err) = plugin.shutdown().await {
+                // If we can't shutdown a plugin, we terminate the router since we can't
+                // assume that it is safe to continue.
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("terminating router...");
+                std::process::exit(1);
+            } else {
+                tracing::debug!("stopped plugin: {}", plugin.name());
+            }
+        }
+
         for error in &errors {
             tracing::error!("{:#}", error);
         }
@@ -195,7 +192,7 @@ async fn process_plugins(
                 .join("\n"),
         ))
     } else {
-        Ok(plugin_instances)
+        Ok(plugin_instances.into_iter().collect())
     }
 }
 

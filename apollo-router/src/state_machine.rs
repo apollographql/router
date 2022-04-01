@@ -597,6 +597,11 @@ mod tests {
             .expect_create()
             .times(1)
             .returning(|_, _, _| Err(BoxError::from("Error")));
+
+        router_factory
+            .expect_plugins()
+            .times(0)
+            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
@@ -633,6 +638,11 @@ mod tests {
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _, _| Err(BoxError::from("Error")));
+
+        router_factory
+            .expect_plugins()
+            .times(1)
+            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -809,6 +819,10 @@ mod tests {
                 router.expect_clone().return_once(MockMyRouter::new);
                 Ok(router)
             });
+        router_factory
+            .expect_plugins()
+            .times(expect_times_called)
+            .return_const(Vec::new());
         router_factory
     }
 }
