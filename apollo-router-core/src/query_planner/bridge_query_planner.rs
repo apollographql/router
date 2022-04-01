@@ -82,7 +82,7 @@ impl QueryPlanner for BridgeQueryPlanner {
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
-            .map_err(|e| QueryPlannerError::from(e))?;
+            .map_err(QueryPlannerError::from)?;
 
         match planner_result {
             PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
