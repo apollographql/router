@@ -5,8 +5,8 @@ use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    SubgraphResponse,
+    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -17,8 +17,6 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use typed_builder::TypedBuilder;
-
-static DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
@@ -167,7 +165,6 @@ where
 
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
-    buffer: usize,
     plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_services: Vec<(
         String,
@@ -180,7 +177,6 @@ impl PluggableRouterServiceBuilder {
     pub fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
-            buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
             subgraph_services: Default::default(),
             naive_introspection: false,
@@ -255,7 +251,7 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
+        let query_planner_service = ServiceBuilder::new().buffered().service(
             self.plugins.iter_mut().rev().fold(
                 CachingQueryPlanner::new(
                     RouterBridgeQueryPlanner::new(self.schema.clone()),
@@ -277,7 +273,7 @@ impl PluggableRouterServiceBuilder {
                     .rev()
                     .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
 
-                let service = ServiceBuilder::new().buffer(self.buffer).service(service);
+                let service = ServiceBuilder::new().buffered().service(service);
 
                 (name.clone(), service)
             })
@@ -299,7 +295,7 @@ impl PluggableRouterServiceBuilder {
                     ),
                 )
                 .boxed(),
-            self.buffer,
+            DEFAULT_BUFFER_SIZE,
         );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
@@ -361,7 +357,7 @@ impl PluggableRouterServiceBuilder {
                     ),
                 )
                 .boxed(),
-            self.buffer,
+            DEFAULT_BUFFER_SIZE,
         );
 
         (router_service.boxed_clone(), self.plugins)

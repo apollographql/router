@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, ConfigurationError};
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema, ServiceBuilderExt,
 };
 use apollo_router_core::{prelude::*, Context};
 use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
@@ -97,7 +97,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // the startup() method of our Reporting plugin.
         let (pluggable_router_service, plugins) = builder.build().await;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
-        let service = ServiceBuilder::new().buffer(20_000).service(
+        let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
                 .map_request(
                     |http_request: Request<apollo_router_core::Request>| RouterRequest {

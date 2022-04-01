@@ -13,6 +13,7 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
@@ -23,6 +24,8 @@ pub mod http_compat;
 mod reqwest_subgraph_service;
 mod router_service;
 pub use reqwest_subgraph_service::ReqwestSubgraphService;
+
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -240,6 +243,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 
@@ -247,5 +251,9 @@ pub trait ServiceBuilderExt<L>: Sized {
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
         ServiceBuilder::layer(self, layer)
+    }
+
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
+        self.buffer(DEFAULT_BUFFER_SIZE)
     }
 }

@@ -1,3 +1,4 @@
+use crate::services::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
@@ -15,7 +16,7 @@ use std::task::{Context, Poll};
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
 use tower::util::BoxService;
-use tower::{BoxError, Service};
+use tower::{BoxError, Service, ServiceBuilder};
 
 type InstanceFactory = fn(&serde_json::Value) -> Result<Box<dyn DynPlugin>, BoxError>;
 
@@ -251,7 +252,7 @@ impl Handler {
         >,
     ) -> Self {
         Self {
-            service: Buffer::new(service, 20_000),
+            service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
