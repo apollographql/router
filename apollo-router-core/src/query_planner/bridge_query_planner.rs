@@ -150,6 +150,13 @@ mod tests {
             "empty_query_plan_should_be_a_planner_error",
             BridgeQueryPlanner::new(Arc::new(example_schema()))
                 .await
+                .unwrap()
+                .get(
+                    include_str!("testdata/unknown_introspection_query.graphql").into(),
+                    None,
+                    Default::default(),
+                )
+                .await
                 .unwrap_err()
         )
     }
@@ -162,7 +169,7 @@ mod tests {
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
-            "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
+            "Query planning had errors: Bridge errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
