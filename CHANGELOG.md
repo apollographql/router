@@ -58,10 +58,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   While schema introspection is useful in development, we might not want to expose the entire schema in production,
   so the router can be configured to forbid introspection queries as follows:
-```yaml
-server:
-  introspection: false
-```
+  ```yaml
+  server:
+    introspection: false
+  ```
 
 ## 🐛 Fixes
 - **Move query dedup to an experimental `traffic_shaping` plugin** ([PR #753](https://github.com/apollographql/router/pull/753))
@@ -90,7 +90,7 @@ server:
 
 - **Relax variables selection for subgraph queries** ([PR #755](https://github.com/apollographql/router/pull/755))
 
-  federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
+  Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
 
 ## 🛠 Maintenance
 ## 📚 Documentation
