@@ -20,7 +20,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 
 - **CORS default Configuration** ([#40](https://github.com/apollographql/router/issues/40))
