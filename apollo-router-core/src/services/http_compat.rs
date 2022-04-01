@@ -11,7 +11,6 @@ use http::{
     header::HeaderName, request::Builder, uri::InvalidUri, HeaderMap, HeaderValue, Method, Uri,
     Version,
 };
-use url::{ParseError, Url};
 
 #[derive(Debug)]
 pub struct Request<T> {
