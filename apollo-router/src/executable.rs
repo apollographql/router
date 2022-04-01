@@ -33,8 +33,8 @@ pub struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(short, long, env = "HOT_RELOAD")]
-    watch: bool,
+    #[clap(alias = "hr", long = "hot-reload", env = "ROUTER_HOT_RELOAD")]
+    hot_reload: bool,
 
     /// Configuration location relative to the project directory.
     #[clap(short, long = "config", parse(from_os_str), env)]
@@ -182,7 +182,7 @@ pub async fn rt_main() -> Result<()> {
 
             ConfigurationKind::File {
                 path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         })
@@ -197,7 +197,7 @@ pub async fn rt_main() -> Result<()> {
             };
             SchemaKind::File {
                 path: supergraph_path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         }

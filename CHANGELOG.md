@@ -28,10 +28,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   The Router will allow only the https://studio.apollographql.com origin by default, instead of any origin.
   This behavior can still be tweaked in the [YAML configuration](https://www.apollographql.com/docs/router/configuration/cors)
 
+- **Hot reload flag** ([766](https://github.com/apollographql/router/issues/766))
+  The `--watch` (or `-w`) flag that enables hot reload was renamed to `--hr` or `--hot-reload`
+
 ## 🚀 Features
 
 - **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
-  You can now ust the HOT_RELOAD=true environment variable to have the router watch for configuration and schema changes and automatically reload.
+  You can now ust the ROUTER_HOT_RELOAD=true environment variable to have the router watch for configuration and schema changes and automatically reload.
 
 - **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
