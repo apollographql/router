@@ -2,13 +2,13 @@ use apollo_router_core::{
     http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
     RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
-use http::Method;
+use http::{Method, Uri};
 use maplit::hashmap;
-use reqwest::Url;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
@@ -33,7 +33,7 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let http_request = http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        let http_request = http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -96,7 +96,7 @@ async fn api_schema_hides_field() {
         .build();
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -184,7 +184,7 @@ async fn queries_should_work_over_get() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -213,7 +213,7 @@ async fn service_errors_should_be_propagated() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -259,7 +259,7 @@ async fn mutation_should_not_work_over_get() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -308,7 +308,7 @@ async fn automated_persisted_queries() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
             .unwrap();
 
@@ -335,7 +335,7 @@ async fn automated_persisted_queries() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_request_with_query)
             .unwrap();
 
@@ -357,7 +357,7 @@ async fn automated_persisted_queries() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
             .unwrap();
 
@@ -419,7 +419,7 @@ async fn missing_variables() {
         .build();
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
