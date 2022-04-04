@@ -39,6 +39,7 @@ use tower::Layer;
 use tower::{BoxError, ServiceExt};
 
 use self::metrics::MetricsConfiguration;
+use self::metrics::MetricsExporter;
 use self::metrics::MetricsPlugin;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -275,6 +276,19 @@ impl Plugin for Telemetry {
                 .send(self.config.spaceport.clone().unwrap_or_default())
                 .await?;
         }
+
+        if let Some(MetricsExporter::Otlp(_otlp_exporter_conf)) = &mut self
+            .config
+            .metrics
+            .as_mut()
+            .map(|m_conf| &mut m_conf.exporter)
+        {
+            self.metrics_plugin
+                .as_mut()
+                .expect("configuration has already been checked in the new method; qed")
+                .startup()
+                .await?;
+        }
         Ok(())
     }
 
@@ -358,11 +372,16 @@ impl Plugin for Telemetry {
 
     fn subgraph_service(
         &mut self,
-        _name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+        name: &str,
+        mut service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
-        match &self.opentracing_layer {
+        service = match &self.opentracing_layer {
             Some(opentracing_layer) => opentracing_layer.layer(service).boxed(),
+            None => service,
+        };
+
+        match &mut self.metrics_plugin {
+            Some(metrics_plugin) => metrics_plugin.subgraph_service(name, service),
             None => service,
         }
     }

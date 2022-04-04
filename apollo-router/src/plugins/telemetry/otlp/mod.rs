@@ -36,7 +36,8 @@ pub struct Tracing {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Metrics {
-    exporter: Exporter,
+    #[serde(flatten)]
+    pub exporter: Exporter,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

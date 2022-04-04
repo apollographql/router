@@ -1,5 +1,6 @@
 use apollo_router_core::{
-    http_compat, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
+    http_compat, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse, SubgraphRequest,
+    SubgraphResponse,
 };
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -7,6 +8,7 @@ use http::{Method, StatusCode};
 use opentelemetry::{
     global,
     metrics::{Counter, ValueRecorder},
+    sdk::metrics::PushController,
     KeyValue,
 };
 use opentelemetry_prometheus::PrometheusExporter;
@@ -25,14 +27,15 @@ use super::otlp::Metrics as OltpConfiguration;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MetricsConfiguration {
-    exporter: MetricsExporter,
+    pub exporter: MetricsExporter,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum MetricsExporter {
     Prometheus(PrometheusConfiguration),
-    OTLP(Box<OltpConfiguration>),
+    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+    Otlp(Box<OltpConfiguration>),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -44,7 +47,15 @@ pub struct PrometheusConfiguration {
 pub struct MetricsPlugin {
     exporter: Option<PrometheusExporter>,
     conf: MetricsConfiguration,
+    metrics_controller: Option<PushController>,
+    router_metrics: BasicMetrics,
+    subgraph_metrics: BasicMetrics,
+}
+
+#[derive(Debug)]
+pub struct BasicMetrics {
     http_requests_total: Counter<u64>,
+    http_requests_error_total: Counter<u64>,
     http_requests_duration: ValueRecorder<f64>,
 }
 
@@ -67,19 +78,47 @@ impl Plugin for MetricsPlugin {
         Ok(Self {
             exporter: exporter.into(),
             conf: config,
-            http_requests_total: meter
-                .u64_counter("http_requests_total")
-                .with_description("Total number of HTTP requests made")
-                .init(),
-            http_requests_duration: meter
-                .f64_value_recorder("http_request_duration_seconds")
-                .with_description("The HTTP request latencies in seconds.")
-                .init(),
+            router_metrics: BasicMetrics {
+                http_requests_total: meter
+                    .u64_counter("http_requests_total")
+                    .with_description("Total number of HTTP requests made.")
+                    .init(),
+                http_requests_error_total: meter
+                    .u64_counter("http_requests_error_total")
+                    .with_description("Total number of HTTP requests in error made.")
+                    .init(),
+                http_requests_duration: meter
+                    .f64_value_recorder("http_request_duration_seconds")
+                    .with_description("The HTTP request latencies in seconds.")
+                    .init(),
+            },
+            subgraph_metrics: BasicMetrics {
+                http_requests_total: meter
+                    .u64_counter("http_requests_total_subgraph")
+                    .with_description("Total number of HTTP requests made for a subgraph.")
+                    .init(),
+                http_requests_error_total: meter
+                    .u64_counter("http_requests_error_total_subgraph")
+                    .with_description("Total number of HTTP requests in error made for a subgraph.")
+                    .init(),
+                http_requests_duration: meter
+                    .f64_value_recorder("http_request_duration_seconds_subgraph")
+                    .with_description("The HTTP request latencies in seconds for a subgraph.")
+                    .init(),
+            },
+            metrics_controller: None,
         })
     }
 
     async fn startup(&mut self) -> Result<(), BoxError> {
-        todo!("implement start of otlp");
+        match &self.conf.exporter {
+            MetricsExporter::Prometheus(_) => {}
+            #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+            MetricsExporter::Otlp(otlp_conf) => {
+                self.metrics_controller = otlp_conf.exporter.metrics_exporter()?.into();
+            }
+        }
+
         Ok(())
     }
 
@@ -88,8 +127,9 @@ impl Plugin for MetricsPlugin {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const METRICS_REQUEST_TIME: &str = "METRICS_REQUEST_TIME";
-        let http_counter = self.http_requests_total.clone();
-        let http_request_duration = self.http_requests_duration.clone();
+        let http_counter = self.router_metrics.http_requests_total.clone();
+        let http_request_duration = self.router_metrics.http_requests_duration.clone();
+        let http_requests_error_total = self.router_metrics.http_requests_error_total.clone();
 
         service
             .map_request(|req: RouterRequest| {
@@ -120,13 +160,78 @@ impl Plugin for MetricsPlugin {
                 http_counter.add(1, kvs);
                 res
             })
+            .map_err(move |err: BoxError| {
+                http_requests_error_total.add(1, &[]);
+
+                err
+            })
+            .boxed()
+    }
+
+    fn subgraph_service(
+        &mut self,
+        name: &str,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        const METRICS_REQUEST_TIME: &str = "METRICS_REQUEST_TIME_SUBGRAPH";
+        let subgraph_name = name.to_owned();
+        let subgraph_name_cloned = name.to_owned();
+        let subgraph_name_cloned_for_err = name.to_owned();
+        let http_counter = self.subgraph_metrics.http_requests_total.clone();
+        let http_request_duration = self.subgraph_metrics.http_requests_duration.clone();
+        let http_requests_error_total = self.subgraph_metrics.http_requests_error_total.clone();
+
+        service
+            .map_request(move |req: SubgraphRequest| {
+                let request_start = SystemTime::now();
+                req.context
+                    .insert(
+                        format!("{}_{}", METRICS_REQUEST_TIME, subgraph_name),
+                        request_start,
+                    )
+                    .unwrap();
+
+                req
+            })
+            .map_response(move |res| {
+                let request_start: SystemTime = from_value(
+                    res.context
+                        .extensions
+                        .get(&format!(
+                            "{}_{}",
+                            METRICS_REQUEST_TIME, subgraph_name_cloned
+                        ))
+                        .unwrap()
+                        .clone(),
+                )
+                .unwrap();
+                let kvs = &[
+                    KeyValue::new("subgraph", subgraph_name_cloned),
+                    KeyValue::new("url", res.context.request.url().to_string()),
+                    KeyValue::new("status", res.response.status().as_u16().to_string()),
+                ];
+                http_request_duration.record(
+                    request_start.elapsed().map_or(0.0, |d| d.as_secs_f64()),
+                    kvs,
+                );
+                http_counter.add(1, kvs);
+                res
+            })
+            .map_err(move |err: BoxError| {
+                http_requests_error_total.add(
+                    1,
+                    &[KeyValue::new("subgraph", subgraph_name_cloned_for_err)],
+                );
+
+                err
+            })
             .boxed()
     }
 
     fn custom_endpoint(&self) -> Option<Handler> {
         let prometheus_endpoint = match &self.conf.exporter {
             MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
-            MetricsExporter::OTLP(_) => None,
+            MetricsExporter::Otlp(_) => None,
         };
 
         match (prometheus_endpoint, &self.exporter) {
