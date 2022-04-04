@@ -22,3 +22,6 @@ crates/*/Cargo.lock
 # Docs
 /docs/node_modules/
 /docs/.cache/
+
+# Prevent accidental commits of router.yaml in the root
+/router.yaml

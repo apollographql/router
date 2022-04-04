@@ -4,13 +4,16 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!--# [x.x.x] (unreleased) - 2022-mm-dd
+<!-- <THIS IS AN EXAMPLE, DO NOT REMOVE>
+
+# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-## 🚀 Features
-## 🐛 Fixes
-## 🛠 Maintenance
-## 📚 Documentation
+## 🚀 Features ( :rocket: )
+## 🐛 Fixes ( :bug: )
+## 🛠 Maintenance ( :hammer_and_wrench: )
+## 📚 Documentation ( :books: )
+## 🐛 Fixes ( :bug: )
 
 ## Example section entry format
 
@@ -18,9 +21,31 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Description! And a link to a [reference](http://url)
 
+</THIS IS AN EXAMPLE, DO NOT REMOVE> -->
+
+<!--# [x.x.x] (unreleased) - 2022-mm-dd
+> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
+## ❗ BREAKING ❗
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+## 🐛 Fixes
+
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
+
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
+
+
+## 🛠 Maintenance
+
+- **Xtask improvements** ([PR ##604](https://github.com/apollographql/router/pull/604))
+
+The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
+
  -->
 
-# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 
 - **CORS default Configuration** ([#40](https://github.com/apollographql/router/issues/40))
@@ -28,7 +53,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   The Router will allow only the https://studio.apollographql.com origin by default, instead of any origin.
   This behavior can still be tweaked in the [YAML configuration](https://www.apollographql.com/docs/router/configuration/cors)
 
+- **Hot reload flag** ([766](https://github.com/apollographql/router/issues/766))
+  The `--watch` (or `-w`) flag that enables hot reload was renamed to `--hr` or `--hot-reload`
+
 ## 🚀 Features
+
+- **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
+  You can now use the `ROUTER_HOT_RELOAD=true` environment variable to have the router watch for configuration and schema changes and automatically reload.
 
 - **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
@@ -40,9 +71,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
 
-  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) --entrypoint=sh.
+  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) `--entrypoint=sh`.
 
-  For more details about thse images, see the docs.
+  For more details about these images, see the docs.
 
 - **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
 
@@ -52,10 +83,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   While schema introspection is useful in development, we might not want to expose the entire schema in production,
   so the router can be configured to forbid introspection queries as follows:
-```yaml
-server:
-  introspection: false
-```
+  ```yaml
+  server:
+    introspection: false
+  ```
 
 ## 🐛 Fixes
 - **Move query dedup to an experimental `traffic_shaping` plugin** ([PR #753](https://github.com/apollographql/router/pull/753))
@@ -84,9 +115,10 @@ server:
 
 - **Relax variables selection for subgraph queries** ([PR #755](https://github.com/apollographql/router/pull/755))
 
-  federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
+  Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
 
 ## 🛠 Maintenance
+
 ## 📚 Documentation
 
 <!--# [v0.1.0-preview.1] - 2022-03-23
