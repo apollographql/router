@@ -39,6 +39,7 @@ use tower::{BoxError, ServiceExt};
 use url::Url;
 
 use self::metrics::MetricsConfiguration;
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use self::metrics::MetricsExporter;
 use self::metrics::MetricsPlugin;
 
@@ -277,6 +278,7 @@ impl Plugin for Telemetry {
                 .await?;
         }
 
+        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         if let Some(MetricsExporter::Otlp(_otlp_exporter_conf)) = &mut self
             .config
             .metrics

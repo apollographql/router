@@ -23,6 +23,7 @@ use std::{
 };
 use tower::{service_fn, steer::Steer, util::BoxService, BoxError, Service, ServiceExt};
 
+#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use super::otlp::Metrics as OltpConfiguration;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -231,6 +232,7 @@ impl Plugin for MetricsPlugin {
     fn custom_endpoint(&self) -> Option<Handler> {
         let prometheus_endpoint = match &self.conf.exporter {
             MetricsExporter::Prometheus(prom) => Some(prom.endpoint.clone()),
+            #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
             MetricsExporter::Otlp(_) => None,
         };
 

@@ -8,11 +8,11 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use std::collections::HashMap;
 use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -113,7 +113,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                     .body(body)
                                     .expect("we know the body is already well formatted because it's coming from warp; qed"))
                                     .await.map_err(|err| warp::reject::custom(CustomRejection { msg: err.to_string() }))?;
-                                    
+
                                 let is_json = matches!(res.body(), ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_));
 
                                 let res = res.map(|body| match body {

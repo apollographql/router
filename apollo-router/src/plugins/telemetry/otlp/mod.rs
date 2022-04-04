@@ -9,11 +9,11 @@ pub use self::grpc::*;
 pub use self::http::*;
 use super::TraceConfig;
 use crate::configuration::ConfigurationError;
+#[cfg(feature = "otlp-grpc")]
 use futures::{Stream, StreamExt};
-use opentelemetry::{
-    sdk::metrics::{selectors, PushController},
-    util::tokio_interval_stream,
-};
+use opentelemetry::sdk::metrics::PushController;
+#[cfg(feature = "otlp-grpc")]
+use opentelemetry::{sdk::metrics::selectors, util::tokio_interval_stream};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -186,6 +186,7 @@ where
     Ok(Some(url))
 }
 
+#[cfg(feature = "otlp-grpc")]
 fn delayed_interval(duration: Duration) -> impl Stream<Item = tokio::time::Instant> {
     tokio_interval_stream(duration).skip(1)
 }
