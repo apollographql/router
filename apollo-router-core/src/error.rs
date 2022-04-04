@@ -219,6 +219,12 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+#[derive(Error, Debug, Display, Clone)]
+pub enum ServiceBuildError {
+    /// Couldn't build Router Service: {0}
+    QueryPlannerError(QueryPlannerError),
+}
+
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {

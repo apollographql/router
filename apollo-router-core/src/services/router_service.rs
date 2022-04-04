@@ -5,8 +5,8 @@ use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
     ExecutionResponse, NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    SubgraphResponse,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
+    SubgraphRequest, SubgraphResponse,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -236,8 +236,7 @@ impl PluggableRouterServiceBuilder {
             BoxCloneService<RouterRequest, RouterResponse, BoxError>,
             Vec<Box<dyn DynPlugin>>,
         ),
-        // TODO: Make it an actual BuildError ?
-        crate::QueryPlannerError,
+        crate::ServiceBuildError,
     > {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
@@ -252,7 +251,9 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone()).await?;
+        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone())
+            .await
+            .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service =
             ServiceBuilder::new()
                 .buffer(self.buffer)
