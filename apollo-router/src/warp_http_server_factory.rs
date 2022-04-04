@@ -8,12 +8,12 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use http::HeaderValue;
+use http::{HeaderValue, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use reqwest::Url;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -455,10 +455,10 @@ where
             Ok(mut service) => {
                 let uri = match authority {
                     Some(authority) => {
-                        Url::parse(&format!("http://{}{}", authority.as_str(), path.as_str()))
+                        Uri::from_str(&format!("http://{}{}", authority.as_str(), path.as_str()))
                             .expect("if the authority is some then the URL is valid; qed")
                     }
-                    None => Url::parse(&format!("http://router{}", path.as_str())).unwrap(),
+                    None => Uri::from_str(&format!("http://router{}", path.as_str())).unwrap(),
                 };
 
                 let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();

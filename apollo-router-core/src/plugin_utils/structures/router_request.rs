@@ -3,10 +3,9 @@ use crate::{
     http_compat::{self, RequestBuilder},
     Context, Object,
 };
-use http::Method;
-use reqwest::Url;
+use http::{Method, Uri};
 use serde_json_bytes::Value;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use typed_builder::TypedBuilder;
 
 #[derive(Default, Clone, TypedBuilder)]
@@ -30,7 +29,7 @@ impl From<RouterRequest> for crate::RouterRequest {
             extensions: request.extensions.unwrap_or_default(),
         };
 
-        let mut req = RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap());
+        let mut req = RequestBuilder::new(Method::GET, Uri::from_str("http://default").unwrap());
 
         for (key, value) in request.headers.unwrap_or_default() {
             req = req.header(key, value);

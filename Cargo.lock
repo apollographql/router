@@ -206,6 +206,7 @@ dependencies = [
  "futures",
  "hex",
  "http",
+ "hyper",
  "include_dir",
  "insta",
  "itertools",
@@ -215,11 +216,9 @@ dependencies = [
  "mockall",
  "moka",
  "once_cell",
+ "opentelemetry",
  "paste",
  "regex",
- "reqwest",
- "reqwest-middleware",
- "reqwest-tracing",
  "router-bridge",
  "schemars",
  "serde",
@@ -235,9 +234,11 @@ dependencies = [
  "thiserror",
  "tokio",
  "tower",
+ "tower-http",
  "tower-service",
  "tower-test",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber 0.3.10",
  "typed-builder",
  "url",
@@ -2477,9 +2478,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.7.3"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb87f3080f6d1d69e8c564c0fcfde1d7aa8cc451ce40cae89479111f03bc0eb"
+checksum = "32613e41de4c47ab04970c348ca7ae7382cf116625755af070b008a15516a889"
 dependencies = [
  "hashbrown",
 ]
@@ -3641,7 +3642,6 @@ dependencies = [
  "lazy_static",
  "log",
  "mime",
- "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -3657,38 +3657,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
-]
-
-[[package]]
-name = "reqwest-middleware"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b58621b8223cfc85b63d38b8d335c69b96a666d9b7561aa30a3b070ce1df31c"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "http",
- "reqwest",
- "serde",
- "task-local-extensions",
- "thiserror",
-]
-
-[[package]]
-name = "reqwest-tracing"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03f32bd53de59d66d157bd974bafbb69fbb9e98f665d14218b5b991e7dba8d75"
-dependencies = [
- "async-trait",
- "opentelemetry",
- "reqwest",
- "reqwest-middleware",
- "task-local-extensions",
- "tokio",
- "tracing",
- "tracing-opentelemetry",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use crate::*;
 use apollo_parser::ast;
+use http::Uri;
 use itertools::Itertools;
-use reqwest::Url;
 use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
-    subgraphs: HashMap<String, Url>,
+    subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) input_types: HashMap<String, InputObjectType>,
@@ -178,7 +178,7 @@ impl std::str::FromStr for Schema {
                                                     if subgraphs
                                                         .insert(
                                                             name.clone(),
-                                                            Url::parse(&url).map_err(|err| {
+                                                            Uri::from_str(&url).map_err(|err| {
                                                                 SchemaError::UrlParse(
                                                                     name.clone(),
                                                                     err,
@@ -397,7 +397,7 @@ impl Schema {
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
-    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Url)> {
+    pub fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()
     }
 
@@ -682,25 +682,41 @@ mod tests {
         println!("subgraphs: {:?}", schema.subgraphs);
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
-            schema.subgraphs.get("accounts").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("accounts")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4001/graphql"),
             "Incorrect url for accounts"
         );
 
         assert_eq!(
-            schema.subgraphs.get("inventory").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("inventory")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4004/graphql"),
             "Incorrect url for inventory"
         );
 
         assert_eq!(
-            schema.subgraphs.get("products").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("products")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4003/graphql"),
             "Incorrect url for products"
         );
 
         assert_eq!(
-            schema.subgraphs.get("reviews").map(|s| s.as_str()),
+            schema
+                .subgraphs
+                .get("reviews")
+                .map(|s| s.to_string())
+                .as_deref(),
             Some("http://localhost:4002/graphql"),
             "Incorrect url for reviews"
         );

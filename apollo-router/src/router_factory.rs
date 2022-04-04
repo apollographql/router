@@ -4,7 +4,7 @@ use apollo_router_core::{
     PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
 };
 use apollo_router_core::{prelude::*, Context};
-use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
+use apollo_router_core::{DynPlugin, TowerSubgraphService};
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
@@ -77,7 +77,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         }
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_service = BoxService::new(ReqwestSubgraphService::new(name.to_string()));
+            let subgraph_service = BoxService::new(TowerSubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }

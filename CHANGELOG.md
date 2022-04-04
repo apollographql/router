@@ -44,7 +44,11 @@ We reworked the way query plans are generated before being cached, which lead to
 
 - **Xtask improvements** ([PR #604](https://github.com/apollographql/router/pull/604))
 
-The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
+  The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
+
+- **Switch from reqwest to a Tower client for subgraph services** ([PR #769](https://github.com/apollographql/router/pull/769))
+
+  It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
 
  -->
 
