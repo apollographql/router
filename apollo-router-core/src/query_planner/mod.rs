@@ -244,7 +244,7 @@ pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
     use serde::Deserialize;
-    use std::sync::Arc;
+    use std::sync::{atomic::Ordering, Arc};
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
@@ -411,16 +411,24 @@ pub(crate) mod fetch {
                 });
             }
 
-            // fix error path and erase subgraph error messages (we cannot expose subgraph information
-            // to the client)
+            // fix error path
+            // only display subgraph error messages if configured to do so
             let errors = response
                 .errors
                 .into_iter()
                 .map(|error| Error {
                     locations: error.locations,
                     path: error.path.map(|path| current_dir.join(path)),
-                    message: String::new(),
-                    extensions: Object::default(),
+                    message: if INCLUDE_SUBGRAPH_RESPONSES.load(Ordering::SeqCst) {
+                        error.message
+                    } else {
+                        String::new()
+                    },
+                    extensions: if INCLUDE_SUBGRAPH_RESPONSES.load(Ordering::SeqCst) {
+                        error.extensions
+                    } else {
+                        Object::default()
+                    },
                 })
                 .collect();
 

@@ -55,6 +55,7 @@ pub use response::*;
 pub use service_registry::*;
 pub use services::*;
 pub use spec::*;
+use std::sync::atomic::AtomicBool;
 pub use traits::*;
 
 pub mod prelude {
@@ -78,3 +79,5 @@ pub mod reexports {
     pub use serde_json;
     pub use startup;
 }
+
+pub(crate) static INCLUDE_SUBGRAPH_RESPONSES: AtomicBool = AtomicBool::new(false);

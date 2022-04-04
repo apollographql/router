@@ -1,13 +1,13 @@
-use std::collections::HashMap;
+use crate::deduplication::QueryDeduplicationLayer;
+use crate::plugin::Plugin;
+use crate::{register_plugin, SubgraphRequest, SubgraphResponse, INCLUDE_SUBGRAPH_RESPONSES};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
-
-use crate::deduplication::QueryDeduplicationLayer;
-use crate::plugin::Plugin;
-use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 struct Shaping {
@@ -31,6 +31,8 @@ struct Config {
     all: Option<Shaping>,
     #[serde(default)]
     subgraphs: HashMap<String, Shaping>,
+    #[serde(default)]
+    include_subgraph_responses: bool,
 }
 
 struct TrafficShaping {
@@ -42,6 +44,7 @@ impl Plugin for TrafficShaping {
     type Config = Config;
 
     fn new(config: Self::Config) -> Result<Self, BoxError> {
+        INCLUDE_SUBGRAPH_RESPONSES.store(config.include_subgraph_responses, Ordering::SeqCst);
         Ok(Self { config })
     }
 
