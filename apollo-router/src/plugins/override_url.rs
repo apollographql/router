@@ -1,21 +1,25 @@
 use apollo_router_core::{register_plugin, Plugin, SubgraphRequest, SubgraphResponse};
-use reqwest::Url;
+use http::Uri;
 use std::collections::HashMap;
+use std::str::FromStr;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceExt};
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
-    urls: HashMap<String, Url>,
+    urls: HashMap<String, Uri>,
 }
 
 #[async_trait::async_trait]
 impl Plugin for OverrideSubgraphUrl {
-    type Config = HashMap<String, Url>;
+    type Config = HashMap<String, url::Url>;
 
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(OverrideSubgraphUrl {
-            urls: configuration,
+            urls: configuration
+                .into_iter()
+                .map(|(k, v)| (k, Uri::from_str(v.as_str()).unwrap()))
+                .collect(),
         })
     }
 
@@ -47,7 +51,7 @@ mod tests {
         plugin_utils::{self, MockSubgraphService},
         Context, DynPlugin, SubgraphRequest,
     };
-    use reqwest::Url;
+    use http::Uri;
     use serde_json::Value;
     use std::str::FromStr;
     use tower::{util::BoxService, Service, ServiceExt};
@@ -60,7 +64,7 @@ mod tests {
             .withf(|req| {
                 assert_eq!(
                     req.http_request.url(),
-                    &Url::parse("http://localhost:8001").unwrap()
+                    &Uri::from_str("http://localhost:8001").unwrap()
                 );
                 true
             })

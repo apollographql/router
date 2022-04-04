@@ -73,9 +73,9 @@ tower = { version = "0.4.12", features = ["full"] }
 tower-http = { version = "0.2.5", features = ["trace"] }
 tower-service = "0.3.1"
 tracing = "0.1.32"
-tracing-core = "0.1.23"
+tracing-core = "0.1.24"
 tracing-opentelemetry = "0.17.2"
-tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.10", features = ["env-filter", "json"] }
 typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }

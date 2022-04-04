@@ -21,9 +21,9 @@ use tower_service::Service;
 pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
-mod reqwest_subgraph_service;
 mod router_service;
-pub use reqwest_subgraph_service::ReqwestSubgraphService;
+mod tower_subgraph_service;
+pub use tower_subgraph_service::TowerSubgraphService;
 
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 

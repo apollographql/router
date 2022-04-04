@@ -169,6 +169,14 @@ impl ReportSpaceport {
             .header("Content-Encoding", "gzip")
             .header("Content-Type", "application/protobuf")
             .header("Accept", "application/json")
+            .header(
+                "User-Agent",
+                format!(
+                    "{} / {} usage reporting",
+                    std::env!("CARGO_PKG_NAME"),
+                    std::env!("CARGO_PKG_VERSION")
+                ),
+            )
             .build()
             .map_err(|e| Status::unavailable(e.to_string()))?;
 

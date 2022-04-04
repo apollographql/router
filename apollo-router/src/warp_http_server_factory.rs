@@ -8,13 +8,13 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use http::{HeaderValue, Method};
+use std::collections::HashMap;
+use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use reqwest::Url;
-use std::collections::HashMap;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -101,7 +101,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
                                   body: Bytes| async move {
                                 let res = handler.oneshot(http_compat::RequestBuilder::new(
                                         Method::GET,
-                                        Url::parse(&format!(
+                                        Uri::from_str(&format!(
                                             "http://{}{}",
                                             authority.unwrap().as_str(),
                                             path.as_str()
@@ -526,10 +526,10 @@ where
             Ok(mut service) => {
                 let uri = match authority {
                     Some(authority) => {
-                        Url::parse(&format!("http://{}{}", authority.as_str(), path.as_str()))
+                        Uri::from_str(&format!("http://{}{}", authority.as_str(), path.as_str()))
                             .expect("if the authority is some then the URL is valid; qed")
                     }
-                    None => Url::parse(&format!("http://router{}", path.as_str())).unwrap(),
+                    None => Uri::from_str(&format!("http://router{}", path.as_str())).unwrap(),
                 };
 
                 let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
