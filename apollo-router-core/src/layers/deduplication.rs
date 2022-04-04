@@ -1,11 +1,10 @@
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-    task::Poll,
+use std::{collections::HashMap, sync::Arc, task::Poll};
+use tokio::sync::{
+    broadcast::{self, Sender},
+    oneshot,
 };
-use tokio::sync::broadcast::{self, Sender};
 use tower::{BoxError, Layer, ServiceExt};
 
 #[derive(Default)]
@@ -22,9 +21,8 @@ where
     }
 }
 
-type WaitMap = Arc<
-    Mutex<HashMap<http_compat::Request<Request>, Weak<Sender<Result<SubgraphResponse, String>>>>>,
->;
+type WaitMap =
+    Arc<Mutex<HashMap<http_compat::Request<Request>, Sender<Result<SubgraphResponse, String>>>>>;
 
 pub struct QueryDeduplicationService<S> {
     service: S,
@@ -50,16 +48,7 @@ where
         loop {
             let mut locked_wait_map = wait_map.lock().await;
             match locked_wait_map.get_mut(&request.http_request) {
-                Some(weak_waiter) => {
-                    // Try to upgrade our weak Arc. If we can't, the sender must have
-                    // been cancelled, so remove the entry from the map and try again.
-                    let waiter = match Weak::upgrade(weak_waiter) {
-                        Some(waiter) => waiter,
-                        None => {
-                            locked_wait_map.remove(&request.http_request);
-                            continue;
-                        }
-                    };
+                Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
@@ -79,29 +68,25 @@ where
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
-                    let tx = Arc::new(tx);
-                    // Store a Weak reference to our Sender. If we are cancelled, then the
-                    // client will be unable to upgrade their Weak reference and will know
-                    // to clean up the wait_map and try again.
-                    locked_wait_map.insert(request.http_request.clone(), Arc::downgrade(&tx));
+
+                    locked_wait_map.insert(request.http_request.clone(), tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
                     let http_request = request.http_request.clone();
-                    let res = match service.ready_oneshot().await {
-                        Ok(mut s) => s.call(request).await,
-                        Err(e) => {
-                            // Clean up wait map if ready_oneshot failed
+                    let res = {
+                        // when _drop_signal is dropped, either by getting out of the block, returning
+                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
+                        // return with Err(), then we remove the entry from the wait map
+                        let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
+                        tokio::task::spawn(async move {
+                            let _ = drop_sentinel.await;
                             let mut locked_wait_map = wait_map.lock().await;
                             locked_wait_map.remove(&http_request);
-                            return Err(e);
-                        }
-                    };
+                        });
 
-                    {
-                        let mut locked_wait_map = wait_map.lock().await;
-                        locked_wait_map.remove(&http_request);
-                    }
+                        service.ready_oneshot().await?.call(request).await
+                    };
 
                     // Let our waiters know
                     let broadcast_value = res

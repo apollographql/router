@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.1.0-preview.1"
+version = "0.1.0-preview.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -21,7 +21,7 @@ sys-info = "0.9.1"
 tonic = "0.6.2"
 tokio = { version = "1.17.0", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1.32"
-tracing-subscriber = { version = "0.3.9", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.10", features = ["env-filter", "json"] }
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

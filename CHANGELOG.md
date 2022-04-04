@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
+
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
+
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
@@ -20,7 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
  -->
 
-# [v0.1.0-preview.2] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 
 - **CORS default Configuration** ([#40](https://github.com/apollographql/router/issues/40))
@@ -34,7 +40,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features
 
 - **Hot reload via en environment variable** ([766](https://github.com/apollographql/router/issues/766))
-  You can now ust the ROUTER_HOT_RELOAD=true environment variable to have the router watch for configuration and schema changes and automatically reload.
+  You can now use the `ROUTER_HOT_RELOAD=true` environment variable to have the router watch for configuration and schema changes and automatically reload.
 
 - **Container images are now available** ([PR #764](https://github.com/apollographql/router/pull/764))
 
@@ -46,9 +52,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   The images are based on [distroless](https://github.com/GoogleContainerTools/distroless) which is a very constrained image, intended to be secure and small.
 
-  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) --entrypoint=sh.
+  We'll provide release and debug images for each release. The debug image has a busybox shell which can be accessed using (for instance) `--entrypoint=sh`.
 
-  For more details about thse images, see the docs.
+  For more details about these images, see the docs.
 
 - **Skip and Include directives in post processing** ([PR #626](https://github.com/apollographql/router/pull/626))
 
@@ -58,10 +64,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   While schema introspection is useful in development, we might not want to expose the entire schema in production,
   so the router can be configured to forbid introspection queries as follows:
-```yaml
-server:
-  introspection: false
-```
+  ```yaml
+  server:
+    introspection: false
+  ```
 
 ## 🐛 Fixes
 - **Move query dedup to an experimental `traffic_shaping` plugin** ([PR #753](https://github.com/apollographql/router/pull/753))
@@ -90,7 +96,7 @@ server:
 
 - **Relax variables selection for subgraph queries** ([PR #755](https://github.com/apollographql/router/pull/755))
 
-  federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
+  Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
 
 ## 🛠 Maintenance
 ## 📚 Documentation
