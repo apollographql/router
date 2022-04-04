@@ -4,29 +4,32 @@ use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
+    str::FromStr,
 };
 
-use http::{header::HeaderName, request::Builder, HeaderMap, HeaderValue, Method, Version};
-use url::{ParseError, Url};
+use http::{
+    header::HeaderName, request::Builder, uri::InvalidUri, HeaderMap, HeaderValue, Method, Uri,
+    Version,
+};
 
 #[derive(Debug)]
 pub struct Request<T> {
     // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
     // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
-    pub(super) url: Url,
+    pub(super) url: Uri,
     inner: http::Request<T>,
 }
 
 impl<T> Request<T> {
     /// Update the associated URL
-    pub fn set_url(&mut self, url: url::Url) -> Result<(), http::Error> {
-        *self.inner.uri_mut() = http::Uri::try_from(url.as_str())?;
+    pub fn set_url(&mut self, url: http::Uri) -> Result<(), http::Error> {
+        *self.inner.uri_mut() = url.clone();
         self.url = url;
         Ok(())
     }
 
     /// Returns a reference to the associated URL.
-    pub fn url(&self) -> &url::Url {
+    pub fn url(&self) -> &http::Uri {
         &self.url
     }
 
@@ -81,13 +84,13 @@ impl<T> Request<T> {
     }
 
     /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
-    pub fn map<F, U>(self, f: F) -> Result<Request<U>, ParseError>
+    pub fn map<F, U>(self, f: F) -> Result<Request<U>, InvalidUri>
     where
         F: FnOnce(T) -> U,
     {
         let new_req = self.inner.map(f);
         Ok(Request {
-            url: Url::parse(&new_req.uri().to_string())?,
+            url: new_req.uri().clone(),
             inner: new_req,
         })
     }
@@ -100,7 +103,7 @@ where
     // Only used for plugin_utils and tests
     pub fn mock() -> Request<T> {
         Request {
-            url: Url::parse("http://default").unwrap(),
+            url: Uri::from_str("http://default").unwrap(),
             inner: http::Request::default(),
         }
     }
@@ -185,17 +188,14 @@ impl<T> From<Request<T>> for http::Request<T> {
 
 #[derive(Debug)]
 pub struct RequestBuilder {
-    url: Url,
+    url: http::Uri,
     inner: Builder,
 }
 
 impl RequestBuilder {
-    pub fn new(method: reqwest::Method, url: Url) -> Self {
+    pub fn new(method: http::method::Method, url: http::Uri) -> Self {
         // Enforce the need for a method and an url
-        let builder = Builder::new().method(method).uri(
-            http::Uri::try_from(url.as_str())
-                .expect("Url has already been parsed without errors; qed"),
-        );
+        let builder = Builder::new().method(method).uri(url.clone());
         Self {
             url,
             inner: builder,

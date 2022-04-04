@@ -64,9 +64,9 @@ mod forbid_http_get_mutations_tests {
         plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
         Context, QueryPlan,
     };
-    use http::{Method, StatusCode};
-    use reqwest::Url;
+    use http::{Method, StatusCode, Uri};
     use serde_json::json;
+    use std::str::FromStr;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -170,7 +170,7 @@ mod forbid_http_get_mutations_tests {
             .query_plan(Arc::new(QueryPlan { root }))
             .context(
                 Context::new().with_request(Arc::new(
-                    RequestBuilder::new(method, Url::parse("http://test").unwrap())
+                    RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
                         .body(crate::Request::default())
                         .unwrap(),
                 )),
