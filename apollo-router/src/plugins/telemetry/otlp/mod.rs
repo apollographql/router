@@ -114,6 +114,7 @@ impl Exporter {
                 //     .build()?;
 
                 // Ok(push_ctrl)
+                // Related to this issue https://github.com/open-telemetry/opentelemetry-rust/issues/772
                 unimplemented!("cannot export metrics to http with otlp")
             }
         }
