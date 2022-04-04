@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 443
 expression: "&schema"
 ---
 {
@@ -284,6 +283,10 @@ expression: "&schema"
                 }
               },
               "nullable": true
+            },
+            "include_subgraph_responses": {
+              "default": false,
+              "type": "boolean"
             },
             "subgraphs": {
               "type": "object",
