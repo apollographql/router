@@ -893,6 +893,14 @@ expression: "&schema"
             "external"
           ],
           "properties": {
+            "client_name_header": {
+              "default": "apollographql-client-name",
+              "type": "string"
+            },
+            "client_version_header": {
+              "default": "apollographql-client-version",
+              "type": "string"
+            },
             "collector": {
               "default": "https://127.0.0.1:50051",
               "type": "string"
