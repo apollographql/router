@@ -407,9 +407,15 @@ impl Telemetry {
         if propagation.baggage.unwrap_or_default() {
             propagators.push(Box::new(BaggagePropagator::default()));
         }
+        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         if propagation.trace_context.unwrap_or_default() || tracing.otlp.is_some() {
             propagators.push(Box::new(TraceContextPropagator::default()));
         }
+        #[cfg(all(not(feature = "otlp-grpc"), not(feature = "otlp-http")))]
+        if propagation.trace_context.unwrap_or_default() {
+            propagators.push(Box::new(TraceContextPropagator::default()));
+        }
+
         if propagation.zipkin.unwrap_or_default() || tracing.zipkin.is_some() {
             propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
         }
@@ -434,7 +440,10 @@ impl Telemetry {
         builder = setup(builder, &tracing_config.jaeger, trace_config)?;
         builder = setup(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup(builder, &tracing_config.otlp, trace_config)?;
+        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
+        {
+            builder = setup(builder, &tracing_config.otlp, trace_config)?;
+        }
         builder = setup(builder, &config.apollo, trace_config)?;
         let tracer_provider = builder.build();
         Ok(tracer_provider)

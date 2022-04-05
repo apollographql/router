@@ -272,6 +272,7 @@ impl TracingConfigurator for Config {
 }
 
 #[cfg(test)]
+#[cfg(feature = "otlp-http")]
 mod tests {
     use crate::plugins::telemetry::tracing::test::run_query;
     use opentelemetry::global;
@@ -283,7 +284,6 @@ mod tests {
 
     // This test can be run manually from your IDE to help with testing otel
     // It is set to ignore by default as otlp may not be set up
-    #[cfg(feature = "otlp-http")]
     #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tracing() -> Result<(), BoxError> {
