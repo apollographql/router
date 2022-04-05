@@ -1,6 +1,6 @@
-pub mod metrics;
+pub(crate) mod metrics;
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
-pub mod otlp;
+pub(crate) mod otlp;
 
 use crate::apollo_telemetry::SpaceportConfig;
 use crate::apollo_telemetry::StudioGraph;
