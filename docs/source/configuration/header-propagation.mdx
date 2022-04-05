@@ -9,18 +9,18 @@ You define header rules in your [YAML configuration file](./overview/#configurat
 
 ```yaml title="router.yaml"
 # ...other configuration...
-
-headers:
-  all: # Header rules for all subgraphs
-    - propagate:
-        matching: ^upstream-header-.*
-    - remove:
-        named: "x-legacy-account-id"
-  subgraphs:
-    products: # Header rules for just the products subgraph
-    - insert:
-        name: "router-subgraph-name"
-        value: "products"
+plugins:
+  apollo.headers:
+    all: # Header rules for all subgraphs
+      - propagate:
+          matching: ^upstream-header-.*
+      - remove:
+          named: "x-legacy-account-id"
+    subgraphs:
+      products: # Header rules for just the products subgraph
+      - insert:
+          name: "router-subgraph-name"
+          value: "products"
 
 ```
 
@@ -81,37 +81,38 @@ Enables you to add custom headers to requests going to a specific subgraph. Thes
 Here's a complete example showing all the possible configuration options in use:
 
 ```yaml title="router.yaml"
-headers:
-  # Header rules for all subgraphs
-  all:
-  # Propagate matching headers
-  - propagate:
-      matching: ^upstream-header-.*
-  # Propagate matching headers
-  - propagate:
-      named: "some-header"
-      default: "default-value"
-      rename: "destination-header"
-  # Remove the "x-legacy-account-id" header
-  - remove:
-      named: "x-legacy-account-id"
-  # Remove matching headers
-  - remove:
-      matching: ^x-deprecated-.*
-  # Insert the 'my-company' header
-  - insert:
-      name: "my-company"
-      value: "acme"
-  # Subgraph-specific header rules
-  subgraphs:
-    products:
-      # Calls to the products subgraph have the "router-subgraph-name" header set to `products`.
-      - insert:
-          name: "router-subgraph-name"
-          value: "products"
-    accounts:
-      # Calls to the accounts subgraph have the "router-subgraph-name" header set to `accounts`.
-      - insert:
-          name: "router-subgraph-name"
-          value: "accounts"
+plugins:
+  apollo.headers:
+    # Header rules for all subgraphs
+    all:
+    # Propagate matching headers
+    - propagate:
+        matching: ^upstream-header-.*
+    # Propagate matching headers
+    - propagate:
+        named: "some-header"
+        default: "default-value"
+        rename: "destination-header"
+    # Remove the "x-legacy-account-id" header
+    - remove:
+        named: "x-legacy-account-id"
+    # Remove matching headers
+    - remove:
+        matching: ^x-deprecated-.*
+    # Insert the 'my-company' header
+    - insert:
+        name: "my-company"
+        value: "acme"
+    # Subgraph-specific header rules
+    subgraphs:
+      products:
+        # Calls to the products subgraph have the "router-subgraph-name" header set to `products`.
+        - insert:
+            name: "router-subgraph-name"
+            value: "products"
+      accounts:
+        # Calls to the accounts subgraph have the "router-subgraph-name" header set to `accounts`.
+        - insert:
+            name: "router-subgraph-name"
+            value: "accounts"
 ```

@@ -60,12 +60,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   ```yaml
   plugins:
-  apollo.telemetry:
-    metrics:
-      exporter:
-        prometheus:
-          endpoint: "/metrics"
-  ```
+    apollo.telemetry:
+      metrics:
+        exporter:
+          prometheus:
+            # By setting this endpoint you enable the prometheus exporter
+            # All our endpoints exposed by plugins are namespaced by the name of the plugin
+            # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+            endpoint: "/metrics"
+    ```
+
+- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
+
+  The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
   
 ## 🐛 Fixes
 - **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
