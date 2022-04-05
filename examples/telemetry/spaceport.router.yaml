@@ -12,3 +12,9 @@ telemetry:
     # If `external` is `false`, this is the interface and port to listen on.
     # Omit otherwise.
     listener: 127.0.0.1:50051
+
+    # Header identifying the client name. defaults to apollographql-client-name
+    # client_name_header: client
+
+    # Header identifying the client version. defaults to apollographql-client-version
+    # client_version_header: version

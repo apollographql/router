@@ -1,3 +1,4 @@
+use crate::apollo_telemetry::SpaceportConfig;
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
@@ -75,9 +76,28 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
+            let SpaceportConfig {
+                client_name_header,
+                client_version_header,
+                ..
+            } = configuration
+                .plugins()
+                .get("apollo.telemetry")
+                .and_then(|v| v.get("spaceport"))
+                .and_then(|v| serde_json::value::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            let client_identification = Arc::new(ClientIdentificationHeaders {
+                name: client_name_header,
+                version: client_version_header,
+            });
+
             let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(service.clone()))
-                .or(post_graphql_request(service.clone()))
+                .or(get_graphql_request_or_redirect(
+                    service.clone(),
+                    client_identification.clone(),
+                ))
+                .or(post_graphql_request(service.clone(), client_identification))
                 .with(cors)
                 .with(with::default_header(
                     CONTENT_TYPE,
@@ -298,6 +318,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
 
 fn get_graphql_request_or_redirect<RS>(
     service: RS,
+    client_identification: Arc<ClientIdentificationHeaders>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -324,12 +345,14 @@ where
                   authority: Option<Authority>,
                   path: FullPath| {
                 let service = service.clone();
+                let client_identification = client_identification.clone();
                 async move {
                     let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
                         display_home_page()
                     } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
                         run_graphql_request(
                             service,
+                            &client_identification,
                             authority,
                             http::Method::GET,
                             path,
@@ -371,6 +394,7 @@ fn get_health_request() -> impl Filter<Extract = (Box<dyn Reply>,), Error = Reje
 
 fn post_graphql_request<RS>(
     service: RS,
+    client_identification: Arc<ClientIdentificationHeaders>,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -391,9 +415,11 @@ where
                   path: FullPath,
                   authority: Option<Authority>| {
                 let service = service.clone();
+                let client_identification = client_identification.clone();
                 async move {
                     let reply = run_graphql_request(
                         service,
+                        &client_identification,
                         authority,
                         http::Method::POST,
                         path,
@@ -420,6 +446,7 @@ where
 )]
 fn run_graphql_request<RS>(
     service: RS,
+    client_identification: &ClientIdentificationHeaders,
     authority: Option<Authority>,
     method: http::Method,
     path: FullPath,
@@ -433,11 +460,11 @@ where
         + 'static,
     <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
-    if let Some(client_name) = header_map.get("apollographql-client-name") {
+    if let Some(client_name) = header_map.get(client_identification.name.as_str()) {
         // Record the client name as part of the current span
         Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
     }
-    if let Some(client_version) = header_map.get("apollographql-client-version") {
+    if let Some(client_version) = header_map.get(client_identification.version.as_str()) {
         // Record the client version as part of the current span
         Span::current().record(
             "client_version",
@@ -526,6 +553,11 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
     fn keys(&self) -> Vec<&str> {
         self.0.keys().map(|x| x.as_str()).collect()
     }
+}
+
+struct ClientIdentificationHeaders {
+    name: String,
+    version: String,
 }
 
 #[cfg(test)]

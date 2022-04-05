@@ -52,6 +52,8 @@ use tokio::task::JoinError;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
 const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
+const DEFAULT_CLIENT_NAME_HEADER: &str = "apollographql-client-name";
+const DEFAULT_CLIENT_VERSION_HEADER: &str = "apollographql-client-version";
 
 fn default_collector() -> String {
     DEFAULT_SERVER_URL.to_string()
@@ -59,6 +61,14 @@ fn default_collector() -> String {
 
 fn default_listener() -> String {
     DEFAULT_LISTEN.to_string()
+}
+
+fn default_client_name_header() -> String {
+    DEFAULT_CLIENT_NAME_HEADER.to_string()
+}
+
+fn default_client_version_header() -> String {
+    DEFAULT_CLIENT_VERSION_HEADER.to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -71,6 +81,12 @@ pub struct SpaceportConfig {
 
     #[serde(default = "default_listener")]
     pub(crate) listener: String,
+
+    #[serde(default = "default_client_name_header")]
+    pub(crate) client_name_header: String,
+
+    #[serde(default = "default_client_version_header")]
+    pub(crate) client_version_header: String,
 }
 
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
@@ -101,6 +117,8 @@ impl Default for SpaceportConfig {
             collector: default_collector(),
             listener: default_listener(),
             external: false,
+            client_name_header: default_client_name_header(),
+            client_version_header: default_client_version_header(),
         }
     }
 }

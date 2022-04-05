@@ -70,3 +70,17 @@ telemetry:
     # that's running external from the Router. Omit otherwise.
     collector: https://127.0.0.1:50051
 ```
+
+### Client identification headers
+
+By default, the GraphQL client will be identified by the HTTP headers `apollographql-client-name` and `apollographql-client-version`. This can be overriden as follows:
+
+```yaml title="router.yaml"
+telemetry:
+  spaceport:
+    # Header identifying the client name. defaults to apollographql-client-name
+    client_name_header: client
+
+    # Header identifying the client version. defaults to apollographql-client-version
+    client_version_header: version
+```
