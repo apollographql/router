@@ -23,5 +23,8 @@ crates/*/Cargo.lock
 /docs/node_modules/
 /docs/.cache/
 
+# Dynamically retrieve proto file
+apollo-spaceport/proto/reports.proto
+#
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
