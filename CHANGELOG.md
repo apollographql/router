@@ -28,7 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-- **Configurable client identification headers** [PR #788](https://github.com/apollographql/router/pull/788)
+- **Configurable client identification headers** [PR #794](https://github.com/apollographql/router/pull/794)
 
   The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Thos headers can now be overriden in the configuration:
   ```yaml title="router.yaml"
