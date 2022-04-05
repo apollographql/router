@@ -3,46 +3,86 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use router_bridge::plan;
+use router_bridge::planner::Planner;
 use serde::Deserialize;
+use std::fmt::Debug;
 use std::sync::Arc;
-use std::task;
+use tower::BoxError;
+use tower::Service;
 
+#[derive(Debug, Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
-#[derive(Debug, Clone)]
-pub struct RouterBridgeQueryPlanner {
-    schema: Arc<Schema>,
+pub struct BridgeQueryPlanner {
+    planner: Arc<Planner<PlannerResult>>,
 }
 
-impl RouterBridgeQueryPlanner {
-    /// Create a new router-bridge query planner
-    pub fn new(schema: Arc<Schema>) -> Self {
-        Self { schema }
+impl BridgeQueryPlanner {
+    pub async fn new(schema: Arc<Schema>) -> Result<Self, QueryPlannerError> {
+        Ok(Self {
+            planner: Arc::new(Planner::new(schema.as_str().to_string()).await?),
+        })
+    }
+}
+
+impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
+    type Response = QueryPlannerResponse;
+
+    type Error = BoxError;
+
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
+        let this = self.clone();
+        let fut = async move {
+            let body = req.context.request.body();
+            match this
+                .get(
+                    body.query.clone().expect(
+                        "presence of a query has been checked by the RouterService before; qed",
+                    ),
+                    body.operation_name.to_owned(),
+                    Default::default(),
+                )
+                .await
+            {
+                Ok(query_plan) => Ok(QueryPlannerResponse {
+                    query_plan,
+                    context: req.context,
+                }),
+                Err(e) => Err(tower::BoxError::from(e)),
+            }
+        };
+
+        // Return the response as an immediate future
+        Box::pin(fut)
     }
 }
 
 #[async_trait]
-impl QueryPlanner for RouterBridgeQueryPlanner {
+impl QueryPlanner for BridgeQueryPlanner {
     #[tracing::instrument(skip_all, level = "info", name = "plan")]
     async fn get(
         &self,
         query: String,
         operation: Option<String>,
-        options: QueryPlanOptions,
+        _options: QueryPlanOptions,
     ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
-        let context = plan::OperationalContext {
-            schema: self.schema.as_str().to_string(),
-            query,
-            operation_name: operation.unwrap_or_default(),
-        };
-
-        let planner_result = tokio::task::spawn_blocking(|| {
-            plan::plan::<PlannerResult>(context, options.into())
-                .map_err(QueryPlannerError::RouterBridgeError)
-        })
-        .await???;
+        let planner_result = self
+            .planner
+            .plan(query, operation)
+            .await
+            .map_err(QueryPlannerError::RouterBridgeError)?
+            .into_result()
+            .map_err(QueryPlannerError::from)?;
 
         match planner_result {
             PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
@@ -58,12 +98,6 @@ impl QueryPlanner for RouterBridgeQueryPlanner {
     }
 }
 
-impl From<QueryPlanOptions> for plan::QueryPlanOptions {
-    fn from(_: QueryPlanOptions) -> Self {
-        plan::QueryPlanOptions::default()
-    }
-}
-
 /// The root query plan container.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind")]
@@ -76,43 +110,6 @@ enum PlannerResult {
     Other,
 }
 
-impl tower::Service<QueryPlannerRequest> for RouterBridgeQueryPlanner {
-    type Response = QueryPlannerResponse;
-    // TODO I don't think we can serialize this error back to the router response's payload
-    type Error = tower::BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
-        task::Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let this = self.clone();
-        let fut = async move {
-            let body = request.context.request.body();
-            match this
-                .get(
-                    body.query.clone().expect(
-                        "presence of a query has been checked by the RouterService before; qed",
-                    ),
-                    body.operation_name.to_owned(),
-                    QueryPlanOptions::default(),
-                )
-                .await
-            {
-                Ok(query_plan) => Ok(QueryPlannerResponse {
-                    query_plan,
-                    context: request.context,
-                }),
-                Err(e) => Err(tower::BoxError::from(e)),
-            }
-        };
-
-        // Return the response as an immediate future
-        Box::pin(fut)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,7 +118,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = RouterBridgeQueryPlanner::new(Arc::new(example_schema()));
+        let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap();
         let result = planner
             .get(
                 include_str!("testdata/query.graphql").into(),
@@ -149,23 +148,28 @@ mod tests {
     async fn empty_query_plan_should_be_a_planner_error() {
         insta::assert_debug_snapshot!(
             "empty_query_plan_should_be_a_planner_error",
-            RouterBridgeQueryPlanner::new(Arc::new(example_schema()))
+            BridgeQueryPlanner::new(Arc::new(example_schema()))
+                .await
+                .unwrap()
                 .get(
                     include_str!("testdata/unknown_introspection_query.graphql").into(),
                     None,
                     Default::default(),
                 )
                 .await
+                .unwrap_err()
         )
     }
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = RouterBridgeQueryPlanner::new(Arc::new(example_schema()));
+        let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap();
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
-            "Query planning had errors: Planning errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
+            "query planning had errors: bridge errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
