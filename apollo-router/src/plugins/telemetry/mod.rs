@@ -56,6 +56,7 @@ mod config {
     pub struct Tracing {
         pub propagation: Option<Propagation>,
         pub trace_config: Option<Trace>,
+        #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
         pub otlp: Option<tracing::otlp::Config>,
         pub jaeger: Option<tracing::jaeger::Config>,
         pub zipkin: Option<tracing::zipkin::Config>,
