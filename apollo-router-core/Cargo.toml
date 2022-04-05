@@ -27,7 +27,7 @@ hyper = { version = "0.14.18", features = ["client"] }
 include_dir = "0.7.2"
 itertools = "0.10.3"
 lazy_static = "1.4.0"
-lru = "0.7.3"
+lru = "0.7.5"
 miette = { version = "4.2.1", features = ["fancy"] }
 mockall = "0.11.0"
 moka = { version = "0.7.2", features = ["future", "futures-util"] }
