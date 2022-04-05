@@ -200,7 +200,7 @@ impl From<QueryPlannerError> for FetchError {
 /// Error types for CacheResolver
 #[derive(Error, Debug, Display, Clone)]
 pub enum CacheResolverError {
-    /// Value retrieval failed: {0}
+    /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
 }
 
@@ -221,32 +221,32 @@ pub enum JsonExtError {
 
 #[derive(Error, Debug, Display, Clone)]
 pub enum ServiceBuildError {
-    /// Couldn't build Router Service: {0}
+    /// couldn't build Router Service: {0}
     QueryPlannerError(QueryPlannerError),
 }
 
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// Couldn't instantiate QueryPlanner: {0}
+    /// couldn't instantiate QueryPlanner: {0}
     QueryPlannerError(BridgeErrors),
 
-    /// Query planning had errors: {0}
+    /// query planning had errors: {0}
     PlanningErrors(BridgeErrors),
 
-    /// Query planning panicked: {0}
+    /// query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
-    /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
     EmptyPlan,
 
-    /// Unhandled planner result
+    /// unhandled planner result
     UnhandledPlannerResult,
 
-    /// Router Bridge error: {0}
+    /// router bridge error: {0}
     RouterBridgeError(router_bridge::error::Error),
 }
 
@@ -256,7 +256,7 @@ pub struct BridgeErrors(Arc<Vec<BridgeError>>);
 impl std::fmt::Display for BridgeErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "Bridge errors: {}",
+            "bridge errors: {}",
             self.0
                 .iter()
                 .map(|e| e.to_string())
