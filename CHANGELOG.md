@@ -59,15 +59,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Example of configuration to export an endpoint (configured with the path `/plugins/apollo.telemetry/metrics`) with metrics in `Prometheus` format:
 
   ```yaml
-  plugins:
-    apollo.telemetry:
-      metrics:
-        exporter:
-          prometheus:
-            # By setting this endpoint you enable the prometheus exporter
-            # All our endpoints exposed by plugins are namespaced by the name of the plugin
-            # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
-            endpoint: "/metrics"
+  telemetry:
+    metrics:
+      exporter:
+        prometheus:
+          # By setting this endpoint you enable the prometheus exporter
+          # All our endpoints exposed by plugins are namespaced by the name of the plugin
+          # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+          endpoint: "/metrics"
     ```
 
 - **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
