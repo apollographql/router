@@ -75,7 +75,7 @@ impl QueryPlanner for BridgeQueryPlanner {
         query: String,
         operation: Option<String>,
         _options: QueryPlanOptions,
-    ) -> Result<Arc<QueryPlan>, QueryPlannerError> {
+    ) -> Result<Arc<query_planner::QueryPlan>, QueryPlannerError> {
         let planner_result = self
             .planner
             .plan(query, operation)
@@ -84,30 +84,27 @@ impl QueryPlanner for BridgeQueryPlanner {
             .into_result()
             .map_err(QueryPlannerError::from)?;
 
-        match planner_result {
-            PlannerResult::QueryPlan { node: Some(node) } => Ok(Arc::new(QueryPlan { root: node })),
-            PlannerResult::QueryPlan { node: None } => {
+        match planner_result.plan {
+            QueryPlan { node: Some(node) } => Ok(Arc::new(query_planner::QueryPlan { root: node })),
+            QueryPlan { node: None } => {
                 failfast_debug!("empty query plan");
                 Err(QueryPlannerError::EmptyPlan)
-            }
-            PlannerResult::Other => {
-                failfast_debug!("unhandled planner result");
-                Err(QueryPlannerError::UnhandledPlannerResult)
             }
         }
     }
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannerResult {
+    plan: QueryPlan,
+    usage_reporting_signature: Option<String>,
+}
 /// The root query plan container.
 #[derive(Debug, PartialEq, Deserialize)]
-#[serde(tag = "kind")]
-enum PlannerResult {
-    QueryPlan {
-        /// The hierarchical nodes that make up the query plan
-        node: Option<PlanNode>,
-    },
-    #[serde(other)]
-    Other,
+struct QueryPlan {
+    /// The hierarchical nodes that make up the query plan
+    node: Option<PlanNode>,
 }
 
 #[cfg(test)]
@@ -138,7 +135,7 @@ mod tests {
 
     #[test]
     fn empty_query_plan() {
-        serde_json::from_value::<PlannerResult>(json!({ "kind": "QueryPlan"})).expect(
+        serde_json::from_value::<PlannerResult>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );
