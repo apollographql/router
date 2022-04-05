@@ -181,15 +181,14 @@ impl Plugin for MetricsPlugin {
         let http_counter = self.subgraph_metrics.http_requests_total.clone();
         let http_request_duration = self.subgraph_metrics.http_requests_duration.clone();
         let http_requests_error_total = self.subgraph_metrics.http_requests_error_total.clone();
+        let extension_metric_name = format!("{}_{}", METRICS_REQUEST_TIME, subgraph_name);
+        let extension_metric_name_cloned = extension_metric_name.clone();
 
         service
             .map_request(move |req: SubgraphRequest| {
                 let request_start = SystemTime::now();
                 req.context
-                    .insert(
-                        format!("{}_{}", METRICS_REQUEST_TIME, subgraph_name),
-                        request_start,
-                    )
+                    .insert(extension_metric_name.clone(), request_start)
                     .unwrap();
 
                 req
@@ -198,10 +197,7 @@ impl Plugin for MetricsPlugin {
                 let request_start: SystemTime = from_value(
                     res.context
                         .extensions
-                        .get(&format!(
-                            "{}_{}",
-                            METRICS_REQUEST_TIME, subgraph_name_cloned
-                        ))
+                        .get(&extension_metric_name_cloned)
                         .unwrap()
                         .clone(),
                 )

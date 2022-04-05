@@ -93,53 +93,9 @@ impl HttpServerFactory for WarpHttpServerFactory {
                         .and(warp::path("plugins"))
                         .and(warp::path(plugin_name))
                         .and(warp::host::optional())
+                        .and(warp::header::headers_cloned())
                         .and(warp::body::bytes())
-                        .and_then(
-                            move |path: FullPath,
-                                  handler: Handler,
-                                  authority: Option<Authority>,
-                                  body: Bytes| async move {
-                                let res = handler.oneshot(http_compat::RequestBuilder::new(
-                                        Method::GET,
-                                        Uri::from_str(&format!(
-                                            "http://{}{}",
-                                            authority.unwrap().as_str(),
-                                            path.as_str()
-                                        ))
-                                        .expect(
-                                            "if the authority is some then the URL is valid; qed",
-                                        ),
-                                    )
-                                    .body(body)
-                                    .expect("we know the body is already well formatted because it's coming from warp; qed"))
-                                    .await.map_err(|err| warp::reject::custom(CustomRejection { msg: err.to_string() }))?;
-
-                                let is_json = matches!(res.body(), ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_));
-
-                                let res = res.map(|body| match body {
-                                    ResponseBody::GraphQL(res) => Bytes::from(
-                                        serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    ),
-                                    ResponseBody::RawJSON(res) => Bytes::from(
-                                        serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    ),
-                                    ResponseBody::RawString(res) => Bytes::from(
-                                        serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    ),
-                                    ResponseBody::Text(res) => Bytes::from(res),
-                                });
-
-
-                                if is_json {
-                                    Ok::<_, Rejection>(Box::new(warp::reply::with_header(res.inner, "Content-Type", "application/json")) as Box<dyn Reply>)
-                                } else {
-                                    Ok::<_, Rejection>(Box::new(res.inner) as Box<dyn Reply>)
-                                }
-                            },
-                        )
+                        .and_then(custom_plugin_handler)
                         .boxed();
 
                     acc.or(route).unify().boxed()
@@ -364,6 +320,66 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 actual_listen_address,
             ))
         })
+    }
+}
+
+async fn custom_plugin_handler(
+    path: FullPath,
+    handler: Handler,
+    authority: Option<Authority>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Box<dyn Reply>, Rejection> {
+    let mut req_builder = http_compat::RequestBuilder::new(
+        Method::GET,
+        Uri::from_str(&format!(
+            "http://{}{}",
+            authority.unwrap().as_str(),
+            path.as_str()
+        ))
+        .expect("if the authority is some then the URL is valid; qed"),
+    );
+    for (header_name, header_value) in headers.iter() {
+        req_builder = req_builder.header(header_name.clone(), header_value.clone());
+    }
+
+    let res = handler
+        .oneshot(req_builder.body(body).expect(
+            "we know the body is already well formatted because it's coming from warp; qed",
+        ))
+        .await
+        .map_err(|err| {
+            warp::reject::custom(CustomRejection {
+                msg: err.to_string(),
+            })
+        })?;
+
+    let is_json = matches!(
+        res.body(),
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)
+    );
+
+    let res = res.map(|body| match body {
+        ResponseBody::GraphQL(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawJSON(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawString(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::Text(res) => Bytes::from(res),
+    });
+
+    if is_json {
+        Ok::<_, Rejection>(Box::new(warp::reply::with_header(
+            res.inner,
+            "Content-Type",
+            "application/json",
+        )) as Box<dyn Reply>)
+    } else {
+        Ok::<_, Rejection>(Box::new(res.inner) as Box<dyn Reply>)
     }
 }
 
