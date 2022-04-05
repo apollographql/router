@@ -661,7 +661,8 @@ expression: "&schema"
             "otlp": {
               "type": "object",
               "required": [
-                "endpoint"
+                "endpoint",
+                "timeout"
               ],
               "properties": {
                 "endpoint": {
@@ -790,24 +791,7 @@ expression: "&schema"
                   "nullable": true
                 },
                 "timeout": {
-                  "type": "object",
-                  "required": [
-                    "nanos",
-                    "secs"
-                  ],
-                  "properties": {
-                    "nanos": {
-                      "type": "integer",
-                      "format": "uint32",
-                      "minimum": 0.0
-                    },
-                    "secs": {
-                      "type": "integer",
-                      "format": "uint64",
-                      "minimum": 0.0
-                    }
-                  },
-                  "nullable": true
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
@@ -935,27 +919,18 @@ expression: "&schema"
                   "nullable": true
                 },
                 "sampler": {
-                  "oneOf": [
+                  "anyOf": [
+                    {
+                      "description": "Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
+                      "type": "number",
+                      "format": "double"
+                    },
                     {
                       "type": "string",
                       "enum": [
                         "AlwaysOn",
                         "AlwaysOff"
                       ]
-                    },
-                    {
-                      "description": "Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as zero, but spans may still be sampled if their parent is.",
-                      "type": "object",
-                      "required": [
-                        "TraceIdRatioBased"
-                      ],
-                      "properties": {
-                        "TraceIdRatioBased": {
-                          "type": "number",
-                          "format": "double"
-                        }
-                      },
-                      "additionalProperties": false
                     }
                   ],
                   "nullable": true
