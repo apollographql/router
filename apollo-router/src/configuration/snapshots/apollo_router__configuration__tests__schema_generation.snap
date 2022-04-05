@@ -918,6 +918,10 @@ expression: "&schema"
                   "minimum": 0.0,
                   "nullable": true
                 },
+                "parent_based_sampler": {
+                  "type": "boolean",
+                  "nullable": true
+                },
                 "sampler": {
                   "anyOf": [
                     {

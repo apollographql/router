@@ -79,6 +79,7 @@ mod config {
         pub service_name: Option<String>,
         pub service_namespace: Option<String>,
         pub sampler: Option<SamplerOption>,
+        pub parent_based_sampler: Option<bool>,
         pub max_events_per_span: Option<u32>,
         pub max_attributes_per_span: Option<u32>,
         pub max_links_per_span: Option<u32>,
@@ -160,18 +161,29 @@ mod config {
     impl From<&Trace> for opentelemetry::sdk::trace::Config {
         fn from(config: &Trace) -> Self {
             let mut trace_config = opentelemetry::sdk::trace::config();
-            if let Some(sampler) = config.sampler.clone() {
-                let sampler: opentelemetry::sdk::trace::Sampler = match sampler {
-                    SamplerOption::Always(Sampler::AlwaysOn) => {
-                        opentelemetry::sdk::trace::Sampler::AlwaysOn
-                    }
-                    SamplerOption::Always(Sampler::AlwaysOff) => {
-                        opentelemetry::sdk::trace::Sampler::AlwaysOff
-                    }
-                    SamplerOption::TraceIdRatioBased(ratio) => {
-                        opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
-                    }
-                };
+
+            let sampler = match (&config.sampler, &config.parent_based_sampler) {
+                (Some(SamplerOption::Always(Sampler::AlwaysOn)), Some(true)) => {
+                    Some(parent_based(opentelemetry::sdk::trace::Sampler::AlwaysOn))
+                }
+                (Some(SamplerOption::Always(Sampler::AlwaysOff)), Some(true)) => {
+                    Some(parent_based(opentelemetry::sdk::trace::Sampler::AlwaysOff))
+                }
+                (Some(SamplerOption::TraceIdRatioBased(ratio)), Some(true)) => Some(parent_based(
+                    opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(*ratio),
+                )),
+                (Some(SamplerOption::Always(Sampler::AlwaysOn)), _) => {
+                    Some(opentelemetry::sdk::trace::Sampler::AlwaysOn)
+                }
+                (Some(SamplerOption::Always(Sampler::AlwaysOff)), _) => {
+                    Some(opentelemetry::sdk::trace::Sampler::AlwaysOff)
+                }
+                (Some(SamplerOption::TraceIdRatioBased(ratio)), _) => Some(
+                    opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(*ratio),
+                ),
+                (_, _) => None,
+            };
+            if let Some(sampler) = sampler {
                 trace_config = trace_config.with_sampler(sampler);
             }
             if let Some(n) = config.max_events_per_span {
@@ -222,6 +234,10 @@ mod config {
             trace_config
         }
     }
+}
+
+fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
+    opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 #[derive(Debug)]
