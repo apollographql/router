@@ -468,8 +468,7 @@ mod tests {
         plugin_utils::{MockExecutionService, MockRouterService, RouterResponse},
         Context, DynPlugin, ResponseBody, RouterRequest,
     };
-    use http::Method;
-    use reqwest::Url;
+    use http::{Method, Uri};
     use serde_json::Value;
     use tower::{util::BoxService, Service, ServiceExt};
 
@@ -494,7 +493,7 @@ mod tests {
             )
             .unwrap();
         let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
-        let fake_req = RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        let fake_req = RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .header("X-CUSTOM-HEADER", "CUSTOM_VALUE")
             .body(
                 apollo_router_core::Request::builder()
@@ -567,7 +566,7 @@ mod tests {
             .unwrap();
         let mut router_service =
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
-        let fake_req = RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        let fake_req = RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .header("X-CUSTOM-HEADER", "CUSTOM_VALUE")
             .body(
                 apollo_router_core::Request::builder()

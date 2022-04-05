@@ -4,6 +4,25 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<!-- <THIS IS AN EXAMPLE, DO NOT REMOVE>
+
+# [x.x.x] (unreleased) - 2022-mm-dd
+> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
+## ❗ BREAKING ❗
+## 🚀 Features ( :rocket: )
+## 🐛 Fixes ( :bug: )
+## 🛠 Maintenance ( :hammer_and_wrench: )
+## 📚 Documentation ( :books: )
+## 🐛 Fixes ( :bug: )
+
+## Example section entry format
+
+- **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
+
+  Description! And a link to a [reference](http://url)
+
+</THIS IS AN EXAMPLE, DO NOT REMOVE> -->
+
 <!--# [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
@@ -11,12 +30,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+## 🐛 Fixes
 
-## Example section entry format
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
 
-- **Headline** ([PR #PR_NUMBER](https://github.com/apollographql/router/pull/PR_NUMBER))
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
 
-  Description! And a link to a [reference](http://url)
+
+## 🛠 Maintenance
+
+- **Xtask improvements** ([PR #604](https://github.com/apollographql/router/pull/604))
+
+  The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
+
+- **Switch from reqwest to a Tower client for subgraph services** ([PR #769](https://github.com/apollographql/router/pull/769))
+
+  It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
 
  -->
 
@@ -93,6 +122,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Federated subgraph queries relying on partial or invalid data from previous subgraph queries could result in response failures or empty subgraph queries. The router is now more flexible when selecting data from previous queries, while still keeping a correct form for the final response
 
 ## 🛠 Maintenance
+
 ## 📚 Documentation
 
 <!--# [v0.1.0-preview.1] - 2022-03-23

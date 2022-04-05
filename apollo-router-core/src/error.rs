@@ -271,7 +271,7 @@ pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
     /// URL parse error for subgraph {0}: {1}
-    UrlParse(String, url::ParseError),
+    UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
     /// Parsing error(s).

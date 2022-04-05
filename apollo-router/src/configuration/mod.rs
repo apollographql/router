@@ -411,10 +411,10 @@ mod tests {
     use super::*;
     use apollo_router_core::prelude::*;
     use apollo_router_core::SchemaError;
+    use http::Uri;
     #[cfg(unix)]
     #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
-    use reqwest::Url;
     #[cfg(unix)]
     #[cfg(any(feature = "otlp-grpc"))]
     use schemars::gen::SchemaSettings;
@@ -521,28 +521,28 @@ mod tests {
         .parse()
         .unwrap();
 
-        let subgraphs: HashMap<&String, &Url> = schema.subgraphs().collect();
+        let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            subgraphs.get(&"accounts".to_string()).unwrap().as_str(),
+            subgraphs.get(&"accounts".to_string()).unwrap().to_string(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
         // this should show a warning in logs
         assert_eq!(
-            subgraphs.get(&"inventory".to_string()).unwrap().as_str(),
+            subgraphs.get(&"inventory".to_string()).unwrap().to_string(),
             "http://localhost:4002/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            subgraphs.get(&"products".to_string()).unwrap().as_str(),
+            subgraphs.get(&"products".to_string()).unwrap().to_string(),
             "http://localhost:4003/graphql"
         );
 
         assert_eq!(
-            subgraphs.get(&"reviews".to_string()).unwrap().as_str(),
+            subgraphs.get(&"reviews".to_string()).unwrap().to_string(),
             "http://localhost:4004/graphql"
         );
     }

@@ -20,7 +20,6 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::{Array, KeyValue, Value};
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 use otlp::Tracing;
-use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -33,6 +32,7 @@ use std::str::FromStr;
 use tower::util::BoxService;
 use tower::Layer;
 use tower::{BoxError, ServiceExt};
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]

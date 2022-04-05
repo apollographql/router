@@ -1,8 +1,7 @@
 use super::from_names_and_values;
 use crate::{fetch::OperationKind, http_compat, Context, Object, Request};
 use http::header::{HeaderName, HeaderValue};
-use http::Method;
-use reqwest::Url;
+use http::{Method, Uri};
 use serde_json_bytes::Value;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -30,7 +29,7 @@ impl From<SubgraphRequest> for crate::SubgraphRequest {
             extensions: request.extensions.unwrap_or_default(),
         };
         let mut req_compat: http_compat::Request<Request> =
-            http_compat::RequestBuilder::new(Method::GET, Url::parse("http://default").unwrap())
+            http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://default").unwrap())
                 .body(gql_req)
                 .expect("won't fail because our url is valid; qed");
 

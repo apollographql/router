@@ -10,10 +10,10 @@ pub use self::http::*;
 use super::TraceConfig;
 use crate::configuration::ConfigurationError;
 use opentelemetry_otlp::{Protocol, WithExportConfig};
-use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
