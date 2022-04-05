@@ -201,7 +201,7 @@ async fn queries_should_work_over_get() {
 #[tokio::test]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
-        message :"Value retrieval failed: Query planning had errors: Planning errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
+        message :"value retrieval failed: query planning had errors: bridge errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
 
@@ -487,7 +487,7 @@ async fn setup_router_and_registry() -> (
         builder = builder.with_subgraph_service(name, service);
     }
 
-    let (router, _) = builder.build().await;
+    let (router, _) = builder.build().await.unwrap();
 
     (router, counting_registry)
 }

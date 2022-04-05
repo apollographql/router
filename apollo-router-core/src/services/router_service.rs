@@ -3,9 +3,9 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema,
+    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
+    ExecutionResponse, NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
@@ -233,10 +233,13 @@ impl PluggableRouterServiceBuilder {
 
     pub async fn build(
         mut self,
-    ) -> (
-        BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-        Vec<(String, Box<dyn DynPlugin>)>,
-    ) {
+    ) -> Result<
+        (
+            BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+            Vec<(String, Box<dyn DynPlugin>)>,
+        ),
+        crate::ServiceBuildError,
+    > {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -244,23 +247,23 @@ impl PluggableRouterServiceBuilder {
         // various iterators that we create for folding and leave
         // the plugins in their original order.
 
-        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let query_planner_service = ServiceBuilder::new().buffered().service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(
-                    RouterBridgeQueryPlanner::new(self.schema.clone()),
-                    plan_cache_limit,
-                )
-                .boxed(),
-                |acc, (_, e)| e.query_planning_service(acc),
-            ),
-        );
+
+        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone())
+            .await
+            .map_err(ServiceBuildError::QueryPlannerError)?;
+        let query_planner_service =
+            ServiceBuilder::new()
+                .buffered()
+                .service(self.plugins.iter_mut().rev().fold(
+                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
+                    |acc, (_, e)| e.query_planning_service(acc),
+                ));
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -360,6 +363,6 @@ impl PluggableRouterServiceBuilder {
             DEFAULT_BUFFER_SIZE,
         );
 
-        (router_service.boxed_clone(), self.plugins)
+        Ok((router_service.boxed_clone(), self.plugins))
     }
 }
