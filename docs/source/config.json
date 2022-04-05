@@ -13,7 +13,7 @@
       "CORS": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
-      "OpenTelemetry": "/configuration/opentelemetry",
+      "Tracing": "/configuration/tracing",
       "Traffic shaping": "/configuration/traffic-shaping",
       "Usage reporting": "/configuration/spaceport"
     },
