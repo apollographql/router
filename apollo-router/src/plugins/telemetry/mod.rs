@@ -77,7 +77,7 @@ mod config {
     pub struct Trace {
         pub service_name: Option<String>,
         pub service_namespace: Option<String>,
-        pub sampler: Option<Sampler>,
+        pub sampler: Option<SamplerOption>,
         pub max_events_per_span: Option<u32>,
         pub max_attributes_per_span: Option<u32>,
         pub max_links_per_span: Option<u32>,
@@ -138,16 +138,22 @@ mod config {
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+    #[serde(deny_unknown_fields, untagged)]
+    pub enum SamplerOption {
+        /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
+        /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
+        /// zero, but spans may still be sampled if their parent is.
+        TraceIdRatioBased(f64),
+        Always(Sampler),
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub enum Sampler {
         /// Always sample the trace
         AlwaysOn,
         /// Never sample the trace
         AlwaysOff,
-        /// Sample a given fraction of traces. Fractions >= 1 will always sample. If the parent span is
-        /// sampled, then it's child spans will automatically be sampled. Fractions < 0 are treated as
-        /// zero, but spans may still be sampled if their parent is.
-        TraceIdRatioBased(f64),
     }
 
     impl From<&Trace> for opentelemetry::sdk::trace::Config {
@@ -155,9 +161,13 @@ mod config {
             let mut trace_config = opentelemetry::sdk::trace::config();
             if let Some(sampler) = config.sampler.clone() {
                 let sampler: opentelemetry::sdk::trace::Sampler = match sampler {
-                    Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
-                    Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
-                    Sampler::TraceIdRatioBased(ratio) => {
+                    SamplerOption::Always(Sampler::AlwaysOn) => {
+                        opentelemetry::sdk::trace::Sampler::AlwaysOn
+                    }
+                    SamplerOption::Always(Sampler::AlwaysOff) => {
+                        opentelemetry::sdk::trace::Sampler::AlwaysOff
+                    }
+                    SamplerOption::TraceIdRatioBased(ratio) => {
                         opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
                     }
                 };

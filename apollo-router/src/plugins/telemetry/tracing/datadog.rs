@@ -16,7 +16,7 @@ pub struct Config {
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub enum AgentEndpoint {
     Default(AgentDefault),
-    Socket(Url),
+    Url(Url),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -28,7 +28,7 @@ impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
         let url = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
-            AgentEndpoint::Socket(s) => Some(s),
+            AgentEndpoint::Url(s) => Some(s),
         };
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |b, e| b.with_agent_endpoint(e.to_string()))

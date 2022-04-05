@@ -1,5 +1,5 @@
 ---
-title: OpenTelemetry in the Apollo Router
+title: Tracing in the Apollo Router
 description: Collect tracing information
 ---
 
@@ -8,6 +8,8 @@ import { Link } from "gatsby";
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
 * [Jaeger](https://www.jaegertracing.io/)
+* [Zipkin](https://zipkin.io/)
+* [Datadog](https://www.datadoghq.com/)
 * [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC.
 
 The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
@@ -20,77 +22,101 @@ Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/)
 
 > To get the most out of distributed tracing, _all_ components in your system should be instrumented.
 
-## OpenTracing support
+## Common configuration
 
-Although OpenTelemetry has superseded OpenTracing, you might need to interact with systems that have not yet moved to OpenTelemetry.
-
-If you're using OpenTelemetry throughout your systems and just want to view in [Jaeger](https://www.jaegertracing.io/), you don't need to configure this.
+### Trace config
+The `trace_config` section contains common configuration that will be used in the for all exporters. It is optional and will fall back on env variables as specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
 
 ```yaml title="router.yaml"
-# ...other configuration...
-
 telemetry:
-  # Optional if you want to enable opentracing propagation headers to your subgraphs
-  opentracing:
-    # "zipkin_b3" and "jaeger" formats are supported
-    format: "zipkin_b3"
+  tracing:
+    trace_config:
+      service_name: "${MY_ENV_VARIABLE:router}"
+      service_namespace: "apollo"
+      # Either a float between 0 and 1 or 'AlwaysOn' or 'AlwaysOff'
+      sampler: 0.2
+      
+      # Optional limits 
+      max_attributes_per_event: 10
+      max_attributes_per_link: 10
+      max_attributes_per_span: 10
+      max_events_per_span: 10
+      max_links_per_span: 10
+      
+      # Attributes particular to an exporter that have not
+      # been explicitly handled in Router configuration.
+      attributes: 
+        some.config.attribute: "config value"
+```
 
-  # ...other telemetry configuration...
+If `service_name` is set then environment variables are not used. However, it is possible to embed environment variables into your router config using Unix `${key:default}` syntax.
+
+### Propagation
+
+The `propagation` section allows you to configure which propagators are active in addition to ones automatically activated by virtue of using an exporter.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    propagation:
+      # https://www.w3.org/TR/baggage/
+      baggage: false
+      
+      # https://www.datadoghq.com/
+      datadog: false
+      
+      .# https://www.jaegertracing.io/
+      jaeger: false 
+      
+      # https://www.w3.org/TR/trace-context/
+      trace_context: false
+      
+      # https://zipkin.io/
+      zipkin: false
+      
+    jaeger:
+      .. # Jaeger export configuration, no need to specify Jaeger propagation.
+```
+Specifying explicit propagation is generally only required if you are using an exporter that supports multiple trace ID formats. For example OpenTelemetry collector or Jaeger.
+
+## Using Datadog
+
+The Apollo Router can be configured to connect to either the default agent address or a URL.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    datadog:
+      # Either 'Default' or a URL
+      endpoint: Default
 ```
 
 ## Using Jaeger
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
+### Agent config
 ```yaml title="router.yaml"
 telemetry:
-  opentelemetry:
+  tracing:
     jaeger:
-      # Optional: if not present, jaeger will use the default UDP agent address
-      #endpoint:
-        # address for the UDP agent mode
-        # incomptable with collector
-        # agent: "127.0.0.1:1234"
+      agent:
+        # Either 'Default' or a socket address 
+        endpoint: Default
+      
+```
 
-        # URL of the HTTP collector
-        # collector:" http://example.org"
-        # the username and password are obtained from the environment variables
-        # JAEGER_USERNAME and JAEGER_PASSWORD
+### Collector config
+If you are using Kubernetes then you can inject your secrets into configuration via env variable.
 
-      # Name of the service used in traces
-      # defaults to router
-      service_name: "router"
-
-      trace_config:
-        # Trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-        # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-        # and 1 and decides on trace creation whether it will be recorded.
-        sampler:
-          TraceIdRatioBased: 0.42
-        max_events_per_span: 1
-        max_attributes_per_span: 2
-        max_links_per_span: 3
-        max_attributes_per_event: 4
-        max_attributes_per_link: 5
-        
-        # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[] 
-        attributes:
-          str: "a"
-          int: 1
-          float: 1.0
-          bool: true
-          str_arr:
-            - "a"
-            - "b"
-          int_arr:
-            - 1
-            - 2
-          float_arr:
-            - 1.0
-            - 2.0
-          bool_arr:
-            - true
-            - false
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    jaeger:
+      collector: 
+        endpoint: "http://my-jaeger-collector"
+        username: "${JAEGER_USERNAME}"
+        password: "${JAEGER_PASSWORD}"
 ```
 
 ## OpenTelemetry Collector via OTLP
@@ -101,47 +127,59 @@ If you find that the built-in telemetry features of the Apollo Router are missin
 
 ```yaml title="router.yaml"
 telemetry:
-  # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
-  opentelemetry:
+  tracing:
     otlp:
-      tracing:
-        exporter:
-          # 'http' for OTLP/HTTP, 'grpc' for OTLP/gRPC
-          grpc:
-            # URL of the exporter
-            endpoint: http://example.com
-            # Possible options: 'Grpc' for GRPC protocol and 'HttpBinary' for HTTP protocol with binary protobuf
-            protocol: Grpc
-            # timmeout in seconds
-            timeout: 60
-        trace_config:
-          # trace sampling: possible values are `AlwaysOn`, `AlwaysOff`, or
-          # `TraceIdRatioBased: number`. The ratio sampler takes a value between 0
-          # and 1 and decides on trace creation whether it will be recorded.
-          sampler:
-            TraceIdRatioBased: 0.42
-          max_events_per_span: 1
-          max_attributes_per_span: 2
-          max_links_per_span: 3
-          max_attributes_per_event: 4
-          max_attributes_per_link: 5
-          
-          # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[] 
-          attributes:
-            str: "a"
-            int: 1
-            float: 1.0
-            bool: true
-            str_arr:
-              - "a"
-              - "b"
-            int_arr:
-              - 1
-              - 2
-            float_arr:
-              - 1.0
-              - 2.0
-            bool_arr:
-              - true
-              - false
+      # Either Default or a URL
+      endpoint: Default
+      
+      # The protocol (Defaults to Grpc)
+      protocol: Grpc
+      
+      # Optional Grpc configuration
+      grpc:
+        domain_name: "my.domain"
+        key:
+          file: ""
+          # env: ""
+        ca:
+          file: ""
+          # env: ""
+        cert:
+          file: ""
+          # env: ""
+        metadata:
+          foo: bar
+      
+      # Optional Http configuration
+      http:
+        headers:
+          foo: bar   
+      
+      # Optional timeout in humatime form       
+      timeout: 2s
+
+```
+
+
+## Using Zipkin
+
+The Apollo Router can be configured to export tracing data to Zipkin either via an agent or http collector.
+
+### Agent config
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      agent:
+        # Either 'Default' or a socket address 
+        endpoint: Default
+```
+
+### Collector config
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      collector: 
+        endpoint: "http://my-zipkin-collector"
 ```

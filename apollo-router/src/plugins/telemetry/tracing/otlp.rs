@@ -22,6 +22,9 @@ use self::http::*;
 pub struct Config {
     pub endpoint: Endpoint,
     pub protocol: Option<Protocol>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
     pub timeout: Option<Duration>,
     #[cfg(feature = "otlp-grpc")]
     pub grpc: Option<GrpcExporter>,
