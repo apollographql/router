@@ -2,7 +2,6 @@
 source: apollo-router/tests/integration_tests.rs
 assertion_line: 141
 expression: get_spans()
-
 ---
 {
   "name": "integration_tests::root",
@@ -35,15 +34,15 @@ expression: get_spans()
       },
       "children": {}
     },
-    "apollo_router_core::query_planner::router_bridge_query_planner::plan": {
-      "name": "apollo_router_core::query_planner::router_bridge_query_planner::plan",
+    "apollo_router_core::query_planner::bridge_query_planner::plan": {
+      "name": "apollo_router_core::query_planner::bridge_query_planner::plan",
       "record": {
         "entries": [],
         "metadata": {
           "name": "plan",
-          "target": "apollo_router_core::query_planner::router_bridge_query_planner",
+          "target": "apollo_router_core::query_planner::bridge_query_planner",
           "level": "INFO",
-          "module_path": "apollo_router_core::query_planner::router_bridge_query_planner",
+          "module_path": "apollo_router_core::query_planner::bridge_query_planner",
           "fields": {
             "names": []
           }

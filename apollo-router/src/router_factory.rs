@@ -160,7 +160,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         //
         // This is because our tracing configuration is initialized by
         // the startup() method of our Reporting plugin.
-        let (pluggable_router_service, plugins) = builder.build().await;
+        let (pluggable_router_service, plugins) = builder.build().await?;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let service = ServiceBuilder::new().buffer(20_000).service(
             pluggable_router_service
