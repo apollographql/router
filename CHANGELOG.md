@@ -55,6 +55,16 @@ We reworked the way query plans are generated before being cached, which lead to
  # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+- **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
+
+  While displaying a landing page could be useful in development, we might not want to display it,
+  so the router can be configured to not display any landing page:
+  ```yaml
+  server:
+    landing_page: false
+  ```
+
 - **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
 
   The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.

@@ -102,14 +102,15 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 },
             );
 
-            let routes = get_graphql_request_or_redirect(service.clone())
-                .or(post_graphql_request(service.clone()))
-                .or(plugin_routes)
-                .with(cors)
-                .with(with::default_header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("application/json"),
-                ));
+            let routes =
+                get_graphql_request_or_redirect(service.clone(), configuration.server.landing_page)
+                    .or(post_graphql_request(service.clone()))
+                    .or(plugin_routes)
+                    .with(cors)
+                    .with(with::default_header(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/json"),
+                    ));
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
@@ -385,6 +386,7 @@ async fn custom_plugin_handler(
 
 fn get_graphql_request_or_redirect<RS>(
     service: RS,
+    display_landing_page: bool,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -412,24 +414,25 @@ where
                   path: FullPath| {
                 let service = service.clone();
                 async move {
-                    let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                        display_home_page()
-                    } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-                        run_graphql_request(
-                            service,
-                            authority,
-                            http::Method::GET,
-                            path,
-                            request,
-                            header_map,
-                        )
-                        .await
-                    } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid GraphQL request",
-                            StatusCode::BAD_REQUEST,
-                        ))
-                    };
+                    let reply: Box<dyn Reply> =
+                        if accept.map(prefers_html).unwrap_or_default() && display_landing_page {
+                            display_home_page()
+                        } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
+                            run_graphql_request(
+                                service,
+                                authority,
+                                http::Method::GET,
+                                path,
+                                request,
+                                header_map,
+                            )
+                            .await
+                        } else {
+                            Box::new(warp::reply::with_status(
+                                "Invalid GraphQL request",
+                                StatusCode::BAD_REQUEST,
+                            ))
+                        };
 
                     Ok::<_, warp::reject::Rejection>(reply)
                 }
