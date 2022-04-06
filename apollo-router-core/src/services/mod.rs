@@ -13,6 +13,7 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
@@ -23,6 +24,8 @@ pub mod http_compat;
 mod router_service;
 mod tower_subgraph_service;
 pub use tower_subgraph_service::TowerSubgraphService;
+
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
@@ -38,6 +41,7 @@ pub enum ResponseBody {
     GraphQL(Response),
     RawJSON(serde_json::Value),
     RawString(String),
+    Text(String),
 }
 
 impl TryFrom<ResponseBody> for Response {
@@ -52,6 +56,7 @@ impl TryFrom<ResponseBody> for Response {
             ResponseBody::RawString(_) => {
                 Err("wrong ResponseBody kind: expected Response, found RawString")
             }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
         }
     }
 }
@@ -68,6 +73,7 @@ impl TryFrom<ResponseBody> for String {
                 Err("wrong ResponseBody kind: expected RawString, found GraphQL")
             }
             ResponseBody::RawString(res) => Ok(res),
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawString, found Text"),
         }
     }
 }
@@ -84,6 +90,7 @@ impl TryFrom<ResponseBody> for serde_json::Value {
             ResponseBody::RawString(_) => {
                 Err("wrong ResponseBody kind: expected RawJSON, found RawString")
             }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
         }
     }
 }
@@ -236,6 +243,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 
@@ -243,5 +251,9 @@ pub trait ServiceBuilderExt<L>: Sized {
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
         ServiceBuilder::layer(self, layer)
+    }
+
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
+        self.buffer(DEFAULT_BUFFER_SIZE)
     }
 }

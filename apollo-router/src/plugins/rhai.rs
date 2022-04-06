@@ -530,7 +530,7 @@ mod tests {
                     );
                 }
             }
-            ResponseBody::RawJSON(_) | ResponseBody::RawString(_) => {
+            _ => {
                 panic!("should not be this kind of response")
             }
         }

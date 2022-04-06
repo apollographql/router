@@ -42,7 +42,7 @@ humantime = "2.1.0"
 hyper = { version = "0.14.18", features = ["server"] }
 itertools = "0.10.3"
 once_cell = "1.9.0"
-opentelemetry = { version = "0.17.0", features = ["rt-tokio", "serialize"] }
+opentelemetry = { version = "0.17.0", features = ["rt-tokio", "serialize", "metrics"] }
 opentelemetry-jaeger = { version = "0.16.0", features = [
     "collector_client",
     "reqwest_collector_client",
@@ -50,7 +50,10 @@ opentelemetry-jaeger = { version = "0.16.0", features = [
 ] }
 opentelemetry-otlp = { version = "0.10.0", default-features = false, features = [
     "serialize",
+    "metrics"
 ], optional = true }
+opentelemetry-prometheus = "0.10.0"
+prometheus = "0.13"
 prost-types = "0.9.0"
 regex = "1.5.4"
 reqwest = { version = "0.11.10", features = ["json", "stream"] }
