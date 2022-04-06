@@ -32,35 +32,35 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   ```yaml
   telemetry:
-  apollo:
-    endpoint:
-    apollo_graph_ref:
-    apollo_key:
-  tracing:
-    propagation:
-      # Propagation is automatically enabled for any exporters that are enabled,
-      # but you can enable extras. This is mostly to support otlp.
-      zipkin: true
-      datadog: false
-      trace_context: false
-      jaeger: false
-      baggage: false
-
-    otlp:
-      endpoint: Default
-      protocol: Grpc
-      http:
-        ..
-      grpc:
-        ..
-    zipkin:
-      agent:
+    apollo:
+      endpoint:
+      apollo_graph_ref:
+      apollo_key:
+    tracing:
+      propagation:
+        # Propagation is automatically enabled for any exporters that are enabled,
+        # but you can enable extras. This is mostly to support otlp.
+        zipkin: true
+        datadog: false
+        trace_context: false
+        jaeger: false
+        baggage: false
+  
+      otlp:
         endpoint: Default
-    jaeger:
-      agent:
+        protocol: Grpc
+        http:
+          ..
+        grpc:
+          ..
+      zipkin:
+        agent:
+          endpoint: Default
+      jaeger:
+        agent:
+          endpoint: Default
+      datadog:
         endpoint: Default
-    datadog:
-      endpoint: Default
   ```
 
 ## 🚀 Features
