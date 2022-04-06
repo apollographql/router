@@ -366,7 +366,7 @@ impl Plugin for Telemetry {
         let tracer_provider = self
             .tracer_provider
             .take()
-            .expect("trace provider should have been set");
+            .expect("trace_provider will have been set in startup, qed");
 
         let tracer = tracer_provider.versioned_tracer(
             "apollo-router",
@@ -377,9 +377,10 @@ impl Plugin for Telemetry {
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
         Self::flush_tracer();
-        replace_layer(Box::new(telemetry)).expect("could not replace telemetry layer");
+        replace_layer(Box::new(telemetry))
+            .expect("set_global_subscriber() was not called at startup, fatal");
         opentelemetry::global::set_error_handler(handle_error)
-            .expect("could not replace telemetry error handler");
+            .expect("otel error handler lock poisoned, fatal");
         global::set_text_map_propagator(Self::create_propagator(&self.config));
     }
 
