@@ -7,21 +7,28 @@ pub mod zipkin;
 
 #[cfg(test)]
 mod test {
+    use http::{Method, Request, Uri};
+    use opentelemetry::global;
+    use opentelemetry_http::HttpClient;
     use tracing::{info_span, Instrument};
-
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
     pub async fn run_query() {
         let span = info_span!("client_request");
-        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(reqwest_tracing::TracingMiddleware)
-            .build();
+        let client = reqwest::Client::new();
 
-        client
-            .post("http://localhost:4000")
-            .header("test", "Boo")
-            .body(r#"{"query":"query {\n  topProducts {\n    name\n  }\n}","variables":{}}"#)
-            .send()
-            .instrument(span)
-            .await
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri(Uri::from_static("http://localhost:4000"))
+            .body(r#"{"query":"query {\n  topProducts {\n    name\n  }\n}","variables":{}}"#.into())
             .unwrap();
+
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &span.context(),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            )
+        });
+
+        client.send(request).instrument(span).await.unwrap();
     }
 }
