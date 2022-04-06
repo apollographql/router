@@ -353,10 +353,8 @@ mod tests {
     use apollo_router_core::SchemaError;
     use http::Uri;
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
     use schemars::gen::SchemaSettings;
     use std::collections::HashMap;
 
@@ -370,7 +368,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[cfg(all(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft2019_09().with(|s| {
@@ -396,33 +393,28 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_jaeger_full.yml");
     }
 
-    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn ensure_configuration_api_does_not_change_common() {
         // NOTE: don't take a snapshot here because the optional fields appear with ~ and they vary
         // per implementation
 
-        #[cfg(feature = "otlp-http")]
         serde_yaml::from_str::<Configuration>(include_str!(
             "testdata/config_opentelemetry_otlp_tracing_http_common.yml"
         ))
         .unwrap();
 
-        #[cfg(feature = "otlp-grpc")]
         serde_yaml::from_str::<Configuration>(include_str!(
             "testdata/config_opentelemetry_otlp_tracing_grpc_common.yml"
         ))
         .unwrap();
     }
 
-    #[cfg(feature = "otlp-grpc")]
     #[test]
     fn ensure_configuration_api_does_not_change_grpc() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_basic.yml");
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_full.yml");
     }
 
-    #[cfg(feature = "otlp-http")]
     #[test]
     fn ensure_configuration_api_does_not_change_http() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_basic.yml");

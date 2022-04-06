@@ -6,7 +6,7 @@ use xtask::*;
 
 const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked", "--no-default-features"];
 
-const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[]];
+const FEATURE_SETS: &[&[&str]] = &[&[]];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {

@@ -2,7 +2,6 @@ pub mod apollo;
 pub mod apollo_telemetry;
 pub mod datadog;
 pub mod jaeger;
-#[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub mod otlp;
 pub mod zipkin;
 

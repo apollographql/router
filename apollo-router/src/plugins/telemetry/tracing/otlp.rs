@@ -1,7 +1,6 @@
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::{GenericWith, TracingConfigurator};
-#[cfg(feature = "otlp-grpc")]
 use grpc::*;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry_otlp::{SpanExporterBuilder, WithExportConfig};
@@ -14,7 +13,6 @@ use std::time::Duration;
 use tower::BoxError;
 use url::Url;
 
-#[cfg(feature = "otlp-http")]
 use self::http::*;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -26,9 +24,7 @@ pub struct Config {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub timeout: Option<Duration>,
-    #[cfg(feature = "otlp-grpc")]
     pub grpc: Option<GrpcExporter>,
-    #[cfg(feature = "otlp-http")]
     pub http: Option<HttpExporter>,
 }
 
@@ -44,7 +40,6 @@ pub enum EndpointDefault {
     Default,
 }
 
-#[cfg(feature = "otlp-http")]
 mod http {
     use super::*;
     #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -54,14 +49,12 @@ mod http {
     }
 }
 
-#[cfg(feature = "otlp-grpc")]
 mod grpc {
     use super::*;
     use serde_json::Value;
     use tonic::metadata::MetadataMap;
     use tonic::transport::ClientTlsConfig;
 
-    #[cfg(feature = "otlp-grpc")]
     #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct GrpcExporter {
@@ -206,23 +199,16 @@ impl Secret {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub enum Protocol {
-    #[cfg(feature = "otlp-grpc")]
     Grpc,
-    #[cfg(feature = "otlp-http")]
     Http,
 }
 
 impl Default for Protocol {
     fn default() -> Self {
-        vec![
-            #[cfg(feature = "otlp-grpc")]
-            Protocol::Grpc,
-            #[cfg(feature = "otlp-http")]
-            Protocol::Http,
-        ]
-        .get(0)
-        .expect("at least one feature must be present for otel, qed")
-        .clone()
+        vec![Protocol::Grpc, Protocol::Http]
+            .get(0)
+            .expect("at least one feature must be present for otel, qed")
+            .clone()
     }
 }
 
@@ -234,7 +220,6 @@ impl TracingConfigurator for Config {
             Endpoint::Url(s) => Some(s),
         };
         match self.protocol.clone().unwrap_or_default() {
-            #[cfg(feature = "otlp-grpc")]
             Protocol::Grpc => {
                 let grpc = self.grpc.clone().unwrap_or_default();
                 let exporter: SpanExporterBuilder = opentelemetry_otlp::new_exporter()
@@ -253,7 +238,6 @@ impl TracingConfigurator for Config {
                     opentelemetry::runtime::Tokio,
                 ))
             }
-            #[cfg(feature = "otlp-http")]
             Protocol::Http => {
                 let http = self.http.clone().unwrap_or_default();
                 let exporter: SpanExporterBuilder = opentelemetry_otlp::new_exporter()
@@ -273,7 +257,6 @@ impl TracingConfigurator for Config {
 }
 
 #[cfg(test)]
-#[cfg(feature = "otlp-http")]
 mod tests {
     use crate::plugins::telemetry::tracing::test::run_query;
     use opentelemetry::global;

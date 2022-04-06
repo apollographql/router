@@ -3008,9 +3008,7 @@ dependencies = [
  "opentelemetry-http",
  "prost",
  "prost-build",
- "serde",
  "thiserror",
- "tokio",
  "tonic",
  "tonic-build",
 ]
