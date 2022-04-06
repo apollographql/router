@@ -24,15 +24,15 @@ use url::Url;
 pub mod metrics;
 pub mod tracing;
 
-struct Telemetry {
+pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
 }
-mod config {
+pub mod config {
     use super::*;
 
-    #[derive(Clone, Debug, Deserialize, JsonSchema)]
+    #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields, rename_all = "snake_case")]
     pub struct Conf {
         #[allow(dead_code)]

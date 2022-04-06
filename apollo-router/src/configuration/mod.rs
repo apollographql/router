@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
+    #[cfg(all(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft2019_09().with(|s| {

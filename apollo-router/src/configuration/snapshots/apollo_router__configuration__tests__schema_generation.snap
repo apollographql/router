@@ -783,10 +783,25 @@ expression: "&schema"
                   "additionalProperties": false,
                   "nullable": true
                 },
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
                 "protocol": {
                   "type": "string",
                   "enum": [
-                    "Grpc"
+                    "Grpc",
+                    "Http"
                   ],
                   "nullable": true
                 },
