@@ -36,6 +36,7 @@ pub enum Endpoint {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum EndpointDefault {
     Default,
 }
@@ -198,6 +199,7 @@ impl Secret {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Protocol {
     Grpc,
     Http,

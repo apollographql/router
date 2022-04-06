@@ -47,20 +47,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
         baggage: false
   
       otlp:
-        endpoint: Default
-        protocol: Grpc
+        endpoint: default
+        protocol: grpc
         http:
           ..
         grpc:
           ..
       zipkin:
         agent:
-          endpoint: Default
+          endpoint: default
       jaeger:
         agent:
-          endpoint: Default
+          endpoint: default
       datadog:
-        endpoint: Default
+        endpoint: default
   ```
 
 ## 🚀 Features

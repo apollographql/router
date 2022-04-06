@@ -91,8 +91,8 @@ The Apollo Router can be configured to connect to either the default agent addre
 telemetry:
   tracing:
     datadog:
-      # Either 'Default' or a URL
-      endpoint: Default
+      # Either 'default' or a URL
+      endpoint: default
 ```
 
 ## Using Jaeger
@@ -105,8 +105,8 @@ telemetry:
   tracing:
     jaeger:
       agent:
-        # Either 'Default' or a socket address 
-        endpoint: Default
+        # Either 'default' or a socket address 
+        endpoint: default
       
 ```
 
@@ -133,11 +133,11 @@ If you find that the built-in telemetry features of the Apollo Router are missin
 telemetry:
   tracing:
     otlp:
-      # Either Default or a URL
-      endpoint: Default
+      # Either 'default' or a URL
+      endpoint: default
       
-      # The protocol (Defaults to Grpc)
-      protocol: Grpc
+      # The protocol (Defaults to grpc)
+      protocol: grpc
       
       # Optional Grpc configuration
       grpc:
@@ -175,8 +175,8 @@ telemetry:
   tracing:
     zipkin:
       agent:
-        # Either 'Default' or a socket address 
-        endpoint: Default
+        # Either 'default' or a socket address 
+        endpoint: default
 ```
 
 ### Collector config
