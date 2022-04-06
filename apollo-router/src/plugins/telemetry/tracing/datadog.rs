@@ -26,6 +26,7 @@ pub enum AgentDefault {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+        tracing::debug!("configuring Datadog tracing");
         let url = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(s) => Some(s),

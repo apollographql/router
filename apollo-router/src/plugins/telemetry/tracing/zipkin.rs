@@ -35,6 +35,7 @@ pub enum AgentDefault {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+        tracing::debug!("configuring Zipkin tracing");
         let exporter = match &self.endpoint {
             Endpoint::Agent { endpoint } => {
                 let socket = match endpoint {

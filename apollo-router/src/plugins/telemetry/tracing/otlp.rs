@@ -228,6 +228,7 @@ impl Default for Protocol {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, _trace_config: &Trace) -> Result<Builder, BoxError> {
+        tracing::debug!("configuring Otlp tracing");
         let endpoint = match &self.endpoint {
             Endpoint::Default(_) => None,
             Endpoint::Url(s) => Some(s),

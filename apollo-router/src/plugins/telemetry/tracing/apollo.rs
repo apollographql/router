@@ -18,6 +18,7 @@ pub struct Config {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+        tracing::debug!("configuring Apollo tracing");
         Ok(match self {
             Config {
                 endpoint: Some(endpoint),
