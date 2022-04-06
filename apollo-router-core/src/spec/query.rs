@@ -180,7 +180,7 @@ impl Query {
                 _ => Ok(()),
             },
 
-            FieldType::Named(type_name) => {
+            FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
@@ -593,6 +593,10 @@ impl Query {
             Err(Response::builder().errors(errors).build())
         }
     }
+
+    pub fn contains_introspection(&self) -> bool {
+        self.operations.iter().any(Operation::is_introspection)
+    }
 }
 
 #[derive(Debug)]
@@ -664,6 +668,13 @@ impl Operation {
             name,
             variables,
             kind,
+        })
+    }
+
+    fn is_introspection(&self) -> bool {
+        self.selection_set.iter().any(|sel| match sel {
+            Selection::Field { name, .. } => name.as_str().starts_with("__"),
+            _ => false,
         })
     }
 }

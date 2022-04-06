@@ -7,6 +7,8 @@ pub(crate) struct InvalidValue;
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FieldType {
+    /// Only used for introspection queries when types are prefixed by __
+    Introspection(String),
     Named(String),
     List(Box<FieldType>),
     NonNull(Box<FieldType>),
@@ -94,7 +96,7 @@ impl FieldType {
     /// Example if we get the field `list: [User!]!`, it will return "User"
     pub fn inner_type_name(&self) -> Option<&str> {
         match self {
-            FieldType::Named(name) => Some(name.as_str()),
+            FieldType::Named(name) | FieldType::Introspection(name) => Some(name.as_str()),
             FieldType::List(inner) | FieldType::NonNull(inner) => inner.inner_type_name(),
             FieldType::String
             | FieldType::Int
@@ -106,7 +108,10 @@ impl FieldType {
 
     pub fn is_builtin_scalar(&self) -> bool {
         match self {
-            FieldType::Named(_) | FieldType::List(_) | FieldType::NonNull(_) => false,
+            FieldType::Named(_)
+            | FieldType::Introspection(_)
+            | FieldType::List(_)
+            | FieldType::NonNull(_) => false,
             FieldType::String
             | FieldType::Int
             | FieldType::Float

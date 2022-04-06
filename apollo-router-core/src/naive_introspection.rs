@@ -1,8 +1,9 @@
 use crate::prelude::graphql::*;
 use include_dir::include_dir;
 use once_cell::sync::Lazy;
-use router_bridge::introspect;
+use router_bridge::introspect::{self, IntrospectionError};
 use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 /// KNOWN_INTROSPECTION_QUERIES we will serve through NaiveIntrospection.
 ///
@@ -24,22 +25,24 @@ static KNOWN_INTROSPECTION_QUERIES: Lazy<Vec<String>> = Lazy::new(|| {
 });
 
 /// A cache containing our well known introspection queries.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NaiveIntrospection {
-    cache: HashMap<String, Response>,
+    cache: RwLock<HashMap<String, Response>>,
 }
 
 impl NaiveIntrospection {
     #[cfg(test)]
     pub fn from_cache(cache: HashMap<String, Response>) -> Self {
-        Self { cache }
+        Self {
+            cache: RwLock::new(cache),
+        }
     }
 
     /// Create a `NaiveIntrospection` from a `Schema`.
     ///
     /// This function will populate a cache in a blocking manner.
     /// This is why `NaiveIntrospection` instanciation happens in a spawn_blocking task on the state_machine side.
-    pub fn from_schema(schema: &Schema) -> Self {
+    pub async fn from_schema(schema: &Schema) -> Self {
         let span = tracing::trace_span!("naive_introspection_population");
         let _guard = span.enter();
 
@@ -86,12 +89,55 @@ impl NaiveIntrospection {
         })
         .unwrap_or_default();
 
-        Self { cache }
+        Self {
+            cache: RwLock::new(cache),
+        }
     }
 
     /// Get a cached response for a query.
-    pub fn get(&self, query: &str) -> Option<Response> {
-        self.cache.get(query).map(std::clone::Clone::clone)
+    pub async fn get(&self, query: &str) -> Option<Response> {
+        self.cache
+            .read()
+            .await
+            .get(query)
+            .map(std::clone::Clone::clone)
+    }
+
+    /// Execute an introspection and cache the response.
+    pub async fn execute(
+        &self,
+        schema_sdl: &str,
+        query: &str,
+    ) -> Result<Response, IntrospectionError> {
+        // Do the introspection query and cache it
+        let mut response = introspect::batch_introspect(schema_sdl, vec![query.to_owned()])
+            .map_err(|err| IntrospectionError {
+                message: format!("Deno runtime error: {:?}", err).into(),
+            })??;
+        let introspection_result = response
+            .pop()
+            .ok_or_else(|| IntrospectionError {
+                message: String::from("cannot find the introspection response").into(),
+            })?
+            .into_result()
+            .map_err(|err| IntrospectionError {
+                message: format!(
+                    "introspection error : {}",
+                    err.into_iter()
+                        .map(|err| err.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                )
+                .into(),
+            })?;
+        let response = Response::builder().data(introspection_result).build();
+
+        self.cache
+            .write()
+            .await
+            .insert(query.to_string(), response.clone());
+
+        Ok(response)
     }
 }
 
@@ -99,8 +145,8 @@ impl NaiveIntrospection {
 mod naive_introspection_tests {
     use super::*;
 
-    #[test]
-    fn test_plan() {
+    #[tokio::test]
+    async fn test_plan() {
         let query_to_test = "this is a test query";
         let expected_data = Response::builder()
             .data(serde_json::Value::Number(42.into()))
@@ -114,7 +160,7 @@ mod naive_introspection_tests {
 
         assert_eq!(
             expected_data,
-            naive_introspection.get(query_to_test).unwrap()
+            naive_introspection.get(query_to_test).await.unwrap()
         );
     }
 
