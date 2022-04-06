@@ -1,35 +1,17 @@
-"Exposes a URL that specifies the behaviour of this scalar."
-directive @specifiedBy("The URL that specifies the behaviour of this scalar." url: String!) on SCALAR
 type FetchError {
   code: FetchErrorCode!
   message: String!
   "Minimum delay before the next fetch should occur, in seconds."
   minDelaySeconds: Float!
 }
-enum FetchErrorCode {
-  "This token provided is not a valid graph token. Do not retry"
-  AUTHENTICATION_FAILED
-  "This token does not have access to fetch the schema for this ref. Do not retry."
-  ACCESS_DENIED
-  "The graphRef passed is not a valid ref or no configuration for that ref is found. Do not retry"
-  UNKNOWN_REF
-  "An internal server error occurred. Please retry with some backoff"
-  RETRY_LATER
-}
 type Message {
   level: MessageLevel!
   body: String!
-}
-enum MessageLevel {
-  ERROR
-  WARN
-  INFO
 }
 type Query {
   "Fetch the configuration for a router. If a valid configuration is available, it will be readable as cSDL."
   routerConfig("The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)." ref: String!, apiKey: String!, "When specified and the result is not newer, `Unchanged` is returned rather `RouterConfigResult`." ifAfterId: ID): RouterConfigResponse!
 }
-union RouterConfigResponse = RouterConfigResult | Unchanged | FetchError
 type RouterConfigResult {
   "Variant-unique identifier."
   id: ID!
@@ -47,3 +29,21 @@ type Unchanged {
   "Minimum delay before the next fetch should occur, in seconds."
   minDelaySeconds: Float!
 }
+union RouterConfigResponse = RouterConfigResult | Unchanged | FetchError
+enum FetchErrorCode {
+  "This token provided is not a valid graph token. Do not retry"
+  AUTHENTICATION_FAILED
+  "This token does not have access to fetch the schema for this ref. Do not retry."
+  ACCESS_DENIED
+  "The graphRef passed is not a valid ref or no configuration for that ref is found. Do not retry"
+  UNKNOWN_REF
+  "An internal server error occurred. Please retry with some backoff"
+  RETRY_LATER
+}
+enum MessageLevel {
+  ERROR
+  WARN
+  INFO
+}
+"Exposes a URL that specifies the behaviour of this scalar."
+directive @specifiedBy("The URL that specifies the behaviour of this scalar." url: String!) on SCALAR
