@@ -66,6 +66,7 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
 
 /// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
     type Config: JsonSchema + DeserializeOwned;
@@ -117,9 +118,10 @@ pub trait Plugin: Send + Sync + 'static + Sized {
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only specific subgraphs.
     fn subgraph_service(
         &mut self,
-        _name: &str,
+        _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
@@ -142,6 +144,7 @@ fn get_type_of<T>(_: &T) -> &'static str {
 
 /// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
     /// Plugins will receive a notification that they should start up and shut down.
@@ -177,9 +180,10 @@ pub trait DynPlugin: Send + Sync + 'static {
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only on specific subgraphs.
     fn subgraph_service(
         &mut self,
-        _name: &str,
+        _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
 
