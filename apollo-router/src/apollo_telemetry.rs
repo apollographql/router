@@ -1,9 +1,9 @@
 //! # Apollo-Telemetry Span Exporter
 //!
-//! The apollo-telemetry [`SpanExporter`] sends [`Reports`]s to its configured
+//! The apollo-telemetry [`SpanExporter`] sends [`Report`]s to its configured
 //! [`Reporter`] instance. By default it will write to the Apollo Ingress.
 //!
-//! [`SpanExporter`]: super::SpanExporter
+//! [`SpanExporter`]: SpanExporter
 //! [`Span`]: crate::trace::Span
 //! [`Report`]: apollo_spaceport::report::Report
 //! [`Reporter`]: apollo_spaceport::Reporter
