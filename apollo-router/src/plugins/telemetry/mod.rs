@@ -377,16 +377,7 @@ impl Plugin for Telemetry {
 
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        // This code will hang unless we execute from a separate
-        // thread.  See:
-        // https://github.com/apollographql/router/issues/331
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
-        // for more details and description.
-        let jh = tokio::task::spawn_blocking(|| {
-            opentelemetry::global::force_flush_tracer_provider();
-            opentelemetry::global::set_tracer_provider(tracer_provider);
-        });
-        futures::executor::block_on(jh).expect("could not flush previous tracer");
+        Self::flush_tracer();
         replace_layer(Box::new(telemetry)).expect("could not replace telemetry layer");
         opentelemetry::global::set_error_handler(handle_error)
             .expect("could not replace telemetry error handler");
@@ -394,6 +385,7 @@ impl Plugin for Telemetry {
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
+        Self::flush_tracer();
         if let Some(sender) = self.spaceport_shutdown.take() {
             let _ = sender.send(());
         }
@@ -463,6 +455,18 @@ impl Telemetry {
         builder = setup(builder, &config.apollo, trace_config)?;
         let tracer_provider = builder.build();
         Ok(tracer_provider)
+    }
+
+    fn flush_tracer() {
+        // This code will hang unless we execute from a separate
+        // thread.  See:
+        // https://github.com/apollographql/router/issues/331
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
+        // for more details and description.
+        let jh = tokio::task::spawn_blocking(|| {
+            opentelemetry::global::force_flush_tracer_provider();
+        });
+        futures::executor::block_on(jh).expect("could not flush previous tracer");
     }
 }
 
