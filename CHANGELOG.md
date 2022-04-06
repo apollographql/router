@@ -68,6 +68,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   See the docs for more examples.
 
 ## 🐛 Fixes
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
+
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
+
 - **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
 
   Before this fix, if you wrote a query with only whitespaces inside, it wasn't detected as an empty query.
@@ -78,10 +82,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 
 ## 🛠 Maintenance
-- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
-
-  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
-
 - **A faster Query planner** ([PR #768](https://github.com/apollographql/router/pull/768))
 
   We reworked the way query plans are generated before being cached, which lead to a great performance improvement. Moreover, the router is able to make sure the schema is valid at startup and on schema update, before you query it.
