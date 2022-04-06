@@ -39,7 +39,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     tracing:
       propagation:
         # Propagation is automatically enabled for any exporters that are enabled,
-        # but you can enable extras. This is mostly to support otlp.
+        # but you can enable extras. This is mostly to support otlp and opentracing.
         zipkin: true
         datadog: false
         trace_context: false
