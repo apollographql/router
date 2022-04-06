@@ -80,7 +80,7 @@ fn from_elem(c: &mut Criterion) {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        let (router, _) = runtime.block_on(builder.build());
+        let (router, _) = runtime.block_on(builder.build()).unwrap();
         b.to_async(runtime)
             .iter(|| basic_composition_benchmark(router.clone()));
     });

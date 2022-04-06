@@ -32,10 +32,30 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd
+# [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+- **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
 
+  The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
+
+  Example of configuration to export an endpoint (configured with the path `/plugins/apollo.telemetry/metrics`) with metrics in `Prometheus` format:
+
+  ```yaml
+  telemetry:
+    metrics:
+      exporter:
+        prometheus:
+          # By setting this endpoint you enable the prometheus exporter
+          # All our endpoints exposed by plugins are namespaced by the name of the plugin
+          # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+          endpoint: "/metrics"
+    ```
+
+- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
+
+  The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
+  
 - **configurable subgraph error redaction** ([797](https://github.com/apollographql/router/issues/797))
   By default, subgraph errors are not propagated to the user. This experimental plugin allows messages to be propagated either for all subgraphs or on
   an individual subgraph basis. Individual subgraph configuration overrides the default (all) configuration. The configuration mechanism is similar
@@ -48,12 +68,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   See the docs for more examples.
 
 ## 🐛 Fixes
-## 🛠 Maintenance
+- **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
 
+  Before this fix, if you wrote a query with only whitespaces inside, it wasn't detected as an empty query.
+
+- **Keep the original context in `RouterResponse` when returning an error** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  This fix keeps the original http request in `RouterResponse` when there is an error.
+
+
+## 🛠 Maintenance
 - **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
 
   The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
 
+- **A faster Query planner** ([PR #768](https://github.com/apollographql/router/pull/768))
+
+  We reworked the way query plans are generated before being cached, which lead to a great performance improvement. Moreover, the router is able to make sure the schema is valid at startup and on schema update, before you query it.
 
 - **Xtask improvements** ([PR #604](https://github.com/apollographql/router/pull/604))
 

@@ -7,7 +7,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 
 use crate::deduplication::QueryDeduplicationLayer;
 use crate::plugin::Plugin;
-use crate::{register_plugin, SubgraphRequest, SubgraphResponse};
+use crate::{register_plugin, ServiceBuilderExt, SubgraphRequest, SubgraphResponse};
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 struct Shaping {
@@ -61,7 +61,7 @@ impl Plugin for TrafficShaping {
                     //Buffer is required because dedup layer requires a clone service.
                     ServiceBuilder::new()
                         .layer(QueryDeduplicationLayer::default())
-                        .buffer(20_000)
+                        .buffered()
                 }))
                 .service(service)
                 .boxed()

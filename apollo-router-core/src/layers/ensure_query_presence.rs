@@ -20,7 +20,7 @@ where
             |req: RouterRequest| {
                 // A query must be available at this point
                 let query = req.context.request.body().query.as_ref();
-                if query.is_none() || query.unwrap().is_empty() {
+                if query.is_none() || query.unwrap().trim().is_empty() {
                     let res = plugin_utils::RouterResponse::builder()
                         .errors(vec![crate::Error {
                             message: "Must provide query string.".to_string(),
