@@ -335,7 +335,7 @@ impl SpanExporter for Exporter {
 
         // Let's first retrieve the queries we're about to deal with
         for query_span in batch.iter().filter(|span| span.name == "get_query") {
-            match (
+            if let (Some(query), Some(usage_reporting_signature)) = (
                 query_span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("query")),
@@ -345,13 +345,10 @@ impl SpanExporter for Exporter {
                         "usage_reporting_signature",
                     )),
             ) {
-                (Some(query), Some(usage_reporting_signature)) => {
-                    self.normalized_queries.insert(
-                        query.as_str().to_string(),
-                        usage_reporting_signature.as_str().to_string(),
-                    );
-                }
-                _ => {}
+                self.normalized_queries.insert(
+                    query.as_str().to_string(),
+                    usage_reporting_signature.as_str().to_string(),
+                );
             }
         }
 
