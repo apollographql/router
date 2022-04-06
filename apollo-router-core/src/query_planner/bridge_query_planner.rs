@@ -15,7 +15,7 @@ use tower::Service;
 ///
 /// No caching is performed. To cache, wrap in a [`CachingQueryPlanner`].
 pub struct BridgeQueryPlanner {
-    planner: Arc<Planner<PlannerResult>>,
+    planner: Arc<Planner<QueryPlan>>,
 }
 
 impl BridgeQueryPlanner {
@@ -84,11 +84,16 @@ impl QueryPlanner for BridgeQueryPlanner {
             .into_result()
             .map_err(QueryPlannerError::from)?;
 
-        match planner_result.plan {
-            QueryPlan { node: Some(node) } => Ok(Arc::new(query_planner::QueryPlan { root: node })),
+        let usage_reporting_signature = planner_result.usage_reporting_signature;
+
+        match planner_result.data {
+            QueryPlan { node: Some(node) } => Ok(Arc::new(query_planner::QueryPlan {
+                usage_reporting_signature,
+                root: node,
+            })),
             QueryPlan { node: None } => {
                 failfast_debug!("empty query plan");
-                Err(QueryPlannerError::EmptyPlan)
+                Err(QueryPlannerError::EmptyPlan(usage_reporting_signature))
             }
         }
     }
@@ -96,12 +101,7 @@ impl QueryPlanner for BridgeQueryPlanner {
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PlannerResult {
-    plan: QueryPlan,
-    usage_reporting_signature: Option<String>,
-}
 /// The root query plan container.
-#[derive(Debug, PartialEq, Deserialize)]
 struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     node: Option<PlanNode>,
@@ -127,6 +127,10 @@ mod tests {
             .await
             .unwrap();
         insta::assert_debug_snapshot!("plan", result);
+        assert_eq!(
+            r#"{me{name{first last}}}"#,
+            result.usage_reporting_signature.clone().unwrap()
+        );
     }
 
     fn example_schema() -> Schema {
@@ -135,7 +139,7 @@ mod tests {
 
     #[test]
     fn empty_query_plan() {
-        serde_json::from_value::<PlannerResult>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(
+        serde_json::from_value::<QueryPlan>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(
             "If this test fails, It probably means QueryPlan::node isn't an Option anymore.\n
                  Introspection queries return an empty QueryPlan, so the node field needs to remain optional.",
         );

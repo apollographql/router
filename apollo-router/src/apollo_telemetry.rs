@@ -26,7 +26,6 @@
 //!     shutdown_tracer_provider(); // sending remaining spans
 //! }
 //! ```
-use apollo_parser::{ast, Parser};
 use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
@@ -333,6 +332,29 @@ impl SpanExporter for Exporter {
             // and panic here in case a logic bug creeps in elsewhere.
             panic!("cannot export statistics without graph details")
         }
+
+        // Let's first retrieve the queries we're about to deal with
+        for query_span in batch.iter().filter(|span| span.name == "get_query") {
+            match (
+                query_span
+                    .attributes
+                    .get(&opentelemetry::Key::from_static_str("query")),
+                query_span
+                    .attributes
+                    .get(&opentelemetry::Key::from_static_str(
+                        "usage_reporting_signature",
+                    )),
+            ) {
+                (Some(query), Some(usage_reporting_signature)) => {
+                    self.normalized_queries.insert(
+                        query.as_str().to_string(),
+                        usage_reporting_signature.as_str().to_string(),
+                    );
+                }
+                _ => {}
+            }
+        }
+
         // In every batch we'll have a varying number of actual stats reports to submit
         // Each report is unique by client name, client version and key (derived from op_name)
         // The dh_map contains a batch specific map, keyed on the unique report triple,
@@ -359,7 +381,6 @@ impl SpanExporter for Exporter {
 
                 tracing::trace!(%span.name, %query, ?span.start_time, ?span.end_time);
                 let not_found = Value::String("not found".into());
-                let anonymous_or_optional_operation_name = Value::String("".into());
                 let client_name = span
                     .attributes
                     .get(&opentelemetry::Key::from_static_str("client_name"))
@@ -370,20 +391,11 @@ impl SpanExporter for Exporter {
                     .get(&opentelemetry::Key::from_static_str("client_version"))
                     .unwrap_or(&not_found)
                     .to_string();
-                let operation_name = span
-                    .attributes
-                    .get(&opentelemetry::Key::from_static_str("operation_name"))
-                    .unwrap_or(&anonymous_or_optional_operation_name);
 
-                // XXX Since normalization is expensive, try to reduce the
-                // amount of normalization by doing an exact string match
-                // on a query. This might not save a lot of work and may
-                // result in too much caching, so re-visit this decision
-                // post-integration.
                 let key = self
                     .normalized_queries
-                    .entry(query.as_str().to_string())
-                    .or_insert_with(|| stats_report_key(operation_name, &query.as_str()));
+                    .get(&query.as_str().to_string())
+                    .expect("query_string has been pushed above.");
 
                 // Retrieve DurationHistogram from our HashMap, or add a new one
                 let dh = dh_map
@@ -432,79 +444,6 @@ impl SpanExporter for Exporter {
 
         Ok(())
     }
-}
-
-// Taken from TS implementation
-static GRAPHQL_PARSE_FAILURE: &str = "## GraphQLParseFailure\n";
-#[allow(dead_code)]
-static GRAPHQL_VALIDATION_FAILURE: &str = "## GraphQLValidationFailure\n";
-static GRAPHQL_UNKNOWN_OPERATION_NAME: &str = "## GraphQLUnknownOperationName\n";
-
-fn stats_report_key(op_name: &opentelemetry::Value, query: &str) -> String {
-    let mut op_name: String = op_name.as_str().into_owned();
-
-    let parser = Parser::new(query);
-    // compress *before* parsing to modify whitespaces/comments
-    let ast = parser.compress().parse();
-    tracing::debug!("ast:\n {:?}", ast);
-    // If we can't parse the query, we definitely can't normalize it, so
-    // just return the appropriate error.
-    if ast.errors().len() > 0 {
-        tracing::warn!("could not parse query: {}", query);
-        return GRAPHQL_PARSE_FAILURE.to_string();
-    }
-    let doc = ast.document();
-    // If we haven't specified an out of band name, then return true
-    // for every operation definition and update the op_name if
-    // we have one.
-    // If we do have an out of band name, then check for equality
-    // with the operation definition name.
-    // If we find more than one match, then in either case we will
-    // fail.
-    let filter: Box<dyn FnMut(&ast::Definition) -> bool> = if op_name.is_empty() {
-        Box::new(|x| {
-            if let ast::Definition::OperationDefinition(op_def) = x {
-                if let Some(v) = op_def.name() {
-                    op_name = v.text().to_string();
-                }
-                true
-            } else {
-                false
-            }
-        })
-    } else {
-        Box::new(|x| {
-            if let ast::Definition::OperationDefinition(op_def) = x {
-                match op_def.name() {
-                    Some(v) => v.text() == op_name,
-                    None => false,
-                }
-            } else {
-                false
-            }
-        })
-    };
-    let mut required_definitions: Vec<_> = doc.definitions().into_iter().filter(filter).collect();
-    tracing::debug!("required definitions: {:?}", required_definitions);
-    if required_definitions.len() != 1 {
-        tracing::warn!("could not find required definition: {}", query);
-        return GRAPHQL_UNKNOWN_OPERATION_NAME.to_string();
-    }
-    tracing::debug!(
-        "looking for operation: {}",
-        if op_name.is_empty() { "-" } else { &op_name }
-    );
-    let required_definition = required_definitions.pop().unwrap();
-    tracing::debug!("required_definition: {:?}", required_definition);
-
-    // In the event of an operation that could be processed without an operation name,
-    // the stats key that our ingress expects demands a `-` be returned in that position.
-    if op_name.is_empty() {
-        op_name = "-".to_string()
-    }
-
-    let def = required_definition.format();
-    format!("# {}\n{}", op_name, def)
 }
 
 struct DurationHistogram {
@@ -681,101 +620,5 @@ mod test {
             DurationHistogram::duration_to_bucket(Duration::from_nanos(1e64 as u64)),
             DurationHistogram::MAXIMUM_SIZE
         );
-    }
-
-    // stats_report_key() testing
-
-    #[test]
-    fn it_handles_no_name() {
-        let op_name = Value::String("".into());
-        let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
-
-        let _ = stats_report_key(&op_name, query);
-    }
-
-    #[test]
-    fn it_handles_default_name() {
-        let expected = "# -\nquery ($limit: Int!) { products(limit: $limit) { upc, name, price } }";
-        let op_name = Value::String("".into());
-        let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_out_of_band_name_and_no_query_name() {
-        let expected = GRAPHQL_UNKNOWN_OPERATION_NAME;
-        let op_name = Value::String("OneProduct".into());
-        let query = "query ($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_query_specified_name() {
-        let expected =
-            "# OneProduct\nquery OneProduct($limit: Int!) { products(limit: $limit) { upc, name, price } }";
-        let op_name = Value::String("".into());
-        let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_same_out_of_band_and_query_specified_name() {
-        let expected =
-            "# OneProduct\nquery OneProduct($limit: Int!) { products(limit: $limit) { upc, name, price } }";
-        let op_name = Value::String("OneProduct".into());
-        let query = "query OneProduct($limit: Int!) {\n  products(limit: $limit) {\n    upc,\n    name,\n    price\n  }\n}";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_same_out_of_band_and_query_specified_name_multiple_queries() {
-        let expected = "# OneProduct\nquery OneProduct { __typename } ";
-        let op_name = Value::String("OneProduct".into());
-        let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_missing_out_of_band_and_query_specified_name_multiple_queries() {
-        let expected = GRAPHQL_UNKNOWN_OPERATION_NAME;
-        let op_name = Value::String("YetAnotherProduct".into());
-        let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    #[test]
-    fn it_handles_no_out_of_band_name_and_multiple_queries() {
-        let expected = GRAPHQL_UNKNOWN_OPERATION_NAME;
-        let op_name = Value::String("".into());
-        let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
-    }
-
-    //TODO: This test won't work because we aren't doing any validation. I'm leaving
-    //the test to remember that at some point it will need to be addressed. Perhaps initially
-    //in the router-bridge enhancements.
-    #[test]
-    #[ignore]
-    fn it_handles_invalid_out_of_band_name() {
-        let expected = GRAPHQL_VALIDATION_FAILURE;
-        let op_name = Value::String("anythingo r missing".into());
-        let query = "query OneProduct { __typename } query AnotherProduct { __typename }";
-
-        let key = stats_report_key(&op_name, query);
-        assert_eq!(expected, key);
     }
 }

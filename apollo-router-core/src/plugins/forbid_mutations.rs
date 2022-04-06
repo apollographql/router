@@ -167,7 +167,10 @@ mod forbid_http_get_mutations_tests {
         };
 
         ExecutionRequest::builder()
-            .query_plan(Arc::new(QueryPlan { root }))
+            .query_plan(Arc::new(QueryPlan {
+                usage_reporting_signature: None,
+                root,
+            }))
             .context(
                 Context::new().with_request(Arc::new(
                     RequestBuilder::new(method, Uri::from_str("http://test").unwrap())

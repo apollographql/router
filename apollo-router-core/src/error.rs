@@ -241,7 +241,7 @@ pub enum QueryPlannerError {
     CacheResolverError(Arc<CacheResolverError>),
 
     /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
-    EmptyPlan,
+    EmptyPlan(Option<String>), // usage_reporting_signature
 
     /// unhandled planner result
     UnhandledPlannerResult,
@@ -251,13 +251,16 @@ pub enum QueryPlannerError {
 }
 
 #[derive(Debug, Clone)]
-pub struct BridgeErrors(Arc<Vec<BridgeError>>);
+pub struct BridgeErrors {
+    pub errors: Arc<Vec<BridgeError>>,
+    pub usage_reporting_signature: Option<String>,
+}
 
 impl std::fmt::Display for BridgeErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "bridge errors: {}",
-            self.0
+            self.errors
                 .iter()
                 .map(|e| e.to_string())
                 .collect::<Vec<String>>()
@@ -266,9 +269,12 @@ impl std::fmt::Display for BridgeErrors {
     }
 }
 
-impl From<Vec<BridgeError>> for QueryPlannerError {
-    fn from(err: Vec<BridgeError>) -> Self {
-        QueryPlannerError::PlanningErrors(BridgeErrors(Arc::new(err)))
+impl From<router_bridge::planner::BridgeErrors> for QueryPlannerError {
+    fn from(err: router_bridge::planner::BridgeErrors) -> Self {
+        QueryPlannerError::PlanningErrors(BridgeErrors {
+            errors: Arc::new(err.errors),
+            usage_reporting_signature: err.usage_reporting_signature,
+        })
     }
 }
 

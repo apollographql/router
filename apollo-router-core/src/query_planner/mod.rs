@@ -15,6 +15,7 @@ pub struct QueryPlanOptions {}
 
 #[derive(Debug)]
 pub struct QueryPlan {
+    pub usage_reporting_signature: Option<String>,
     pub(crate) root: PlanNode,
 }
 
@@ -23,6 +24,7 @@ pub struct QueryPlan {
 impl Default for QueryPlan {
     fn default() -> Self {
         Self {
+            usage_reporting_signature: Default::default(),
             root: PlanNode::Sequence { nodes: Vec::new() },
         }
     }
