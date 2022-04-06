@@ -56,6 +56,43 @@ We reworked the way query plans are generated before being cached, which lead to
 
  -->
 
+ # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+- **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
+
+  The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
+
+  Example of configuration to export an endpoint (configured with the path `/plugins/apollo.telemetry/metrics`) with metrics in `Prometheus` format:
+
+  ```yaml
+  telemetry:
+    metrics:
+      exporter:
+        prometheus:
+          # By setting this endpoint you enable the prometheus exporter
+          # All our endpoints exposed by plugins are namespaced by the name of the plugin
+          # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+          endpoint: "/metrics"
+    ```
+
+- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
+
+  The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
+  
+## 🐛 Fixes
+- **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  Before this fix, if you wrote a query with only whitespaces inside, it wasn't detected as an empty query.
+
+- **Keep the original context in `RouterResponse` when returning an error** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  This fix keeps the original http request in `RouterResponse` when there is an error.
+
+
+## 🛠 Maintenance
+## 📚 Documentation
+
 # [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 
