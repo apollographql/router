@@ -7,14 +7,14 @@ import { Link } from "gatsby";
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
-* [Jaeger](https://www.jaegertracing.io/)
-* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC.
+- [Jaeger](https://www.jaegertracing.io/)
+- [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC.
 
 The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
-* Sub-request response times
-* Query shape (sub-request dependencies)
-* Apollo Router post-processing
+- Sub-request response times
+- Query shape (sub-request dependencies)
+- Apollo Router post-processing
 
 Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
 
@@ -28,7 +28,6 @@ If you're using OpenTelemetry throughout your systems and just want to view in [
 
 ```yaml title="router.yaml"
 # ...other configuration...
-
 telemetry:
   # Optional if you want to enable opentracing propagation headers to your subgraphs
   opentracing:
@@ -72,8 +71,8 @@ telemetry:
         max_links_per_span: 3
         max_attributes_per_event: 4
         max_attributes_per_link: 5
-        
-        # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[] 
+
+        # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[]
         attributes:
           str: "a"
           int: 1
@@ -101,6 +100,17 @@ If you find that the built-in telemetry features of the Apollo Router are missin
 
 ```yaml title="router.yaml"
 telemetry:
+  # Metrics configuration
+  metrics:
+    exporter:
+      otlp:
+        grpc:
+          # URL of the exporter
+          endpoint: http://127.0.0.1:4317
+          # Possible options: 'Grpc' (HttpBinary is not already supported for metrics)
+          protocol: Grpc
+          # timmeout in seconds
+          timeout: 60
   # Configuration to send traces and metrics to an OpenTelemetry Protocol compatible service
   opentelemetry:
     otlp:
@@ -125,8 +135,8 @@ telemetry:
           max_links_per_span: 3
           max_attributes_per_event: 4
           max_attributes_per_link: 5
-          
-          # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[] 
+
+          # Trace attributes accept a map of: Bool, Float, Int, String, Bool[], Float[], Int[], String[]
           attributes:
             str: "a"
             int: 1
@@ -144,4 +154,19 @@ telemetry:
             bool_arr:
               - true
               - false
+```
+
+## Using Prometheus to collect metrics
+
+You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    exporter:
+      prometheus:
+        # By setting this endpoint you enable the prometheus exporter
+        # All our endpoints exposed by plugins are namespaced by the name of the plugin
+        # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+        endpoint: "/metrics"
 ```
