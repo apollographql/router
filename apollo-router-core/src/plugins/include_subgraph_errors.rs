@@ -192,7 +192,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_redacts_all_subgraphs_explicit_withold() {
+    async fn it_redacts_all_subgraphs_explicit_redact() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false }));
         let router = build_mock_router(plugin).await;
@@ -200,7 +200,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_redacts_all_subgraphs_implicit_withold() {
+    async fn it_redacts_all_subgraphs_implicit_redact() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({}));
         let router = build_mock_router(plugin).await;
@@ -216,7 +216,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_not_redact_all_implicit_withold_product_explict_allow_for_product_query() {
+    async fn it_does_not_redact_all_implicit_redact_product_explict_allow_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }}));
         let router = build_mock_router(plugin).await;
@@ -224,7 +224,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_redact_all_implicit_withold_product_explict_allow_for_review_query() {
+    async fn it_does_redact_all_implicit_redact_product_explict_allow_for_review_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }}));
         let router = build_mock_router(plugin).await;
@@ -232,7 +232,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_not_redact_all_explicit_allow_review_explict_withold_for_product_query() {
+    async fn it_does_not_redact_all_explicit_allow_review_explict_redact_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
@@ -242,7 +242,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_redact_all_explicit_allow_product_explict_withold_for_product_query() {
+    async fn it_does_redact_all_explicit_allow_product_explict_redact_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
@@ -252,7 +252,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_not_redact_all_explicit_allow_account_explict_withold_for_product_query() {
+    async fn it_does_not_redact_all_explicit_allow_account_explict_redact_for_product_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
@@ -262,7 +262,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_does_redact_all_explicit_allow_account_explict_withold_for_account_query() {
+    async fn it_does_redact_all_explicit_allow_account_explict_redact_for_account_query() {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),

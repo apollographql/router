@@ -30,14 +30,30 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+-->
+
+# [x.x.x] (unreleased) - 2022-mm-dd
+## ❗ BREAKING ❗
+## 🚀 Features
+
+- **configurable subgraph error redaction** ([797](https://github.com/apollographql/router/issues/797))
+  By default, subgraph errors are not propagated to the user. This experimental plugin allows messages to be propagated either for all subgraphs or on
+  an individual subgraph basis. Individual subgraph configuration overrides the default (all) configuration. The configuration mechanism is similar
+  to that used in the `headers` plugin:
+  ```yaml
+  plugins:
+    experimental.include_subgraph_errors:
+      all: true
+  ```
+  See the docs for more examples.
+
 ## 🐛 Fixes
+## 🛠 Maintenance
 
 - **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
 
   The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
 
-
-## 🛠 Maintenance
 
 - **Xtask improvements** ([PR #604](https://github.com/apollographql/router/pull/604))
 
@@ -47,7 +63,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
 
- -->
+## 📚 Documentation
 
 # [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗

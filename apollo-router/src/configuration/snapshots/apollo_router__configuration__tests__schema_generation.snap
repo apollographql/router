@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 443
 expression: "&schema"
 ---
 {
@@ -260,6 +259,23 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.include_subgraph_errors": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "default": false,
+              "type": "boolean"
+            },
+            "subgraphs": {
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "experimental.rhai": {
           "type": "object",
           "required": [
