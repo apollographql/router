@@ -133,6 +133,22 @@ mod tests {
         );
     }
 
+    #[test(tokio::test)]
+    async fn test_plan_invalid_query() {
+        let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap();
+        let result = planner
+            .get(
+                "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
+                None,
+                Default::default(),
+            )
+            .await
+            .unwrap_err();
+        insta::assert_debug_snapshot!("plan_invalid_query", result);
+    }
+
     fn example_schema() -> Schema {
         include_str!("testdata/schema.graphql").parse().unwrap()
     }
