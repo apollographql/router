@@ -50,6 +50,10 @@ We reworked the way query plans are generated before being cached, which lead to
 
   It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
 
+- **Remove OpenSSL usage** ([PR #783](https://github.com/apollographql/router/pull/783))
+
+  OpenSSL is used for HTTPS clients when connecting to subgraphs or the Studio API. It is now replaced with rustls, which is faster to compile and link
+
  -->
 
  # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
