@@ -172,7 +172,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         );
 
         // We're good to go with the new service. Let the plugins know that this is about to happen.
-        // This is needed so tha the Telemetry plugin can swap in the new propagator.
+        // This is needed so that the Telemetry plugin can swap in the new propagator.
         // The alternative is that we introduce another service on Plugin that wraps the request
         // as a much earlier stage.
         for plugin in &mut self.plugins {
