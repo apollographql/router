@@ -4,7 +4,7 @@ use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
-    ExecutionResponse, NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest,
+    ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
     QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
@@ -28,7 +28,7 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
     ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
-    naive_introspection: Option<NaiveIntrospection>,
+    introspection: Option<Arc<Introspection>>,
 }
 
 impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
@@ -74,29 +74,31 @@ where
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
+        let naive_introspection = self.introspection.clone();
 
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        if let Some(naive_introspection) = self.naive_introspection.as_ref() {
-            if let Some(response) = naive_introspection.get(
-                req.context
-                    .request
-                    .body()
-                    .query
-                    .as_ref()
-                    .expect("apollo.ensure-query-is-present has checked this already; qed"),
-            ) {
-                return Box::pin(async move {
-                    Ok(RouterResponse {
-                        response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                        context: req.context.into(),
-                    })
-                });
-            }
-        }
         let context_cloned = req.context.clone();
         let fut = async move {
+            // Check if we already have the query in the known introspection queries
+            if let Some(naive_introspection) = naive_introspection.as_ref() {
+                if let Some(response) =
+                    naive_introspection
+                        .get(
+                            req.context.request.body().query.as_ref().expect(
+                                "apollo.ensure-query-is-present has checked this already; qed",
+                            ),
+                        )
+                        .await
+                {
+                    return Ok(RouterResponse {
+                        response: http::Response::new(ResponseBody::GraphQL(response)).into(),
+                        context: req.context.into(),
+                    });
+                }
+            }
+
             let context = req.context;
             let body = context.request.body();
             let variables = body.variables.clone();
@@ -108,6 +110,24 @@ where
                         .as_str(),
                 )
                 .await;
+
+            // Check if it's an introspection query
+            if let Some(current_query) = query.as_ref().filter(|q| q.contains_introspection()) {
+                if let Some(naive_introspection) = naive_introspection.as_ref() {
+                    match naive_introspection
+                        .execute(schema.as_str(), current_query.as_str())
+                        .await
+                    {
+                        Ok(resp) => {
+                            return Ok(RouterResponse {
+                                response: http::Response::new(ResponseBody::GraphQL(resp)).into(),
+                                context: context.into(),
+                            });
+                        }
+                        Err(err) => return Err(BoxError::from(err)),
+                    }
+                }
+            }
 
             if let Some(err) = query
                 .as_ref()
@@ -170,7 +190,7 @@ pub struct PluggableRouterServiceBuilder {
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
-    naive_introspection: bool,
+    introspection: bool,
 }
 
 impl PluggableRouterServiceBuilder {
@@ -179,7 +199,7 @@ impl PluggableRouterServiceBuilder {
             schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
-            naive_introspection: false,
+            introspection: false,
         }
     }
 
@@ -227,7 +247,7 @@ impl PluggableRouterServiceBuilder {
     }
 
     pub fn with_naive_introspection(mut self) -> PluggableRouterServiceBuilder {
-        self.naive_introspection = true;
+        self.introspection = true;
         self
     }
 
@@ -307,16 +327,16 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
         let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
-        let naive_introspection = if self.naive_introspection {
-            // NaiveIntrospection instantiation can potentially block for some time
+        let introspection = if self.introspection {
+            // Introspection instantiation can potentially block for some time
             // We don't need to use the api schema here because on the deno side we always convert to API schema
 
             let schema = self.schema.clone();
-            Some(
-                tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
+            Some(Arc::new(
+                tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
                     .await
-                    .expect("NaiveIntrospection instantiation panicked"),
-            )
+                    .expect("Introspection instantiation panicked"),
+            ))
         } else {
             None
         };
@@ -353,7 +373,7 @@ impl PluggableRouterServiceBuilder {
                             .query_execution_service(execution_service)
                             .schema(self.schema)
                             .query_cache(query_cache)
-                            .naive_introspection(naive_introspection)
+                            .introspection(introspection)
                             .build()
                             .boxed(),
                         |acc, (_, e)| e.router_service(acc),
