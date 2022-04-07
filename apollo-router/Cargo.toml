@@ -83,7 +83,7 @@ warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
-libc = "0.2.121"
+libc = "0.2.122"
 
 [dev-dependencies]
 insta = "1.12.0"
