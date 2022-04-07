@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: router-configuration
-  labels:
-    {{- include "router.labels" . | nindent 4 }}
-data: 
-  configuration.yaml: |{{ toYaml .Values.configuration | nindent 4 }}
-
