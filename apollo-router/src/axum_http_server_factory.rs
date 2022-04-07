@@ -644,7 +644,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<http_compat::Response<ResponseBody>, BoxError>;
         }
     }
 
