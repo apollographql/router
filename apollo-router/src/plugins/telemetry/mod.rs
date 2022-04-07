@@ -1,3 +1,5 @@
+//! Telemetry customization.
+
 pub(crate) mod metrics;
 #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
 pub(crate) mod otlp;

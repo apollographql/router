@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 455
 expression: "&schema"
 ---
 {
@@ -493,9 +492,11 @@ expression: "&schema"
                                   "nullable": true
                                 },
                                 "tls_config": {
+                                  "description": "TLS configuration details.",
                                   "type": "object",
                                   "properties": {
                                     "ca": {
+                                      "description": "Types of secret.",
                                       "oneOf": [
                                         {
                                           "type": "object",
@@ -525,6 +526,7 @@ expression: "&schema"
                                       "nullable": true
                                     },
                                     "cert": {
+                                      "description": "Types of secret.",
                                       "oneOf": [
                                         {
                                           "type": "object",
@@ -558,6 +560,7 @@ expression: "&schema"
                                       "nullable": true
                                     },
                                     "key": {
+                                      "description": "Types of secret.",
                                       "oneOf": [
                                         {
                                           "type": "object",
@@ -838,9 +841,11 @@ expression: "&schema"
                                       "nullable": true
                                     },
                                     "tls_config": {
+                                      "description": "TLS configuration details.",
                                       "type": "object",
                                       "properties": {
                                         "ca": {
+                                          "description": "Types of secret.",
                                           "oneOf": [
                                             {
                                               "type": "object",
@@ -870,6 +875,7 @@ expression: "&schema"
                                           "nullable": true
                                         },
                                         "cert": {
+                                          "description": "Types of secret.",
                                           "oneOf": [
                                             {
                                               "type": "object",
@@ -903,6 +909,7 @@ expression: "&schema"
                                           "nullable": true
                                         },
                                         "key": {
+                                          "description": "Types of secret.",
                                           "oneOf": [
                                             {
                                               "type": "object",

@@ -35,7 +35,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+- **Add version flag to router** ([#805](https://github.com/apollographql/router/pull/805))
 
+  You can now provider a `--version or -V` flag to the router. It will output version information and terminate.
+  
 - **Add better support of introspection queries** ([PR #802](https://github.com/apollographql/router/pull/802))
 
   Before this feature the Router didn't execute all the introspection queries, only a small  of the most used ones was executed. Now it detects if it's an introspection query, try to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.

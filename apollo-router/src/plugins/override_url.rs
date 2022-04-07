@@ -1,3 +1,5 @@
+//! Allows subgraph URLs to be overridden.
+
 use apollo_router_core::{register_plugin, Plugin, SubgraphRequest, SubgraphResponse};
 use http::Uri;
 use std::collections::HashMap;
