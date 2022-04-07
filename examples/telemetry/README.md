@@ -18,6 +18,6 @@ cargo run -- -s ../graphql/supergraph.graphql -c ./oltp.router.yaml
 ```
 ## Spaceport
 ```bash
-cargo run -- -s ../graphql/supergraph.graphql -c ./sapceport.router.yaml
+cargo run -- -s ../graphql/supergraph.graphql -c ./spaceport.router.yaml
 ```
 
