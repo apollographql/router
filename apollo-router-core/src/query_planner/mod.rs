@@ -490,10 +490,12 @@ pub(crate) struct FlattenNode {
     node: Box<PlanNode>,
 }
 
+// The code resides in a separate submodule to allow writing a log filter activating it
+// separately from the query planner logs, as follows:
+// `router -s supergraph.graphql --log info,apollo_router_core::query_planner::log=trace`
 mod log {
-    use serde_json_bytes::{ByteString, Map, Value};
-
     use crate::PlanNode;
+    use serde_json_bytes::{ByteString, Map, Value};
 
     pub(crate) fn trace_query_plan(plan: &PlanNode) {
         tracing::trace!("query plan\n{:?}", plan);
