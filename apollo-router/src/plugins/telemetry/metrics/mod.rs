@@ -96,8 +96,8 @@ where
     T: Into<Number> + Copy,
 {
     pub fn record(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.0 {
-            counter.record(value, attributes)
+        for value_recorder in &self.0 {
+            value_recorder.record(value, attributes)
         }
     }
 }
