@@ -32,6 +32,7 @@ impl MetricsConfigurator for Config {
                 }
                 .boxed(),
             );
+            builder = builder.with_meter_provider(exporter.provider()?);
             builder = builder.with_exporter(exporter);
         }
         Ok(builder)
@@ -58,7 +59,6 @@ impl Service<http_compat::Request<Bytes>> for PrometheusService {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
-            tracing::info!("Metrics {}", String::from_utf8_lossy(&result).into_owned());
             Ok(http_compat::Response {
                 inner: http::Response::builder()
                     .status(StatusCode::OK)

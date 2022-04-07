@@ -38,13 +38,13 @@ impl MetricsConfigurator for super::super::otlp::Config {
         let exporter: MetricExporterBuilder = self.exporter()?;
         match exporter.exporter {
             Some(exporter) => {
-                builder = builder.with_exporter(
-                    opentelemetry_otlp::new_pipeline()
-                        .metrics(tokio::spawn, delayed_interval)
-                        .with_exporter(exporter)
-                        .with_aggregator_selector(selectors::simple::Selector::Exact)
-                        .build()?,
-                );
+                let exporter = opentelemetry_otlp::new_pipeline()
+                    .metrics(tokio::spawn, delayed_interval)
+                    .with_exporter(exporter)
+                    .with_aggregator_selector(selectors::simple::Selector::Exact)
+                    .build()?;
+                builder = builder.with_meter_provider(exporter.provider());
+                builder = builder.with_exporter(exporter);
                 Ok(builder)
             }
             None => Err("otlp metric export does not support http yet".into()),
