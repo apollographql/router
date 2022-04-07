@@ -6,7 +6,7 @@ use crate::{
     ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
-use clap::{CommandFactory, Parser};
+use clap::{AppSettings, CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
@@ -21,6 +21,7 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(Parser, Debug)]
+#[clap(global_setting(AppSettings::NoAutoVersion))]
 #[structopt(name = "router", about = "Apollo federation router")]
 pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
@@ -63,6 +64,10 @@ pub struct Opt {
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
     apollo_schema_poll_interval: Duration,
+
+    /// Display version and exit
+    #[clap(parse(from_flag), long, short = 'V')]
+    pub version: bool,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -130,6 +135,11 @@ pub fn main() -> Result<()> {
 /// ```
 pub async fn rt_main() -> Result<()> {
     let opt = Opt::parse();
+
+    if opt.version {
+        println!("{}", std::env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
 
     copy_args_to_env();
 
