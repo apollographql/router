@@ -35,6 +35,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+- **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
+
+  By default the router will display a landing page, which could be useful in development. If this is not
+  desirable the router can be configured to not display this landing page:
+  ```yaml
+  server:
+    landing_page: false
+  ```
+
 - **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
 
   The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
