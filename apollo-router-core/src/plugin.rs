@@ -157,6 +157,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     async fn shutdown(&mut self) -> Result<(), BoxError>;
 
     /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
