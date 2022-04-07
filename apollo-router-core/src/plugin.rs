@@ -64,20 +64,33 @@ pub fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
+/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
     type Config: JsonSchema + DeserializeOwned;
 
+    /// This is invoked once after the router starts and compiled-in
+    /// plugins are registered.
     fn new(config: Self::Config) -> Result<Self, BoxError>;
 
-    // Plugins will receive a notification that they should start up and shut down.
+    /// Plugins will receive a notification that they should start up and shut down.
+    /// This is invoked whenever configuration is changed
+    /// during router execution, including at startup.
     async fn startup(&mut self) -> Result<(), BoxError> {
         Ok(())
     }
+
+    /// This is invoked whenever configuration is changed
+    /// during router execution, including at shutdown.
     async fn shutdown(&mut self) -> Result<(), BoxError> {
         Ok(())
     }
 
+    /// This service runs at the very beginning and very end of the request lifecycle.
+    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -85,6 +98,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         service
     }
 
+    /// This service handles generating the query plan for each incoming request.
+    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     fn query_planning_service(
         &mut self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
@@ -92,6 +107,8 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         service
     }
 
+    /// This service handles initiating the execution of a query plan after it's been generated.
+    /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
         &mut self,
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
@@ -99,14 +116,19 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         service
     }
 
+    /// This service handles communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only specific subgraphs.
     fn subgraph_service(
         &mut self,
-        _name: &str,
+        _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         service
     }
 
+    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
+    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler> {
         None
     }
@@ -120,33 +142,54 @@ fn get_type_of<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
 
+/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
+/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
-    // Plugins will receive a notification that they should start up and shut down.
+    /// Plugins will receive a notification that they should start up and shut down.
+    /// This is invoked whenever configuration is changed
+    /// during router execution, including at startup.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
+    /// This is invoked whenever configuration is changed
+    /// during router execution, including at shutdown.
     async fn shutdown(&mut self) -> Result<(), BoxError>;
 
+    /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
+    /// Define router_service if your customization needs to interact at the earliest or latest point possible.
+    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn router_service(
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError>;
 
+    /// This service handles generating the query plan for each incoming request.
+    /// Define `query_planning_service` if your customization needs to interact with query planning functionality (for example, to log query plan details).
     fn query_planning_service(
         &mut self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>;
 
+    /// This service handles initiating the execution of a query plan after it's been generated.
+    /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
     fn execution_service(
         &mut self,
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError>;
 
+    /// This service handles communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only on specific subgraphs.
     fn subgraph_service(
         &mut self,
-        _name: &str,
+        _subgraph_name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+
+    /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
+    /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler>;
     fn name(&self) -> &'static str;
 }
