@@ -42,7 +42,7 @@ helm show values apollographql/router
 | autoscaling.maxReplicas | int | `100` |  |
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
-| configuration | object | `{"server":{"listen":"0.0.0.0:80"}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
+| containerPorts.http | int | `80` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"ghcr.io/apollographql/router"` |  |
@@ -63,9 +63,13 @@ helm show values apollographql/router
 | podSecurityContext | object | `{}` |  |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
+| router | object | `{"args":["--hot-reload"],"configuration":{"server":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
 | service.port | int | `80` |  |
 | service.type | string | `"ClusterIP"` |  |
+| serviceAccount.annotations | object | `{}` |  |
+| serviceAccount.create | bool | `true` |  |
+| serviceAccount.name | string | `""` |  |
 | tolerations | list | `[]` |  |
 
 ----------------------------------------------
