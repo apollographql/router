@@ -58,8 +58,8 @@ We reworked the way query plans are generated before being cached, which lead to
 
 - **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
 
-  While displaying a landing page could be useful in development, we might not want to display it,
-  so the router can be configured to not display any landing page:
+  By default the router will display a landing page, which could be useful in development. If this is not
+  desirable the router can be configured to not display this landing page:
   ```yaml
   server:
     landing_page: false
