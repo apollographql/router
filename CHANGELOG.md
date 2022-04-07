@@ -26,61 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 [x.x.x] (unreleased) - 2022-mm-dd
 > Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
-- **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
-  
-  Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are tying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
-
-  ```yaml
-  telemetry:
-    apollo:
-      endpoint:
-      apollo_graph_ref:
-      apollo_key:
-    tracing:
-      propagation:
-        # Propagation is automatically enabled for any exporters that are enabled,
-        # but you can enable extras. This is mostly to support otlp and opentracing.
-        zipkin: true
-        datadog: false
-        trace_context: false
-        jaeger: false
-        baggage: false
-  
-      otlp:
-        endpoint: default
-        protocol: grpc
-        http:
-          ..
-        grpc:
-          ..
-      zipkin:
-        agent:
-          endpoint: default
-      jaeger:
-        agent:
-          endpoint: default
-      datadog:
-        endpoint: default
-  ```
-
 ## 🚀 Features
-- **Datadog support** [PR #782](https://github.com/apollographql/router/pull/782)
-
-  Datadog support has been added via `telemetry` yaml configuration.
-
-- **Yaml env variable expansion** [PR #782](https://github.com/apollographql/router/pull/782)
-
-  All values in the router configuration outside the `server` section may use environment variable expansion.
-  Unix style expansion is used. Either:
-
-  * `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
-  * `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
-  
-  Only values may be expanded (not keys):
-  ```yaml {4,8} title="router.yaml"
-  example:
-    passord: "${MY_PASSWORD}" 
-  ```
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
@@ -115,12 +61,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ```yaml
   telemetry:
     metrics:
-      exporter:
-        prometheus:
-          # By setting this endpoint you enable the prometheus exporter
-          # All our endpoints exposed by plugins are namespaced by the name of the plugin
-          # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
-          endpoint: "/metrics"
+      prometheus:
+        # By setting this endpoint you enable the prometheus exporter
+        # All our endpoints exposed by plugins are namespaced by the name of the plugin
+        # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+        enabled: true
     ```
 
 - **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
@@ -128,6 +73,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
   
 - **configurable subgraph error redaction** ([797](https://github.com/apollographql/router/issues/797))
+
   By default, subgraph errors are not propagated to the user. This experimental plugin allows messages to be propagated either for all subgraphs or on
   an individual subgraph basis. Individual subgraph configuration overrides the default (all) configuration. The configuration mechanism is similar
   to that used in the `headers` plugin:
@@ -137,6 +83,62 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
       all: true
   ```
   See the docs for more examples.
+- **Datadog support** [PR #782](https://github.com/apollographql/router/pull/782)
+
+  Datadog support has been added via `telemetry` yaml configuration.
+
+- **Yaml env variable expansion** [PR #782](https://github.com/apollographql/router/pull/782)
+
+  All values in the router configuration outside the `server` section may use environment variable expansion.
+  Unix style expansion is used. Either:
+
+  * `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
+  * `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
+
+  Only values may be expanded (not keys):
+  ```yaml {4,8} title="router.yaml"
+  example:
+    passord: "${MY_PASSWORD}" 
+  ```
+- **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
+
+  Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are tying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
+
+  ```yaml
+  telemetry:
+    apollo:
+      endpoint:
+      apollo_graph_ref:
+      apollo_key:
+    metrics:
+      prometheus:
+        enabled: true
+    tracing:
+      propagation:
+        # Propagation is automatically enabled for any exporters that are enabled,
+        # but you can enable extras. This is mostly to support otlp and opentracing.
+        zipkin: true
+        datadog: false
+        trace_context: false
+        jaeger: false
+        baggage: false
+  
+      otlp:
+        endpoint: default
+        protocol: grpc
+        http:
+          ..
+        grpc:
+          ..
+      zipkin:
+        agent:
+          endpoint: default
+      jaeger:
+        agent:
+          endpoint: default
+      datadog:
+        endpoint: default
+  ```
 
 ## 🐛 Fixes
 - **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
