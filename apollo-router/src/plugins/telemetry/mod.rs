@@ -256,6 +256,7 @@ impl Plugin for Telemetry {
 
     fn new(config: Self::Config) -> Result<Self, BoxError> {
         let meter = global::meter("apollo/router");
+
         Ok(Telemetry {
             spaceport_shutdown: None,
             tracer_provider: None,

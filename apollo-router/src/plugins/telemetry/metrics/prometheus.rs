@@ -14,7 +14,7 @@ use tower_service::Service;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    endpoint: String,
+    enabled: bool,
 }
 
 impl MetricsConfigurator for Config {
@@ -23,15 +23,17 @@ impl MetricsConfigurator for Config {
         mut builder: MetricsBuilder,
         _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
-        let exporter = opentelemetry_prometheus::exporter().try_init()?;
-        builder = builder.with_custom_endpoint(
-            "prometheus",
-            PrometheusService {
-                registry: exporter.registry().clone(),
-            }
-            .boxed(),
-        );
-        builder = builder.with_exporter(exporter);
+        if self.enabled {
+            let exporter = opentelemetry_prometheus::exporter().try_init()?;
+            builder = builder.with_custom_endpoint(
+                "prometheus",
+                PrometheusService {
+                    registry: exporter.registry().clone(),
+                }
+                .boxed(),
+            );
+            builder = builder.with_exporter(exporter);
+        }
         Ok(builder)
     }
 }

@@ -18,8 +18,8 @@ pub struct Config {
     pub endpoint: Endpoint,
     pub protocol: Option<Protocol>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
     pub timeout: Option<Duration>,
     pub grpc: Option<GrpcExporter>,
     pub http: Option<HttpExporter>,
