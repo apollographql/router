@@ -116,6 +116,7 @@ impl Default for PipelineBuilder {
     }
 }
 
+#[allow(dead_code)]
 impl PipelineBuilder {
     const DEFAULT_BATCH_SIZE: usize = 65_536;
     const DEFAULT_QUEUE_SIZE: usize = 65_536;

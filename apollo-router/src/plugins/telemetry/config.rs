@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -20,10 +21,15 @@ pub struct Conf {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
 pub struct Metrics {
-    pub otlp: Option<metrics::otlp::Config>,
+    pub common: Option<MetricsCommon>,
+    pub otlp: Option<otlp::Config>,
     pub prometheus: Option<metrics::prometheus::Config>,
-    pub datadog: Option<metrics::datadog::Config>,
-    pub apollo: Option<metrics::apollo::Config>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct MetricsCommon {
+    pub delay_interval: Duration,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -31,7 +37,7 @@ pub struct Metrics {
 pub struct Tracing {
     pub propagation: Option<Propagation>,
     pub trace_config: Option<Trace>,
-    pub otlp: Option<tracing::otlp::Config>,
+    pub otlp: Option<otlp::Config>,
     pub jaeger: Option<tracing::jaeger::Config>,
     pub zipkin: Option<tracing::zipkin::Config>,
     pub datadog: Option<tracing::datadog::Config>,
