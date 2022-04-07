@@ -45,6 +45,15 @@ impl AxumHttpServerFactory {
     }
 }
 
+type BufferedService = Buffer<
+    BoxService<
+        http_compat::Request<graphql::Request>,
+        http_compat::Response<ResponseBody>,
+        BoxError,
+    >,
+    http_compat::Request<graphql::Request>,
+>;
+
 impl HttpServerFactory for AxumHttpServerFactory {
     type Future =
         Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
@@ -84,11 +93,41 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let mut router = Router::new()
                 .route(
                     "/",
-                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
+                    get({
+                        let display_landing_page = configuration.server.landing_page;
+                        move |query: RawQuery,
+                              headers: HeaderMap,
+                              original_uri: OriginalUri,
+                              service: Extension<BufferedService>| {
+                            redirect_or_run_graphql_operation(
+                                query,
+                                headers,
+                                original_uri,
+                                service,
+                                display_landing_page,
+                            )
+                        }
+                    })
+                    .post(run_graphql_operation),
                 )
                 .route(
                     "/graphql",
-                    get(redirect_or_run_graphql_operation).post(run_graphql_operation),
+                    get({
+                        let display_landing_page = configuration.server.landing_page;
+                        move |query: RawQuery,
+                              headers: HeaderMap,
+                              original_uri: OriginalUri,
+                              service: Extension<BufferedService>| {
+                            redirect_or_run_graphql_operation(
+                                query,
+                                headers,
+                                original_uri,
+                                service,
+                                display_landing_page,
+                            )
+                        }
+                    })
+                    .post(run_graphql_operation),
                 )
                 .route("/.well-known", get(health_check))
                 .route("/apollo", get(health_check))
@@ -385,18 +424,10 @@ async fn redirect_or_run_graphql_operation(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
-    Extension(service): Extension<
-        Buffer<
-            BoxService<
-                http_compat::Request<graphql::Request>,
-                http_compat::Response<ResponseBody>,
-                BoxError,
-            >,
-            http_compat::Request<graphql::Request>,
-        >,
-    >,
+    Extension(service): Extension<BufferedService>,
+    display_landing_page: bool,
 ) -> impl IntoResponse {
-    if headers.get("accept").map(prefers_html).unwrap_or_default() {
+    if headers.get("accept").map(prefers_html).unwrap_or_default() && display_landing_page {
         return display_home_page().into_response();
     }
 
@@ -416,16 +447,7 @@ async fn redirect_or_run_graphql_operation(
 async fn run_graphql_operation(
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
-    Extension(service): Extension<
-        Buffer<
-            BoxService<
-                http_compat::Request<graphql::Request>,
-                http_compat::Response<ResponseBody>,
-                BoxError,
-            >,
-            http_compat::Request<graphql::Request>,
-        >,
-    >,
+    Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     run_graphql_request(service, Method::POST, request, header_map, uri)
@@ -566,6 +588,7 @@ impl<'a> Extractor for HeaderMapCarrier<'a> {
 mod tests {
     use super::*;
     use crate::configuration::Cors;
+    use apollo_router_core::http_compat::Request;
     use mockall::mock;
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -621,7 +644,7 @@ mod tests {
     mock! {
         #[derive(Debug)]
         RouterService {
-            fn service_call(&mut self, req: http_compat::Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
+            fn service_call(&mut self, req: Request<graphql::Request>) -> Result<Response<ResponseBody>, BoxError>;
         }
     }
 
@@ -902,18 +925,6 @@ mod tests {
         }
 
         server.shutdown().await
-    }
-
-    #[test(tokio::test)]
-    async fn test_health_check() {
-        let filter = get_health_request();
-
-        let res = warp::test::request()
-            .path("/.well-known/apollo/server-health")
-            .reply(&filter)
-            .await;
-
-        insta::assert_debug_snapshot!("health_check", res);
     }
 
     #[test(tokio::test)]
