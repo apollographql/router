@@ -25,6 +25,7 @@ image:
   tag: ""
 
 containerPorts:
+  # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
   http: 80
 
 imagePullSecrets: []
