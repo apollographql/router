@@ -35,6 +35,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 ## 🚀 Features
+- **Add version flag to router** ([#805](https://github.com/apollographql/router/pull/805))
+
+  You can now provider a `--version or -V` flag to the router. It will output version information and terminate.
+  
 - **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
 
   The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
