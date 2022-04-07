@@ -397,7 +397,7 @@ impl Plugin for Telemetry {
         let (paths, mut endpoints): (Vec<_>, Vec<_>) =
             self.custom_endpoints.clone().into_iter().unzip();
         endpoints.push(Self::not_found_endpoint());
-        let not_found_index = endpoints.len();
+        let not_found_index = endpoints.len() - 1;
 
         let svc = Steer::new(
             // All services we route between
@@ -409,8 +409,10 @@ impl Plugin for Telemetry {
                     .path()
                     .trim_start_matches("/plugins/apollo.telemetry");
                 if let Some(index) = paths.iter().position(|path| path == endpoint) {
+                    ::tracing::info!("Returning  {}", index);
                     index
                 } else {
+                    ::tracing::info!("Returning error");
                     not_found_index
                 }
             },
