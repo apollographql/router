@@ -147,6 +147,11 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
     Schema::Object(plugins_object)
 }
 
+/// Plugins provided by Apollo.
+///
+/// These plugins are processed prior to user plugins. Also, their configuration
+/// is "hoisted" to the top level of the config rather than being processed
+/// under "plugins" as for user plugins.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct ApolloPlugins {
@@ -177,6 +182,10 @@ impl JsonSchema for ApolloPlugins {
     }
 }
 
+/// Plugins provided by a user.
+///
+/// These plugins are compiled into a router by and their configuration is performed
+/// under the "plugins" section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct UserPlugins {
@@ -222,6 +231,12 @@ pub struct Server {
     #[serde(default = "default_introspection")]
     #[builder(default_code = "default_introspection()", setter(into))]
     pub introspection: bool,
+
+    /// display landing page
+    /// enabled by default
+    #[serde(default = "default_landing_page")]
+    #[builder(default_code = "default_landing_page()", setter(into))]
+    pub landing_page: bool,
 }
 
 /// Listening address.
@@ -323,6 +338,10 @@ fn default_cors_methods() -> Vec<String> {
 }
 
 fn default_introspection() -> bool {
+    true
+}
+
+fn default_landing_page() -> bool {
     true
 }
 

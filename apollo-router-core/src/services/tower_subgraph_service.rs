@@ -1,10 +1,12 @@
 use crate::prelude::*;
 use futures::future::BoxFuture;
+use global::get_text_map_propagator;
 use http::{
     header::{ACCEPT, CONTENT_TYPE},
     HeaderValue,
 };
 use hyper::client::HttpConnector;
+use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use std::sync::Arc;
 use std::task::Poll;
@@ -14,14 +16,20 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Clone)]
 pub struct TowerSubgraphService {
-    client: hyper::Client<HttpConnector>,
+    client: hyper::Client<HttpsConnector<HttpConnector>>,
     service: Arc<String>,
 }
 
 impl TowerSubgraphService {
     pub fn new(service: impl Into<String>) -> Self {
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_or_http()
+            .enable_http1()
+            .build();
+
         Self {
-            client: ServiceBuilder::new().service(hyper::Client::new()),
+            client: ServiceBuilder::new().service(hyper::Client::builder().build(https)),
             service: Arc::new(service.into()),
         }
     }
@@ -58,7 +66,7 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
             request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
             request.headers_mut().insert(ACCEPT, app_json);
 
-            global::get_text_map_propagator(|propagator| {
+            get_text_map_propagator(|propagator| {
                 propagator.inject_context(
                     &Span::current().context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),

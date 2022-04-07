@@ -1,3 +1,4 @@
+//! Telemetry customization.
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::tracing::apollo;
 use crate::subscriber::replace_layer;

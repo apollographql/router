@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 451
+assertion_line: 467
 expression: config
 ---
 plugins: ~
@@ -8,4 +8,5 @@ server:
   listen: "1.2.3.4:5"
   cors: ~
   introspection: true
+  landing_page: true
 

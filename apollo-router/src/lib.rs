@@ -6,7 +6,7 @@ mod files;
 mod http_server_factory;
 pub mod plugins;
 mod reload;
-pub mod router_factory;
+mod router_factory;
 mod state_machine;
 pub mod subscriber;
 mod warp_http_server_factory;
@@ -381,6 +381,7 @@ where
     router_factory: RF,
 }
 
+/// A builder for an [`ApolloRouter`]
 #[derive(Default)]
 pub struct ApolloRouterBuilder<Factory = ()> {
     /// The Configuration that the server will use. This can be static or a stream for hot reloading.

@@ -180,7 +180,7 @@ impl Query {
                 _ => Ok(()),
             },
 
-            FieldType::Named(type_name) => {
+            FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
                 if schema.custom_scalars.contains(type_name) {
@@ -298,11 +298,13 @@ impl Query {
             match selection {
                 Selection::Field {
                     name,
+                    alias,
                     selection_set,
                     field_type,
                     skip,
                     include,
                 } => {
+                    let field_name = alias.as_ref().unwrap_or(name);
                     if skip
                         .should_skip(variables)
                         // validate_variables should have already checked that
@@ -321,18 +323,19 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(input_value) = input.get_mut(name.as_str()) {
+                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
                         // the input value with Null
                         // - the value was already null and is already present in output
                         // if we expect an object or list at that key, output will already contain
                         // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(name.as_str()) {
+                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value = output.entry((*name).clone()).or_insert(Value::Null);
+                        let output_value =
+                            output.entry((*field_name).clone()).or_insert(Value::Null);
                         self.format_value(
                             field_type,
                             variables,
@@ -342,8 +345,8 @@ impl Query {
                             schema,
                         )?;
                     } else {
-                        if !output.contains_key(name.as_str()) {
-                            output.insert((*name).clone(), Value::Null);
+                        if !output.contains_key(field_name.as_str()) {
+                            output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
@@ -459,24 +462,27 @@ impl Query {
             match selection {
                 Selection::Field {
                     name,
+                    alias,
                     selection_set,
                     field_type,
                     skip: _,
                     include: _,
                 } => {
-                    if let Some(input_value) = input.get_mut(name.as_str()) {
+                    let field_name = alias.as_ref().unwrap_or(name);
+                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
                         // the input value with Null
                         // - the value was already null and is already present in output
                         // if we expect an object or list at that key, output will already contain
                         // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(name.as_str()) {
+                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
-                        let output_value = output.entry((*name).clone()).or_insert(Value::Null);
+                        let output_value =
+                            output.entry((*field_name).clone()).or_insert(Value::Null);
                         self.format_value(
                             field_type,
                             variables,
@@ -593,6 +599,10 @@ impl Query {
             Err(Response::builder().errors(errors).build())
         }
     }
+
+    pub fn contains_introspection(&self) -> bool {
+        self.operations.iter().any(Operation::is_introspection)
+    }
 }
 
 #[derive(Debug)]
@@ -664,6 +674,13 @@ impl Operation {
             name,
             variables,
             kind,
+        })
+    }
+
+    fn is_introspection(&self) -> bool {
+        self.selection_set.iter().any(|sel| match sel {
+            Selection::Field { name, .. } => name.as_str().starts_with("__"),
+            _ => false,
         })
     }
 }

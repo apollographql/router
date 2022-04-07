@@ -6,6 +6,7 @@ use serde_json_bytes::ByteString;
 pub(crate) enum Selection {
     Field {
         name: ByteString,
+        alias: Option<ByteString>,
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
         skip: Skip,
@@ -40,6 +41,8 @@ impl Selection {
 
                 let field_type = if field_name.as_str() == "__typename" {
                     FieldType::String
+                } else if field_name.starts_with("__") {
+                    FieldType::Introspection(field_name.clone())
                 } else {
                     current_type
                         .inner_type_name()
@@ -61,7 +64,6 @@ impl Selection {
                 };
 
                 let alias = field.alias().map(|x| x.name().unwrap().text().to_string());
-                let name = alias.unwrap_or(field_name);
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
@@ -98,7 +100,8 @@ impl Selection {
                     .unwrap_or(Include::Yes);
 
                 Some(Self::Field {
-                    name: name.into(),
+                    alias: alias.map(|alias| alias.into()),
+                    name: field_name.into(),
                     selection_set,
                     field_type,
                     skip,
