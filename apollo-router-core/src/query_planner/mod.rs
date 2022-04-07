@@ -87,6 +87,8 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
+        log::trace_query_plan(&self.root);
+
         let (value, errors) = self
             .root
             .execute_recursively(&root, context, service_registry, schema, &Value::default())
@@ -405,7 +407,7 @@ pub(crate) mod fetch {
                 .response
                 .into_parts();
 
-            log::trace(service_name, operation, &variables, &response);
+            super::log::trace_subfetch(service_name, operation, &variables, &response);
 
             if !response.is_primary() {
                 return Err(FetchError::SubrequestUnexpectedPatchResponse {
@@ -475,25 +477,6 @@ pub(crate) mod fetch {
             &self.operation_kind
         }
     }
-
-    mod log {
-        use serde_json_bytes::{ByteString, Map, Value};
-
-        pub(crate) fn trace(
-            service_name: &str,
-            operation: &str,
-            variables: &Map<ByteString, Value>,
-            response: &crate::prelude::graphql::Response,
-        ) {
-            tracing::trace!(
-                "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
-                service_name,
-                operation,
-                variables,
-                serde_json::to_string_pretty(&response).unwrap()
-            );
-        }
-    }
 }
 
 /// A flatten node.
@@ -505,6 +488,31 @@ pub(crate) struct FlattenNode {
 
     /// The child execution plan.
     node: Box<PlanNode>,
+}
+
+mod log {
+    use serde_json_bytes::{ByteString, Map, Value};
+
+    use crate::PlanNode;
+
+    pub(crate) fn trace_query_plan(plan: &PlanNode) {
+        tracing::trace!("query plan\n{:?}", plan);
+    }
+
+    pub(crate) fn trace_subfetch(
+        service_name: &str,
+        operation: &str,
+        variables: &Map<ByteString, Value>,
+        response: &crate::prelude::graphql::Response,
+    ) {
+        tracing::trace!(
+            "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
+            service_name,
+            operation,
+            variables,
+            serde_json::to_string_pretty(&response).unwrap()
+        );
+    }
 }
 
 #[cfg(test)]
