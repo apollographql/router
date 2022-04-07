@@ -201,7 +201,10 @@ impl Plugin for Telemetry {
         self.tracer_provider = Some(Self::create_tracer_provider(&self.config)?);
 
         // Setup metrics
-
+        // The act of setting up metrics will overwrite a global meter. However it is essential that
+        // we use the aggregate meter provider that is created below. It enables us to support
+        // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
+        // eventually be one.
         let builder = Self::create_metrics_exporters(&self.config)?;
         self._metrics_exporters = builder.exporters;
         self.meter_provider = AggregateMeterProvider::new(builder.meter_providers);
