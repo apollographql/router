@@ -5,9 +5,12 @@
 replicaCount: 1
 
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
-configuration:
-  server:
-    listen: 0.0.0.0:80
+router:
+  configuration:
+    server:
+      listen: 0.0.0.0:80
+  args:
+  - --hot-reload
 
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
@@ -20,6 +23,9 @@ image:
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+
+containerPorts:
+  http: 80
 
 imagePullSecrets: []
 nameOverride: ""
