@@ -405,6 +405,8 @@ pub(crate) mod fetch {
                 .response
                 .into_parts();
 
+            log::trace(service_name, operation, &variables, &response);
+
             if !response.is_primary() {
                 return Err(FetchError::SubrequestUnexpectedPatchResponse {
                     service: service_name.to_owned(),
@@ -471,6 +473,25 @@ pub(crate) mod fetch {
 
         pub(crate) fn operation_kind(&self) -> &OperationKind {
             &self.operation_kind
+        }
+    }
+
+    mod log {
+        use serde_json_bytes::{ByteString, Map, Value};
+
+        pub(crate) fn trace(
+            service_name: &str,
+            operation: &str,
+            variables: &Map<ByteString, Value>,
+            response: &crate::prelude::graphql::Response,
+        ) {
+            tracing::trace!(
+                "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
+                service_name,
+                operation,
+                variables,
+                serde_json::to_string_pretty(&response).unwrap()
+            );
         }
     }
 }
