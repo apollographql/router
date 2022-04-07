@@ -323,7 +323,8 @@ expression: "&schema"
       "default": {
         "listen": "127.0.0.1:4000",
         "cors": null,
-        "introspection": true
+        "introspection": true,
+        "landing_page": true
       },
       "type": "object",
       "properties": {
@@ -389,6 +390,11 @@ expression: "&schema"
         },
         "introspection": {
           "description": "introspection queries enabled by default",
+          "default": true,
+          "type": "boolean"
+        },
+        "landing_page": {
+          "description": "display landing page enabled by default",
           "default": true,
           "type": "boolean"
         },

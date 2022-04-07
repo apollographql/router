@@ -87,6 +87,8 @@ impl QueryPlan {
     ) -> Response {
         let root = Path::empty();
 
+        log::trace_query_plan(&self.root);
+
         let (value, errors) = self
             .root
             .execute_recursively(&root, context, service_registry, schema, &Value::default())
@@ -405,6 +407,8 @@ pub(crate) mod fetch {
                 .response
                 .into_parts();
 
+            super::log::trace_subfetch(service_name, operation, &variables, &response);
+
             if !response.is_primary() {
                 return Err(FetchError::SubrequestUnexpectedPatchResponse {
                     service: service_name.to_owned(),
@@ -484,6 +488,33 @@ pub(crate) struct FlattenNode {
 
     /// The child execution plan.
     node: Box<PlanNode>,
+}
+
+// The code resides in a separate submodule to allow writing a log filter activating it
+// separately from the query planner logs, as follows:
+// `router -s supergraph.graphql --log info,apollo_router_core::query_planner::log=trace`
+mod log {
+    use crate::PlanNode;
+    use serde_json_bytes::{ByteString, Map, Value};
+
+    pub(crate) fn trace_query_plan(plan: &PlanNode) {
+        tracing::trace!("query plan\n{:?}", plan);
+    }
+
+    pub(crate) fn trace_subfetch(
+        service_name: &str,
+        operation: &str,
+        variables: &Map<ByteString, Value>,
+        response: &crate::prelude::graphql::Response,
+    ) {
+        tracing::trace!(
+            "subgraph fetch to {}: operation = '{}', variables = {:?}, response:\n{}",
+            service_name,
+            operation,
+            variables,
+            serde_json::to_string_pretty(&response).unwrap()
+        );
+    }
 }
 
 #[cfg(test)]

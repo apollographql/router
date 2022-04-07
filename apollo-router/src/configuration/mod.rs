@@ -231,6 +231,12 @@ pub struct Server {
     #[serde(default = "default_introspection")]
     #[builder(default_code = "default_introspection()", setter(into))]
     pub introspection: bool,
+
+    /// display landing page
+    /// enabled by default
+    #[serde(default = "default_landing_page")]
+    #[builder(default_code = "default_landing_page()", setter(into))]
+    pub landing_page: bool,
 }
 
 /// Listening address.
@@ -332,6 +338,10 @@ fn default_cors_methods() -> Vec<String> {
 }
 
 fn default_introspection() -> bool {
+    true
+}
+
+fn default_landing_page() -> bool {
     true
 }
 

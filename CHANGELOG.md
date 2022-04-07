@@ -39,6 +39,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   You can now provider a `--version or -V` flag to the router. It will output version information and terminate.
   
+- **Add better support of introspection queries** ([PR #802](https://github.com/apollographql/router/pull/802))
+
+  Before this feature the Router didn't execute all the introspection queries, only a small  of the most used ones was executed. Now it detects if it's an introspection query, try to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
+
+- **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
+
+  By default the router will display a landing page, which could be useful in development. If this is not
+  desirable the router can be configured to not display this landing page:
+  ```yaml
+  server:
+    landing_page: false
+  ```
+
 - **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
 
   The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
