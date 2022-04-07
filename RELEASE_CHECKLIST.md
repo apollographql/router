@@ -23,8 +23,8 @@ in lieu of an official changelog.
     label indicating if the change is documentation, feature, fix, or
     maintenance. If there is a missing label, please add one. If it is a
     breaking change, also add a BREAKING label.
-4.  Add this release to the `CHANGELOG.md`. Use the structure of previous
-    entries.
+4.  Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
+    `CHANGELOG.md`. Use the structure of previous entries.
 
 ### Start a release PR
 
@@ -35,8 +35,8 @@ in lieu of an official changelog.
 3.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core` and `apollo-router`.
 4.  Run `cargo check` so the lock file gets updated.
 5.  Run `cargo xtask check-compliance` so the lock file gets updated.
-6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock` and
-    `CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
+6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
+    `NEXT_CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
 7.  Request review from the Router team.
 
@@ -72,7 +72,8 @@ After CI builds the release binaries, a new release will appear on the
 
 #### If this is a stable release (not a release candidate)
 
-1. Paste the current release notes from `CHANGELOG.md` into the release body.
+1. Paste the current release notes from `NEXT_CHANGELOG.md` into the release body.
+2. Reset the content of `NEXT_CHANGELOG.md`.
 
 #### If this is a release candidate
 
