@@ -148,6 +148,7 @@ where
                     .call(ExecutionRequest {
                         query_plan: planned_query.query_plan,
                         context: planned_query.context,
+                        operation_name: operation_name.clone(),
                     })
                     .await?;
 

@@ -42,7 +42,12 @@ impl Service<ExecutionRequest> for ExecutionService {
             let context = req.context;
             let response = req
                 .query_plan
-                .execute(&context, &this.subgraph_services, &this.schema)
+                .execute(
+                    req.operation_name.as_deref(),
+                    &context,
+                    &this.subgraph_services,
+                    &this.schema,
+                )
                 .await;
 
             // Note that request context is not propagated from downstream.

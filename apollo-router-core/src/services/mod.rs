@@ -167,6 +167,8 @@ pub struct ExecutionRequest {
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
+
+    pub operation_name: Option<String>,
 }
 
 assert_impl_all!(ExecutionResponse: Send);

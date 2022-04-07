@@ -81,6 +81,7 @@ impl QueryPlan {
     /// Execute the plan and return a [`Response`].
     pub async fn execute<'a>(
         &'a self,
+        operation: Option<&'a str>,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
@@ -92,6 +93,11 @@ impl QueryPlan {
         let (value, errors) = self
             .root
             .execute_recursively(&root, context, service_registry, schema, &Value::default())
+            .instrument(tracing::span!(
+                tracing::Level::TRACE,
+                "executing plan",
+                operation_name = &operation
+            ))
             .await;
 
         Response::builder().data(value).errors(errors).build()

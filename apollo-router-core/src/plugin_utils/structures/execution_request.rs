@@ -8,6 +8,7 @@ use typed_builder::TypedBuilder;
 pub struct ExecutionRequest {
     query_plan: Option<Arc<QueryPlan>>,
     context: Option<Context<CompatRequest>>,
+    operation_name: Option<String>,
 }
 
 impl From<ExecutionRequest> for crate::ExecutionRequest {
@@ -17,6 +18,7 @@ impl From<ExecutionRequest> for crate::ExecutionRequest {
             context: execution_request
                 .context
                 .unwrap_or_else(|| Context::new().with_request(Arc::new(Request::mock()))),
+            operation_name: execution_request.operation_name,
         }
     }
 }
