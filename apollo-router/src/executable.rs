@@ -26,15 +26,15 @@ pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
-        default_value = "apollo_router=info,router=info,apollo_router_core=info,apollo_spaceport=info,tower_http=info,reqwest_tracing=info",
+        default_value = "info",
         alias = "log-level",
         env = "RUST_LOG"
     )]
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(short, long)]
-    watch: bool,
+    #[clap(alias = "hr", long = "hot-reload", env = "ROUTER_HOT_RELOAD")]
+    hot_reload: bool,
 
     /// Configuration location relative to the project directory.
     #[clap(short, long = "config", parse(from_os_str), env)]
@@ -182,7 +182,7 @@ pub async fn rt_main() -> Result<()> {
 
             ConfigurationKind::File {
                 path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         })
@@ -197,7 +197,7 @@ pub async fn rt_main() -> Result<()> {
             };
             SchemaKind::File {
                 path: supergraph_path,
-                watch: opt.watch,
+                watch: opt.hot_reload,
                 delay: None,
             }
         }

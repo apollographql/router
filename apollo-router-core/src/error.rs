@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::plan::PlanningErrors;
+pub use router_bridge::planner::BridgeError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -146,7 +146,7 @@ impl Error {
                     reason: err.to_string(),
                 })?
                 .unwrap_or_default();
-        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: err.to_string(),
@@ -200,7 +200,7 @@ impl From<QueryPlannerError> for FetchError {
 /// Error types for CacheResolver
 #[derive(Error, Debug, Display, Clone)]
 pub enum CacheResolverError {
-    /// Value retrieval failed: {0}
+    /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
 }
 
@@ -219,31 +219,56 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+#[derive(Error, Debug, Display, Clone)]
+pub enum ServiceBuildError {
+    /// couldn't build Router Service: {0}
+    QueryPlannerError(QueryPlannerError),
+}
+
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// Query planning had errors: {0}
-    PlanningErrors(Arc<PlanningErrors>),
+    /// couldn't instantiate QueryPlanner: {0}
+    QueryPlannerError(BridgeErrors),
 
-    /// Query planning panicked: {0}
+    /// query planning had errors: {0}
+    PlanningErrors(BridgeErrors),
+
+    /// query planning panicked: {0}
     JoinError(Arc<JoinError>),
 
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
 
-    /// Empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
     EmptyPlan,
 
-    /// Unhandled planner result.
+    /// unhandled planner result
     UnhandledPlannerResult,
 
-    /// Router Bridge error: {0}
+    /// router bridge error: {0}
     RouterBridgeError(router_bridge::error::Error),
 }
 
-impl From<PlanningErrors> for QueryPlannerError {
-    fn from(err: PlanningErrors) -> Self {
-        QueryPlannerError::PlanningErrors(Arc::new(err))
+#[derive(Debug, Clone)]
+pub struct BridgeErrors(Arc<Vec<BridgeError>>);
+
+impl std::fmt::Display for BridgeErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "bridge errors: {}",
+            self.0
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
+    }
+}
+
+impl From<Vec<BridgeError>> for QueryPlannerError {
+    fn from(err: Vec<BridgeError>) -> Self {
+        QueryPlannerError::PlanningErrors(BridgeErrors(Arc::new(err)))
     }
 }
 
@@ -271,7 +296,7 @@ pub enum SchemaError {
     /// IO error: {0}
     IoError(#[from] std::io::Error),
     /// URL parse error for subgraph {0}: {1}
-    UrlParse(String, url::ParseError),
+    UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
     /// Parsing error(s).

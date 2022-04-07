@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[serde(deny_unknown_fields)]
 pub struct HttpExporter {
     #[serde(flatten)]
-    export_config: ExportConfig,
+    pub export_config: ExportConfig,
     headers: Option<HashMap<String, String>>,
 }
 

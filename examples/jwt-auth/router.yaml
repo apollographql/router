@@ -1,13 +1,9 @@
-server:
-  cors:
-    origins:
-      - "https://studio.apollographql.com/"
 plugins:
   # Authentication Mechanism
   # plugin name: example.jwt
   #
   # Mandatory Configuration:
-  #   - algorithm: HS256 | HS384 | HS512 
+  #   - algorithm: HS256 | HS384 | HS512
   #   - key: valid base64 encoded key
   #
   # Optional Configuration:
@@ -27,5 +23,3 @@ plugins:
     key: 629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba
     time_tolerance: 60
     max_token_life: 600
-
-

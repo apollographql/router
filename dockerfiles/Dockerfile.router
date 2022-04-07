@@ -1,0 +1,34 @@
+ARG DEBUG_IMAGE
+# Build is required to extract the release files
+FROM --platform=linux/amd64 alpine:latest AS build
+
+ARG ROUTER_RELEASE
+
+# Pull release from GH
+ADD https://github.com/apollographql/router/releases/download/v${ROUTER_RELEASE}/router-${ROUTER_RELEASE}-x86_64-linux.tar.gz /tmp/router.tar.gz
+
+WORKDIR /tmp
+
+# router.tar.gz extracts to "dist"
+RUN tar xvzf router.tar.gz -C /
+
+# Make directories for config and schema
+RUN mkdir /dist/config && mkdir /dist/schema
+
+# Copy configuration for docker image
+COPY dockerfiles/router.yaml /dist/config
+
+# Final image uses distroless
+FROM --platform=linux/amd64 gcr.io/distroless/cc-debian11${DEBUG_IMAGE}
+
+LABEL org.opencontainers.image.authors="ApolloGraphQL https://github.com/apollographql/router"
+
+# Copy in the extracted/created files
+COPY --from=build --chown=root:root /dist /dist
+
+WORKDIR /dist
+
+# Default executable is the router
+ENTRYPOINT ["./router"]
+
+CMD ["--config", "./config/router.yaml"]

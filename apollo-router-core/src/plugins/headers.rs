@@ -371,11 +371,10 @@ mod test {
     use crate::plugin_utils::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
-    use http::Method;
+    use http::{Method, Uri};
     use std::collections::HashSet;
     use std::sync::Arc;
     use tower::BoxError;
-    use url::Url;
 
     #[test]
     fn test_subgraph_config() {
@@ -649,7 +648,7 @@ mod test {
 
     fn example_originating_request() -> Context {
         Context::new().with_request(Arc::new(
-            RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
                 .header("da", "vda")
                 .header("db", "vdb")
                 .header("dc", "vdc")
@@ -663,7 +662,7 @@ mod test {
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
-            http_request: RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+            http_request: RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
                 .header("aa", "vaa")
                 .header("ab", "vab")
                 .header("ac", "vac")

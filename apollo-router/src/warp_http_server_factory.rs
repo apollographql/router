@@ -1,19 +1,20 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
-use apollo_router_core::prelude::*;
+use apollo_router_core::http_compat::{self, Request, RequestBuilder, Response};
 use apollo_router_core::ResponseBody;
+use apollo_router_core::{prelude::*, Handler};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use http::HeaderValue;
+use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::Extractor;
-use reqwest::Url;
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -45,6 +46,13 @@ impl WarpHttpServerFactory {
     }
 }
 
+#[derive(Debug)]
+struct CustomRejection {
+    #[allow(dead_code)]
+    msg: String,
+}
+impl warp::reject::Reject for CustomRejection {}
+
 impl HttpServerFactory for WarpHttpServerFactory {
     type Future =
         Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
@@ -54,6 +62,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -75,14 +84,33 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(service.clone()))
-                .or(post_graphql_request(service.clone()))
-                .with(cors)
-                .with(with::default_header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("application/json"),
-                ));
+            let plugin_routes = plugin_handlers.into_iter().fold(
+                get_health_request().boxed(),
+                move |acc, (plugin_name, custom_handler)| {
+                    let route = warp::get()
+                        .and(warp::path::full())
+                        .and(warp::any().map(move || custom_handler.clone()))
+                        .and(warp::path("plugins"))
+                        .and(warp::path(plugin_name))
+                        .and(warp::host::optional())
+                        .and(warp::header::headers_cloned())
+                        .and(warp::body::bytes())
+                        .and_then(custom_plugin_handler)
+                        .boxed();
+
+                    acc.or(route).unify().boxed()
+                },
+            );
+
+            let routes =
+                get_graphql_request_or_redirect(service.clone(), configuration.server.landing_page)
+                    .or(post_graphql_request(service.clone()))
+                    .or(plugin_routes)
+                    .with(cors)
+                    .with(with::default_header(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/json"),
+                    ));
 
             // generate a hyper service from warp routes
             let svc = warp::service(routes);
@@ -296,8 +324,69 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
+async fn custom_plugin_handler(
+    path: FullPath,
+    handler: Handler,
+    authority: Option<Authority>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Box<dyn Reply>, Rejection> {
+    let mut req_builder = http_compat::RequestBuilder::new(
+        Method::GET,
+        Uri::from_str(&format!(
+            "http://{}{}",
+            authority.unwrap().as_str(),
+            path.as_str()
+        ))
+        .expect("if the authority is some then the URL is valid; qed"),
+    );
+    for (header_name, header_value) in headers.iter() {
+        req_builder = req_builder.header(header_name.clone(), header_value.clone());
+    }
+
+    let res = handler
+        .oneshot(req_builder.body(body).expect(
+            "we know the body is already well formatted because it's coming from warp; qed",
+        ))
+        .await
+        .map_err(|err| {
+            warp::reject::custom(CustomRejection {
+                msg: err.to_string(),
+            })
+        })?;
+
+    let is_json = matches!(
+        res.body(),
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)
+    );
+
+    let res = res.map(|body| match body {
+        ResponseBody::GraphQL(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawJSON(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawString(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::Text(res) => Bytes::from(res),
+    });
+
+    if is_json {
+        Ok::<_, Rejection>(Box::new(warp::reply::with_header(
+            res.inner,
+            "Content-Type",
+            "application/json",
+        )) as Box<dyn Reply>)
+    } else {
+        Ok::<_, Rejection>(Box::new(res.inner) as Box<dyn Reply>)
+    }
+}
+
 fn get_graphql_request_or_redirect<RS>(
     service: RS,
+    display_landing_page: bool,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -325,24 +414,25 @@ where
                   path: FullPath| {
                 let service = service.clone();
                 async move {
-                    let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                        display_home_page()
-                    } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-                        run_graphql_request(
-                            service,
-                            authority,
-                            http::Method::GET,
-                            path,
-                            request,
-                            header_map,
-                        )
-                        .await
-                    } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid GraphQL request",
-                            StatusCode::BAD_REQUEST,
-                        ))
-                    };
+                    let reply: Box<dyn Reply> =
+                        if accept.map(prefers_html).unwrap_or_default() && display_landing_page {
+                            display_home_page()
+                        } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
+                            run_graphql_request(
+                                service,
+                                authority,
+                                http::Method::GET,
+                                path,
+                                request,
+                                header_map,
+                            )
+                            .await
+                        } else {
+                            Box::new(warp::reply::with_status(
+                                "Invalid GraphQL request",
+                                StatusCode::BAD_REQUEST,
+                            ))
+                        };
 
                     Ok::<_, warp::reject::Rejection>(reply)
                 }
@@ -455,10 +545,10 @@ where
             Ok(mut service) => {
                 let uri = match authority {
                     Some(authority) => {
-                        Url::parse(&format!("http://{}{}", authority.as_str(), path.as_str()))
+                        Uri::from_str(&format!("http://{}{}", authority.as_str(), path.as_str()))
                             .expect("if the authority is some then the URL is valid; qed")
                     }
-                    None => Url::parse(&format!("http://router{}", path.as_str())).unwrap(),
+                    None => Uri::from_str(&format!("http://router{}", path.as_str())).unwrap(),
                 };
 
                 let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
@@ -470,17 +560,26 @@ where
                     .map(|response| {
                         tracing::trace_span!("serialize_response")
                             .in_scope(|| {
-                                response.map(|body| {
-                                    Bytes::from(
-                                        serde_json::to_vec(&body)
+                                response.map(|body| match body {
+                                    ResponseBody::GraphQL(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
                                             .expect("responsebody is serializable; qed"),
-                                    )
+                                    ),
+                                    ResponseBody::RawJSON(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::RawString(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::Text(res) => Bytes::from(res),
                                 })
                             })
                             .into()
                     })
                     .unwrap_or_else(|e| {
-                        tracing::error!("router serivce call failed: {}", e);
+                        tracing::error!("router service call failed: {}", e);
                         http::Response::builder()
                             .status(StatusCode::INTERNAL_SERVER_ERROR)
                             .body(Bytes::from_static(b"router service call failed"))
@@ -623,6 +722,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -669,6 +769,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");

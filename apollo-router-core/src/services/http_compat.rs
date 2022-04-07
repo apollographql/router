@@ -4,34 +4,37 @@ use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
+    str::FromStr,
 };
 
-use axum_core::{body::boxed, response::IntoResponse};
+use axum::{body::boxed, response::IntoResponse};
 use bytes::Bytes;
 
 use crate::ResponseBody;
 
-use http::{header::HeaderName, request::Builder, HeaderMap, HeaderValue, Method, Version};
-use url::{ParseError, Url};
+use http::{
+    header::HeaderName, request::Builder, uri::InvalidUri, HeaderMap, HeaderValue, Method, Uri,
+    Version,
+};
 
 #[derive(Debug)]
 pub struct Request<T> {
     // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
     // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
-    pub(super) url: Url,
+    pub(super) url: Uri,
     inner: http::Request<T>,
 }
 
 impl<T> Request<T> {
     /// Update the associated URL
-    pub fn set_url(&mut self, url: url::Url) -> Result<(), http::Error> {
-        *self.inner.uri_mut() = http::Uri::try_from(url.as_str())?;
+    pub fn set_url(&mut self, url: http::Uri) -> Result<(), http::Error> {
+        *self.inner.uri_mut() = url.clone();
         self.url = url;
         Ok(())
     }
 
     /// Returns a reference to the associated URL.
-    pub fn url(&self) -> &url::Url {
+    pub fn url(&self) -> &http::Uri {
         &self.url
     }
 
@@ -86,13 +89,13 @@ impl<T> Request<T> {
     }
 
     /// Consumes the request returning a new request with body mapped to the return type of the passed in function.
-    pub fn map<F, U>(self, f: F) -> Result<Request<U>, ParseError>
+    pub fn map<F, U>(self, f: F) -> Result<Request<U>, InvalidUri>
     where
         F: FnOnce(T) -> U,
     {
         let new_req = self.inner.map(f);
         Ok(Request {
-            url: Url::parse(&new_req.uri().to_string())?,
+            url: new_req.uri().clone(),
             inner: new_req,
         })
     }
@@ -105,7 +108,7 @@ where
     // Only used for plugin_utils and tests
     pub fn mock() -> Request<T> {
         Request {
-            url: Url::parse("http://default").unwrap(),
+            url: Uri::from_str("http://default").unwrap(),
             inner: http::Request::default(),
         }
     }
@@ -189,7 +192,7 @@ impl<T> From<Request<T>> for http::Request<T> {
 }
 
 impl<T> TryFrom<http::Request<T>> for Request<T> {
-    type Error = ParseError;
+    type Error = InvalidUri;
     fn try_from(request: http::Request<T>) -> Result<Self, Self::Error> {
         Ok(Self {
             url: request.uri().to_string().parse()?,
@@ -200,17 +203,14 @@ impl<T> TryFrom<http::Request<T>> for Request<T> {
 
 #[derive(Debug)]
 pub struct RequestBuilder {
-    url: Url,
+    url: http::Uri,
     inner: Builder,
 }
 
 impl RequestBuilder {
-    pub fn new(method: reqwest::Method, url: Url) -> Self {
+    pub fn new(method: http::method::Method, url: http::Uri) -> Self {
         // Enforce the need for a method and an url
-        let builder = Builder::new().method(method).uri(
-            http::Uri::try_from(url.as_str())
-                .expect("Url has already been parsed without errors; qed"),
-        );
+        let builder = Builder::new().method(method).uri(url.clone());
         Self {
             url,
             inner: builder,
@@ -323,15 +323,21 @@ pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
 }
 
 impl IntoResponse for Response<ResponseBody> {
-    fn into_response(self) -> axum_core::response::Response {
+    fn into_response(self) -> axum::response::Response {
         // todo: chunks?
         let (parts, body) = self.into_parts();
         let json_body_bytes =
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
 
-        axum_core::response::Response::from_parts(
-            parts,
-            boxed(http_body::Full::new(json_body_bytes)),
-        )
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+    }
+}
+
+impl IntoResponse for Response<Bytes> {
+    fn into_response(self) -> axum::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
     }
 }

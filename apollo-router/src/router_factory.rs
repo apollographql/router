@@ -1,15 +1,15 @@
 use crate::configuration::{Configuration, ConfigurationError};
-use apollo_router_core::deduplication::QueryDeduplicationLayer;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema, ServiceBuilderExt,
 };
 use apollo_router_core::{prelude::*, Context};
-use apollo_router_core::{DynPlugin, ReqwestSubgraphService};
+use apollo_router_core::{DynPlugin, TowerSubgraphService};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
-use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
+use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 
 /// Factory for creating a RouterService
@@ -35,19 +35,21 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
         schema: Arc<graphql::Schema>,
         previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError>;
+
+    fn plugins(&self) -> &[(String, Box<dyn DynPlugin>)];
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
 #[derive(Default)]
 pub struct YamlRouterServiceFactory {
-    plugins: Vec<Box<dyn DynPlugin>>,
+    plugins: Vec<(String, Box<dyn DynPlugin>)>,
 }
 
 impl Drop for YamlRouterServiceFactory {
     fn drop(&mut self) {
         // If we get here, everything is good so shutdown our old plugins
         // If we fail to shutdown a plugin, just log it and move on...
-        for mut plugin in self.plugins.drain(..).rev() {
+        for (_, mut plugin) in self.plugins.drain(..).rev() {
             if let Err(err) = futures::executor::block_on(plugin.shutdown()) {
                 tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
             }
@@ -69,88 +71,21 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterService>,
     ) -> Result<Self::RouterService, BoxError> {
-        let mut errors: Vec<ConfigurationError> = Vec::default();
-        let configuration = (*configuration).clone();
-
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+        if configuration.server.introspection {
+            builder = builder.with_naive_introspection();
+        }
 
         for (name, _) in schema.subgraphs() {
-            let dedup_layer = QueryDeduplicationLayer;
-            let subgraph_service =
-                BoxService::new(dedup_layer.layer(ReqwestSubgraphService::new(name.to_string())));
+            let subgraph_service = BoxService::new(TowerSubgraphService::new(name.to_string()));
 
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
-        {
-            async fn process_plugin(
-                mut builder: PluggableRouterServiceBuilder,
-                errors: &mut Vec<ConfigurationError>,
-                name: String,
-                configuration: &serde_json::Value,
-            ) -> PluggableRouterServiceBuilder {
-                let plugin_registry = apollo_router_core::plugins();
-                match plugin_registry.get(name.as_str()) {
-                    Some(factory) => {
-                        tracing::debug!(
-                            "creating plugin: '{}' with configuration:\n{:#}",
-                            name,
-                            configuration
-                        );
-                        match factory.create_instance(configuration) {
-                            Ok(mut plugin) => {
-                                tracing::debug!("starting plugin: {}", name);
-                                match plugin.startup().await {
-                                    Ok(_v) => {
-                                        tracing::debug!("started plugin: {}", name);
-                                        builder = builder.with_dyn_plugin(plugin);
-                                    }
-                                    Err(err) => {
-                                        (*errors).push(ConfigurationError::PluginStartup {
-                                            plugin: name,
-                                            error: err.to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                (*errors).push(ConfigurationError::PluginConfiguration {
-                                    plugin: name,
-                                    error: err.to_string(),
-                                });
-                            }
-                        }
-                    }
-                    None => {
-                        (*errors).push(ConfigurationError::PluginUnknown(name));
-                    }
-                }
-                builder
-            }
+        // Process the plugins.
+        let plugins = process_plugins(configuration.clone()).await?;
 
-            // Process the plugins.
-            for (name, configuration) in configuration.plugins().iter() {
-                let name = name.clone();
-                builder = process_plugin(builder, &mut errors, name, configuration).await;
-            }
-        }
-        if !errors.is_empty() {
-            // Shutdown all the plugins we started
-            for plugin in builder.plugins().iter_mut().rev() {
-                tracing::debug!("stopping plugin: {}", plugin.name());
-                if let Err(err) = plugin.shutdown().await {
-                    // If we can't shutdown a plugin, we terminate the router since we can't
-                    // assume that it is safe to continue.
-                    tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
-                    tracing::error!("terminating router...");
-                    std::process::exit(1);
-                } else {
-                    tracing::debug!("stopped plugin: {}", plugin.name());
-                }
-            }
-            for error in errors {
-                tracing::error!("{:#}", error);
-            }
-            return Err(Box::new(ConfigurationError::InvalidConfiguration));
+        for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
         // This **must** run after:
@@ -160,9 +95,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         //
         // This is because our tracing configuration is initialized by
         // the startup() method of our Reporting plugin.
-        let (pluggable_router_service, plugins) = builder.build().await;
+        let (pluggable_router_service, plugins) = builder.build().await?;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
-        let service = ServiceBuilder::new().buffer(20_000).service(
+        let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
                 .map_request(
                     |http_request: Request<apollo_router_core::Request>| RouterRequest {
@@ -173,7 +108,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 .boxed_clone(),
         );
         // If we get here, everything is good so shutdown our previous plugins
-        for mut plugin in previous_plugins.drain(..).rev() {
+        for (_, mut plugin) in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
                 // If we can't shutdown a plugin, we terminate the router since we can't
                 // assume that it is safe to continue.
@@ -183,6 +118,81 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             }
         }
         Ok(service)
+    }
+
+    fn plugins(&self) -> &[(String, Box<dyn DynPlugin>)] {
+        &self.plugins
+    }
+}
+
+async fn process_plugins(
+    configuration: Arc<Configuration>,
+) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
+    let mut errors = Vec::new();
+    let plugin_registry = apollo_router_core::plugins();
+    let mut plugin_instances = Vec::with_capacity(configuration.plugins().len());
+
+    for (name, configuration) in configuration.plugins().iter() {
+        let name = name.clone();
+        match plugin_registry.get(name.as_str()) {
+            Some(factory) => {
+                tracing::debug!(
+                    "creating plugin: '{}' with configuration:\n{:#}",
+                    name,
+                    configuration
+                );
+                match factory.create_instance(configuration) {
+                    Ok(mut plugin) => {
+                        tracing::debug!("starting plugin: {}", name);
+                        match plugin.startup().await {
+                            Ok(_v) => {
+                                tracing::debug!("started plugin: {}", name);
+                                plugin_instances.push((name.clone(), plugin));
+                            }
+                            Err(err) => errors.push(ConfigurationError::PluginStartup {
+                                plugin: name,
+                                error: err.to_string(),
+                            }),
+                        }
+                    }
+                    Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                        plugin: name,
+                        error: err.to_string(),
+                    }),
+                }
+            }
+            None => errors.push(ConfigurationError::PluginUnknown(name)),
+        }
+    }
+
+    if !errors.is_empty() {
+        // Shutdown all the plugins we started
+        for (_plugin_name, plugin) in plugin_instances.iter_mut().rev() {
+            tracing::debug!("stopping plugin: {}", plugin.name());
+            if let Err(err) = plugin.shutdown().await {
+                // If we can't shutdown a plugin, we terminate the router since we can't
+                // assume that it is safe to continue.
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("terminating router...");
+                std::process::exit(1);
+            } else {
+                tracing::debug!("stopped plugin: {}", plugin.name());
+            }
+        }
+
+        for error in &errors {
+            tracing::error!("{:#}", error);
+        }
+
+        Err(BoxError::from(
+            errors
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<String>>()
+                .join("\n"),
+        ))
+    } else {
+        Ok(plugin_instances.into_iter().collect())
     }
 }
 

@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 429
+assertion_line: 455
 expression: "&schema"
 ---
 {
@@ -260,6 +260,23 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.include_subgraph_errors": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "default": false,
+              "type": "boolean"
+            },
+            "subgraphs": {
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "experimental.rhai": {
           "type": "object",
           "required": [
@@ -271,6 +288,33 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "experimental.traffic_shaping": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "object",
+              "properties": {
+                "dedup": {
+                  "type": "boolean",
+                  "nullable": true
+                }
+              },
+              "nullable": true
+            },
+            "subgraphs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "dedup": {
+                    "type": "boolean",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -279,7 +323,9 @@ expression: "&schema"
       "description": "Configuration options pertaining to the http server component.",
       "default": {
         "listen": "127.0.0.1:4000",
-        "cors": null
+        "cors": null,
+        "introspection": true,
+        "landing_page": true
       },
       "type": "object",
       "properties": {
@@ -289,7 +335,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "allow_any_origin": {
-              "description": "Set to false to disallow any origin and rely exclusively on `origins`.\n\n/!\\ Defaults to true Having this set to true is the only way to allow Origin: null.",
+              "description": "Set to true to allow any origin.\n\nDefaults to false Having this set to true is the only way to allow Origin: null.",
               "default": null,
               "type": "boolean",
               "nullable": true
@@ -332,7 +378,7 @@ expression: "&schema"
               }
             },
             "origins": {
-              "description": "The origin(s) to allow requests from. Use `https://studio.apollographql.com/` to allow Apollo Studio to function.",
+              "description": "The origin(s) to allow requests from. Defaults to `https://studio.apollographql.com/` for Apollo Studio.",
               "default": [],
               "type": "array",
               "items": {
@@ -342,6 +388,16 @@ expression: "&schema"
           },
           "additionalProperties": false,
           "nullable": true
+        },
+        "introspection": {
+          "description": "introspection queries enabled by default",
+          "default": true,
+          "type": "boolean"
+        },
+        "landing_page": {
+          "description": "display landing page enabled by default",
+          "default": true,
+          "type": "boolean"
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
@@ -363,6 +419,194 @@ expression: "&schema"
     "telemetry": {
       "type": "object",
       "properties": {
+        "metrics": {
+          "type": "object",
+          "required": [
+            "exporter"
+          ],
+          "properties": {
+            "exporter": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "prometheus"
+                  ],
+                  "properties": {
+                    "prometheus": {
+                      "type": "object",
+                      "required": [
+                        "endpoint"
+                      ],
+                      "properties": {
+                        "endpoint": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "otlp"
+                  ],
+                  "properties": {
+                    "otlp": {
+                      "type": "object",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "grpc"
+                          ],
+                          "properties": {
+                            "grpc": {
+                              "type": "object",
+                              "properties": {
+                                "endpoint": {
+                                  "default": null,
+                                  "type": "string",
+                                  "format": "uri",
+                                  "nullable": true
+                                },
+                                "metadata": {
+                                  "default": null,
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                  "nullable": true
+                                },
+                                "protocol": {
+                                  "default": null,
+                                  "type": "string",
+                                  "enum": [
+                                    "Grpc",
+                                    "HttpBinary"
+                                  ],
+                                  "nullable": true
+                                },
+                                "timeout": {
+                                  "type": "integer",
+                                  "format": "uint64",
+                                  "minimum": 0.0,
+                                  "nullable": true
+                                },
+                                "tls_config": {
+                                  "type": "object",
+                                  "properties": {
+                                    "ca": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "env"
+                                          ],
+                                          "properties": {
+                                            "env": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "file"
+                                          ],
+                                          "properties": {
+                                            "file": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "nullable": true
+                                    },
+                                    "cert": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "env"
+                                          ],
+                                          "properties": {
+                                            "env": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "file"
+                                          ],
+                                          "properties": {
+                                            "file": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "nullable": true
+                                    },
+                                    "domain_name": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "key": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "env"
+                                          ],
+                                          "properties": {
+                                            "env": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "required": [
+                                            "file"
+                                          ],
+                                          "properties": {
+                                            "file": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "nullable": true
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "nullable": true
+                                }
+                              },
+                              "additionalProperties": false,
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "nullable": true
+        },
         "opentelemetry": {
           "oneOf": [
             {

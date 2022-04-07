@@ -1,10 +1,10 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
-use axum::extract::{Extension, OriginalUri, RawQuery};
+use apollo_router_core::{http_compat, Handler};
+use axum::extract::{Extension, Host, OriginalUri, RawBody, RawQuery};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
 use axum::routing::get;
@@ -15,7 +15,9 @@ use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use opentelemetry::propagation::Extractor;
 use serde_json::json;
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -52,6 +54,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<
@@ -78,7 +81,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_layer())
                 .unwrap_or_else(|| Cors::builder().build().into_layer());
 
-            let svc = Router::new()
+            let mut router = Router::new()
                 .route(
                     "/",
                     get(redirect_or_run_graphql_operation).post(run_graphql_operation),
@@ -95,8 +98,24 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
                 )
                 .layer(Extension(boxed_service))
-                .layer(cors)
-                .into_make_service();
+                .layer(cors);
+
+            for (plugin_name, handler) in plugin_handlers {
+                router = router.route(
+                    &format!("/plugins/{}/*path", plugin_name),
+                    get({
+                        let new_handler = handler.clone();
+                        move |host: Host,
+                              original_uri: OriginalUri,
+                              headers: HeaderMap,
+                              body: RawBody| {
+                            custom_plugin_handler(host, original_uri, headers, body, new_handler)
+                        }
+                    }),
+                );
+            }
+
+            let svc = router.into_make_service();
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -297,10 +316,69 @@ impl HttpServerFactory for AxumHttpServerFactory {
             Ok(HttpServerHandle::new(
                 shutdown_sender,
                 server_future,
-                actual_listen_address.into(),
+                actual_listen_address,
             ))
         })
     }
+}
+
+#[derive(Debug)]
+struct CustomRejection {
+    #[allow(dead_code)]
+    msg: String,
+}
+
+async fn custom_plugin_handler(
+    Host(host): Host,
+    OriginalUri(original_uri): OriginalUri,
+    headers: HeaderMap,
+    RawBody(body): RawBody,
+    handler: Handler,
+) -> impl IntoResponse {
+    let mut req_builder = http_compat::RequestBuilder::new(
+        Method::GET,
+        Uri::from_str(&format!("http://{}{}", host, original_uri))
+            .expect("if the authority is some then the URL is valid; qed"),
+    );
+    for (header_name, header_value) in headers.iter() {
+        req_builder = req_builder.header(header_name.clone(), header_value.clone());
+    }
+    let body = hyper::body::to_bytes(body)
+        .await
+        .map_err(|err| err.to_string())?;
+    let res = handler
+        .oneshot(req_builder.body(body).expect(
+            "we know the body is already well formatted because it's coming from warp; qed",
+        ))
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let is_json = matches!(
+        res.body(),
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)
+    );
+
+    let mut res = res.map(|body| match body {
+        ResponseBody::GraphQL(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawJSON(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawString(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::Text(res) => Bytes::from(res),
+    });
+
+    if is_json {
+        res.headers_mut().insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+    }
+
+    Ok::<_, String>(res)
 }
 
 async fn redirect_or_run_graphql_operation(
@@ -576,10 +654,10 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -623,10 +701,10 @@ mod tests {
                                 ))
                                 .build(),
                         )
-                        .subgraphs(Default::default())
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -746,7 +824,7 @@ mod tests {
                     service: "Mock service".to_string(),
                     reason: "Mock error".to_string(),
                 }
-                .to_response(true);
+                .to_response();
                 Ok(http::Response::builder()
                     .status(200)
                     .body(ResponseBody::GraphQL(example_response))
@@ -777,7 +855,7 @@ mod tests {
                 service: "Mock service".to_string(),
                 reason: "Mock error".to_string(),
             }
-            .to_response(true)
+            .to_response()
         );
         server.shutdown().await
     }

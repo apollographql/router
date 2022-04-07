@@ -9,17 +9,22 @@ pub use self::grpc::*;
 pub use self::http::*;
 use super::TraceConfig;
 use crate::configuration::ConfigurationError;
+#[cfg(feature = "otlp-grpc")]
+use futures::{Stream, StreamExt};
+use opentelemetry::sdk::metrics::PushController;
+#[cfg(feature = "otlp-grpc")]
+use opentelemetry::{sdk::metrics::selectors, util::tokio_interval_stream};
 use opentelemetry_otlp::{Protocol, WithExportConfig};
-use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Otlp {
+    // TODO: in a future iteration we should get rid of tracing and put tracing at the root level cf https://github.com/apollographql/router/issues/683
     pub tracing: Option<Tracing>,
-    // TODO metrics
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -27,6 +32,12 @@ pub struct Otlp {
 pub struct Tracing {
     pub exporter: Exporter,
     pub trace_config: Option<TraceConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct Metrics {
+    #[serde(flatten)]
+    pub exporter: Exporter,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -45,6 +56,67 @@ impl Exporter {
             Exporter::Grpc(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
             #[cfg(feature = "otlp-http")]
             Exporter::Http(exporter) => Ok(exporter.clone().unwrap_or_default().exporter()?.into()),
+        }
+    }
+
+    pub fn metrics_exporter(&self) -> Result<PushController, ConfigurationError> {
+        match &self {
+            #[cfg(feature = "otlp-grpc")]
+            Exporter::Grpc(exporter) => {
+                let mut export_config = opentelemetry_otlp::ExportConfig::default();
+                if let Some(grpc_exporter_cfg) = exporter {
+                    if let Some(endpoint) = &grpc_exporter_cfg.export_config.endpoint {
+                        export_config.endpoint = endpoint.clone().to_string();
+                    }
+                    if let Some(timeout) = &grpc_exporter_cfg.export_config.timeout {
+                        export_config.timeout = Duration::from_secs(*timeout);
+                    }
+                    if let Some(protocol) = &grpc_exporter_cfg.export_config.protocol {
+                        export_config.protocol = *protocol;
+                    }
+                }
+
+                let push_ctrl = opentelemetry_otlp::new_pipeline()
+                    .metrics(tokio::spawn, delayed_interval)
+                    .with_exporter(
+                        opentelemetry_otlp::new_exporter()
+                            .tonic()
+                            .with_export_config(export_config),
+                    )
+                    .with_aggregator_selector(selectors::simple::Selector::Exact)
+                    .build()?;
+
+                Ok(push_ctrl)
+            }
+            #[cfg(feature = "otlp-http")]
+            Exporter::Http(_exporter) => {
+                // let mut export_config = opentelemetry_otlp::ExportConfig::default();
+                // if let Some(http_exporter_cfg) = exporter {
+                //     if let Some(endpoint) = &http_exporter_cfg.export_config.endpoint {
+                //         export_config.endpoint = endpoint.clone().to_string();
+                //     }
+                //     if let Some(timeout) = &http_exporter_cfg.export_config.timeout {
+                //         export_config.timeout = Duration::from_secs(*timeout);
+                //     }
+                //     if let Some(protocol) = &http_exporter_cfg.export_config.protocol {
+                //         export_config.protocol = *protocol;
+                //     }
+                // }
+
+                // let push_ctrl = opentelemetry_otlp::new_pipeline()
+                //     .metrics(tokio::spawn, delayed_interval)
+                //     .with_exporter(
+                //         opentelemetry_otlp::new_exporter()
+                //             .http()
+                //             .with_export_config(export_config),
+                //     )
+                //     .with_aggregator_selector(selectors::simple::Selector::Exact)
+                //     .build()?;
+
+                // Ok(push_ctrl)
+                // Related to this issue https://github.com/open-telemetry/opentelemetry-rust/issues/772
+                unimplemented!("cannot export metrics to http with otlp")
+            }
         }
     }
 }
@@ -112,4 +184,9 @@ where
     }
 
     Ok(Some(url))
+}
+
+#[cfg(feature = "otlp-grpc")]
+fn delayed_interval(duration: Duration) -> impl Stream<Item = tokio::time::Instant> {
+    tokio_interval_stream(duration).skip(1)
 }

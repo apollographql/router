@@ -3,10 +3,10 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    NaiveIntrospection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterBridgeQueryPlanner, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    SubgraphResponse,
+    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
+    ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
+    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -18,8 +18,6 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use typed_builder::TypedBuilder;
 
-static DEFAULT_BUFFER_SIZE: usize = 20_000;
-
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
@@ -30,7 +28,7 @@ pub struct RouterService<QueryPlannerService, ExecutionService> {
     ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
-    naive_introspection: NaiveIntrospection,
+    introspection: Option<Arc<Introspection>>,
 }
 
 impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
@@ -76,27 +74,31 @@ where
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let mut planning = self.ready_query_planner_service.take().unwrap();
         let mut execution = self.ready_query_execution_service.take().unwrap();
+        let naive_introspection = self.introspection.clone();
 
         let schema = self.schema.clone();
         let query_cache = self.query_cache.clone();
 
-        if let Some(response) = self.naive_introspection.get(
-            req.context
-                .request
-                .body()
-                .query
-                .as_ref()
-                .expect("apollo.ensure-query-is-present has checked this already; qed"),
-        ) {
-            return Box::pin(async move {
-                Ok(RouterResponse {
-                    response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                    context: req.context.into(),
-                })
-            });
-        }
-
+        let context_cloned = req.context.clone();
         let fut = async move {
+            // Check if we already have the query in the known introspection queries
+            if let Some(naive_introspection) = naive_introspection.as_ref() {
+                if let Some(response) =
+                    naive_introspection
+                        .get(
+                            req.context.request.body().query.as_ref().expect(
+                                "apollo.ensure-query-is-present has checked this already; qed",
+                            ),
+                        )
+                        .await
+                {
+                    return Ok(RouterResponse {
+                        response: http::Response::new(ResponseBody::GraphQL(response)).into(),
+                        context: req.context.into(),
+                    });
+                }
+            }
+
             let context = req.context;
             let body = context.request.body();
             let variables = body.variables.clone();
@@ -108,6 +110,24 @@ where
                         .as_str(),
                 )
                 .await;
+
+            // Check if it's an introspection query
+            if let Some(current_query) = query.as_ref().filter(|q| q.contains_introspection()) {
+                if let Some(naive_introspection) = naive_introspection.as_ref() {
+                    match naive_introspection
+                        .execute(schema.as_str(), current_query.as_str())
+                        .await
+                    {
+                        Ok(resp) => {
+                            return Ok(RouterResponse {
+                                response: http::Response::new(ResponseBody::GraphQL(resp)).into(),
+                                context: context.into(),
+                            });
+                        }
+                        Err(err) => return Err(BoxError::from(err)),
+                    }
+                }
+            }
 
             if let Some(err) = query
                 .as_ref()
@@ -154,6 +174,7 @@ where
                     message: error.to_string(),
                     ..Default::default()
                 }])
+                .context(context_cloned.into())
                 .build()
                 .with_status(StatusCode::INTERNAL_SERVER_ERROR))
         });
@@ -164,39 +185,44 @@ where
 
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
-    buffer: usize,
-    plugins: Vec<Box<dyn DynPlugin>>,
+    plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     )>,
+    introspection: bool,
 }
 
 impl PluggableRouterServiceBuilder {
     pub fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
-            buffer: DEFAULT_BUFFER_SIZE,
             plugins: Default::default(),
             subgraph_services: Default::default(),
+            introspection: false,
         }
     }
 
     pub fn with_plugin<E: DynPlugin + Plugin>(
         mut self,
+        plugin_name: String,
         plugin: E,
     ) -> PluggableRouterServiceBuilder {
-        self.plugins.push(Box::new(plugin));
+        self.plugins.push((plugin_name, Box::new(plugin)));
         self
     }
 
-    pub fn with_dyn_plugin(mut self, plugin: Box<dyn DynPlugin>) -> PluggableRouterServiceBuilder {
-        self.plugins.push(plugin);
+    pub fn with_dyn_plugin(
+        mut self,
+        plugin_name: String,
+        plugin: Box<dyn DynPlugin>,
+    ) -> PluggableRouterServiceBuilder {
+        self.plugins.push((plugin_name, plugin));
         self
     }
 
     // Consume the builder and retrieve its plugins
-    pub fn plugins(self) -> Vec<Box<dyn DynPlugin>> {
+    pub fn plugins(self) -> Vec<(String, Box<dyn DynPlugin>)> {
         self.plugins
     }
 
@@ -220,12 +246,20 @@ impl PluggableRouterServiceBuilder {
         self
     }
 
+    pub fn with_naive_introspection(mut self) -> PluggableRouterServiceBuilder {
+        self.introspection = true;
+        self
+    }
+
     pub async fn build(
         mut self,
-    ) -> (
-        BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-        Vec<Box<dyn DynPlugin>>,
-    ) {
+    ) -> Result<
+        (
+            BoxCloneService<RouterRequest, RouterResponse, BoxError>,
+            Vec<(String, Box<dyn DynPlugin>)>,
+        ),
+        crate::ServiceBuildError,
+    > {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -233,23 +267,23 @@ impl PluggableRouterServiceBuilder {
         // various iterators that we create for folding and leave
         // the plugins in their original order.
 
-        //QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let query_planner_service = ServiceBuilder::new().buffer(self.buffer).service(
-            self.plugins.iter_mut().rev().fold(
-                CachingQueryPlanner::new(
-                    RouterBridgeQueryPlanner::new(self.schema.clone()),
-                    plan_cache_limit,
-                )
-                .boxed(),
-                |acc, e| e.query_planning_service(acc),
-            ),
-        );
+
+        let bridge_query_planner = BridgeQueryPlanner::new(self.schema.clone())
+            .await
+            .map_err(ServiceBuildError::QueryPlannerError)?;
+        let query_planner_service =
+            ServiceBuilder::new()
+                .buffered()
+                .service(self.plugins.iter_mut().rev().fold(
+                    CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).boxed(),
+                    |acc, (_, e)| e.query_planning_service(acc),
+                ));
 
         // SubgraphService takes a SubgraphRequest and outputs a RouterResponse
         let subgraphs = self
@@ -260,9 +294,9 @@ impl PluggableRouterServiceBuilder {
                     .plugins
                     .iter_mut()
                     .rev()
-                    .fold(s, |acc, e| e.subgraph_service(&name, acc));
+                    .fold(s, |acc, (_, e)| e.subgraph_service(&name, acc));
 
-                let service = ServiceBuilder::new().buffer(self.buffer).service(service);
+                let service = ServiceBuilder::new().buffered().service(service);
 
                 (name.clone(), service)
             })
@@ -280,11 +314,11 @@ impl PluggableRouterServiceBuilder {
                             .subgraph_services(subgraphs)
                             .build()
                             .boxed(),
-                        |acc, e| e.execution_service(acc),
+                        |acc, (_, e)| e.execution_service(acc),
                     ),
                 )
                 .boxed(),
-            self.buffer,
+            DEFAULT_BUFFER_SIZE,
         );
 
         let query_cache_limit = std::env::var("ROUTER_QUERY_CACHE_LIMIT")
@@ -293,13 +327,18 @@ impl PluggableRouterServiceBuilder {
             .unwrap_or(100);
         let query_cache = Arc::new(QueryCache::new(query_cache_limit, self.schema.clone()));
 
-        // NaiveIntrospection instantiation can potentially block for some time
-        // We don't need to use the api schema here because on the deno side we always convert to API schema
-        let naive_introspection = {
+        let introspection = if self.introspection {
+            // Introspection instantiation can potentially block for some time
+            // We don't need to use the api schema here because on the deno side we always convert to API schema
+
             let schema = self.schema.clone();
-            tokio::task::spawn_blocking(move || NaiveIntrospection::from_schema(&schema))
-                .await
-                .expect("NaiveIntrospection instantiation panicked")
+            Some(Arc::new(
+                tokio::task::spawn_blocking(move || Introspection::from_schema(&schema))
+                    .await
+                    .expect("Introspection instantiation panicked"),
+            ))
+        } else {
+            None
         };
 
         /*FIXME
@@ -334,16 +373,16 @@ impl PluggableRouterServiceBuilder {
                             .query_execution_service(execution_service)
                             .schema(self.schema)
                             .query_cache(query_cache)
-                            .naive_introspection(naive_introspection)
+                            .introspection(introspection)
                             .build()
                             .boxed(),
-                        |acc, e| e.router_service(acc),
+                        |acc, (_, e)| e.router_service(acc),
                     ),
                 )
                 .boxed(),
-            self.buffer,
+            DEFAULT_BUFFER_SIZE,
         );
 
-        (router_service.boxed_clone(), self.plugins)
+        Ok((router_service.boxed_clone(), self.plugins))
     }
 }

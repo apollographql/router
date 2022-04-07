@@ -8,7 +8,7 @@ If you're currently using the `@apollo/gateway` library in your federated graph,
 
 ## What's different?
 
-Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. You can pass this binary a [YAML configuration file](./configuration/overview/#configuration-file) at startup to customize its behavior.  Additionally, if you start your router with the `--watch` flag, you can even _modify_ that configuration and have changes picked up without restarting the router.
+Unlike `@apollo/gateway`, the Apollo Router is usually packaged as a _static, standalone binary_. You can pass this binary a [YAML configuration file](./configuration/overview/#configuration-file) at startup to customize its behavior.  Additionally, if you start your router with the `--hot-reload` flag, or set the `ROUTER_HOT_RELOAD` environment variable to `true` you can even _modify_ that configuration and have changes picked up without restarting the router.
 
 You _can_ use the Apollo Router as a library in a larger project, but our goal is to remove the need to write custom code in your graph router (as is necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
 

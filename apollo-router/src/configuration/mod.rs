@@ -32,6 +32,8 @@ pub enum ConfigurationError {
     InvalidEnvironmentVariable(String),
     /// could not setup OTLP tracing: {0}
     OtlpTracing(opentelemetry::trace::TraceError),
+    /// could not setup OTLP metrics: {0}
+    Metrics(#[from] opentelemetry::metrics::MetricsError),
     /// the configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
     /// unknown plugin {0}
@@ -215,6 +217,18 @@ pub struct Server {
     #[serde(default)]
     #[builder(default)]
     pub cors: Option<Cors>,
+
+    /// introspection queries
+    /// enabled by default
+    #[serde(default = "default_introspection")]
+    #[builder(default_code = "default_introspection()", setter(into))]
+    pub introspection: bool,
+
+    /// display landing page
+    /// enabled by default
+    #[serde(default = "default_landing_page")]
+    #[builder(default_code = "default_landing_page()", setter(into))]
+    pub landing_page: bool,
 }
 
 /// Listening address.
@@ -268,9 +282,9 @@ impl fmt::Display for ListenAddr {
 pub struct Cors {
     #[serde(default)]
     #[builder(default)]
-    /// Set to false to disallow any origin and rely exclusively on `origins`.
+    /// Set to true to allow any origin.
     ///
-    /// /!\ Defaults to true
+    /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
     pub allow_any_origin: Option<bool>,
 
@@ -292,9 +306,9 @@ pub struct Cors {
     pub expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
-    /// Use `https://studio.apollographql.com/` to allow Apollo Studio to function.
+    /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
     #[serde(default)]
-    #[builder(default)]
+    #[builder(default_code = "default_origins()")]
     pub origins: Vec<String>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
@@ -303,12 +317,24 @@ pub struct Cors {
     pub methods: Vec<String>,
 }
 
+fn default_origins() -> Vec<String> {
+    vec!["https://studio.apollographql.com/".into()]
+}
+
 fn default_cors_headers() -> Vec<String> {
     vec!["Content-Type".into()]
 }
 
 fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+}
+
+fn default_introspection() -> bool {
+    true
+}
+
+fn default_landing_page() -> bool {
+    true
 }
 
 impl Default for Server {
@@ -343,7 +369,7 @@ impl Cors {
                         .ok()
                 }));
 
-        if self.allow_any_origin.unwrap_or(true) {
+        if self.allow_any_origin.unwrap_or_default() {
             cors.allow_origin(Any)
         } else {
             cors.allow_origin(Origin::list(self.origins.into_iter().filter_map(
@@ -423,10 +449,10 @@ mod tests {
     use super::*;
     use apollo_router_core::prelude::*;
     use apollo_router_core::SchemaError;
+    use http::Uri;
     #[cfg(unix)]
     #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
-    use reqwest::Url;
     #[cfg(unix)]
     #[cfg(any(feature = "otlp-grpc"))]
     use schemars::gen::SchemaSettings;
@@ -533,28 +559,28 @@ mod tests {
         .parse()
         .unwrap();
 
-        let subgraphs: HashMap<&String, &Url> = schema.subgraphs().collect();
+        let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
         // if no configuration override, use the URL from the supergraph
         assert_eq!(
-            subgraphs.get(&"accounts".to_string()).unwrap().as_str(),
+            subgraphs.get(&"accounts".to_string()).unwrap().to_string(),
             "http://localhost:4001/graphql"
         );
         // if both configuration and schema specify a non empty URL, the configuration wins
         // this should show a warning in logs
         assert_eq!(
-            subgraphs.get(&"inventory".to_string()).unwrap().as_str(),
+            subgraphs.get(&"inventory".to_string()).unwrap().to_string(),
             "http://localhost:4002/graphql"
         );
         // if the configuration has a non empty routing URL, and the supergraph
         // has an empty one, the configuration wins
         assert_eq!(
-            subgraphs.get(&"products".to_string()).unwrap().as_str(),
+            subgraphs.get(&"products".to_string()).unwrap().to_string(),
             "http://localhost:4003/graphql"
         );
 
         assert_eq!(
-            subgraphs.get(&"reviews".to_string()).unwrap().as_str(),
+            subgraphs.get(&"reviews".to_string()).unwrap().to_string(),
             "http://localhost:4004/graphql"
         );
     }
@@ -594,5 +620,19 @@ mod tests {
                 schema_error
             );
         }
+    }
+
+    #[test]
+    fn cors_defaults() {
+        let cors = Cors::builder().build();
+
+        assert_eq!(
+            ["https://studio.apollographql.com/"],
+            cors.origins.as_slice()
+        );
+        assert!(
+            !cors.allow_any_origin.unwrap_or_default(),
+            "Allow any origin should be disabled by default"
+        );
     }
 }

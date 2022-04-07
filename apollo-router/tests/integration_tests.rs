@@ -1,15 +1,14 @@
 use apollo_router_core::{
-    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder,
-    ReqwestSubgraphService, ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest,
-    ValueExt,
+    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
-use http::Method;
+use http::{Method, Uri};
 use maplit::hashmap;
-use reqwest::Url;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
@@ -34,7 +33,7 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let http_request = http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        let http_request = http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -97,7 +96,7 @@ async fn api_schema_hides_field() {
         .build();
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -185,7 +184,7 @@ async fn queries_should_work_over_get() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -202,7 +201,7 @@ async fn queries_should_work_over_get() {
 #[tokio::test]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
-        message :"Value retrieval failed: Query planning had errors: Planning errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
+        message :"value retrieval failed: query planning had errors: bridge errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
 
@@ -214,7 +213,7 @@ async fn service_errors_should_be_propagated() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -260,7 +259,7 @@ async fn mutation_should_not_work_over_get() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -309,7 +308,7 @@ async fn automated_persisted_queries() {
     let expected_service_hits = hashmap! {};
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
             .unwrap();
 
@@ -336,7 +335,7 @@ async fn automated_persisted_queries() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_request_with_query)
             .unwrap();
 
@@ -358,7 +357,7 @@ async fn automated_persisted_queries() {
     };
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
             .unwrap();
 
@@ -420,7 +419,7 @@ async fn missing_variables() {
         .build();
 
     let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Url::parse("http://test").unwrap())
+        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
             .unwrap();
 
@@ -477,7 +476,7 @@ async fn setup_router_and_registry() -> (
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();
 
-        let service = ReqwestSubgraphService::new(name.to_owned()).map_request(
+        let service = TowerSubgraphService::new(name.to_owned()).map_request(
             move |request: SubgraphRequest| {
                 let cloned_counter = cloned_counter.clone();
                 cloned_counter.increment(cloned_name.as_str());
@@ -488,7 +487,7 @@ async fn setup_router_and_registry() -> (
         builder = builder.with_subgraph_service(name, service);
     }
 
-    let (router, _) = builder.build().await;
+    let (router, _) = builder.build().await.unwrap();
 
     (router, counting_registry)
 }

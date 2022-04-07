@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 433
+assertion_line: 460
 expression: config
 ---
 plugins: ~
@@ -17,4 +17,6 @@ server:
     methods:
       - GET
       - PUT
+  introspection: true
+  landing_page: true
 

@@ -1,9 +1,13 @@
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
-use tokio::sync::broadcast::{self, Sender};
+use tokio::sync::{
+    broadcast::{self, Sender},
+    oneshot,
+};
 use tower::{BoxError, Layer, ServiceExt};
 
+#[derive(Default)]
 pub struct QueryDeduplicationLayer;
 
 impl<S> Layer<S> for QueryDeduplicationLayer
@@ -64,17 +68,25 @@ where
                 }
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
+
                     locked_wait_map.insert(request.http_request.clone(), tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
                     let http_request = request.http_request.clone();
-                    let res = service.ready_oneshot().await?.call(request).await;
+                    let res = {
+                        // when _drop_signal is dropped, either by getting out of the block, returning
+                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
+                        // return with Err(), then we remove the entry from the wait map
+                        let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
+                        tokio::task::spawn(async move {
+                            let _ = drop_sentinel.await;
+                            let mut locked_wait_map = wait_map.lock().await;
+                            locked_wait_map.remove(&http_request);
+                        });
 
-                    {
-                        let mut locked_wait_map = wait_map.lock().await;
-                        locked_wait_map.remove(&http_request);
-                    }
+                        service.ready_oneshot().await?.call(request).await
+                    };
 
                     // Let our waiters know
                     let broadcast_value = res
@@ -82,11 +94,10 @@ where
                         .map(|response| response.clone())
                         .map_err(|e| e.to_string());
 
-                    // Our use case is very specific, so we are sure that
-                    // we won't get any errors here.
-                    tokio::task::spawn_blocking(move || {
+                    // We may get errors here, for instance if a task is cancelled,
+                    // so just ignore the result of send
+                    let _ = tokio::task::spawn_blocking(move || {
                         tx.send(broadcast_value)
-                            .expect("there is always at least one receiver alive, the _rx guard; qed")
                     }).await
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
