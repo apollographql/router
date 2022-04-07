@@ -26,7 +26,7 @@ impl MetricsConfigurator for Config {
         if self.enabled {
             let exporter = opentelemetry_prometheus::exporter().try_init()?;
             builder = builder.with_custom_endpoint(
-                "prometheus",
+                "/prometheus",
                 PrometheusService {
                     registry: exporter.registry().clone(),
                 }
@@ -53,12 +53,12 @@ impl Service<http_compat::Request<Bytes>> for PrometheusService {
     }
 
     fn call(&mut self, _req: http_compat::Request<Bytes>) -> Self::Future {
-        let encoder = TextEncoder::new();
         let metric_families = self.registry.gather();
-        let mut result = Vec::new();
-        encoder.encode(&metric_families, &mut result).unwrap();
-
         Box::pin(async move {
+            let encoder = TextEncoder::new();
+            let mut result = Vec::new();
+            encoder.encode(&metric_families, &mut result)?;
+            tracing::info!("Metrics {}", String::from_utf8_lossy(&result).into_owned());
             Ok(http_compat::Response {
                 inner: http::Response::builder()
                     .status(StatusCode::OK)

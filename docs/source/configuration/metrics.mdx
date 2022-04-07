@@ -12,11 +12,10 @@ You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/gr
 ```yaml title="router.yaml"
 telemetry:
   metrics:
-    exporter:
-      prometheus:
-        # By setting this endpoint you enable the prometheus exporter
-        # All our endpoints exposed by plugins are namespaced by the name of the plugin
-        # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
-        endpoint: "/metrics"
+    prometheus:
+      # By setting this endpoint you enable the prometheus exporter
+      # All our endpoints exposed by plugins are namespaced by the name of the plugin
+      # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/prometheus`
+      enabled: true
 ```
 

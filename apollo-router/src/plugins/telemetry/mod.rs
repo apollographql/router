@@ -408,7 +408,6 @@ impl Plugin for Telemetry {
                     .url()
                     .path()
                     .trim_start_matches("/plugins/apollo.telemetry");
-
                 if let Some(index) = paths.iter().position(|path| path == endpoint) {
                     index
                 } else {
@@ -499,7 +498,7 @@ impl Telemetry {
                 Ok::<_, BoxError>(http_compat::Response {
                     inner: http::Response::builder()
                         .status(StatusCode::NOT_FOUND)
-                        .body(ResponseBody::Text(String::new()))
+                        .body(ResponseBody::Text("Not found".to_string()))
                         .unwrap(),
                 })
             })
