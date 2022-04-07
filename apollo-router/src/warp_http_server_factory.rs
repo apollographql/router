@@ -357,7 +357,7 @@ async fn custom_plugin_handler(
 
     let is_json = matches!(
         res.body(),
-        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_)
     );
 
     let res = res.map(|body| match body {
@@ -365,9 +365,6 @@ async fn custom_plugin_handler(
             Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
         }
         ResponseBody::RawJSON(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::RawString(res) => {
             Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
         }
         ResponseBody::Text(res) => Bytes::from(res),
@@ -566,10 +563,6 @@ where
                                             .expect("responsebody is serializable; qed"),
                                     ),
                                     ResponseBody::RawJSON(res) => Bytes::from(
-                                        serde_json::to_vec(&res)
-                                            .expect("responsebody is serializable; qed"),
-                                    ),
-                                    ResponseBody::RawString(res) => Bytes::from(
                                         serde_json::to_vec(&res)
                                             .expect("responsebody is serializable; qed"),
                                     ),
