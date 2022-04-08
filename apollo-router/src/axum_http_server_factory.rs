@@ -13,7 +13,8 @@ use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
-use opentelemetry::propagation::Extractor;
+use opentelemetry::global;
+use opentelemetry::trace::TraceContextExt;
 use serde_json::json;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -28,10 +29,9 @@ use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// A basic http server using warp.
 /// Uses streaming as primary method of response.
@@ -137,8 +137,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .route("/apollo", get(health_check))
                 .route("/server-health", get(health_check))
                 .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                    TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
+                        DefaultMakeSpan::new().level(Level::INFO),
+                    )),
                 )
                 .layer(Extension(boxed_service))
                 .layer(cors);
@@ -398,7 +399,7 @@ async fn custom_plugin_handler(
 
     let is_json = matches!(
         res.body(),
-        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_) | ResponseBody::RawString(_)
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_)
     );
 
     let mut res = res.map(|body| match body {
@@ -406,9 +407,6 @@ async fn custom_plugin_handler(
             Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
         }
         ResponseBody::RawJSON(res) => {
-            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
-        }
-        ResponseBody::RawString(res) => {
             Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
         }
         ResponseBody::Text(res) => Bytes::from(res),
@@ -508,11 +506,6 @@ async fn run_graphql_request(
         );
     }
 
-    // retrieve and reuse the potential trace id from the caller
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
-    });
-
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let uri = format!("http://{}{}", host, uri);
@@ -565,24 +558,26 @@ fn prefers_html(accept_header: &HeaderValue) -> bool {
         .unwrap_or_default()
 }
 
-struct HeaderMapCarrier<'a>(&'a HeaderMap);
+#[derive(Clone)]
+struct PropagatingMakeSpan(DefaultMakeSpan);
 
-impl<'a> Extractor for HeaderMapCarrier<'a> {
-    fn get(&self, key: &str) -> Option<&str> {
-        if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
-            tracing::trace!(
-                "found OpenTelemetry key in user's request: {}={}",
-                key,
-                value
-            );
-            Some(value)
+impl<B> MakeSpan<B> for PropagatingMakeSpan {
+    fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // Before we make the span we need to attach span info that may have come in from the request.
+        let context = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
+        });
+
+        // If there was no span from the request then it will default to the NOOP span.
+        // Attaching the NOOP span has the effect of preventing further tracing.
+        if context.span().span_context().is_valid() {
+            // We have a valid remote span, attach it to the current thread before creating the root span.
+            let _context_guard = context.attach();
+            self.0.make_span(request)
         } else {
-            None
+            // No remote span, we can go ahead and create the span without context.
+            self.0.make_span(request)
         }
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(|x| x.as_str()).collect()
     }
 }
 

@@ -1,0 +1,70 @@
+---
+title: Metrics in the Apollo Router
+description: Collect metrics
+---
+
+import { Link } from "gatsby";
+
+## Collecting Metrics
+
+### Using Prometheus
+
+You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    prometheus:
+      # By setting this endpoint you enable the prometheus exporter
+      # All our endpoints exposed by plugins are namespaced by the name of the plugin
+      # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/prometheus`
+      enabled: true
+```
+
+Assuming you are running locally:
+1. Run a query against the router.
+2. Navigate to [http://localhost:4000/plugins/apollo.telemetry/prometheus](http://localhost:4000/plugins/apollo.telemetry/prometheus) to see something like:
+
+```
+# HELP http_request_duration_seconds Total number of HTTP requests made.
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{le="0.5"} 1
+http_request_duration_seconds_bucket{le="0.9"} 1
+---SNIP---
+```
+
+Note that if you have not run a query against the router you will see a blank page as no metrics will have been generated yet!
+
+### Using OpenTelemetry Collector
+
+You may send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and eporting metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    otlp:
+      # Either 'default' or a URL
+      endpoint: default
+      
+      # Optional protocol. Only grpc is supported currently. 
+      # Setting to http will result in configuration failure.
+      protocol: grpc
+      
+      # Optional Grpc configuration
+      grpc:
+        domain_name: "my.domain"
+        key:
+          file: ""
+          # env: ""
+        ca:
+          file: ""
+          # env: ""
+        cert:
+          file: ""
+          # env: ""
+        metadata:
+          foo: bar
+      
+      # Optional timeout in humatime form       
+      timeout: 2s
+```

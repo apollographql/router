@@ -242,10 +242,7 @@ commands:
     steps:
       - rust/build:
           with_cache: false
-          crate: --locked --features otlp-grpc -p apollo-router -p apollo-router-core
-      - rust/build:
-          with_cache: false
-          crate: --locked --no-default-features --features otlp-http -p apollo-router -p apollo-router-core
+          crate: --locked -p apollo-router -p apollo-router-core
   build_all_permutations:
     steps:
       - build_common_permutations
@@ -648,7 +645,7 @@ jobs:
             cd artifacts && sha1sum *.tar.gz > sha1sums.txt
       - run:
           command: >
-            gh release create $VERSION --notes-file CHANGELOG.md --title $VERSION artifacts/*
+            gh release create $VERSION --notes-file NEXT_CHANGELOG.md --title $VERSION artifacts/*
       - setup_remote_docker:
           version: 20.10.11
           docker_layer_caching: true

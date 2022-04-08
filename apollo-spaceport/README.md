@@ -12,9 +12,19 @@ re-loaded, so it makes more sense to include this configuration here. There
 is a new optional section that looks like this:
 
 ```
-graph:
-  key: <YOUR_GRAPH_API_KEY>
-  reference: <YOUR_GRAPH_ID>@<VARIANT>
+telemetry:
+  # Optional Apollo telemetry configuration.
+  apollo: 
+  
+    # Optional external Spaceport URL.
+    # If not specified an in-process spaceport is used. 
+    endpoint: "https://my-spaceport"
+  
+    # Optional Apollo key. If not specified the env variable APOLLO_KEY will be used.
+    apollo_key: "${APOLLO_KEY}"
+    
+    # Optional graphs reference. If not specified the env variable APOLLO_GRAPH_REF will be used.   
+    apollo_graph_ref: "${APOLLO_GRAPH_REF}"
 ```
 
 ## Design
@@ -33,28 +43,14 @@ The spaceport is configured from a new optional configuration section which look
 like this:
 
 ```
-spaceport:
-  external: false
-  collector: https://127.0.0.1:50051
-  listener: 127.0.0.1:50051
+telemetry:
+  # Optional Apollo telemetry configuration.
+  apollo: 
+  
+    # Optional external Spaceport URL.
+    # If not specified an in-process spaceport is used. 
+    endpoint: "https://my-spaceport"
 ```
-
-(The above values are the defaults, so configuring like this will have the same
-results as performing no configuration.)
-
-### external
-
-This directs the router to start an internal spaceport (default: false) or to send
-statistics to an externally configured spaceport.
-
-### collector
-
-This directs the router to send statistics to this configured URL.
-
-### listener
-
-This is only used if external spaceport is false, in which case a listening spaceport
-is spawned and will listen at the specified address.
 
 ### Components
 

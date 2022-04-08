@@ -1,6 +1,6 @@
 [package]
 name = "apollo-spaceport"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -20,6 +20,7 @@ serde_json = { version = "1.0.79" }
 sys-info = "0.9.1"
 tonic = "0.6.2"
 tokio = { version = "1.17.0", features = ["macros", "rt-multi-thread"] }
+tokio-stream = {version="0.1.8", features=["net"]}
 tracing = "0.1.32"
 tracing-subscriber = { version = "0.3.10", features = ["env-filter", "json"] }
 

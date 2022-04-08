@@ -1,0 +1,191 @@
+---
+title: Tracing in the Apollo Router
+description: Collect tracing information
+---
+
+import { Link } from "gatsby";
+
+The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+
+* [Jaeger](https://www.jaegertracing.io/)
+* [Zipkin](https://zipkin.io/)
+* [Datadog](https://www.datadoghq.com/)
+* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC.
+
+The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
+
+* Sub-request response times
+* Query shape (sub-request dependencies)
+* Apollo Router post-processing
+
+Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
+
+> To get the most out of distributed tracing, _all_ components in your system should be instrumented.
+
+## Common configuration
+
+### Trace config
+The `trace_config` section contains common configuration that will be used in the for all exporters. It is optional and will fall back on env variables as specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    trace_config:
+      service_name: "router"
+      service_namespace: "apollo"
+      # Optional. Either a float between 0 and 1 or 'always_on' or 'always_off'
+      sampler: 0.1
+      
+      # Optional. Use a parent based sampler. This enables remote spans help make a decision on if a span is sampeld or not.  
+      # https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/sdk.md#parentbased
+      parent_based_sampler: false
+      
+      # Optional limits 
+      max_attributes_per_event: 10
+      max_attributes_per_link: 10
+      max_attributes_per_span: 10
+      max_events_per_span: 10
+      max_links_per_span: 10
+      
+      # Attributes particular to an exporter that have not
+      # been explicitly handled in Router configuration.
+      attributes: 
+        some.config.attribute: "config value"
+```
+
+If `service_name` is set then environment variables are not used. However, it is possible to embed environment variables into your router config using Unix `${key:default}` syntax.
+
+If no environment variable is set and service_name is not present then the default of `service_unknown` will be used as per the OpenTelemetry spec.
+
+### Propagation
+
+The `propagation` section allows you to configure which propagators are active in addition to ones automatically activated by virtue of using an exporter.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    propagation:
+      # https://www.w3.org/TR/baggage/
+      baggage: false
+      
+      # https://www.datadoghq.com/
+      datadog: false
+      
+      # https://www.jaegertracing.io/ (compliant with opentracing)
+      jaeger: false 
+      
+      # https://www.w3.org/TR/trace-context/
+      trace_context: false
+      
+      # https://zipkin.io/ (compliant with opentracing)
+      zipkin: false
+      
+    jaeger:
+      .. # Jaeger export configuration, no need to specify Jaeger propagation.
+```
+Specifying explicit propagation is generally only required if you are using an exporter that supports multiple trace ID formats. For example OpenTelemetry Collector, Jaeger or OpenTracing compatible exporters.
+
+## Using Datadog
+
+The Apollo Router can be configured to connect to either the default agent address or a URL.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    datadog:
+      # Either 'default' or a URL
+      endpoint: default
+```
+
+## Using Jaeger
+
+The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
+
+### Agent config
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    jaeger:
+      agent:
+        # Either 'default' or a socket address 
+        endpoint: default
+      
+```
+
+### Collector config
+If you are using Kubernetes then you can inject your secrets into configuration via env variable.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    jaeger:
+      collector: 
+        endpoint: "http://my-jaeger-collector"
+        username: "${JAEGER_USERNAME}"
+        password: "${JAEGER_PASSWORD}"
+```
+
+## OpenTelemetry Collector via OTLP
+
+[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that can be used to receive, process and export your telemetry data in a pluggable way.
+
+If you find that the built-in telemetry features of the Apollo Router are missing some desired functionality e.g. [exporting to Kafka](https://opentelemetry.io/docs/collector/configuration/#exporters) then it's worth considering this option.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    otlp:
+      # Either 'default' or a URL
+      endpoint: default
+      
+      # Optional protocol (Defaults to grpc)
+      protocol: grpc
+      
+      # Optional Grpc configuration
+      grpc:
+        domain_name: "my.domain"
+        key:
+          file: ""
+          # env: ""
+        ca:
+          file: ""
+          # env: ""
+        cert:
+          file: ""
+          # env: ""
+        metadata:
+          foo: bar
+      
+      # Optional Http configuration
+      http:
+        headers:
+          foo: bar   
+      
+      # Optional timeout in humatime form       
+      timeout: 2s
+
+```
+
+
+## Using Zipkin
+
+The Apollo Router can be configured to export tracing data to Zipkin either via an agent or http collector.
+
+### Agent config
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      agent:
+        # Either 'default' or a socket address 
+        endpoint: default
+```
+
+### Collector config
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      collector: 
+        endpoint: "http://my-zipkin-collector"
+```
