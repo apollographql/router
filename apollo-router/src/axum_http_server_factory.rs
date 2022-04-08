@@ -95,11 +95,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     "/",
                     get({
                         let display_landing_page = configuration.server.landing_page;
-                        move |query: RawQuery,
+                        move |host: Host,
+                              query: RawQuery,
                               headers: HeaderMap,
                               original_uri: OriginalUri,
                               service: Extension<BufferedService>| {
                             redirect_or_run_graphql_operation(
+                                host,
                                 query,
                                 headers,
                                 original_uri,
@@ -114,11 +116,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     "/graphql",
                     get({
                         let display_landing_page = configuration.server.landing_page;
-                        move |query: RawQuery,
+                        move |host: Host,
+                              query: RawQuery,
                               headers: HeaderMap,
                               original_uri: OriginalUri,
                               service: Extension<BufferedService>| {
                             redirect_or_run_graphql_operation(
+                                host,
                                 query,
                                 headers,
                                 original_uri,
@@ -421,6 +425,7 @@ async fn custom_plugin_handler(
 }
 
 async fn redirect_or_run_graphql_operation(
+    host: Host,
     RawQuery(query): RawQuery,
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
@@ -435,7 +440,7 @@ async fn redirect_or_run_graphql_operation(
         if let Ok(request) =
             graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
         {
-            return run_graphql_request(service, Method::GET, request, headers, uri)
+            return run_graphql_request(service, Method::GET, request, headers, uri, host)
                 .await
                 .into_response();
         }
@@ -445,12 +450,13 @@ async fn redirect_or_run_graphql_operation(
 }
 
 async fn run_graphql_operation(
+    host: Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
-    run_graphql_request(service, Method::POST, request, header_map, uri)
+    run_graphql_request(service, Method::POST, request, header_map, uri, host)
         .await
         .into_response()
 }
@@ -488,6 +494,7 @@ async fn run_graphql_request(
     request: graphql::Request,
     header_map: HeaderMap,
     uri: Uri,
+    Host(host): Host,
 ) -> impl IntoResponse {
     if let Some(client_name) = header_map.get("apollographql-client-name") {
         // Record the client name as part of the current span
@@ -508,12 +515,7 @@ async fn run_graphql_request(
 
     match service.ready_oneshot().await {
         Ok(mut service) => {
-            // TODO: come on :/
-            let uri = format!(
-                "http://{}{}",
-                header_map.get("host").unwrap().to_str().unwrap(),
-                &uri
-            );
+            let uri = format!("http://{}{}", host, uri);
             let mut http_request = http::Request::builder()
                 .method(method)
                 .uri(uri)
@@ -589,6 +591,7 @@ mod tests {
     use super::*;
     use crate::configuration::Cors;
     use apollo_router_core::http_compat::Request;
+    use http::header::CONTENT_TYPE;
     use mockall::mock;
     use reqwest::header::{
         ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -684,7 +687,11 @@ mod tests {
             )
             .await
             .expect("Failed to create server factory");
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
         let client = reqwest::Client::builder()
+            .default_headers(default_headers)
             .redirect(Policy::none())
             .build()
             .unwrap();
@@ -821,7 +828,7 @@ mod tests {
         // Get query
         let response = client
             .get(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
+            .query(&json!({ "query": "query" }))
             .send()
             .await
             .unwrap()
@@ -949,8 +956,12 @@ mod tests {
             });
         let server = init_unix(expectations, &temp_dir).await;
 
-        let output =
-            send_to_unix_socket(server.listen_address(), "POST", r#"{"query":"query"}"#).await;
+        let output = send_to_unix_socket(
+            server.listen_address(),
+            Method::POST,
+            r#"{"query":"query"}"#,
+        )
+        .await;
 
         assert_eq!(
             serde_json::from_slice::<graphql::Response>(&output).unwrap(),
@@ -959,7 +970,7 @@ mod tests {
 
         // Get query
         let output =
-            send_to_unix_socket(server.listen_address(), "GET", r#"{"query":"query"}"#).await;
+            send_to_unix_socket(server.listen_address(), Method::GET, r#"query=query"#).await;
 
         assert_eq!(
             serde_json::from_slice::<graphql::Response>(&output).unwrap(),
@@ -970,28 +981,44 @@ mod tests {
     }
 
     #[cfg(unix)]
-    async fn send_to_unix_socket(addr: &ListenAddr, method: &str, body: &str) -> Vec<u8> {
+    async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> Vec<u8> {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest};
         use tokio::net::UnixStream;
 
-        let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
-        stream.ready(Interest::WRITABLE).await.unwrap();
-        stream
-            .write_all(
+        let content = match method {
+            Method::GET => {
+                format!(
+                    "{} /?{} HTTP/1.1\r
+Host: localhost:4100\r
+Content-Length: {}\r
+Content-Type: application/json\r
+
+\n",
+                    method.as_str(),
+                    body,
+                    body.len(),
+                )
+            }
+            Method::POST => {
                 format!(
                     "{} / HTTP/1.1\r
 Host: localhost:4100\r
 Content-Length: {}\r
+Content-Type: application/json\r
 
 {}\n",
-                    method,
+                    method.as_str(),
                     body.len(),
                     body
                 )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
+            }
+            _ => {
+                unimplemented!()
+            }
+        };
+        let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
+        stream.ready(Interest::WRITABLE).await.unwrap();
+        stream.write_all(content.as_bytes()).await.unwrap();
         stream.flush().await.unwrap();
         let stream = BufReader::new(stream);
         let mut lines = stream.lines();
