@@ -1,3 +1,5 @@
+//! Customization via Rhai.
+
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{

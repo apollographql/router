@@ -24,6 +24,7 @@ futures = "0.3.21"
 hex = "0.4.3"
 http = "0.2.6"
 hyper = { version = "0.14.18", features = ["client"] }
+hyper-rustls = "0.23.0"
 include_dir = "0.7.2"
 itertools = "0.10.3"
 lazy_static = "1.4.0"

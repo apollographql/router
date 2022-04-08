@@ -5,6 +5,7 @@ use http::{
     HeaderValue,
 };
 use hyper::client::HttpConnector;
+use hyper_rustls::HttpsConnector;
 use opentelemetry::{global, propagation::Injector};
 use std::task::Poll;
 use std::{str::FromStr, sync::Arc};
@@ -14,14 +15,20 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Clone)]
 pub struct TowerSubgraphService {
-    client: hyper::Client<HttpConnector>,
+    client: hyper::Client<HttpsConnector<HttpConnector>>,
     service: Arc<String>,
 }
 
 impl TowerSubgraphService {
     pub fn new(service: impl Into<String>) -> Self {
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_or_http()
+            .enable_http1()
+            .build();
+
         Self {
-            client: ServiceBuilder::new().service(hyper::Client::new()),
+            client: ServiceBuilder::new().service(hyper::Client::builder().build(https)),
             service: Arc::new(service.into()),
         }
     }

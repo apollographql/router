@@ -147,6 +147,11 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
     Schema::Object(plugins_object)
 }
 
+/// Plugins provided by Apollo.
+///
+/// These plugins are processed prior to user plugins. Also, their configuration
+/// is "hoisted" to the top level of the config rather than being processed
+/// under "plugins" as for user plugins.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct ApolloPlugins {
@@ -177,6 +182,10 @@ impl JsonSchema for ApolloPlugins {
     }
 }
 
+/// Plugins provided by a user.
+///
+/// These plugins are compiled into a router by and their configuration is performed
+/// under the "plugins" section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct UserPlugins {
@@ -366,6 +375,7 @@ pub(crate) fn default_service_namespace() -> String {
     "apollo".to_string()
 }
 
+/// Types of secret.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Secret {
@@ -384,6 +394,7 @@ impl Secret {
     }
 }
 
+/// TLS configuration details.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TlsConfig {

@@ -35,12 +35,15 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
+/// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
+    /// A GraphQL response corresponding to the spec https://spec.graphql.org/October2021/#sec-Response
     GraphQL(Response),
+    /// A json value
     RawJSON(serde_json::Value),
-    RawString(String),
+    /// Text without any serialization (example: HTML content, Prometheus metrics, ...)
     Text(String),
 }
 
@@ -52,9 +55,6 @@ impl TryFrom<ResponseBody> for Response {
             ResponseBody::GraphQL(res) => Ok(res),
             ResponseBody::RawJSON(_) => {
                 Err("wrong ResponseBody kind: expected Response, found RawJSON")
-            }
-            ResponseBody::RawString(_) => {
-                Err("wrong ResponseBody kind: expected Response, found RawString")
             }
             ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
         }
@@ -72,8 +72,7 @@ impl TryFrom<ResponseBody> for String {
             ResponseBody::GraphQL(_) => {
                 Err("wrong ResponseBody kind: expected RawString, found GraphQL")
             }
-            ResponseBody::RawString(res) => Ok(res),
-            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawString, found Text"),
+            ResponseBody::Text(res) => Ok(res),
         }
     }
 }
@@ -86,9 +85,6 @@ impl TryFrom<ResponseBody> for serde_json::Value {
             ResponseBody::RawJSON(res) => Ok(res),
             ResponseBody::GraphQL(_) => {
                 Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
-            }
-            ResponseBody::RawString(_) => {
-                Err("wrong ResponseBody kind: expected RawJSON, found RawString")
             }
             ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
         }
@@ -115,7 +111,7 @@ impl From<serde_json::Value> for ResponseBody {
 impl FromStr for ResponseBody {
     type Err = Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::RawString(s.to_owned()))
+        Ok(Self::Text(s.to_owned()))
     }
 }
 
