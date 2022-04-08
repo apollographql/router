@@ -23,24 +23,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 -->
 
 # [v0.1.0-preview.4] - Unreleased
-## 🚀 Features
-- **Datadog support** [PR #782](https://github.com/apollographql/router/pull/782)
-
-  Datadog support has been added via `telemetry` yaml configuration.
-
-- **Yaml env variable expansion** [PR #782](https://github.com/apollographql/router/pull/782)
-
-  All values in the router configuration outside the `server` section may use environment variable expansion.
-  Unix style expansion is used. Either:
-
-  * `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
-  * `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
-
-  Only values may be expanded (not keys):
-  ```yaml {4,8} title="router.yaml"
-  example:
-    passord: "${MY_PASSWORD}" 
-  ```
+## ❗ BREAKING ❗
 - **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
 
   Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are tying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
@@ -80,7 +63,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
       datadog:
         endpoint: default
   ```
+## 🚀 Features
+- **Datadog support** [PR #782](https://github.com/apollographql/router/pull/782)
 
+  Datadog support has been added via `telemetry` yaml configuration.
+
+- **Yaml env variable expansion** [PR #782](https://github.com/apollographql/router/pull/782)
+
+  All values in the router configuration outside the `server` section may use environment variable expansion.
+  Unix style expansion is used. Either:
+
+  * `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
+  * `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
+
+  Only values may be expanded (not keys):
+  ```yaml {4,8} title="router.yaml"
+  example:
+    passord: "${MY_PASSWORD}" 
+  ```
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
