@@ -122,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
-        let mut mock_service = utils::MockSubgraphService::new();
+        let mut mock_service = utils::test::MockSubgraphService::new();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -157,7 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
-        let mut mock_service = utils::MockSubgraphService::new();
+        let mut mock_service = utils::test::MockSubgraphService::new();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
@@ -194,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = utils::MockRouterService::new();
+        let mut mock_service = utils::test::MockRouterService::new();
 
         mock_service
             .expect_call()
@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = utils::MockRouterService::new();
+        let mut mock_service = utils::test::MockRouterService::new();
 
         mock_service
             .expect_call()

@@ -40,7 +40,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::MockSubgraphService::new();
+        let mut mock = utils::test::MockSubgraphService::new();
 
         // The expected reply is going to be JSON returned in the SubgraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";

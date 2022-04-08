@@ -20,7 +20,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_processes_operation_name() {
         // create a mock service we will use to test our plugin
-        let mut mock = utils::MockRouterService::new();
+        let mut mock = utils::test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";

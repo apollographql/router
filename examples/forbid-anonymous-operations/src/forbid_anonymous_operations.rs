@@ -112,7 +112,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -146,7 +146,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
@@ -182,7 +182,7 @@ mod tests {
         let operation_name = "validOperationName";
 
         // create a mock service we will use to test our plugin
-        let mut mock = utils::MockRouterService::new();
+        let mut mock = utils::test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
