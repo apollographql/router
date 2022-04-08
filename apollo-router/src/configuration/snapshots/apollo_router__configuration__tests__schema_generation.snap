@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 401
 expression: "&schema"
 ---
 {
@@ -1026,8 +1025,8 @@ expression: "&schema"
                     {
                       "type": "string",
                       "enum": [
-                        "AlwaysOn",
-                        "AlwaysOff"
+                        "always_on",
+                        "always_off"
                       ]
                     }
                   ],
