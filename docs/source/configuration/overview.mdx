@@ -259,6 +259,23 @@ plugins:
     var2: 1
 ```
 
+### Environment variable expansion
+
+You can reference environment variables directly in your yaml file for any section outside of `server`.
+
+This is useful for referencing secrets without embedding them directly into the yaml.
+
+Unix style expansion is used. Either:
+
+* `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
+* `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
+
+Only values may be expanded (not keys):
+```yaml {4,8} title="router.yaml"
+example:
+  passord: "${MY_PASSWORD}" 
+```
+
 ### Reusing configuration
 
 You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:

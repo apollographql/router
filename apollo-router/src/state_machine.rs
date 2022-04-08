@@ -196,6 +196,10 @@ where
                         None,
                     )
                     .await
+                    .map(|s| {
+                        tracing::info!("reloaded");
+                        s
+                    })
                     .into_ok_or_err2()
                 }
 
@@ -260,7 +264,7 @@ where
                 .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot create the router: {}", err);
+                    tracing::error!("cannot create the router: {}", err);
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
 
@@ -281,7 +285,7 @@ where
                 .create(router.clone(), configuration.clone(), None, plugin_handlers)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot start the router: {}", err);
+                    tracing::error!("cannot start the router: {}", err);
                     Errored(err)
                 })?;
 
@@ -342,7 +346,7 @@ where
                     )
                     .await
                     .map_err(|err| {
-                        tracing::error!("Cannot start the router: {}", err);
+                        tracing::error!("cannot start the router: {}", err);
                         Errored(err)
                     })?;
                 Ok(Running {
@@ -354,7 +358,7 @@ where
             }
             Err(err) => {
                 tracing::error!(
-                    "Cannot create new router, keeping previous configuration: {}",
+                    "cannot create new router, keeping previous configuration: {}",
                     err
                 );
                 Err(Running {
@@ -637,7 +641,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _| Err(BoxError::from("error")));
 
         router_factory
             .expect_plugins()
