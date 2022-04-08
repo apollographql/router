@@ -33,8 +33,8 @@ telemetry:
     trace_config:
       service_name: "${MY_ENV_VARIABLE:router}"
       service_namespace: "apollo"
-      # Optional. Either a float between 0 and 1 or 'AlwaysOn' or 'AlwaysOff'
-      sampler: AlwaysOn
+      # Optional. Either a float between 0 and 1 or 'always_on' or 'always_off'
+      sampler: 0.1
       
       # Optional. Use a parent based sampler. This enables remote spans help make a decision on if a span is sampeld or not.  
       # https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/sdk.md#parentbased

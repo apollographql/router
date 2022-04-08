@@ -154,7 +154,7 @@ pub enum SamplerOption {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum Sampler {
     /// Always sample the trace
     AlwaysOn,
