@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2.5.{{ checksum "rust-toolchain.toml" }}
+    default: v2.6.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -281,7 +281,7 @@ commands:
           command: |
             set -e -o pipefail
             cargo sweep --version || cargo install cargo-sweep
-      - run: cargo sweep -s
+
       - run:
           name: precompile large dependencies
           command: |
@@ -293,6 +293,7 @@ commands:
           paths:
             - ~/.cargo
             - target/
+      - run: cargo sweep -s
       - restore_cache:
           name: Restore target/
           keys:
@@ -325,7 +326,7 @@ commands:
               cargo install cargo-sweep
             }
             exit $LASTEXITCODE
-      - run: cargo sweep -s
+
       - run:
           name: precompile large dependencies
           command: |
@@ -341,6 +342,7 @@ commands:
             - C:\\Users\\circleci\.cargo
             - target/
 
+      - run: cargo sweep -s
       - restore_cache:
           name: Restore target/
           keys:
@@ -373,7 +375,7 @@ commands:
               cargo install cargo-sweep
             }
             exit $LASTEXITCODE
-      - run: cargo sweep -s
+
       - run:
           name: precompile large dependencies
           command: |
@@ -389,6 +391,7 @@ commands:
             - C:\\Users\\circleci\.cargo
             - target/
 
+      - run: cargo sweep -s
       - restore_cache:
           name: Restore target/
           keys:
@@ -421,7 +424,6 @@ commands:
           command: |
             set -e -o pipefail
             cargo sweep --version || cargo install cargo-sweep
-      - run: cargo sweep -s
       - run:
           name: precompile large dependencies
           command: |
@@ -435,6 +437,7 @@ commands:
             - target/
             - dockerfiles/federation-demo/federation-demo/node_modules
 
+      - run: cargo sweep -s
       - restore_cache:
           name: Restore target/
           keys:
