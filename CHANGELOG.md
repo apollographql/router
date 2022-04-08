@@ -104,7 +104,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Download the Studio protobuf schema during build** ([PR #776](https://github.com/apollographql/router/pull/776)
 
   The schema was vendored before, now it is downloaded dynamically during the build process
- 
+
+- **Fix broken benchmarks** ([PR #797](https://github.com/apollographql/router/issues/797))
+
+  the `apollo-router-benchmarks` project was failing due to changes in the query planner. It is now fixed, and its subgraph mocking code is now available in `apollo-router-core`
+
 ## 📚 Documentation
 
 - **Document the Plugin and DynPlugin trait** ([PR #800](https://github.com/apollographql/router/pull/800)
