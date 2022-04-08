@@ -234,7 +234,7 @@ pub async fn rt_main() -> Result<()> {
                 r#"
 ===
 APOLLO ROUTER v{version}
-
+!
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
 👉 DO ONE:
