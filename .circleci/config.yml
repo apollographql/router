@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2-{{ checksum "rust-toolchain.toml" }}
+    default: v2.1-{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -276,25 +276,37 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - restore_cache:
-          name: Restore target/
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
       - run:
           name: Install cargo sweep
           command: |
             set -e -o pipefail
             cargo sweep --version || cargo install cargo-sweep
       - run: cargo sweep -s
-      - build_all_permutations
+      - run:
+          name: precompile large dependencies
+          command: |
+            for PACKAGE in opentelemetry router-bridge opentelemetry-otlp opentelemetry-jaeger opentelemetry-prometheus tracing tokio moka mockall tower-http tonic apollo-parser hyper-rustls
+            do
+              cargo build -p $PACKAGE
+            done
       - run: cargo sweep -f
       - save_cache:
-          name: Save .cargo
+          name: Save .cargo and precompiled dependencies
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - ~/.cargo
+            - target/
+      - restore_cache:
+          name: Restore target/
+          keys:
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+
+      - run: cargo sweep -s
+      - build_all_permutations
+      - run: cargo sweep -f
+      
       - save_cache:
           name: Save target/
           key: rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
