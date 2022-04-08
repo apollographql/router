@@ -5,6 +5,9 @@ use apollo_router_core::{
 };
 use apollo_router_core::{prelude::*, Context};
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
+use envmnt::types::ExpandOptions;
+use envmnt::ExpansionType;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tower::buffer::Buffer;
@@ -88,13 +91,6 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // This **must** run after:
-        //  - the Reporting plugin is initialized.
-        //  - all configuration errors are checked
-        // and **before** build() is called.
-        //
-        // This is because our tracing configuration is initialized by
-        // the startup() method of our Reporting plugin.
         let (pluggable_router_service, plugins) = builder.build().await?;
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let service = ServiceBuilder::new().buffered().service(
@@ -107,13 +103,25 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );
+
+        // We're good to go with the new service. Let the plugins know that this is about to happen.
+        // This is needed so that the Telemetry plugin can swap in the new propagator.
+        // The alternative is that we introduce another service on Plugin that wraps the request
+        // as a much earlier stage.
+        for (_, plugin) in &mut self.plugins {
+            tracing::debug!("activating plugin {}", plugin.name());
+            #[allow(deprecated)]
+            plugin.activate();
+            tracing::debug!("activated plugin {}", plugin.name());
+        }
+
         // If we get here, everything is good so shutdown our previous plugins
         for (_, mut plugin) in previous_plugins.drain(..).rev() {
             if let Err(err) = plugin.shutdown().await {
                 // If we can't shutdown a plugin, we terminate the router since we can't
                 // assume that it is safe to continue.
-                tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
-                tracing::error!("Terminating router...");
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("terminating router...");
                 std::process::exit(1);
             }
         }
@@ -141,7 +149,10 @@ async fn process_plugins(
                     name,
                     configuration
                 );
-                match factory.create_instance(configuration) {
+
+                // expand any env variables in the config before processing.
+                let configuration = expand_env_variables(configuration);
+                match factory.create_instance(&configuration) {
                     Ok(mut plugin) => {
                         tracing::debug!("starting plugin: {}", name);
                         match plugin.startup().await {
@@ -193,6 +204,29 @@ async fn process_plugins(
         ))
     } else {
         Ok(plugin_instances.into_iter().collect())
+    }
+}
+
+fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
+    let mut configuration = configuration.clone();
+    visit(&mut configuration);
+    configuration
+}
+
+fn visit(value: &mut serde_json::Value) {
+    match value {
+        Value::String(value) => {
+            *value = envmnt::expand(
+                value,
+                Some(
+                    ExpandOptions::new()
+                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
+                ),
+            );
+        }
+        Value::Array(a) => a.iter_mut().for_each(visit),
+        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
+        _ => {}
     }
 }
 

@@ -93,6 +93,12 @@ pub trait Plugin: Send + Sync + 'static + Sized {
         Ok(())
     }
 
+    /// This method may be removed in future, do not use!
+    /// This is invoked after startup before a plugin goes live.
+    /// It must not panic.
+    #[deprecated]
+    fn activate(&mut self) {}
+
     /// This is invoked whenever configuration is changed
     /// during router execution, including at shutdown.
     async fn shutdown(&mut self) -> Result<(), BoxError> {
@@ -165,6 +171,12 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// during router execution, including at startup.
     async fn startup(&mut self) -> Result<(), BoxError>;
 
+    /// This method may be removed in future, do not use!
+    /// This is invoked after startup before a plugin goes live.
+    /// It must not panic.
+    #[deprecated]
+    fn activate(&mut self);
+
     /// This is invoked whenever configuration is changed
     /// during router execution, including at shutdown.
     async fn shutdown(&mut self) -> Result<(), BoxError>;
@@ -217,6 +229,11 @@ where
     // Plugins will receive a notification that they should start up and shut down.
     async fn startup(&mut self) -> Result<(), BoxError> {
         self.startup().await
+    }
+
+    #[allow(deprecated)]
+    fn activate(&mut self) {
+        self.activate()
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {

@@ -1,11 +1,9 @@
 //! Starts a server that will handle http graphql requests.
 
-mod apollo_telemetry;
 pub mod configuration;
 mod executable;
 mod files;
 mod http_server_factory;
-mod layers;
 pub mod plugins;
 mod reload;
 mod router_factory;
@@ -13,7 +11,6 @@ mod state_machine;
 pub mod subscriber;
 mod warp_http_server_factory;
 
-use crate::apollo_telemetry::SpaceportConfig;
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
@@ -71,8 +68,8 @@ pub enum FederatedServerError {
     /// could not create the HTTP server: {0}
     ServerCreationError(std::io::Error),
 
-    /// could not configure spaceport: {0}
-    ServerSpaceportError(tokio::sync::mpsc::error::SendError<SpaceportConfig>),
+    /// could not configure spaceport
+    ServerSpaceportError,
 
     /// no reload handle available
     NoReloadTracingHandleError,

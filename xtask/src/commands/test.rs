@@ -4,9 +4,7 @@ use anyhow::{ensure, Result};
 use structopt::StructOpt;
 use xtask::*;
 
-const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked", "--no-default-features"];
-
-const FEATURE_SETS: &[&[&str]] = &[&["otlp-grpc"], &["otlp-http"], &[]];
+const TEST_DEFAULT_ARGS: &[&str] = &["test", "--locked"];
 
 #[derive(Debug, StructOpt)]
 pub struct Test {
@@ -58,7 +56,6 @@ impl Test {
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
                         .args(TEST_DEFAULT_ARGS)
-                        .args(FEATURE_SETS[0])
                         .arg("--no-run")
                         .spawn()?,
                 )
@@ -77,13 +74,8 @@ impl Test {
             Box::new((demo, guard))
         };
 
-        for features in FEATURE_SETS {
-            eprintln!("Running tests with features: {}", features.join(","));
-            cargo!(
-                TEST_DEFAULT_ARGS,
-                features.iter().flat_map(|feature| ["--features", feature])
-            );
-        }
+        eprintln!("Running tests");
+        cargo!(TEST_DEFAULT_ARGS);
 
         Ok(())
     }

@@ -13,14 +13,18 @@ use prost::Message;
 use prost_types::Timestamp;
 use reqwest::Client;
 use std::collections::HashMap;
+use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
 
@@ -70,6 +74,8 @@ impl StatsOrTrace {
 
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
 pub struct ReportSpaceport {
+    shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+    listener: Option<TcpListener>,
     addr: SocketAddr,
     // This Map will only have a single entry if used internally from a router.
     // (because a router can only be serving a single graph)
@@ -88,7 +94,13 @@ impl ReportSpaceport {
     ///
     /// The spaceport will attempt to make the transfer 5 times before failing. If
     /// the spaceport fails, the data is discarded.
-    pub fn new(addr: SocketAddr) -> Self {
+    pub async fn new(
+        addr: SocketAddr,
+        shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
+    ) -> Result<Self, std::io::Error> {
+        let listener = TcpListener::bind(addr).await?;
+        let addr = listener.local_addr()?;
+
         // Spawn a task which will check if there are reports to
         // submit every interval.
         let graph_usage: GraphUsageMap = Arc::new(Mutex::new(HashMap::new()));
@@ -119,20 +131,33 @@ impl ReportSpaceport {
                 };
             }
         });
-        Self {
+        Ok(Self {
+            shutdown_signal,
+            listener: Some(listener),
             addr,
             graph_usage,
             tx,
             total,
-        }
+        })
+    }
+
+    pub fn address(&self) -> &SocketAddr {
+        &self.addr
     }
 
     /// Start serving requests.
-    pub async fn serve(self) -> Result<(), Error> {
-        let addr = self.addr;
+    pub async fn serve(mut self) -> Result<(), Error> {
+        let shutdown_signal = self
+            .shutdown_signal
+            .take()
+            .unwrap_or_else(|| Box::pin(std::future::pending()));
+        let listener = self
+            .listener
+            .take()
+            .expect("should have allocated listener");
         Server::builder()
             .add_service(ReporterServer::new(self))
-            .serve(addr)
+            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown_signal)
             .await
     }
 
@@ -196,7 +221,7 @@ impl ReportSpaceport {
                     //  - if server error, it may be transient so treat as retry-able
                     //  - if ok, return ok
                     if status.is_client_error() {
-                        tracing::error!("Client error reported at ingress: {}", data);
+                        tracing::error!("client error reported at ingress: {}", data);
                         return Err(Status::invalid_argument(data));
                     } else if status.is_server_error() {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);

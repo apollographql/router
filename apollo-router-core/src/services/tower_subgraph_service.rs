@@ -2,15 +2,16 @@
 
 use crate::prelude::*;
 use futures::future::BoxFuture;
+use global::get_text_map_propagator;
 use http::{
-    header::{HeaderName, ACCEPT, CONTENT_TYPE},
+    header::{ACCEPT, CONTENT_TYPE},
     HeaderValue,
 };
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
-use opentelemetry::{global, propagation::Injector};
+use opentelemetry::global;
+use std::sync::Arc;
 use std::task::Poll;
-use std::{str::FromStr, sync::Arc};
 use tower::{BoxError, ServiceBuilder};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -68,12 +69,10 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
             request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
             request.headers_mut().insert(ACCEPT, app_json);
 
-            global::get_text_map_propagator(|injector| {
-                injector.inject_context(
+            get_text_map_propagator(|propagator| {
+                propagator.inject_context(
                     &Span::current().context(),
-                    &mut RequestInjector {
-                        request: &mut request,
-                    },
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 )
             });
 
@@ -113,17 +112,5 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                 context,
             })
         })
-    }
-}
-
-struct RequestInjector<'a, T> {
-    request: &'a mut http::Request<T>,
-}
-
-impl<'a, T> Injector for RequestInjector<'a, T> {
-    fn set(&mut self, key: &str, value: String) {
-        let header_name = HeaderName::from_str(key).expect("Must be header name");
-        let header_value = HeaderValue::from_str(&value).expect("Must be a header value");
-        self.request.headers_mut().insert(header_name, header_value);
     }
 }
