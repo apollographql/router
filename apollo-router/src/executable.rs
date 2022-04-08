@@ -236,7 +236,7 @@ pub async fn rt_main() -> Result<()> {
 APOLLO ROUTER v{version}
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
-a
+
 👉 DO ONE:
 
   * Pass a local schema file with the '--supergraph' option:
