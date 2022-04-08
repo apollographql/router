@@ -1,7 +1,10 @@
 //! Telemetry customization.
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::{AggregateMeterProvider, BasicMetrics};
-use crate::plugins::telemetry::tracing::apollo;
+use crate::plugins::telemetry::metrics::{
+    AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
+    MetricsExporterHandle,
+};
+use crate::plugins::telemetry::tracing::{apollo, TracingConfigurator};
 use crate::subscriber::replace_layer;
 use apollo_router_core::{
     http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
@@ -11,7 +14,6 @@ use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::StatusCode;
-use opentelemetry::metrics::MeterProvider;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -19,11 +21,9 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, KeyValue};
-use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
 use std::time::Instant;
 use tower::steer::Steer;
 use tower::util::BoxService;
@@ -58,74 +58,6 @@ impl fmt::Display for ReportingError {
 }
 
 impl std::error::Error for ReportingError {}
-
-trait TracingConfigurator {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
-}
-
-type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
-type CustomEndpoint =
-    BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
-
-#[derive(Default)]
-struct MetricsBuilder {
-    exporters: Vec<MetricsExporterHandle>,
-    meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    custom_endpoints: HashMap<String, Handler>,
-}
-
-impl MetricsBuilder {
-    fn with_exporter<T: Send + Sync + 'static>(mut self, handle: T) -> Self {
-        self.exporters.push(Box::new(handle));
-        self
-    }
-
-    fn with_meter_provider<T: MeterProvider + Send + Sync + 'static>(
-        mut self,
-        meter_provider: T,
-    ) -> Self {
-        self.meter_providers.push(Arc::new(meter_provider));
-        self
-    }
-
-    fn with_custom_endpoint(mut self, path: &str, endpoint: CustomEndpoint) -> Self {
-        self.custom_endpoints
-            .insert(path.to_string(), Handler::new(endpoint));
-        self
-    }
-}
-
-trait MetricsConfigurator {
-    fn apply(
-        &self,
-        builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError>;
-}
-
-trait GenericWith<T>
-where
-    Self: Sized,
-{
-    fn with<B>(self, option: &Option<B>, apply: fn(Self, &B) -> Self) -> Self {
-        if let Some(option) = option {
-            return apply(self, option);
-        }
-        self
-    }
-    fn try_with<B>(
-        self,
-        option: &Option<B>,
-        apply: fn(Self, &B) -> Result<Self, BoxError>,
-    ) -> Result<Self, BoxError> {
-        if let Some(option) = option {
-            return apply(self, option);
-        }
-        Ok(self)
-    }
-}
-
-impl<T> GenericWith<T> for T where Self: Sized {}
 
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
@@ -206,10 +138,10 @@ impl Plugin for Telemetry {
         // we use the aggregate meter provider that is created below. It enables us to support
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
         // eventually be one.
-        let builder = Self::create_metrics_exporters(&self.config)?;
-        self._metrics_exporters = builder.exporters;
-        self.meter_provider = AggregateMeterProvider::new(builder.meter_providers);
-        self.custom_endpoints = builder.custom_endpoints;
+        let mut builder = Self::create_metrics_exporters(&self.config)?;
+        self._metrics_exporters = builder.exporters();
+        self.meter_provider = builder.meter_provider();
+        self.custom_endpoints = builder.custom_endpoints();
 
         // Finally actually start spaceport
         if let Some(spaceport) = spaceport {

@@ -1,9 +1,68 @@
+use crate::plugins::telemetry::config::MetricsCommon;
+use apollo_router_core::{http_compat, Handler, ResponseBody};
+use bytes::Bytes;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
 use opentelemetry::KeyValue;
+use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tower::util::BoxService;
+use tower::BoxError;
 
 pub mod otlp;
 pub mod prometheus;
+
+pub type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
+pub type CustomEndpoint =
+    BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
+
+#[derive(Default)]
+pub struct MetricsBuilder {
+    exporters: Vec<MetricsExporterHandle>,
+    meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
+    custom_endpoints: HashMap<String, Handler>,
+}
+
+impl MetricsBuilder {
+    pub fn exporters(&mut self) -> Vec<MetricsExporterHandle> {
+        std::mem::take(&mut self.exporters)
+    }
+    pub fn meter_provider(&mut self) -> AggregateMeterProvider {
+        AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
+    }
+    pub fn custom_endpoints(&mut self) -> HashMap<String, Handler> {
+        std::mem::take(&mut self.custom_endpoints)
+    }
+}
+
+impl MetricsBuilder {
+    fn with_exporter<T: Send + Sync + 'static>(mut self, handle: T) -> Self {
+        self.exporters.push(Box::new(handle));
+        self
+    }
+
+    fn with_meter_provider<T: MeterProvider + Send + Sync + 'static>(
+        mut self,
+        meter_provider: T,
+    ) -> Self {
+        self.meter_providers.push(Arc::new(meter_provider));
+        self
+    }
+
+    fn with_custom_endpoint(mut self, path: &str, endpoint: CustomEndpoint) -> Self {
+        self.custom_endpoints
+            .insert(path.to_string(), Handler::new(endpoint));
+        self
+    }
+}
+
+pub trait MetricsConfigurator {
+    fn apply(
+        &self,
+        builder: MetricsBuilder,
+        metrics_config: &MetricsCommon,
+    ) -> Result<MetricsBuilder, BoxError>;
+}
 
 #[derive(Clone)]
 pub struct BasicMetrics {

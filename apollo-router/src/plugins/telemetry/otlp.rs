@@ -1,5 +1,5 @@
 use crate::configuration::ConfigurationError;
-use crate::plugins::telemetry::GenericWith;
+use crate::plugins::telemetry::config::GenericWith;
 use opentelemetry_otlp::{HttpExporterBuilder, TonicExporterBuilder, WithExportConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

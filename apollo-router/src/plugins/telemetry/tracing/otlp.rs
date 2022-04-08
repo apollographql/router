@@ -1,5 +1,5 @@
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::TracingConfigurator;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry_otlp::SpanExporterBuilder;
 use std::result::Result;

@@ -1,5 +1,5 @@
-use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::{GenericWith, TracingConfigurator};
+use crate::plugins::telemetry::config::{GenericWith, Trace};
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

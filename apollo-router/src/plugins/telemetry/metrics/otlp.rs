@@ -1,5 +1,5 @@
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::{MetricsBuilder, MetricsConfigurator};
+use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};
 use futures::{Stream, StreamExt};
 use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::util::tokio_interval_stream;

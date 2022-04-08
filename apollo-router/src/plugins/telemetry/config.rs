@@ -8,6 +8,30 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+pub trait GenericWith<T>
+where
+    Self: Sized,
+{
+    fn with<B>(self, option: &Option<B>, apply: fn(Self, &B) -> Self) -> Self {
+        if let Some(option) = option {
+            return apply(self, option);
+        }
+        self
+    }
+    fn try_with<B>(
+        self,
+        option: &Option<B>,
+        apply: fn(Self, &B) -> Result<Self, BoxError>,
+    ) -> Result<Self, BoxError> {
+        if let Some(option) = option {
+            return apply(self, option);
+        }
+        Ok(self)
+    }
+}
+
+impl<T> GenericWith<T> for T where Self: Sized {}
+
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {

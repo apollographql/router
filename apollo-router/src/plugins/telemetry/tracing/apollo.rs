@@ -1,7 +1,6 @@
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::apollo_telemetry::{SpaceportConfig, StudioGraph};
-use crate::plugins::telemetry::TracingConfigurator;
+use crate::plugins::telemetry::tracing::{apollo_telemetry, TracingConfigurator};
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
