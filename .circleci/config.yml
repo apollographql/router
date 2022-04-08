@@ -363,7 +363,7 @@ commands:
       - run: cargo sweep -s
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
-       - save_cache:
+      - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
