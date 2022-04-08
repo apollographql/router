@@ -32,16 +32,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [v0.1.0-preview.3] (unreleased) - 2022-mm-dd
-## ❗ BREAKING ❗
+# [v0.1.0-preview.3] - 2022-04-08
 ## 🚀 Features
-- **Add version flag to router** ([#805](https://github.com/apollographql/router/pull/805))
+- **Add version flag to router** ([PR #805](https://github.com/apollographql/router/pull/805))
 
   You can now provider a `--version or -V` flag to the router. It will output version information and terminate.
 
+- **New startup message** ([PR #780](https://github.com/apollographql/router/pull/780))
+
+  The router startup message was updated with more links to documentation and version information.
+
 - **Add better support of introspection queries** ([PR #802](https://github.com/apollographql/router/pull/802))
 
-  Before this feature the Router didn't execute all the introspection queries, only a small  of the most used ones was executed. Now it detects if it's an introspection query, try to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
+  Before this feature the Router didn't execute all the introspection queries, only a small number of the most common ones were executed. Now it detects if it's an introspection query, tries to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
 
 - **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
 
@@ -52,7 +55,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     landing_page: false
   ```
 
-- **Add support of metrics in `apollo.telemetry` plugin** ([#738](https://github.com/apollographql/router/pull/738))
+- **Add support of metrics in `apollo.telemetry` plugin** ([PR #738](https://github.com/apollographql/router/pull/738))
 
   The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
 
@@ -69,11 +72,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
           endpoint: "/metrics"
     ```
 
-- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([#738](https://github.com/apollographql/router/pull/738))
+- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([PR #738](https://github.com/apollographql/router/pull/738))
 
   The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
   
-- **configurable subgraph error redaction** ([797](https://github.com/apollographql/router/issues/797))
+- **configurable subgraph error redaction** ([PR #797](https://github.com/apollographql/router/issues/797))
   By default, subgraph errors are not propagated to the user. This experimental plugin allows messages to be propagated either for all subgraphs or on
   an individual subgraph basis. Individual subgraph configuration overrides the default (all) configuration. The configuration mechanism is similar
   to that used in the `headers` plugin:
@@ -82,7 +85,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     experimental.include_subgraph_errors:
       all: true
   ```
-  See the docs for more examples.
+
+- **Add a trace level log for subgraph queries** ([PR #808](https://github.com/apollographql/router/issues/808))
+
+  To debug the query plan execution, we added log messages to print the query plan, and for each subgraph query,
+  the operation, variables and response. It can be activated as follows:
+
+  ```
+  router -s supergraph.graphql --log info,apollo_router_core::query_planner::log=trace
+  ```
 
 ## 🐛 Fixes
 - **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
@@ -97,6 +108,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   This fix keeps the original http request in `RouterResponse` when there is an error.
 
+- **add a user-agent header to the studio usage ingress submission** ([PR #773](https://github.com/apollographql/router/pull/773))
+
+  Requests to Studio now identify the router and its version
 
 ## 🛠 Maintenance
 - **A faster Query planner** ([PR #768](https://github.com/apollographql/router/pull/768))
@@ -111,8 +125,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
 
-- **Remove OpenSSL usage** ([PR #783](https://github.com/apollographql/router/pull/783))
+- **Remove OpenSSL usage** ([PR #783](https://github.com/apollographql/router/pull/783) and [PR #810](https://github.com/apollographql/router/pull/810))
 
   OpenSSL is used for HTTPS clients when connecting to subgraphs or the Studio API. It is now replaced with rustls, which is faster to compile and link
 
+- **Download the Studio protobuf schema during build** ([PR #776](https://github.com/apollographql/router/pull/776)
+
+  The schema was vendored before, now it is downloaded dynamically during the build process
+
+- **Fix broken benchmarks** ([PR #797](https://github.com/apollographql/router/issues/797))
+
+  the `apollo-router-benchmarks` project was failing due to changes in the query planner. It is now fixed, and its subgraph mocking code is now available in `apollo-router-core`
+
 ## 📚 Documentation
+
+- **Document the Plugin and DynPlugin trait** ([PR #800](https://github.com/apollographql/router/pull/800)
+
+  Those traits are used to extend the router with Rust plugins
