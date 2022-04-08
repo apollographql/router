@@ -16,7 +16,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **Add better support of introspection queries** ([PR #802](https://github.com/apollographql/router/pull/802))
 
-  Before this feature the Router didn't execute all the introspection queries, only a small number of the most common ones were executed. Now it detects if it's an introspection query, try to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
+  Before this feature the Router didn't execute all the introspection queries, only a small number of the most common ones were executed. Now it detects if it's an introspection query, tries to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
 
 - **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
 
