@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2.4.{{ checksum "rust-toolchain.toml" }}
+    default: v2.5.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -286,7 +286,7 @@ commands:
           name: precompile large dependencies
           command: |
             ./precompile.sh
-      - run: cargo sweep -f
+
       - save_cache:
           name: Save .cargo and precompiled dependencies
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
@@ -300,7 +300,6 @@ commands:
             - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
 
-      - run: cargo sweep -s
       - build_all_permutations
       - run: cargo sweep -f
       
@@ -334,7 +333,7 @@ commands:
             {
               cargo build -p $package
             }
-      - run: cargo sweep -f
+
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
@@ -349,7 +348,6 @@ commands:
             - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
             - rust-target-<< pipeline.parameters.cache_version >>-build-windows
 
-      - run: cargo sweep -s
       - build_common_permutations
       - run: cargo sweep -f
       - save_cache:
@@ -383,7 +381,7 @@ commands:
             {
               cargo build -p $package
             }
-      - run: cargo sweep -f
+
       - save_cache:
           name: Save .cargo and precompiled dependencies
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
@@ -397,7 +395,7 @@ commands:
             - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-target-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo sweep -s
+
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
@@ -428,7 +426,7 @@ commands:
           name: precompile large dependencies
           command: |
             ./precompile.sh
-      - run: cargo sweep -f
+
       - save_cache:
           name: Save .cargo, precompiled dependencies and node_modules
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
@@ -444,7 +442,6 @@ commands:
             - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
 
-      - run: cargo sweep -s
       - run: cargo xtask test --with-demo
       - run: cargo sweep -f
       - save_cache:
