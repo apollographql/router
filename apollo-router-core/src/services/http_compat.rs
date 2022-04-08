@@ -9,10 +9,7 @@ use std::{
     str::FromStr,
 };
 
-use http::{
-    header::HeaderName, request::Builder, uri::InvalidUri, HeaderMap, HeaderValue, Method, Uri,
-    Version,
-};
+use http::{header::HeaderName, request::Builder, uri::InvalidUri, HeaderValue, Uri, Version};
 
 #[derive(Debug)]
 pub struct Request<T> {
@@ -22,6 +19,7 @@ pub struct Request<T> {
     inner: http::Request<T>,
 }
 
+// Most of the required functionality is provided by our Deref and DerefMut implementations.
 impl<T> Request<T> {
     /// Update the associated URL
     pub fn set_url(&mut self, url: http::Uri) -> Result<(), http::Error> {
@@ -33,46 +31,6 @@ impl<T> Request<T> {
     /// Returns a reference to the associated URL.
     pub fn url(&self) -> &http::Uri {
         &self.url
-    }
-
-    /// Returns a reference to the associated HTTP method.
-    pub fn method(&self) -> &Method {
-        self.inner.method()
-    }
-
-    /// Returns a mutable reference to the associated HTTP method.
-    pub fn method_mut(&mut self) -> &mut Method {
-        self.inner.method_mut()
-    }
-
-    /// Returns the associated version.
-    pub fn version(&self) -> Version {
-        self.inner.version()
-    }
-
-    /// Returns a mutable reference to the associated version.
-    pub fn version_mut(&mut self) -> &mut Version {
-        self.inner.version_mut()
-    }
-
-    /// Returns a reference to the associated header field map.
-    pub fn headers(&self) -> &HeaderMap<HeaderValue> {
-        self.inner.headers()
-    }
-
-    /// Returns a mutable reference to the associated header field map.
-    pub fn headers_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
-        self.inner.headers_mut()
-    }
-
-    /// Returns a reference to the associated HTTP body.
-    pub fn body(&self) -> &T {
-        self.inner.body()
-    }
-
-    /// Returns a mutable reference to the associated HTTP body.
-    pub fn body_mut(&mut self) -> &mut T {
-        self.inner.body_mut()
     }
 
     /// Consumes the request, returning just the body.
@@ -108,6 +66,20 @@ where
             url: Uri::from_str("http://default").unwrap(),
             inner: http::Request::default(),
         }
+    }
+}
+
+impl<T> Deref for Request<T> {
+    type Target = http::Request<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for Request<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -303,8 +275,4 @@ impl<T: Clone> Clone for Response<T> {
             .expect("cloning a valid response creates a valid response");
         Self { inner: res }
     }
-}
-
-pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
-    url::Url::parse(&uri.to_string())
 }
