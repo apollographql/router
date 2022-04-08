@@ -4,6 +4,113 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [v0.1.0-preview.3] - 2022-04-08
+## 🚀 Features
+- **Add version flag to router** ([PR #805](https://github.com/apollographql/router/pull/805))
+
+  You can now provider a `--version or -V` flag to the router. It will output version information and terminate.
+
+- **New startup message** ([PR #780](https://github.com/apollographql/router/pull/780))
+
+  The router startup message was updated with more links to documentation and version information.
+
+- **Add better support of introspection queries** ([PR #802](https://github.com/apollographql/router/pull/802))
+
+  Before this feature the Router didn't execute all the introspection queries, only a small  of the most used ones was executed. Now it detects if it's an introspection query, try to fetch it from cache, if it's not in the cache we execute it and put the response in the cache.
+
+- **Add an option to disable the landing page** ([PR #801](https://github.com/apollographql/router/pull/801))
+
+  By default the router will display a landing page, which could be useful in development. If this is not
+  desirable the router can be configured to not display this landing page:
+  ```yaml
+  server:
+    landing_page: false
+  ```
+
+- **Add support of metrics in `apollo.telemetry` plugin** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  The Router will now compute different metrics you can expose via Prometheus or OTLP exporter.
+
+  Example of configuration to export an endpoint (configured with the path `/plugins/apollo.telemetry/metrics`) with metrics in `Prometheus` format:
+
+  ```yaml
+  telemetry:
+    metrics:
+      exporter:
+        prometheus:
+          # By setting this endpoint you enable the prometheus exporter
+          # All our endpoints exposed by plugins are namespaced by the name of the plugin
+          # Then to access to this prometheus endpoint, the full url path will be `/plugins/apollo.telemetry/metrics`
+          endpoint: "/metrics"
+    ```
+
+- **Add experimental support of `custom_endpoint` method in `Plugin` trait** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin. For now it's only accessible for official `apollo.` plugins and for `experimental.`. The return type of this method is a Tower [`Service`]().
+  
+- **configurable subgraph error redaction** ([PR #797](https://github.com/apollographql/router/issues/797))
+  By default, subgraph errors are not propagated to the user. This experimental plugin allows messages to be propagated either for all subgraphs or on
+  an individual subgraph basis. Individual subgraph configuration overrides the default (all) configuration. The configuration mechanism is similar
+  to that used in the `headers` plugin:
+  ```yaml
+  plugins:
+    experimental.include_subgraph_errors:
+      all: true
+  ```
+
+- **Add a trace level log for subgraph queries** ([PR #808](https://github.com/apollographql/router/issues/808))
+
+  To debug the query plan execution, we added log messages to print the query plan, and for each subgraph query,
+  the operation, variables and response. It can be activated as follows:
+
+  ```
+  router -s supergraph.graphql --log info,apollo_router_core::query_planner::log=trace
+  ```
+
+## 🐛 Fixes
+- **Eliminate memory leaks when tasks are cancelled** [PR #758](https://github.com/apollographql/router/pull/758)
+
+  The deduplication layer could leak memory when queries were cancelled and never retried: leaks were previously cleaned up on the next similar query. Now the leaking data will be deleted right when the query is cancelled
+
+- **Trim the query to better detect an empty query** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  Before this fix, if you wrote a query with only whitespaces inside, it wasn't detected as an empty query.
+
+- **Keep the original context in `RouterResponse` when returning an error** ([PR #738](https://github.com/apollographql/router/pull/738))
+
+  This fix keeps the original http request in `RouterResponse` when there is an error.
+
+- **add a user-agent header to the studio usage ingress submission ([PR #773](https://github.com/apollographql/router/pull/773))
+
+  Requests to Studio now identify the router and its version
+
+## 🛠 Maintenance
+- **A faster Query planner** ([PR #768](https://github.com/apollographql/router/pull/768))
+
+  We reworked the way query plans are generated before being cached, which lead to a great performance improvement. Moreover, the router is able to make sure the schema is valid at startup and on schema update, before you query it.
+
+- **Xtask improvements** ([PR #604](https://github.com/apollographql/router/pull/604))
+
+  The command we run locally to make sure tests, lints and compliance-checks pass will now edit the license file and run cargo fmt so you can directly commit it before you open a Pull Request
+
+- **Switch from reqwest to a Tower client for subgraph services** ([PR #769](https://github.com/apollographql/router/pull/769))
+
+  It results in better performance due to less URL parsing, and now header propagation falls under the apollo_router_core log filter, making it harder to disable accidentally
+
+- **Remove OpenSSL usage** ([PR #783](https://github.com/apollographql/router/pull/783) and [PR #810](https://github.com/apollographql/router/pull/810))
+
+  OpenSSL is used for HTTPS clients when connecting to subgraphs or the Studio API. It is now replaced with rustls, which is faster to compile and link
+
+- **Download the Studio protobuf schema during build** ([PR #776](https://github.com/apollographql/router/pull/776)
+
+  The schema was vendored before, now it is downloaded dynamically during the build process
+ 
+## 📚 Documentation
+
+- **Document the Plugin and DynPlugin trait** ([PR #800](https://github.com/apollographql/router/pull/800)
+
+  Those traits are used to extend the router with Rust plugins
+  
 # [v0.1.0-preview.2] - 2022-04-01
 ## ❗ BREAKING ❗
 
