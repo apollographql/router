@@ -270,7 +270,7 @@ commands:
       os:
         type: string
     steps:
-    - restore_cache:
+      - restore_cache:
           name: Restore .cargo
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
