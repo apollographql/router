@@ -31,7 +31,7 @@ The `trace_config` section contains common configuration that will be used in th
 telemetry:
   tracing:
     trace_config:
-      service_name: "${MY_ENV_VARIABLE:router}"
+      service_name: "router"
       service_namespace: "apollo"
       # Optional. Either a float between 0 and 1 or 'always_on' or 'always_off'
       sampler: 0.1
@@ -54,6 +54,8 @@ telemetry:
 ```
 
 If `service_name` is set then environment variables are not used. However, it is possible to embed environment variables into your router config using Unix `${key:default}` syntax.
+
+If no environment variable is set and service_name is not present then the default of `service_unknown` will be used as per the OpenTelemetry spec.
 
 ### Propagation
 
