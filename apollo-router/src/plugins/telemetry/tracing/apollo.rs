@@ -25,6 +25,7 @@ impl TracingConfigurator for Config {
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
             } => {
+                tracing::debug!("configuring exporter to Spaceport");
                 let exporter = apollo_telemetry::new_pipeline()
                     .with_trace_config(trace_config.into())
                     .with_graph_config(&Some(StudioGraph {

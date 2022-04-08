@@ -178,6 +178,7 @@ impl Plugin for Telemetry {
                 apollo_graph_ref: Some(_),
                 endpoint: None,
             } => {
+                ::tracing::debug!("starting Spaceport");
                 let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
                 let report_spaceport = ReportSpaceport::new(
                     "127.0.0.1:0".parse()?,
@@ -229,7 +230,7 @@ impl Plugin for Telemetry {
         Ok(())
     }
 
-    fn ready(&mut self) {
+    fn activate(&mut self) {
         // The active service is about to be swapped in.
         // The rest of this code in this method is expected to succeed.
         // The issue is that Otel uses globals for a bunch of stuff.
@@ -238,15 +239,12 @@ impl Plugin for Telemetry {
             .tracer_provider
             .take()
             .expect("trace_provider will have been set in startup, qed");
-
         let tracer = tracer_provider.versioned_tracer(
             "apollo-router",
             Some(env!("CARGO_PKG_VERSION")),
             None,
         );
-
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
         Self::flush_tracer();
         replace_layer(Box::new(telemetry))
             .expect("set_global_subscriber() was not called at startup, fatal");

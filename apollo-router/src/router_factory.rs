@@ -109,8 +109,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // The alternative is that we introduce another service on Plugin that wraps the request
         // as a much earlier stage.
         for (_, plugin) in &mut self.plugins {
+            tracing::debug!("plugin activating: {}", plugin.name());
             #[allow(deprecated)]
-            plugin.ready();
+            plugin.activate();
+            tracing::debug!("plugin activated: {}", plugin.name());
         }
 
         // If we get here, everything is good so shutdown our previous plugins
@@ -118,8 +120,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             if let Err(err) = plugin.shutdown().await {
                 // If we can't shutdown a plugin, we terminate the router since we can't
                 // assume that it is safe to continue.
-                tracing::error!("Could not stop plugin: {}, error: {}", plugin.name(), err);
-                tracing::error!("Terminating router...");
+                tracing::error!("could not stop plugin: {}, error: {}", plugin.name(), err);
+                tracing::error!("terminating router...");
                 std::process::exit(1);
             }
         }
