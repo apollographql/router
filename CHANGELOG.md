@@ -80,7 +80,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   This fix keeps the original http request in `RouterResponse` when there is an error.
 
-- **add a user-agent header to the studio usage ingress submission ([PR #773](https://github.com/apollographql/router/pull/773))
+- **add a user-agent header to the studio usage ingress submission** ([PR #773](https://github.com/apollographql/router/pull/773))
 
   Requests to Studio now identify the router and its version
 
