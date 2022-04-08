@@ -109,10 +109,10 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // The alternative is that we introduce another service on Plugin that wraps the request
         // as a much earlier stage.
         for (_, plugin) in &mut self.plugins {
-            tracing::debug!("plugin activating: {}", plugin.name());
+            tracing::debug!("activating plugin {}", plugin.name());
             #[allow(deprecated)]
             plugin.activate();
-            tracing::debug!("plugin activated: {}", plugin.name());
+            tracing::debug!("activated plugin {}", plugin.name());
         }
 
         // If we get here, everything is good so shutdown our previous plugins

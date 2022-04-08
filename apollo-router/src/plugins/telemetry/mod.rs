@@ -19,7 +19,7 @@ use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
 };
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
@@ -177,7 +177,8 @@ impl Plugin for Telemetry {
             None,
         );
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-        Self::flush_tracer();
+        Self::replace_tracer_provider(tracer_provider);
+
         replace_layer(Box::new(telemetry))
             .expect("set_global_subscriber() was not called at startup, fatal");
         opentelemetry::global::set_error_handler(handle_error)
@@ -186,7 +187,6 @@ impl Plugin for Telemetry {
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Self::flush_tracer();
         if let Some(sender) = self.spaceport_shutdown.take() {
             let _ = sender.send(());
         }
@@ -365,18 +365,6 @@ impl Telemetry {
         Ok(builder)
     }
 
-    fn flush_tracer() {
-        // This code will hang unless we execute from a separate
-        // thread.  See:
-        // https://github.com/apollographql/router/issues/331
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/536
-        // for more details and description.
-        let jh = tokio::task::spawn_blocking(|| {
-            opentelemetry::global::force_flush_tracer_provider();
-        });
-        futures::executor::block_on(jh).expect("could not flush previous tracer");
-    }
-
     fn not_found_endpoint() -> Handler {
         Handler::new(
             service_fn(|_req: http_compat::Request<Bytes>| async {
@@ -389,6 +377,20 @@ impl Telemetry {
             })
             .boxed(),
         )
+    }
+
+    fn replace_tracer_provider<T>(tracer_provider: T)
+    where
+        T: TracerProvider + Send + Sync + 'static,
+        <T as TracerProvider>::Tracer: Send + Sync + 'static,
+        <<T as opentelemetry::trace::TracerProvider>::Tracer as Tracer>::Span:
+            Send + Sync + 'static,
+    {
+        let jh = tokio::task::spawn_blocking(|| {
+            opentelemetry::global::force_flush_tracer_provider();
+            opentelemetry::global::set_tracer_provider(tracer_provider);
+        });
+        futures::executor::block_on(jh).expect("failed to replace tracer provider");
     }
 }
 
