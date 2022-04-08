@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .init();
     tracing::info!("spaceport starting");
-    let spaceport = ReportSpaceport::new(args.address);
+    let spaceport = ReportSpaceport::new(args.address, None).await?;
     spaceport.serve().await?;
 
     Ok(())

@@ -1,7 +1,6 @@
 telemetry:
-  opentelemetry:
+  tracing:
+    trace_config:
+      service_name: router
     otlp:
-      tracing:
-        exporter:
-          grpc:
-            protocol: Grpc
+      endpoint: default
