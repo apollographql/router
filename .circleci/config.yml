@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2.6.{{ checksum "rust-toolchain.toml" }}
+    default: v2.7.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -330,7 +330,7 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls"))
+            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "warp", "rhai", "hotwatch", "miette"))
             {
               cargo build -p $package
             }
@@ -379,7 +379,7 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls"))
+            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "warp", "rhai", "hotwatch", "miette"))
             {
               cargo build -p $package
             }
