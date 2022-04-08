@@ -90,8 +90,8 @@ pub struct GrpcExporter {
     #[serde(flatten)]
     pub tls_config: Option<TlsConfig>,
     #[serde(
-        deserialize_with = "header_map_serde::deserialize",
-        serialize_with = "header_map_serde::serialize",
+        deserialize_with = "metadata_map_serde::deserialize",
+        serialize_with = "metadata_map_serde::serialize",
         default
     )]
     #[schemars(schema_with = "option_metadata_map", default)]
@@ -159,14 +159,11 @@ pub enum Protocol {
 
 impl Default for Protocol {
     fn default() -> Self {
-        vec![Protocol::Grpc, Protocol::Http]
-            .get(0)
-            .expect("at least one feature must be present for otel, qed")
-            .clone()
+        Protocol::Grpc
     }
 }
 
-mod header_map_serde {
+mod metadata_map_serde {
     use super::*;
     use std::collections::HashMap;
     use tonic::metadata::{KeyAndValueRef, MetadataKey};

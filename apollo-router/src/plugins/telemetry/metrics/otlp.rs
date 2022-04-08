@@ -7,6 +7,7 @@ use opentelemetry_otlp::{HttpExporterBuilder, TonicExporterBuilder};
 use std::time::Duration;
 use tower::BoxError;
 
+// TODO Remove MetricExporterBuilder once upstream issue is fixed
 // This has to exist because Http is not currently supported for metrics export
 // https://github.com/open-telemetry/opentelemetry-rust/issues/772
 struct MetricExporterBuilder {
@@ -22,8 +23,6 @@ impl From<TonicExporterBuilder> for MetricExporterBuilder {
 }
 
 impl From<HttpExporterBuilder> for MetricExporterBuilder {
-    // This has to exist because Http is not currently supported for metrics export
-    // https://github.com/open-telemetry/opentelemetry-rust/issues/772
     fn from(_exporter: HttpExporterBuilder) -> Self {
         Self { exporter: None }
     }
