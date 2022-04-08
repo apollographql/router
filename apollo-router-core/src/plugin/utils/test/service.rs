@@ -3,6 +3,7 @@ use crate::{
     RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 
+/// Build a mock service handler for the router pipeline.
 #[macro_export]
 macro_rules! mock_service {
     ($name:ident, $request_type:ty, $response_type:ty) => {

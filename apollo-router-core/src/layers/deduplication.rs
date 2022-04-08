@@ -1,3 +1,7 @@
+//! De-duplicate subgraph requests in flight. Implemented as a tower Layer.
+//!
+//! See [`Layer`] and [`tower::Service`] for more details.
+
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};

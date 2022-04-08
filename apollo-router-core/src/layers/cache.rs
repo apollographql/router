@@ -1,3 +1,5 @@
+//! Provides a CachingLayer used to implement the cache functionality of [`crate::services::ServiceBuilderExt`].
+
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -9,7 +11,7 @@ use std::task::Poll;
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
 
-pub type Sentinel<Value> = Arc<RwLock<Option<Value>>>;
+type Sentinel<Value> = Arc<RwLock<Option<Value>>>;
 
 pub struct CachingService<S, Request, Key, Value>
 where

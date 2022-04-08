@@ -39,7 +39,7 @@ impl From<http_compat::Request<Request>> for RouterRequest {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
-    /// A GraphQL response corresponding to the spec https://spec.graphql.org/October2021/#sec-Response
+    /// A GraphQL response corresponding to the spec <https://spec.graphql.org/October2021/#sec-Response>
     GraphQL(Response),
     /// A json value
     RawJSON(serde_json::Value),
@@ -116,13 +116,18 @@ impl FromStr for ResponseBody {
 }
 
 assert_impl_all!(RouterRequest: Send);
-// the parsed graphql Request, HTTP headers and contextual data for extensions
+/// [`Context`] for the request.
+///
+/// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
     // Context for extension
     pub context: Context<http_compat::Request<Request>>,
 }
 
 assert_impl_all!(RouterResponse: Send);
+/// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
+///
+/// This consists of the response body and the context.
 #[derive(Clone)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
@@ -130,11 +135,13 @@ pub struct RouterResponse {
 }
 
 assert_impl_all!(QueryPlannerRequest: Send);
+/// [`Context`] for the request.
 pub struct QueryPlannerRequest {
     pub context: Context,
 }
 
 assert_impl_all!(QueryPlannerResponse: Send);
+/// [`Context`] and [`QueryPlan`] for the response..
 pub struct QueryPlannerResponse {
     pub query_plan: Arc<QueryPlan>,
 
@@ -142,6 +149,7 @@ pub struct QueryPlannerResponse {
 }
 
 assert_impl_all!(SubgraphRequest: Send);
+/// [`Context`], [`OperationKind`] and [`http_compat::Request<Request>`] for the request.
 pub struct SubgraphRequest {
     pub http_request: http_compat::Request<Request>,
 
@@ -151,6 +159,9 @@ pub struct SubgraphRequest {
 }
 
 assert_impl_all!(SubgraphResponse: Send);
+/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+///
+/// This consists of the subgraph response and the context.
 #[derive(Clone, Debug)]
 pub struct SubgraphResponse {
     pub response: http_compat::Response<Response>,
@@ -159,6 +170,7 @@ pub struct SubgraphResponse {
 }
 
 assert_impl_all!(ExecutionRequest: Send);
+/// [`Context`] and [`QueryPlan`] for the request.
 pub struct ExecutionRequest {
     pub query_plan: Arc<QueryPlan>,
 
@@ -166,6 +178,9 @@ pub struct ExecutionRequest {
 }
 
 assert_impl_all!(ExecutionResponse: Send);
+/// [`Context`] and [`http_compat::Response<Response>`] for the response.
+///
+/// This consists of the execution response and the context.
 pub struct ExecutionResponse {
     pub response: http_compat::Response<Response>,
 
@@ -184,6 +199,8 @@ impl AsRef<Request> for Arc<http_compat::Request<Request>> {
     }
 }
 
+/// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities
+/// (e.g.: checkpoints) to a [`Service`].
 #[allow(clippy::type_complexity)]
 pub trait ServiceBuilderExt<L>: Sized {
     fn cache<Request, Response, Key, Value>(

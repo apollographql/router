@@ -368,7 +368,7 @@ mod test {
     use super::*;
     use crate::fetch::OperationKind;
     use crate::http_compat::RequestBuilder;
-    use crate::plugin_utils::MockSubgraphService;
+    use crate::plugin::utils::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use http::{Method, Uri};

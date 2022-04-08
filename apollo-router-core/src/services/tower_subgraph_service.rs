@@ -1,3 +1,5 @@
+//! Tower fetcher for subgraphs.
+
 use crate::prelude::*;
 use futures::future::BoxFuture;
 use http::{
@@ -13,6 +15,7 @@ use tower::{BoxError, ServiceBuilder};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+/// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub struct TowerSubgraphService {
     client: hyper::Client<HttpsConnector<HttpConnector>>,

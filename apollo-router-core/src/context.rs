@@ -1,3 +1,9 @@
+//! Provide a [`Context`] for the plugin chain of responsibilities.
+//!
+//! Router plugins accept a mutable [`Context`] when invoked and this contains useful data such as
+//! the original [`http_compat::Request`] received by the router and [`Extensions`] which allow
+//! custom extensions to be used.
+
 use crate::prelude::graphql::*;
 use crate::services::http_compat;
 use dashmap::DashMap;
@@ -5,8 +11,10 @@ use serde::Serialize;
 use std::sync::Arc;
 use tower::BoxError;
 
+/// Holds [`Context`] extensions.
 pub type Extensions = Arc<DashMap<String, Value>>;
 
+/// Context for a [`http_compat::Request`]
 #[derive(Clone, Debug)]
 pub struct Context<T = Arc<http_compat::Request<Request>>> {
     /// Original request to the Router.

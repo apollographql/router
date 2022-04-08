@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use apollo_router::subscriber::{set_global_subscriber, RouterSubscriber};
-use apollo_router_core::{plugin_utils, PluggableRouterServiceBuilder};
+use apollo_router_core::{plugin::utils, PluggableRouterServiceBuilder};
 use std::sync::Arc;
 use tower::{util::BoxService, ServiceExt};
 use tracing_subscriber::EnvFilter;
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     let (router_service, _) = router_builder.build().await?;
 
     // ...then create a GraphQL request...
-    let request = plugin_utils::RouterRequest::builder()
+    let request = utils::RouterRequest::builder()
         .query(r#"query Query { me { name } }"#.to_string())
         .build()
         .into();

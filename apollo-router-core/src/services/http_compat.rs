@@ -1,4 +1,6 @@
-//! wrapper typpes for Request and Response from the http crate to improve their usability
+//! Wrapper types for [`http::Request`] and [`http::Response`] from the http crate.
+//!
+//! To improve their usability.
 
 use std::{
     cmp::PartialEq,
@@ -100,7 +102,7 @@ impl<T> Request<T>
 where
     T: Default,
 {
-    // Only used for plugin_utils and tests
+    // Only used for plugin::utils and tests
     pub fn mock() -> Request<T> {
         Request {
             url: Uri::from_str("http://default").unwrap(),

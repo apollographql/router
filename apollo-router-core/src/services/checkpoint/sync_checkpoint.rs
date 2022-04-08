@@ -1,7 +1,17 @@
+//! Synchronous Checkpoint [`Layer`].
+//!
+//! Provides a general mechanism for controlling the flow of a request. Useful in any situation
+//! where the caller wishes to provide control flow for a request.
+//!
+//! If the evaluated closure succeeds then the request is passed onto the next service in the
+//! chain of responsibilities. If it fails, then the control flow is broken a response is passed
+//! back to the invoking service.
+
 use futures::future::BoxFuture;
 use std::{ops::ControlFlow, sync::Arc};
 use tower::{BoxError, Layer, Service};
 
+/// [`Layer`] for Synchronous Checkpoints.
 #[allow(clippy::type_complexity)]
 pub struct CheckpointLayer<S, Request>
 where
@@ -153,7 +163,7 @@ where
 mod checkpoint_tests {
     use super::*;
     use crate::{
-        plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
+        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
         ServiceBuilderExt,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};

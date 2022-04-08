@@ -1,4 +1,8 @@
-use crate::{checkpoint::CheckpointService, plugin_utils, ExecutionRequest, ExecutionResponse};
+//! Prevent mutations if the HTTP method is GET.
+//!
+//! See [`Layer`] and [`Service`] for more details.
+
+use crate::{checkpoint::CheckpointService, plugin::utils, ExecutionRequest, ExecutionResponse};
 use http::{Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -20,7 +24,7 @@ where
                 if req.context.request.method() == Method::GET
                     && req.query_plan.contains_mutations()
                 {
-                    let res = plugin_utils::ExecutionResponse::builder()
+                    let res = utils::ExecutionResponse::builder()
                         .errors(vec![crate::Error {
                             message: "GET supports only query operation".to_string(),
                             locations: Default::default(),
@@ -50,7 +54,7 @@ mod forbid_http_get_mutations_tests {
     use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
     use crate::{
-        plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
+        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
         Context, QueryPlan,
     };
     use http::{StatusCode, Uri};
@@ -59,12 +63,12 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
-        let mut mock_service = plugin_utils::MockExecutionService::new();
+        let mut mock_service = MockExecutionService::new();
 
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(plugin_utils::ExecutionResponse::builder().build().into()));
+            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
 
         let mock = mock_service.build();
 
@@ -83,7 +87,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(plugin_utils::ExecutionResponse::builder().build().into()));
+            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
 
         let mock = mock_service.build();
 

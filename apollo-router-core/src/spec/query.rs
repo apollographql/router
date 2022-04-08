@@ -1,3 +1,7 @@
+//! Query processing.
+//!
+//! Parsing, formatting and manipulation of queries.
+
 use crate::{fetch::OperationKind, prelude::graphql::*};
 use apollo_parser::ast;
 use derivative::Derivative;
@@ -5,6 +9,7 @@ use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
 
+/// A GraphQL query.
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
 pub struct Query {

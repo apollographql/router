@@ -1,10 +1,8 @@
-pub mod mock;
-pub mod service;
-pub mod structures;
+//! Utilities which make it easy to work with [`crate::plugin`].
 
-pub use service::{
-    MockExecutionService, MockQueryPlanningService, MockRouterService, MockSubgraphService,
-};
+pub mod test;
+
+pub mod structures;
 pub use structures::{
     execution_request::ExecutionRequest, execution_response::ExecutionResponse,
     queryplanner_response::QueryPlannerResponse, router_request::RouterRequest,

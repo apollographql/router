@@ -3,7 +3,7 @@
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
-    http_compat, plugin_utils, Context, ExecutionRequest, ExecutionResponse, Extensions,
+    http_compat, plugin::utils, Context, ExecutionRequest, ExecutionResponse, Extensions,
     QueryPlannerRequest, QueryPlannerResponse, Request, SubgraphRequest, SubgraphResponse,
 };
 use apollo_router_core::{
@@ -35,7 +35,7 @@ macro_rules! service_handle_response {
                     .get(CONTEXT_ERROR)
                     .expect("we put the context error ourself so it will be deserializable; qed");
                 if let Some(err) = previous_err {
-                    return plugin_utils::$response_ty::builder()
+                    return utils::$response_ty::builder()
                         .errors(vec![Error::builder()
                             .message(format!("RHAI plugin error: {}", err.as_str()))
                             .build()])
@@ -53,10 +53,7 @@ macro_rules! service_handle_response {
                                 ctx.insert(CONTEXT_ERROR, err)
                                     .expect("error is always a string; qed");
 
-                                return plugin_utils::$response_ty::builder()
-                                    .context(ctx)
-                                    .build()
-                                    .into();
+                                return utils::$response_ty::builder().context(ctx).build().into();
                             }
                         };
 
@@ -87,6 +84,20 @@ macro_rules! handle_error {
             }
         }
     };
+}
+
+use rhai::plugin::*; // a "prelude" import for macros
+
+#[export_module]
+mod rhai_plugin_mod {
+    use super::RhaiContext;
+
+    pub(crate) fn get_operation_name(context: &mut RhaiContext) -> String {
+        match &context.context.request.body().operation_name {
+            Some(n) => n.clone(),
+            None => "".to_string(),
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -222,7 +233,7 @@ impl Plugin for Rhai {
                                 ctx.insert(CONTEXT_ERROR, err)
                                     .expect("error is always a string; qed");
 
-                                return plugin_utils::QueryPlannerResponse::builder()
+                                return utils::QueryPlannerResponse::builder()
                                     .context(ctx)
                                     .build()
                                     .into();
@@ -315,7 +326,7 @@ impl Plugin for Rhai {
                     .get(CONTEXT_ERROR)
                     .expect("we put the context error ourself so it will be deserializable; qed");
                 if let Some(err) = previous_err {
-                    return plugin_utils::SubgraphResponse::builder()
+                    return utils::SubgraphResponse::builder()
                         .errors(vec![Error::builder()
                             .message(format!("RHAI plugin error: {}", err.as_str()))
                             .build()])
@@ -333,7 +344,7 @@ impl Plugin for Rhai {
                                 ctx.insert(CONTEXT_ERROR, err)
                                     .expect("error is always a string; qed");
 
-                                return plugin_utils::SubgraphResponse::builder()
+                                return utils::SubgraphResponse::builder()
                                     .context(ctx)
                                     .build()
                                     .into();
@@ -367,7 +378,7 @@ impl RhaiObjectSetterGetter for Extensions {
 }
 
 #[derive(Clone, Debug)]
-struct RhaiContext {
+pub(crate) struct RhaiContext {
     context: Context<http_compat::Request<Request>>,
 }
 
@@ -433,6 +444,13 @@ impl Rhai {
 
     fn new_rhai_engine() -> Engine {
         let mut engine = Engine::new();
+
+        // The macro call creates a Rhai module from the plugin module.
+        let module = exported_module!(rhai_plugin_mod);
+
+        // A module can simply be registered into the global namespace.
+        engine.register_global_module(module.into());
+
         engine
             .set_max_expr_depths(0, 0)
             .register_indexer_set_result(Headers::set_header)
@@ -467,7 +485,8 @@ mod tests {
 
     use apollo_router_core::{
         http_compat::RequestBuilder,
-        plugin_utils::{MockExecutionService, MockRouterService, RouterResponse},
+        plugin::utils::test::{MockExecutionService, MockRouterService},
+        plugin::utils::RouterResponse,
         Context, DynPlugin, ResponseBody, RouterRequest,
     };
     use http::{Method, Uri};
@@ -505,7 +524,7 @@ mod tests {
             .unwrap();
         let context = Context::new().with_request(fake_req);
         context.insert("test", 5i64).unwrap();
-        let router_req = plugin_utils::RouterRequest::builder().context(context);
+        let router_req = utils::RouterRequest::builder().context(context);
 
         let router_resp = router_service
             .ready()
@@ -553,7 +572,7 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: ExecutionRequest| {
-                Ok(plugin_utils::ExecutionResponse::builder()
+                Ok(utils::ExecutionResponse::builder()
                     .context(req.context)
                     .build()
                     .into())
@@ -578,7 +597,7 @@ mod tests {
             .unwrap();
         let context = Context::new().with_request(Arc::new(fake_req));
         context.insert("test", 5i64).unwrap();
-        let exec_req = plugin_utils::ExecutionRequest::builder().context(context);
+        let exec_req = utils::ExecutionRequest::builder().context(context);
 
         let exec_resp = router_service
             .ready()

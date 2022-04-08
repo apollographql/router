@@ -61,7 +61,7 @@
 //!  - ...
 
 use apollo_router_core::{
-    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    plugin::utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::header::AUTHORIZATION;
 use http::StatusCode;
@@ -237,7 +237,7 @@ impl Plugin for JwtAuth {
                     msg: String,
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
-                    let res = plugin_utils::RouterResponse::builder()
+                    let res = utils::RouterResponse::builder()
                         .errors(vec![apollo_router_core::Error {
                             message: msg,
                             ..Default::default()
@@ -391,7 +391,7 @@ register_plugin!("example", "jwt", JwtAuth);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::{plugin_utils, Plugin};
+    use apollo_router_core::{plugin::utils, Plugin};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -412,14 +412,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request without an authorization header
         let request_without_any_authorization_header =
-            plugin_utils::RouterRequest::builder().build().into();
+            utils::RouterRequest::builder().build().into();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -446,13 +446,13 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_no_bearer_in_auth = plugin_utils::RouterRequest::builder()
+        let request_with_no_bearer_in_auth = utils::RouterRequest::builder()
             .headers(vec![(
                 "authorization".to_string(),
                 "should start with Bearer".to_string(),
@@ -485,13 +485,13 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a badly formatted authorization header
-        let request_with_too_many_spaces_in_auth = plugin_utils::RouterRequest::builder()
+        let request_with_too_many_spaces_in_auth = utils::RouterRequest::builder()
             .headers(vec![("authorization".to_string(), "Bearer  ".to_string())])
             .build()
             .into();
@@ -521,14 +521,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request with a properly formatted authorization header
         // Note: (The token isn't valid, but the format is...)
-        let request_with_appropriate_auth = plugin_utils::RouterRequest::builder()
+        let request_with_appropriate_auth = utils::RouterRequest::builder()
             .headers(vec![(
                 "authorization".to_string(),
                 "Bearer atoken".to_string(),
@@ -561,7 +561,7 @@ mod tests {
     #[tokio::test]
     async fn test_hmac_jwtauth_accepts_valid_tokens() {
         // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockRouterService::new();
+        let mut mock = utils::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -580,7 +580,7 @@ mod tests {
                 assert_eq!(claims.subject, Some("subject".to_string()));
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(utils::RouterResponse::builder()
                     .data(expected_mock_response_data.into())
                     .build()
                     .into())
@@ -615,7 +615,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = plugin_utils::RouterRequest::builder()
+        let request_with_appropriate_auth = utils::RouterRequest::builder()
             .headers(vec![(
                 "authorization".to_string(),
                 format!("Bearer {token}"),
@@ -646,7 +646,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -667,7 +667,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = plugin_utils::RouterRequest::builder()
+        let request_with_appropriate_auth = utils::RouterRequest::builder()
             .headers(vec![(
                 "authorization".to_string(),
                 format!("Bearer {token}"),
@@ -700,7 +700,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know JwtAuth did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
@@ -724,7 +724,7 @@ mod tests {
         let token = verifier.authenticate(claims).unwrap();
 
         // Let's create a request with a properly formatted authorization header
-        let request_with_appropriate_auth = plugin_utils::RouterRequest::builder()
+        let request_with_appropriate_auth = utils::RouterRequest::builder()
             .headers(vec![(
                 "authorization".to_string(),
                 format!("Bearer {token}"),

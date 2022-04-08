@@ -1,5 +1,11 @@
+//! Ensure that a [`RouterRequest`] contains a query.
+//!
+//! See [`Layer`] and [`Service`] for more details.
+//!
+//! If the request does not contain a query, then the request is rejected.
+
 use crate::checkpoint::CheckpointService;
-use crate::{plugin_utils, RouterRequest, RouterResponse};
+use crate::{plugin::utils, RouterRequest, RouterResponse};
 use http::StatusCode;
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -21,7 +27,7 @@ where
                 // A query must be available at this point
                 let query = req.context.request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
-                    let res = plugin_utils::RouterResponse::builder()
+                    let res = utils::RouterResponse::builder()
                         .errors(vec![crate::Error {
                             message: "Must provide query string.".to_string(),
                             locations: Default::default(),
@@ -44,8 +50,8 @@ where
 #[cfg(test)]
 mod ensure_query_presence_tests {
     use super::*;
-    use crate::plugin_utils::MockRouterService;
-    use crate::{plugin_utils, ResponseBody};
+    use crate::plugin::utils::test::MockRouterService;
+    use crate::{plugin::utils, ResponseBody};
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -54,12 +60,12 @@ mod ensure_query_presence_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_req| Ok(plugin_utils::RouterResponse::builder().build().into()));
+            .returning(move |_req| Ok(utils::RouterResponse::builder().build().into()));
 
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = plugin_utils::RouterRequest::builder()
+        let request: crate::RouterRequest = utils::RouterRequest::builder()
             .query("{__typename}".to_string())
             .build()
             .into();
@@ -76,7 +82,7 @@ mod ensure_query_presence_tests {
 
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = plugin_utils::RouterRequest::builder()
+        let request: crate::RouterRequest = utils::RouterRequest::builder()
             .query("".to_string())
             .build()
             .into();
@@ -104,7 +110,7 @@ mod ensure_query_presence_tests {
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = plugin_utils::RouterRequest::builder().build().into();
+        let request: crate::RouterRequest = utils::RouterRequest::builder().build().into();
 
         let response = service_stack
             .oneshot(request)

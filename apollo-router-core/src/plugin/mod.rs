@@ -1,3 +1,9 @@
+//! Plugin system for the router.
+//!
+//! Provides a customization mechanism for the router.
+
+pub mod utils;
+
 use crate::services::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
@@ -22,6 +28,7 @@ type InstanceFactory = fn(&serde_json::Value) -> Result<Box<dyn DynPlugin>, BoxE
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
+/// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
     instance_factory: InstanceFactory,
@@ -53,6 +60,7 @@ static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(
     Mutex::new(m)
 });
 
+/// Register a plugin factory.
 pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
     PLUGIN_REGISTRY
         .lock()
@@ -60,13 +68,16 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
         .insert(name, plugin_factory);
 }
 
+/// Get a copy of the registered plugin factories.
 pub fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
-/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// All router plugins must implement the Plugin trait.
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
-/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
     type Config: JsonSchema + DeserializeOwned;
@@ -142,9 +153,11 @@ fn get_type_of<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
 
-/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// All router plugins must implement the DynPlugin trait.
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
-/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
     /// Plugins will receive a notification that they should start up and shut down.
@@ -191,6 +204,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler>;
+
     fn name(&self) -> &'static str;
 }
 
@@ -237,6 +251,7 @@ where
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
     }
+
     fn custom_endpoint(&self) -> Option<Handler> {
         self.custom_endpoint()
     }

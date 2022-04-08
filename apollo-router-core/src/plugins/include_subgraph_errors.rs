@@ -67,9 +67,9 @@ impl Plugin for IncludeSubgraphErrors {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::plugin_utils::mock::subgraph::MockSubgraph;
+    use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        plugin_utils, DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+        plugin::utils, DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
         RouterResponse, Schema,
     };
     use serde_json::Value as jValue;
@@ -104,7 +104,7 @@ mod test {
         body: &ResponseBody,
         mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     ) {
-        let request = plugin_utils::RouterRequest::builder()
+        let request = utils::RouterRequest::builder()
             .query(query.to_string())
             .variables(Arc::new(
                 vec![(ByteString::from("first"), Value::Number(2usize.into()))]

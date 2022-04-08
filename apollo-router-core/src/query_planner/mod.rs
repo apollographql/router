@@ -13,12 +13,13 @@ use tracing::Instrument;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}
 
+/// A plan for a [`crate::Query`]
 #[derive(Debug)]
 pub struct QueryPlan {
     pub(crate) root: PlanNode,
 }
 
-/// This default impl is useful for plugin_utils users
+/// This default impl is useful for plugin::utils users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
 impl Default for QueryPlan {
     fn default() -> Self {

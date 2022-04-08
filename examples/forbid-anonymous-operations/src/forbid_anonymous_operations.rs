@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use apollo_router_core::{
-    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    plugin::utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -51,7 +51,7 @@ impl Plugin for ForbidAnonymousOperations {
                     tracing::error!("Operation is not allowed!");
 
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    let res = plugin_utils::RouterResponse::builder()
+                    let res = utils::RouterResponse::builder()
                         .errors(vec![apollo_router_core::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
@@ -88,7 +88,7 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
+    use apollo_router_core::{plugin::utils, Plugin, RouterRequest};
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -112,15 +112,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request without an operation name...
-        let request_without_any_operation_name =
-            plugin_utils::RouterRequest::builder().build().into();
+        let request_without_any_operation_name = utils::RouterRequest::builder().build().into();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -147,14 +146,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an empty operation name...
-        let request_with_empty_operation_name = plugin_utils::RouterRequest::builder()
+        let request_with_empty_operation_name = utils::RouterRequest::builder()
             .operation_name("".to_string())
             .build()
             .into();
@@ -183,7 +182,7 @@ mod tests {
         let operation_name = "validOperationName";
 
         // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockRouterService::new();
+        let mut mock = utils::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -199,7 +198,7 @@ mod tests {
                     req.context.request.body().operation_name.as_ref().unwrap()
                 );
                 // let's return the expected data
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(utils::RouterResponse::builder()
                     .data(expected_mock_response_data.into())
                     .build()
                     .into())
@@ -213,7 +212,7 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an valid operation name...
-        let request_with_operation_name = plugin_utils::RouterRequest::builder()
+        let request_with_operation_name = utils::RouterRequest::builder()
             .operation_name(operation_name.to_string())
             .build()
             .into();

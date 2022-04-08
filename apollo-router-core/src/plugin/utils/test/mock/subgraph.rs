@@ -1,4 +1,6 @@
-use crate::{plugin_utils, Request, Response, SubgraphRequest, SubgraphResponse};
+//! Mock subgraph implementation
+
+use crate::{plugin::utils, Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tower::{BoxError, Service};
@@ -31,7 +33,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
-        let builder = plugin_utils::SubgraphResponse::builder().context(req.context);
+        let builder = utils::SubgraphResponse::builder().context(req.context);
         let response = if let Some(response) = self.mocks.get(req.http_request.body()) {
             builder.data(response.data.clone()).build().into()
         } else {

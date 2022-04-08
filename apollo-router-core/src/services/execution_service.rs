@@ -1,3 +1,5 @@
+//! Implements the Execution phase of the request lifecycle.
+
 use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
 use futures::future::BoxFuture;
@@ -11,6 +13,7 @@ use tower_service::Service;
 use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
+/// [`Service`] for query execution.
 #[derive(TypedBuilder, Clone)]
 pub struct ExecutionService {
     schema: Arc<Schema>,

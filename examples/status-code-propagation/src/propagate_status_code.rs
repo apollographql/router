@@ -96,7 +96,7 @@ register_plugin!("example", "propagate_status_code", PropagateStatusCode);
 #[cfg(test)]
 mod tests {
     use crate::propagate_status_code::{PropagateStatusCode, PropagateStatusCodeConfig};
-    use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
+    use apollo_router_core::{plugin::utils, Plugin, RouterRequest};
     use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
@@ -122,11 +122,11 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_matching_status_code() {
-        let mut mock_service = plugin_utils::MockSubgraphService::new();
+        let mut mock_service = utils::MockSubgraphService::new();
 
         // Return StatusCode::FORBIDDEN, which shall be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(plugin_utils::SubgraphResponse::builder()
+            Ok(utils::SubgraphResponse::builder()
                 .status(StatusCode::FORBIDDEN)
                 .build()
                 .into())
@@ -141,7 +141,7 @@ mod tests {
         .expect("couldn't create plugin")
         .subgraph_service("accounts", mock_service.boxed());
 
-        let subgraph_request = plugin_utils::SubgraphRequest::builder().build().into();
+        let subgraph_request = utils::SubgraphRequest::builder().build().into();
 
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
@@ -157,11 +157,11 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_service_shouldnt_add_not_matching_status_code() {
-        let mut mock_service = plugin_utils::MockSubgraphService::new();
+        let mut mock_service = utils::MockSubgraphService::new();
 
         // Return StatusCode::OK, which shall NOT be added to our status_codes
         mock_service.expect_call().times(1).returning(move |_| {
-            Ok(plugin_utils::SubgraphResponse::builder()
+            Ok(utils::SubgraphResponse::builder()
                 .status(StatusCode::OK)
                 .build()
                 .into())
@@ -176,7 +176,7 @@ mod tests {
         .expect("couldn't create plugin")
         .subgraph_service("accounts", mock_service.boxed());
 
-        let subgraph_request = plugin_utils::SubgraphRequest::builder().build().into();
+        let subgraph_request = utils::SubgraphRequest::builder().build().into();
 
         let service_response = service_stack.oneshot(subgraph_request).await.unwrap();
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_override_status_code() {
-        let mut mock_service = plugin_utils::MockRouterService::new();
+        let mut mock_service = utils::MockRouterService::new();
 
         mock_service
             .expect_call()
@@ -206,7 +206,7 @@ mod tests {
                     .insert(&"status_code".to_string(), json!(500))
                     .expect("couldn't insert status_code");
 
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(utils::RouterResponse::builder()
                     .context(context.into())
                     .build()
                     .into())
@@ -221,7 +221,7 @@ mod tests {
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 
-        let router_request = plugin_utils::RouterRequest::builder().build().into();
+        let router_request = utils::RouterRequest::builder().build().into();
 
         let service_response = service_stack.oneshot(router_request).await.unwrap();
 
@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn router_service_do_not_override_status_code() {
-        let mut mock_service = plugin_utils::MockRouterService::new();
+        let mut mock_service = utils::MockRouterService::new();
 
         mock_service
             .expect_call()
@@ -241,7 +241,7 @@ mod tests {
             .returning(move |router_request: RouterRequest| {
                 let context = router_request.context;
                 // Don't insert any StatusCode
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(utils::RouterResponse::builder()
                     .context(context.into())
                     .build()
                     .into())
@@ -256,7 +256,7 @@ mod tests {
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 
-        let router_request = plugin_utils::RouterRequest::builder().build().into();
+        let router_request = utils::RouterRequest::builder().build().into();
 
         let service_response = service_stack.oneshot(router_request).await.unwrap();
 

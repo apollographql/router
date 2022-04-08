@@ -219,6 +219,7 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+/// Error types for service building.
 #[derive(Error, Debug, Display, Clone)]
 pub enum ServiceBuildError {
     /// couldn't build Router Service: {0}
@@ -250,6 +251,7 @@ pub enum QueryPlannerError {
     RouterBridgeError(router_bridge::error::Error),
 }
 
+/// Shared collection of [`BridgeError`].
 #[derive(Debug, Clone)]
 pub struct BridgeErrors(Arc<Vec<BridgeError>>);
 
@@ -305,6 +307,7 @@ pub enum SchemaError {
     Api(String),
 }
 
+/// Collection of schema parsing errors.
 #[derive(Debug)]
 pub struct ParseErrors {
     pub(crate) raw_schema: String,

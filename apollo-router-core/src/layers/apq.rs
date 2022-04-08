@@ -1,6 +1,11 @@
+//!  (A)utomatic (P)ersisted (Q)ueries cache.
+//!
+//!  For more information on APQ see:
+//!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
+
 use std::ops::ControlFlow;
 
-use crate::{checkpoint::CheckpointService, plugin_utils, RouterRequest, RouterResponse};
+use crate::{checkpoint::CheckpointService, plugin::utils, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
@@ -77,7 +82,7 @@ where
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
-                            let res = plugin_utils::RouterResponse::builder()
+                            let res = utils::RouterResponse::builder()
                                 .errors(vec![crate::Error {
                                     message: "PersistedQueryNotFound".to_string(),
                                     locations: Default::default(),
@@ -116,7 +121,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 mod apq_tests {
     use super::*;
     use crate::{
-        plugin_utils::{MockRouterService, RouterRequest, RouterResponse},
+        plugin::utils::{test::MockRouterService, RouterRequest, RouterResponse},
         ResponseBody,
     };
     use serde_json_bytes::json;

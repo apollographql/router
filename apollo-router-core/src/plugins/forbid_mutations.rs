@@ -1,5 +1,5 @@
 use crate::{
-    plugin_utils, register_plugin, ExecutionRequest, ExecutionResponse, Plugin, ServiceBuilderExt,
+    plugin::utils, register_plugin, ExecutionRequest, ExecutionResponse, Plugin, ServiceBuilderExt,
 };
 use http::StatusCode;
 use std::ops::ControlFlow;
@@ -27,7 +27,7 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let res = plugin_utils::ExecutionResponse::builder()
+                        let res = utils::ExecutionResponse::builder()
                             .errors(vec![crate::Error {
                                 message: "Mutations are forbidden".to_string(),
                                 locations: Default::default(),
@@ -61,7 +61,7 @@ mod forbid_http_get_mutations_tests {
     use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
     use crate::{
-        plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
+        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
         Context, QueryPlan,
     };
     use http::{Method, StatusCode, Uri};

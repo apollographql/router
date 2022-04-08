@@ -1,6 +1,6 @@
-use apollo_router_core::plugin_utils::mock::subgraph::MockSubgraph;
+use apollo_router_core::plugin::utils::test::mock::subgraph::MockSubgraph;
 use apollo_router_core::{
-    plugin_utils, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
+    plugin::utils, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
     Schema,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -18,7 +18,7 @@ static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $fir
 async fn basic_composition_benchmark(
     mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
 ) {
-    let request = plugin_utils::RouterRequest::builder()
+    let request = utils::RouterRequest::builder()
         .query(QUERY.to_string())
         .variables(Arc::new(
             vec![(ByteString::from("first"), Value::Number(2usize.into()))]

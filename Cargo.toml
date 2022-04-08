@@ -13,6 +13,7 @@ members = [
     "examples/hello-world",
     "examples/status-code-propagation",
     "examples/jwt-auth",
+    "examples/op-name-to-header",
     "fuzz",
     "uplink",
     "xtask",

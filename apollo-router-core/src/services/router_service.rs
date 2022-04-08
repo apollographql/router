@@ -1,9 +1,11 @@
+//! Implements the router phase of the request lifecycle.
+
 use crate::apq::APQLayer;
 use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
+    plugin::utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
     ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
     QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
@@ -18,6 +20,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use typed_builder::TypedBuilder;
 
+/// Containing [`Service`] in the request lifecyle.
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
@@ -169,7 +172,7 @@ where
             }
         }
         .or_else(|error: BoxError| async move {
-            Ok(plugin_utils::RouterResponse::builder()
+            Ok(utils::RouterResponse::builder()
                 .errors(vec![crate::Error {
                     message: error.to_string(),
                     ..Default::default()
@@ -183,6 +186,12 @@ where
     }
 }
 
+/// Builder which generates a plugin pipeline.
+///
+/// This is at the heart of the delegation of responsibility model for the router. A schema,
+/// collection of plugins, collection of subgraph services are assembled to generate a
+/// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
+/// response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Vec<(String, Box<dyn DynPlugin>)>,

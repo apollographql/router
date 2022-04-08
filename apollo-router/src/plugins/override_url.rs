@@ -50,7 +50,7 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 #[cfg(test)]
 mod tests {
     use apollo_router_core::{
-        plugin_utils::{self, MockSubgraphService},
+        plugin::utils::{self, test::MockSubgraphService},
         Context, DynPlugin, SubgraphRequest,
     };
     use http::Uri;
@@ -72,7 +72,7 @@ mod tests {
             })
             .times(1)
             .returning(move |req: SubgraphRequest| {
-                Ok(plugin_utils::SubgraphResponse::builder()
+                Ok(utils::SubgraphResponse::builder()
                     .context(req.context)
                     .build()
                     .into())
@@ -95,7 +95,7 @@ mod tests {
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = plugin_utils::SubgraphRequest::builder().context(context);
+        let subgraph_req = utils::SubgraphRequest::builder().context(context);
 
         let _subgraph_resp = subgraph_service
             .ready()
