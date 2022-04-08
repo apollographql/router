@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2.3.{{ checksum "rust-toolchain.toml" }}
+    default: v2.4.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -330,14 +330,18 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            ./precompile.sh
-          shell: bash.exe
+            foreach ($package in router-bridge,opentelemetry,opentelemetry-otlp,opentelemetry-jaeger,opentelemetry-prometheus,tracing,tokio,moka,mockall,tower-http,tonic,hyper-rustls)
+            {
+              cargo build -p $package
+            }
       - run: cargo sweep -f
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - C:\\Users\\circleci\.cargo
+            - target/
+
       - restore_cache:
           name: Restore target/
           keys:
@@ -375,14 +379,17 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            ./precompile.sh
-          shell: bash.exe
+            foreach ($package in router-bridge,opentelemetry,opentelemetry-otlp,opentelemetry-jaeger,opentelemetry-prometheus,tracing,tokio,moka,mockall,tower-http,tonic,hyper-rustls)
+            {
+              cargo build -p $package
+            }
       - run: cargo sweep -f
       - save_cache:
           name: Save .cargo and precompiled dependencies
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - C:\\Users\\circleci\.cargo
+            - target/
 
       - restore_cache:
           name: Restore target/
@@ -427,6 +434,7 @@ commands:
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - ~/.cargo
+            - target/
             - dockerfiles/federation-demo/federation-demo/node_modules
 
       - restore_cache:
