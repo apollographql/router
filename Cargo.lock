@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.4 (git+https://github.com/apollographql/apollo-rs.git?rev=e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac)",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "apollo-parser 0.2.5",
  "async-trait",
@@ -259,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "bytes",
  "clap 3.1.6",
@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "futures",
  "graphql_client",
@@ -2260,9 +2260,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.121"
+version = "0.2.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efaa7b300f3b5fe8eb6bf21ce3895e1751d9665086af2d64b42f19701015ff4f"
+checksum = "ec647867e2bf0772e28c8bcde4f0d19a9216916e890543b5a03ed8ef27b8f259"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -5262,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "ansi_term",
  "anyhow",

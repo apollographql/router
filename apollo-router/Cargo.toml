@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -80,7 +80,7 @@ warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
-libc = "0.2.121"
+libc = "0.2.122"
 
 [dev-dependencies]
 insta = "1.12.0"
