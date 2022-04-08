@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v2.2.{{ checksum "rust-toolchain.toml" }}
+    default: v2.3.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -331,6 +331,7 @@ commands:
           name: precompile large dependencies
           command: |
             ./precompile.sh
+          shell: bash.exe
       - run: cargo sweep -f
       - save_cache:
           name: Save .cargo
@@ -375,6 +376,7 @@ commands:
           name: precompile large dependencies
           command: |
             ./precompile.sh
+          shell: bash.exe
       - run: cargo sweep -f
       - save_cache:
           name: Save .cargo and precompiled dependencies
