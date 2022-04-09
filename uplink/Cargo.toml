@@ -13,7 +13,7 @@ reqwest = { version = "0.11.10", default_features = false, features = ["rustls-t
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 tokio = "1.17.0"
 tokio-stream = "0.1.8"
-tracing = "0.1.32"
+tracing = "0.1.33"
 url = "2.2.2"
 
 [build-dependencies]
