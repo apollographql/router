@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 - **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
 
-  Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are tying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
+  Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are trying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
 
   ```yaml
   telemetry:
