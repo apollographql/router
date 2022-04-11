@@ -234,4 +234,74 @@ mod tests {
             FetchError::ExecutionFieldNotFound { field } if field == "id"
         ));
     }
+
+    #[test]
+    fn test_array() {
+        let schema: Schema = "type Query { me: String }
+        type MainObject { mainObjectList: [SubObject] }
+        type SubObject { key: String name: String }"
+            .parse()
+            .unwrap();
+
+        let response = bjson!({
+            "__typename": "MainObject",
+            "mainObjectList": [
+                {
+                    "key": "a",
+                    "name": "A"
+                },
+                {
+                    "key": "b",
+                    "name": "B"
+                }
+            ]
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "MainObject",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "mainObjectList",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "key",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        println!(
+            "response\n{}\nand selection\n{:?}\n returns:\n{}",
+            serde_json::to_string_pretty(&response).unwrap(),
+            selection,
+            serde_json::to_string_pretty(&value).unwrap()
+        );
+
+        assert_eq!(
+            value.unwrap().unwrap(),
+            bjson!({
+                "__typename": "MainObject",
+                "mainObjectList": [
+                    {
+                        "key": "a"
+                    },
+                    {
+                        "key": "b"
+                    }
+                ]
+            })
+        );
+    }
 }
