@@ -80,14 +80,13 @@ fn select_field(
     field: &Field,
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    match (content.get(field.name.as_str()), &field.selections) {
-        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
-        (Some(value), None) => Ok(Some(value.to_owned())),
+    let res = match (content.get(field.name.as_str()), &field.selections) {
+        (Some(v), _) => select_value(v, field, schema),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
         }),
-        _ => Ok(None),
-    }
+    };
+    res
 }
 
 fn select_inline_fragment(
@@ -108,6 +107,22 @@ fn select_inline_fragment(
             field: "__typename".to_string(),
         }),
         (_, _) => Ok(None),
+    }
+}
+
+fn select_value(
+    content: &Value,
+    field: &Field,
+    schema: &Schema,
+) -> Result<Option<Value>, FetchError> {
+    match (content, &field.selections) {
+        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
+        (Value::Array(elements), Some(_)) => elements
+            .iter()
+            .map(|element| select_value(element, field, schema))
+            .collect(),
+        (value, None) => Ok(Some(value.to_owned())),
+        _ => Ok(None),
     }
 }
 
