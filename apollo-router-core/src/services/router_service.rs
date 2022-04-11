@@ -3,7 +3,7 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
+    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, Error, ExecutionRequest,
     ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
     QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
@@ -80,104 +80,121 @@ where
         let query_cache = self.query_cache.clone();
 
         let context_cloned = req.context.clone();
-        let fut = async move {
-            // Check if we already have the query in the known introspection queries
-            if let Some(naive_introspection) = naive_introspection.as_ref() {
-                if let Some(response) =
-                    naive_introspection
-                        .get(
-                            req.context.request.body().query.as_ref().expect(
-                                "apollo.ensure-query-is-present has checked this already; qed",
-                            ),
-                        )
-                        .await
-                {
-                    return Ok(RouterResponse {
-                        response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                        context: req.context.into(),
-                    });
-                }
-            }
-
-            let context = req.context;
-            let body = context.request.body();
-            let variables = body.variables.clone();
-            let query = query_cache
-                .get_query(
-                    body.query
-                        .as_ref()
-                        .expect("apollo.ensure-query-is-present has checked this already; qed")
-                        .as_str(),
-                )
-                .await;
-
-            // Check if it's an introspection query
-            if let Some(current_query) = query.as_ref().filter(|q| q.contains_introspection()) {
+        let fut =
+            async move {
+                // Check if we already have the query in the known introspection queries
                 if let Some(naive_introspection) = naive_introspection.as_ref() {
-                    match naive_introspection
-                        .execute(schema.as_str(), current_query.as_str())
-                        .await
+                    if let Some(response) =
+                        naive_introspection
+                            .get(req.context.request.body().query.as_ref().expect(
+                                "apollo.ensure-query-is-present has checked this already; qed",
+                            ))
+                            .await
                     {
-                        Ok(resp) => {
+                        return Ok(RouterResponse {
+                            response: http::Response::new(ResponseBody::GraphQL(response)).into(),
+                            context: req.context.into(),
+                        });
+                    }
+                }
+
+                let context = req.context;
+                let body = context.request.body();
+                let variables = body.variables.clone();
+                let query = query_cache
+                    .get_query(
+                        body.query
+                            .as_ref()
+                            .expect("apollo.ensure-query-is-present has checked this already; qed")
+                            .as_str(),
+                    )
+                    .await;
+
+                // Check if it's an introspection query
+                if let Some(current_query) = query.as_ref().filter(|q| q.contains_introspection()) {
+                    match naive_introspection.as_ref() {
+                        Some(naive_introspection) => {
+                            match naive_introspection
+                                .execute(schema.as_str(), current_query.as_str())
+                                .await
+                            {
+                                Ok(resp) => {
+                                    return Ok(RouterResponse {
+                                        response: http::Response::new(ResponseBody::GraphQL(resp))
+                                            .into(),
+                                        context: context.into(),
+                                    });
+                                }
+                                Err(err) => return Err(BoxError::from(err)),
+                            }
+                        }
+                        None => {
+                            let mut resp = http::Response::new(ResponseBody::GraphQL(
+                                crate::Response::builder()
+                                    .errors(vec![Error::builder()
+                                        .message(String::from("introspection has been disabled"))
+                                        .build()])
+                                    .build(),
+                            ));
+                            *resp.status_mut() = StatusCode::BAD_REQUEST;
+
                             return Ok(RouterResponse {
-                                response: http::Response::new(ResponseBody::GraphQL(resp)).into(),
+                                response: resp.into(),
                                 context: context.into(),
                             });
                         }
-                        Err(err) => return Err(BoxError::from(err)),
                     }
                 }
-            }
 
-            if let Some(err) = query
-                .as_ref()
-                .and_then(|q| q.validate_variables(body, &schema).err())
-            {
-                Ok(RouterResponse {
-                    response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: context.into(),
-                })
-            } else {
-                let operation_name = body.operation_name.clone();
-                let planned_query = planning
-                    .call(QueryPlannerRequest {
+                if let Some(err) = query
+                    .as_ref()
+                    .and_then(|q| q.validate_variables(body, &schema).err())
+                {
+                    Ok(RouterResponse {
+                        response: http::Response::new(ResponseBody::GraphQL(err)).into(),
                         context: context.into(),
                     })
-                    .await?;
-                let mut response = execution
-                    .call(ExecutionRequest {
-                        query_plan: planned_query.query_plan,
-                        context: planned_query.context,
+                } else {
+                    let operation_name = body.operation_name.clone();
+                    let planned_query = planning
+                        .call(QueryPlannerRequest {
+                            context: context.into(),
+                        })
+                        .await?;
+                    let mut response = execution
+                        .call(ExecutionRequest {
+                            query_plan: planned_query.query_plan,
+                            context: planned_query.context,
+                        })
+                        .await?;
+
+                    if let Some(query) = query {
+                        tracing::debug_span!("format_response").in_scope(|| {
+                            query.format_response(
+                                response.response.body_mut(),
+                                operation_name.as_deref(),
+                                (*variables).clone(),
+                                schema.api_schema(),
+                            )
+                        });
+                    }
+
+                    Ok(RouterResponse {
+                        context: response.context,
+                        response: response.response.map(ResponseBody::GraphQL),
                     })
-                    .await?;
-
-                if let Some(query) = query {
-                    tracing::debug_span!("format_response").in_scope(|| {
-                        query.format_response(
-                            response.response.body_mut(),
-                            operation_name.as_deref(),
-                            (*variables).clone(),
-                            schema.api_schema(),
-                        )
-                    });
                 }
-
-                Ok(RouterResponse {
-                    context: response.context,
-                    response: response.response.map(ResponseBody::GraphQL),
-                })
             }
-        }
-        .or_else(|error: BoxError| async move {
-            Ok(plugin_utils::RouterResponse::builder()
-                .errors(vec![crate::Error {
-                    message: error.to_string(),
-                    ..Default::default()
-                }])
-                .context(context_cloned.into())
-                .build()
-                .with_status(StatusCode::INTERNAL_SERVER_ERROR))
-        });
+            .or_else(|error: BoxError| async move {
+                Ok(plugin_utils::RouterResponse::builder()
+                    .errors(vec![crate::Error {
+                        message: error.to_string(),
+                        ..Default::default()
+                    }])
+                    .context(context_cloned.into())
+                    .build()
+                    .with_status(StatusCode::INTERNAL_SERVER_ERROR))
+            });
 
         Box::pin(fut)
     }

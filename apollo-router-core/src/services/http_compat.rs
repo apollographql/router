@@ -7,9 +7,12 @@ use std::{
     str::FromStr,
 };
 
+#[cfg(feature = "axum-server")]
 use axum::{body::boxed, response::IntoResponse};
+#[cfg(feature = "axum-server")]
 use bytes::Bytes;
 
+#[cfg(feature = "axum-server")]
 use crate::ResponseBody;
 
 use http::{
@@ -322,6 +325,7 @@ pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
     url::Url::parse(&uri.to_string())
 }
 
+#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
@@ -333,6 +337,7 @@ impl IntoResponse for Response<ResponseBody> {
     }
 }
 
+#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<Bytes> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?

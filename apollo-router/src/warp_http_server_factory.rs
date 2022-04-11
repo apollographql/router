@@ -66,7 +66,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
-            + Send 
+            + Send
             + Sync
             + Clone
             + 'static,
