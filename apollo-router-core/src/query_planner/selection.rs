@@ -80,14 +80,13 @@ fn select_field(
     field: &Field,
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    match (content.get(field.name.as_str()), &field.selections) {
-        (Some(Value::Object(child)), Some(selections)) => select_object(child, selections, schema),
-        (Some(value), None) => Ok(Some(value.to_owned())),
+    let res = match (content.get(field.name.as_str()), &field.selections) {
+        (Some(v), _) => select_value(v, field, schema),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
         }),
-        _ => Ok(None),
-    }
+    };
+    res
 }
 
 fn select_inline_fragment(
@@ -108,6 +107,22 @@ fn select_inline_fragment(
             field: "__typename".to_string(),
         }),
         (_, _) => Ok(None),
+    }
+}
+
+fn select_value(
+    content: &Value,
+    field: &Field,
+    schema: &Schema,
+) -> Result<Option<Value>, FetchError> {
+    match (content, &field.selections) {
+        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
+        (Value::Array(elements), Some(_)) => elements
+            .iter()
+            .map(|element| select_value(element, field, schema))
+            .collect(),
+        (value, None) => Ok(Some(value.to_owned())),
+        _ => Ok(None),
     }
 }
 
@@ -233,5 +248,75 @@ mod tests {
                 .unwrap_err(),
             FetchError::ExecutionFieldNotFound { field } if field == "id"
         ));
+    }
+
+    #[test]
+    fn test_array() {
+        let schema: Schema = "type Query { me: String }
+        type MainObject { mainObjectList: [SubObject] }
+        type SubObject { key: String name: String }"
+            .parse()
+            .unwrap();
+
+        let response = bjson!({
+            "__typename": "MainObject",
+            "mainObjectList": [
+                {
+                    "key": "a",
+                    "name": "A"
+                },
+                {
+                    "key": "b",
+                    "name": "B"
+                }
+            ]
+        });
+
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "MainObject",
+                "selections": [
+                    {
+                        "kind": "Field",
+                        "name": "__typename",
+                    },
+                    {
+                        "kind": "Field",
+                        "name": "mainObjectList",
+                        "selections": [
+                            {
+                                "kind": "Field",
+                                "name": "key",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        println!(
+            "response\n{}\nand selection\n{:?}\n returns:\n{}",
+            serde_json::to_string_pretty(&response).unwrap(),
+            selection,
+            serde_json::to_string_pretty(&value).unwrap()
+        );
+
+        assert_eq!(
+            value.unwrap().unwrap(),
+            bjson!({
+                "__typename": "MainObject",
+                "mainObjectList": [
+                    {
+                        "key": "a"
+                    },
+                    {
+                        "key": "b"
+                    }
+                ]
+            })
+        );
     }
 }
