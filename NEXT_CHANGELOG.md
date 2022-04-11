@@ -82,5 +82,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     passord: "${MY_PASSWORD}" 
   ```
 ## 🐛 Fixes
+
+- **Accept arrays in keys for subgraph joins** [PR #822](https://github.com/apollographql/router/pull/822)
+
+  The router is now accepting arrays as part of the key joining between subgraphs.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
