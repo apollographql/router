@@ -3546,7 +3546,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=a1846dd1780989cbad767249c9c4f59a649523ad#a1846dd1780989cbad767249c9c4f59a649523ad"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=85043c931d82a52a9af777b21f0795a15c425b0e#85043c931d82a52a9af777b21f0795a15c425b0e"
 dependencies = [
  "anyhow",
  "async-channel",
