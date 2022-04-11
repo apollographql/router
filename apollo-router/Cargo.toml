@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -31,8 +31,12 @@ humantime-serde = "1.0.1"
 hyper = { version = "0.14.18", features = ["server"] }
 itertools = "0.10.3"
 once_cell = "1.9.0"
-opentelemetry = { version = "0.17.0", features = ["rt-tokio", "serialize", "metrics"] }
-opentelemetry-datadog = {version="0.5.0", features=["reqwest-client"]}
+opentelemetry = { version = "0.17.0", features = [
+    "rt-tokio",
+    "serialize",
+    "metrics",
+] }
+opentelemetry-datadog = { version = "0.5.0", features = ["reqwest-client"] }
 opentelemetry-http = "0.6.0"
 opentelemetry-jaeger = { version = "0.16.0", features = [
     "collector_client",
@@ -53,7 +57,11 @@ opentelemetry-prometheus = "0.10.0"
 prometheus = "0.13"
 prost-types = "0.9.0"
 regex = "1.5.4"
-reqwest = { version = "0.11.10", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.11.10", default-features = false, features = [
+    "rustls-tls",
+    "json",
+    "stream",
+] }
 schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
@@ -86,7 +94,10 @@ libc = "0.2.122"
 insta = "1.12.0"
 maplit = "1.0.2"
 mockall = "0.11.0"
-reqwest = { version = "0.11.10", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.11.10", default-features = false, features = [
+    "json",
+    "stream",
+] }
 tempfile = "3.3.0"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
