@@ -91,6 +91,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   The router is now accepting arrays as part of the key joining between subgraphs.
 
+
+- **Fix value shape on empty subgraph queries** [PR #827](https://github.com/apollographql/router/pull/827)
+
+  When selecting data for a federated query, if there is no data the router will not perform the subgraph query and will instead return a default value. This value had the wrong shape and was generating an object where the query would expect an array.
+
 ## 🛠 Maintenance
 
 - **Switch web server framework from `warp` to `axum`** [PR #751](https://github.com/apollographql/router/pull/751)
