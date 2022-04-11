@@ -29,7 +29,7 @@ To run the CLI:
 
 ```bash
 cargo run -- <args>
-# e.g. 'cargo run -- help' will run the Apollo Router's help command
+# e.g. 'cargo run -- --help' will run the Apollo Router's help command
 ```
 
 Refer to [the README file](README.md) or run `cargo run --help` for more information.
