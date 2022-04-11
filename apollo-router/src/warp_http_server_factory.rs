@@ -1,17 +1,19 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{Request, RequestBuilder, Response};
-use apollo_router_core::prelude::*;
+use apollo_router_core::http_compat::{self, Request, RequestBuilder, Response};
 use apollo_router_core::ResponseBody;
+use apollo_router_core::{prelude::*, Handler};
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
 use http::header::CONTENT_TYPE;
 use http::uri::Authority;
-use http::{HeaderValue, Uri};
+use http::{HeaderValue, Method, Uri};
 use hyper::server::conn::Http;
 use once_cell::sync::Lazy;
-use opentelemetry::propagation::Extractor;
+use opentelemetry::global;
+use opentelemetry::trace::TraceContextExt;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -21,10 +23,9 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 use warp::path::FullPath;
 use warp::{
     http::{header::HeaderMap, StatusCode},
@@ -45,6 +46,13 @@ impl WarpHttpServerFactory {
     }
 }
 
+#[derive(Debug)]
+struct CustomRejection {
+    #[allow(dead_code)]
+    msg: String,
+}
+impl warp::reject::Reject for CustomRejection {}
+
 impl HttpServerFactory for WarpHttpServerFactory {
     type Future =
         Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>;
@@ -54,6 +62,7 @@ impl HttpServerFactory for WarpHttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -75,25 +84,43 @@ impl HttpServerFactory for WarpHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_warp_middleware())
                 .unwrap_or_else(|| Cors::builder().build().into_warp_middleware());
 
-            let routes = get_health_request()
-                .or(get_graphql_request_or_redirect(service.clone()))
-                .or(post_graphql_request(service.clone()))
-                .with(cors)
-                .with(with::default_header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static("application/json"),
-                ));
+            let plugin_routes = plugin_handlers.into_iter().fold(
+                get_health_request().boxed(),
+                move |acc, (plugin_name, custom_handler)| {
+                    let route = warp::get()
+                        .and(warp::path::full())
+                        .and(warp::any().map(move || custom_handler.clone()))
+                        .and(warp::path("plugins"))
+                        .and(warp::path(plugin_name))
+                        .and(warp::host::optional())
+                        .and(warp::header::headers_cloned())
+                        .and(warp::body::bytes())
+                        .and_then(custom_plugin_handler)
+                        .boxed();
+
+                    acc.or(route).unify().boxed()
+                },
+            );
+
+            let routes =
+                get_graphql_request_or_redirect(service.clone(), configuration.server.landing_page)
+                    .or(post_graphql_request(service.clone()))
+                    .or(plugin_routes)
+                    .with(cors)
+                    .with(with::default_header(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static("application/json"),
+                    ));
 
             // generate a hyper service from warp routes
-            let svc = warp::service(routes);
-
             let svc = ServiceBuilder::new()
                 // generate a tracing span that covers request parsing and response serializing
                 .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+                    TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
+                        DefaultMakeSpan::new().level(Level::INFO),
+                    )),
                 )
-                .service(svc);
+                .service(warp::service(routes));
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -296,8 +323,66 @@ impl HttpServerFactory for WarpHttpServerFactory {
     }
 }
 
+async fn custom_plugin_handler(
+    path: FullPath,
+    handler: Handler,
+    authority: Option<Authority>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Box<dyn Reply>, Rejection> {
+    let mut req_builder = http_compat::RequestBuilder::new(
+        Method::GET,
+        Uri::from_str(&format!(
+            "http://{}{}",
+            authority.unwrap().as_str(),
+            path.as_str()
+        ))
+        .expect("if the authority is some then the URL is valid; qed"),
+    );
+    for (header_name, header_value) in headers.iter() {
+        req_builder = req_builder.header(header_name.clone(), header_value.clone());
+    }
+
+    let res = handler
+        .oneshot(req_builder.body(body).expect(
+            "we know the body is already well formatted because it's coming from warp; qed",
+        ))
+        .await
+        .map_err(|err| {
+            warp::reject::custom(CustomRejection {
+                msg: err.to_string(),
+            })
+        })?;
+
+    let is_json = matches!(
+        res.body(),
+        ResponseBody::GraphQL(_) | ResponseBody::RawJSON(_)
+    );
+
+    let res = res.map(|body| match body {
+        ResponseBody::GraphQL(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::RawJSON(res) => {
+            Bytes::from(serde_json::to_vec(&res).expect("responsebody is serializable; qed"))
+        }
+        ResponseBody::Text(res) => Bytes::from(res),
+    });
+
+    if is_json {
+        Ok::<_, Rejection>(Box::new(warp::reply::with_header(
+            res.inner,
+            "Content-Type",
+            "application/json",
+        )) as Box<dyn Reply>)
+    } else {
+        Ok::<_, Rejection>(Box::new(res.inner) as Box<dyn Reply>)
+    }
+}
+
 fn get_graphql_request_or_redirect<RS>(
     service: RS,
+    display_landing_page: bool,
 ) -> impl Filter<Extract = (Box<dyn Reply>,), Error = Rejection> + Clone
 where
     RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -325,24 +410,25 @@ where
                   path: FullPath| {
                 let service = service.clone();
                 async move {
-                    let reply: Box<dyn Reply> = if accept.map(prefers_html).unwrap_or_default() {
-                        display_home_page()
-                    } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
-                        run_graphql_request(
-                            service,
-                            authority,
-                            http::Method::GET,
-                            path,
-                            request,
-                            header_map,
-                        )
-                        .await
-                    } else {
-                        Box::new(warp::reply::with_status(
-                            "Invalid GraphQL request",
-                            StatusCode::BAD_REQUEST,
-                        ))
-                    };
+                    let reply: Box<dyn Reply> =
+                        if accept.map(prefers_html).unwrap_or_default() && display_landing_page {
+                            display_home_page()
+                        } else if let Ok(request) = graphql::Request::from_urlencoded_query(query) {
+                            run_graphql_request(
+                                service,
+                                authority,
+                                http::Method::GET,
+                                path,
+                                request,
+                                header_map,
+                            )
+                            .await
+                        } else {
+                            Box::new(warp::reply::with_status(
+                                "Invalid GraphQL request",
+                                StatusCode::BAD_REQUEST,
+                            ))
+                        };
 
                     Ok::<_, warp::reject::Rejection>(reply)
                 }
@@ -445,11 +531,6 @@ where
         );
     }
 
-    // retrieve and reuse the potential trace id from the caller
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.extract_with_context(&Span::current().context(), &HeaderMapCarrier(&header_map));
-    });
-
     async move {
         match service.ready_oneshot().await {
             Ok(mut service) => {
@@ -470,17 +551,22 @@ where
                     .map(|response| {
                         tracing::trace_span!("serialize_response")
                             .in_scope(|| {
-                                response.map(|body| {
-                                    Bytes::from(
-                                        serde_json::to_vec(&body)
+                                response.map(|body| match body {
+                                    ResponseBody::GraphQL(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
                                             .expect("responsebody is serializable; qed"),
-                                    )
+                                    ),
+                                    ResponseBody::RawJSON(res) => Bytes::from(
+                                        serde_json::to_vec(&res)
+                                            .expect("responsebody is serializable; qed"),
+                                    ),
+                                    ResponseBody::Text(res) => Bytes::from(res),
                                 })
                             })
                             .into()
                     })
                     .unwrap_or_else(|e| {
-                        tracing::error!("router serivce call failed: {}", e);
+                        tracing::error!("router service call failed: {}", e);
                         http::Response::builder()
                             .status(StatusCode::INTERNAL_SERVER_ERROR)
                             .body(Bytes::from_static(b"router service call failed"))
@@ -507,24 +593,26 @@ fn prefers_html(accept_header: String) -> bool {
         .any(|a| a == "text/html")
 }
 
-struct HeaderMapCarrier<'a>(&'a HeaderMap);
+#[derive(Clone)]
+struct PropagatingMakeSpan(DefaultMakeSpan);
 
-impl<'a> Extractor for HeaderMapCarrier<'a> {
-    fn get(&self, key: &str) -> Option<&str> {
-        if let Some(value) = self.0.get(key).and_then(|x| x.to_str().ok()) {
-            tracing::trace!(
-                "found OpenTelemetry key in user's request: {}={}",
-                key,
-                value
-            );
-            Some(value)
+impl<B> MakeSpan<B> for PropagatingMakeSpan {
+    fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        // Before we make the span we need to attach span info that may have come in from the request.
+        let context = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
+        });
+
+        // If there was no span from the request then it will default to the NOOP span.
+        // Attaching the NOOP span has the effect of preventing further tracing.
+        if context.span().span_context().is_valid() {
+            // We have a valid remote span, attach it to the current thread before creating the root span.
+            let _context_guard = context.attach();
+            self.0.make_span(request)
         } else {
-            None
+            // No remote span, we can go ahead and create the span without context.
+            self.0.make_span(request)
         }
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.0.keys().map(|x| x.as_str()).collect()
     }
 }
 
@@ -623,6 +711,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");
@@ -669,6 +758,7 @@ mod tests {
                         .build(),
                 ),
                 None,
+                HashMap::new(),
             )
             .await
             .expect("Failed to create server factory");

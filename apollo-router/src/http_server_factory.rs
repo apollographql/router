@@ -1,15 +1,15 @@
 use super::FederatedServerError;
 use crate::configuration::{Configuration, ListenAddr};
-use apollo_router_core::ResponseBody;
 use apollo_router_core::{
     http_compat::{Request, Response},
     prelude::*,
 };
+use apollo_router_core::{Handler, ResponseBody};
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::{collections::HashMap, pin::Pin};
 use tower::BoxError;
 use tower::Service;
 
@@ -25,6 +25,7 @@ pub(crate) trait HttpServerFactory {
         service: RS,
         configuration: Arc<Configuration>,
         listener: Option<Listener>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Self::Future
     where
         RS: Service<Request<graphql::Request>, Response = Response<ResponseBody>, Error = BoxError>
@@ -86,6 +87,7 @@ impl HttpServerHandle {
         factory: &SF,
         router: RS,
         configuration: Arc<Configuration>,
+        plugin_handlers: HashMap<String, Handler>,
     ) -> Result<Self, FederatedServerError>
     where
         SF: HttpServerFactory,
@@ -106,7 +108,7 @@ impl HttpServerHandle {
         // it is necessary to keep the queue of new TCP sockets associated with
         // the listener instead of dropping them
         let listener = self.server_future.await;
-        tracing::info!("previous server is closed");
+        tracing::debug!("previous server stopped");
 
         // we keep the TCP listener if it is compatible with the new configuration
         let listener = if self.listen_address != configuration.server.listen {
@@ -122,7 +124,12 @@ impl HttpServerHandle {
         };
 
         let handle = factory
-            .create(router, Arc::clone(&configuration), listener)
+            .create(
+                router,
+                Arc::clone(&configuration),
+                listener,
+                plugin_handlers,
+            )
             .await?;
         tracing::debug!("restarted on {}", handle.listen_address());
 

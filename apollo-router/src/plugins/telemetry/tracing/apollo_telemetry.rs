@@ -1,9 +1,9 @@
 //! # Apollo-Telemetry Span Exporter
 //!
-//! The apollo-telemetry [`SpanExporter`] sends [`Reports`]s to its configured
+//! The apollo-telemetry [`SpanExporter`] sends [`Report`]s to its configured
 //! [`Reporter`] instance. By default it will write to the Apollo Ingress.
 //!
-//! [`SpanExporter`]: super::SpanExporter
+//! [`SpanExporter`]: SpanExporter
 //! [`Span`]: crate::trace::Span
 //! [`Report`]: apollo_spaceport::report::Report
 //! [`Reporter`]: apollo_spaceport::Reporter
@@ -50,26 +50,16 @@ use std::time::Duration;
 use tokio::task::JoinError;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
-const DEFAULT_LISTEN: &str = "127.0.0.1:50051";
 
 fn default_collector() -> String {
     DEFAULT_SERVER_URL.to_string()
 }
 
-fn default_listener() -> String {
-    DEFAULT_LISTEN.to_string()
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct SpaceportConfig {
-    pub(crate) external: bool,
-
     #[serde(default = "default_collector")]
     pub(crate) collector: String,
-
-    #[serde(default = "default_listener")]
-    pub(crate) listener: String,
 }
 
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
@@ -98,8 +88,6 @@ impl Default for SpaceportConfig {
     fn default() -> Self {
         Self {
             collector: default_collector(),
-            listener: default_listener(),
-            external: false,
         }
     }
 }
@@ -127,6 +115,7 @@ impl Default for PipelineBuilder {
     }
 }
 
+#[allow(dead_code)]
 impl PipelineBuilder {
     const DEFAULT_BATCH_SIZE: usize = 65_536;
     const DEFAULT_QUEUE_SIZE: usize = 65_536;
@@ -152,7 +141,7 @@ impl PipelineBuilder {
 
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     pub fn install_batch(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
-        let exporter = self.get_exporter()?;
+        let exporter = self.build_exporter()?;
 
         // Users can override the default batch and queue sizes, but they can't
         // set them to be lower than our specified defaults;
@@ -232,7 +221,7 @@ impl PipelineBuilder {
     /// Install the apollo telemetry exporter pipeline with the recommended defaults.
     #[allow(dead_code)]
     pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, ApolloError> {
-        let exporter = self.get_exporter()?;
+        let exporter = self.build_exporter()?;
 
         let mut provider_builder =
             sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
@@ -252,7 +241,7 @@ impl PipelineBuilder {
     }
 
     /// Create a client to talk to our spaceport and return an exporter.
-    pub fn get_exporter(&self) -> Result<Exporter, ApolloError> {
+    pub fn build_exporter(&self) -> Result<Exporter, ApolloError> {
         let collector = match self.spaceport_config.clone() {
             Some(cfg) => cfg.collector,
             None => DEFAULT_SERVER_URL.to_string(),
@@ -326,6 +315,7 @@ impl From<&StudioGraph> for ReporterGraph {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     async fn export(&mut self, batch: Vec<SpanData>) -> ExportResult {
+        tracing::info!("Exporting batch {}", batch.len());
         if self.graph.is_none() {
             // It's an error to try and export statistics without
             // graph details. We enforce that elsewhere in the code

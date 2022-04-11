@@ -5,9 +5,9 @@ fn main() {
         io::{Read, Write},
     };
 
-    use rover_client::{
+    use launchpad::{
         blocking::GraphQLClient,
-        operations::graph::introspect::{self, GraphIntrospectInput},
+        introspect::{self, GraphIntrospectInput},
     };
     use std::collections::HashMap;
 

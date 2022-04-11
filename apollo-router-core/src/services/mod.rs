@@ -13,6 +13,7 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
@@ -24,6 +25,8 @@ mod router_service;
 mod tower_subgraph_service;
 pub use tower_subgraph_service::TowerSubgraphService;
 
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
+
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
@@ -32,12 +35,16 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     }
 }
 
+/// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]
 pub enum ResponseBody {
+    /// A GraphQL response corresponding to the spec https://spec.graphql.org/October2021/#sec-Response
     GraphQL(Response),
+    /// A json value
     RawJSON(serde_json::Value),
-    RawString(String),
+    /// Text without any serialization (example: HTML content, Prometheus metrics, ...)
+    Text(String),
 }
 
 impl TryFrom<ResponseBody> for Response {
@@ -49,9 +56,7 @@ impl TryFrom<ResponseBody> for Response {
             ResponseBody::RawJSON(_) => {
                 Err("wrong ResponseBody kind: expected Response, found RawJSON")
             }
-            ResponseBody::RawString(_) => {
-                Err("wrong ResponseBody kind: expected Response, found RawString")
-            }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected Response, found Text"),
         }
     }
 }
@@ -67,7 +72,7 @@ impl TryFrom<ResponseBody> for String {
             ResponseBody::GraphQL(_) => {
                 Err("wrong ResponseBody kind: expected RawString, found GraphQL")
             }
-            ResponseBody::RawString(res) => Ok(res),
+            ResponseBody::Text(res) => Ok(res),
         }
     }
 }
@@ -81,9 +86,7 @@ impl TryFrom<ResponseBody> for serde_json::Value {
             ResponseBody::GraphQL(_) => {
                 Err("wrong ResponseBody kind: expected RawJSON, found GraphQL")
             }
-            ResponseBody::RawString(_) => {
-                Err("wrong ResponseBody kind: expected RawJSON, found RawString")
-            }
+            ResponseBody::Text(_) => Err("wrong ResponseBody kind: expected RawJSON, found Text"),
         }
     }
 }
@@ -108,7 +111,7 @@ impl From<serde_json::Value> for ResponseBody {
 impl FromStr for ResponseBody {
     type Err = Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::RawString(s.to_owned()))
+        Ok(Self::Text(s.to_owned()))
     }
 }
 
@@ -236,6 +239,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 
@@ -243,5 +247,9 @@ pub trait ServiceBuilderExt<L>: Sized {
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
         ServiceBuilder::layer(self, layer)
+    }
+
+    fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
+        self.buffer(DEFAULT_BUFFER_SIZE)
     }
 }

@@ -13,8 +13,11 @@
       "CORS": "/configuration/cors",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
-      "OpenTelemetry": "/configuration/opentelemetry",
+      "Apollo telemetry": "/configuration/apollo-telemetry",
+      "Metrics": "/configuration/metrics",
+      "Tracing": "/configuration/tracing",
       "Traffic shaping": "/configuration/traffic-shaping",
+      "Subgraph Error Inclusion": "/configuration/subgraph-error-inclusion",
       "Usage reporting": "/configuration/spaceport"
     },
     "Containerization": {

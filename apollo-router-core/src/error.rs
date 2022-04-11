@@ -146,7 +146,7 @@ impl Error {
                     reason: err.to_string(),
                 })?
                 .unwrap_or_default();
-        let message = extract_key_value_from_object!(object, "label", Value::String(s) => s)
+        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: err.to_string(),

@@ -5,10 +5,11 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::prelude::*;
 use apollo_router_core::Schema;
+use apollo_router_core::{prelude::*, Handler};
 use futures::channel::mpsc;
 use futures::prelude::*;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use Event::{NoMoreConfiguration, NoMoreSchema, Shutdown};
@@ -195,6 +196,10 @@ where
                         None,
                     )
                     .await
+                    .map(|s| {
+                        tracing::info!("reloaded");
+                        s
+                    })
                     .into_ok_or_err2()
                 }
 
@@ -253,21 +258,34 @@ where
             tracing::debug!("starting http");
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
+
             let router = self
                 .router_factory
                 .create(configuration.clone(), schema.clone(), None)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot create the router: {}", err);
+                    tracing::error!("cannot create the router: {}", err);
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
 
+            let plugin_handlers: HashMap<String, Handler> = self
+                .router_factory
+                .plugins()
+                .iter()
+                .filter_map(|(plugin_name, plugin)| {
+                    (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
+                        .then(|| plugin.custom_endpoint())
+                        .flatten()
+                        .map(|h| (plugin_name.clone(), h))
+                })
+                .collect();
+
             let server_handle = self
                 .http_server_factory
-                .create(router.clone(), configuration.clone(), None)
+                .create(router.clone(), configuration.clone(), None, plugin_handlers)
                 .await
                 .map_err(|err| {
-                    tracing::error!("Cannot start the router: {}", err);
+                    tracing::error!("cannot start the router: {}", err);
                     Errored(err)
                 })?;
 
@@ -295,6 +313,7 @@ where
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
+
         match self
             .router_factory
             .create(
@@ -305,15 +324,29 @@ where
             .await
         {
             Ok(new_router_service) => {
+                let plugin_handlers: HashMap<String, Handler> = self
+                    .router_factory
+                    .plugins()
+                    .iter()
+                    .filter_map(|(plugin_name, plugin)| {
+                        (plugin_name.starts_with("apollo.")
+                            || plugin_name.starts_with("experimental."))
+                        .then(|| plugin.custom_endpoint())
+                        .flatten()
+                        .map(|handler| (plugin_name.clone(), handler))
+                    })
+                    .collect();
+
                 let server_handle = server_handle
                     .restart(
                         &self.http_server_factory,
                         new_router_service.clone(),
                         new_configuration.clone(),
+                        plugin_handlers,
                     )
                     .await
                     .map_err(|err| {
-                        tracing::error!("Cannot start the router: {}", err);
+                        tracing::error!("cannot start the router: {}", err);
                         Errored(err)
                     })?;
                 Ok(Running {
@@ -325,7 +358,7 @@ where
             }
             Err(err) => {
                 tracing::error!(
-                    "Cannot create new router, keeping previous configuration: {}",
+                    "cannot create new router, keeping previous configuration: {}",
                     err
                 );
                 Err(Running {
@@ -338,6 +371,7 @@ where
         }
     }
 }
+
 trait ResultExt<T> {
     // Unstable method can be deleted in future
     fn into_ok_or_err2(self) -> T;
@@ -358,7 +392,7 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use apollo_router_core::http_compat::{Request, Response};
-    use apollo_router_core::ResponseBody;
+    use apollo_router_core::{DynPlugin, ResponseBody};
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use mockall::{mock, Sequence};
@@ -567,6 +601,11 @@ mod tests {
             .expect_create()
             .times(1)
             .returning(|_, _, _| Err(BoxError::from("Error")));
+
+        router_factory
+            .expect_plugins()
+            .times(0)
+            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
@@ -602,7 +641,12 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _| Err(BoxError::from("error")));
+
+        router_factory
+            .expect_plugins()
+            .times(1)
+            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -645,6 +689,8 @@ mod tests {
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
             ) -> Result<MockMyRouter, BoxError>;
+
+            fn plugins(&self) -> &[(String, Box<dyn DynPlugin>)];
         }
     }
 
@@ -692,6 +738,7 @@ mod tests {
             _service: RS,
             configuration: Arc<Configuration>,
             listener: Option<Listener>,
+            _plugin_handlers: HashMap<String, Handler>,
         ) -> Pin<Box<dyn Future<Output = Result<HttpServerHandle, FederatedServerError>> + Send>>
         where
             RS: Service<
@@ -776,6 +823,10 @@ mod tests {
                 router.expect_clone().return_once(MockMyRouter::new);
                 Ok(router)
             });
+        router_factory
+            .expect_plugins()
+            .times(expect_times_called)
+            .return_const(Vec::new());
         router_factory
     }
 }

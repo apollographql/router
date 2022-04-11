@@ -188,6 +188,31 @@ server:
 
 ```
 
+### Introspection
+
+By default, the router answers to some introspection queries. You can override this behavior to disable the introspection like so:
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  introspection: false
+```
+
+### Landing page
+
+By default, the router displays a landing page if you're accessing the router via your browser. You can override this behavior to disable the landing page like so:
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  landing_page: false
+```
+
+
 ### Subgraph routing URLs
 
 By default, the Apollo Router extracts the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
@@ -232,6 +257,23 @@ plugins:
   example.plugin:
     var1: "hello"
     var2: 1
+```
+
+### Environment variable expansion
+
+You can reference environment variables directly in your yaml file for any section outside of `server`.
+
+This is useful for referencing secrets without embedding them directly into the yaml.
+
+Unix style expansion is used. Either:
+
+* `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
+* `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
+
+Only values may be expanded (not keys):
+```yaml {4,8} title="router.yaml"
+example:
+  passord: "${MY_PASSWORD}" 
 ```
 
 ### Reusing configuration

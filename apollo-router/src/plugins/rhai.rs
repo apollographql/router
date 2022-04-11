@@ -1,3 +1,5 @@
+//! Customization via Rhai.
+
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
@@ -530,7 +532,7 @@ mod tests {
                     );
                 }
             }
-            ResponseBody::RawJSON(_) | ResponseBody::RawString(_) => {
+            _ => {
                 panic!("should not be this kind of response")
             }
         }

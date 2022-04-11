@@ -31,6 +31,8 @@ pub enum ConfigurationError {
     InvalidEnvironmentVariable(String),
     /// could not setup OTLP tracing: {0}
     OtlpTracing(opentelemetry::trace::TraceError),
+    /// could not setup OTLP metrics: {0}
+    Metrics(#[from] opentelemetry::metrics::MetricsError),
     /// the configuration could not be loaded because it requires the feature {0:?}
     MissingFeature(&'static str),
     /// unknown plugin {0}
@@ -145,6 +147,11 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
     Schema::Object(plugins_object)
 }
 
+/// Plugins provided by Apollo.
+///
+/// These plugins are processed prior to user plugins. Also, their configuration
+/// is "hoisted" to the top level of the config rather than being processed
+/// under "plugins" as for user plugins.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct ApolloPlugins {
@@ -175,6 +182,10 @@ impl JsonSchema for ApolloPlugins {
     }
 }
 
+/// Plugins provided by a user.
+///
+/// These plugins are compiled into a router by and their configuration is performed
+/// under the "plugins" section.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TypedBuilder)]
 #[serde(transparent)]
 pub struct UserPlugins {
@@ -220,6 +231,12 @@ pub struct Server {
     #[serde(default = "default_introspection")]
     #[builder(default_code = "default_introspection()", setter(into))]
     pub introspection: bool,
+
+    /// display landing page
+    /// enabled by default
+    #[serde(default = "default_landing_page")]
+    #[builder(default_code = "default_landing_page()", setter(into))]
+    pub landing_page: bool,
 }
 
 /// Listening address.
@@ -324,6 +341,10 @@ fn default_introspection() -> bool {
     true
 }
 
+fn default_landing_page() -> bool {
+    true
+}
+
 impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
@@ -346,66 +367,6 @@ impl Cors {
     }
 }
 
-pub(crate) fn default_service_name() -> String {
-    "router".to_string()
-}
-
-pub(crate) fn default_service_namespace() -> String {
-    "apollo".to_string()
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum Secret {
-    Env(String),
-    File(PathBuf),
-}
-
-impl Secret {
-    pub fn read(&self) -> Result<String, ConfigurationError> {
-        match self {
-            Secret::Env(s) => std::env::var(s).map_err(ConfigurationError::CannotReadSecretFromEnv),
-            Secret::File(path) => {
-                std::fs::read_to_string(path).map_err(ConfigurationError::CannotReadSecretFromFile)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TlsConfig {
-    domain_name: Option<String>,
-    ca: Option<Secret>,
-    cert: Option<Secret>,
-    key: Option<Secret>,
-}
-
-#[cfg(feature = "otlp-grpc")]
-impl TlsConfig {
-    pub fn tls_config(
-        &self,
-    ) -> Result<tonic::transport::channel::ClientTlsConfig, ConfigurationError> {
-        let mut config = tonic::transport::channel::ClientTlsConfig::new();
-
-        if let Some(domain_name) = self.domain_name.as_ref() {
-            config = config.domain_name(domain_name);
-        }
-
-        if let Some(ca_certificate) = self.ca.as_ref() {
-            let certificate = tonic::transport::Certificate::from_pem(ca_certificate.read()?);
-            config = config.ca_certificate(certificate);
-        }
-
-        if let (Some(cert), Some(key)) = (self.cert.as_ref(), self.key.as_ref()) {
-            let identity = tonic::transport::Identity::from_pem(cert.read()?, key.read()?);
-            config = config.identity(identity);
-        }
-
-        Ok(config)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,10 +374,8 @@ mod tests {
     use apollo_router_core::SchemaError;
     use http::Uri;
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
     use insta::assert_json_snapshot;
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
     use schemars::gen::SchemaSettings;
     use std::collections::HashMap;
 
@@ -430,7 +389,6 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[cfg(any(feature = "otlp-grpc"))]
     #[test]
     fn schema_generation() {
         let settings = SchemaSettings::draft2019_09().with(|s| {
@@ -456,33 +414,28 @@ mod tests {
         assert_config_snapshot!("testdata/config_opentelemetry_jaeger_full.yml");
     }
 
-    #[cfg(any(feature = "otlp-grpc", feature = "otlp-http"))]
     #[test]
     fn ensure_configuration_api_does_not_change_common() {
         // NOTE: don't take a snapshot here because the optional fields appear with ~ and they vary
         // per implementation
 
-        #[cfg(feature = "otlp-http")]
         serde_yaml::from_str::<Configuration>(include_str!(
             "testdata/config_opentelemetry_otlp_tracing_http_common.yml"
         ))
         .unwrap();
 
-        #[cfg(feature = "otlp-grpc")]
         serde_yaml::from_str::<Configuration>(include_str!(
             "testdata/config_opentelemetry_otlp_tracing_grpc_common.yml"
         ))
         .unwrap();
     }
 
-    #[cfg(feature = "otlp-grpc")]
     #[test]
     fn ensure_configuration_api_does_not_change_grpc() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_basic.yml");
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_full.yml");
     }
 
-    #[cfg(feature = "otlp-http")]
     #[test]
     fn ensure_configuration_api_does_not_change_http() {
         assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_basic.yml");

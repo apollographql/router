@@ -6,7 +6,7 @@ use crate::{
     ApolloRouterBuilder, ConfigurationKind, SchemaKind, ShutdownKind,
 };
 use anyhow::{anyhow, Context, Result};
-use clap::{CommandFactory, Parser};
+use clap::{AppSettings, CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use schemars::gen::SchemaSettings;
@@ -21,6 +21,7 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(Parser, Debug)]
+#[clap(global_setting(AppSettings::NoAutoVersion))]
 #[structopt(name = "router", about = "Apollo federation router")]
 pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
@@ -63,6 +64,10 @@ pub struct Opt {
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
     apollo_schema_poll_interval: Duration,
+
+    /// Display version and exit
+    #[clap(parse(from_flag), long, short = 'V')]
+    pub version: bool,
 }
 
 /// Wrapper so that structop can display the default config path in the help message.
@@ -131,6 +136,11 @@ pub fn main() -> Result<()> {
 pub async fn rt_main() -> Result<()> {
     let opt = Opt::parse();
 
+    if opt.version {
+        println!("{}", std::env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     copy_args_to_env();
 
     if opt.schema {
@@ -162,12 +172,6 @@ pub async fn rt_main() -> Result<()> {
 
     GLOBAL_ENV_FILTER.set(opt.log_level).unwrap();
 
-    tracing::info!(
-        "{}@{}",
-        std::env!("CARGO_PKG_NAME"),
-        std::env!("CARGO_PKG_VERSION")
-    );
-
     let current_directory = std::env::current_dir()?;
 
     let configuration = opt
@@ -190,6 +194,11 @@ pub async fn rt_main() -> Result<()> {
 
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
+            tracing::info!(
+                "{}@{}",
+                std::env!("CARGO_PKG_NAME"),
+                std::env!("CARGO_PKG_VERSION")
+            );
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -202,6 +211,11 @@ pub async fn rt_main() -> Result<()> {
             }
         }
         (None, Some(apollo_key)) => {
+            tracing::info!(
+                "{}@{}",
+                std::env!("CARGO_PKG_NAME"),
+                std::env!("CARGO_PKG_VERSION")
+            );
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
             if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
@@ -215,49 +229,42 @@ pub async fn rt_main() -> Result<()> {
             }
         }
         _ => {
+            let version = std::env!("CARGO_PKG_VERSION");
             return Err(anyhow!(
                 r#"
-    💫 Apollo Router requires a supergraph to be set using '--supergraph':
+===
+APOLLO ROUTER v{version}
 
-        $ ./router --supergraph <file>`
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-        Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
-        and APOLLO_GRAPH_REF environment variables to your graph's settings.
-        
-          $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-          
-        For more on Apollo Studio and Managed Federation, see our documentation:
-        
-          https://www.apollographql.com/docs/router/managed-federation/
+👉 DO ONE:
 
-    🪐 The supergraph can be built or downloaded from the Apollo Registry
-       using the Rover CLI. To find out how, see:
+  * Pass a local schema file with the '--supergraph' option:
 
-        https://www.apollographql.com/docs/rover/supergraphs/.
+      $ ./router --supergraph <file_path>
 
-    🧪 If you're just experimenting, you can download and use an example
-       supergraph with pre-deployed subgraphs:
+  * Fetch a registered schema from Apollo Studio by setting
+    these environment variables:
 
-        $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
-       Then run the Apollo Router with that supergraph:
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/router/managed-federation/setup
 
-        $ ./router --supergraph starstuff.graphql
+🔬 TESTING THINGS OUT?
+
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the Apollo Router with the supergraph schema:
+
+    $ ./router --supergraph starstuff.graphql
 
     "#,
             ));
         }
     };
-
-    // Create your text map propagator & assign it as the global propagator.
-    //
-    // This is required in order to create the header traceparent used in http_subgraph to
-    // propagate the trace id to the subgraph services.
-    //
-    // /!\ If this is not called, there will be no warning and no header will be sent to the
-    //     subgraphs!
-    let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
-    opentelemetry::global::set_text_map_propagator(propagator);
 
     let server = ApolloRouterBuilder::default()
         .configuration(configuration)
