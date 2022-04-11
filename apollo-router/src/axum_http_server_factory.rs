@@ -4,15 +4,16 @@ use crate::FederatedServerError;
 use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use apollo_router_core::{http_compat, Handler};
-use axum::extract::{Extension, Host, OriginalUri, RawBody, RawQuery};
+use axum::extract::{Extension, Host, OriginalUri, RawQuery};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
-use http::{HeaderValue, Method, Uri};
+use http::{HeaderValue, Method, Request, Uri};
 use hyper::server::conn::Http;
+use hyper::Body;
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use serde_json::json;
@@ -149,11 +150,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     &format!("/plugins/{}/*path", plugin_name),
                     get({
                         let new_handler = handler.clone();
-                        move |host: Host,
-                              original_uri: OriginalUri,
-                              headers: HeaderMap,
-                              body: RawBody| {
-                            custom_plugin_handler(host, original_uri, headers, body, new_handler)
+                        move |host: Host, request_parts: Request<Body>| {
+                            custom_plugin_handler(host, request_parts, new_handler)
+                        }
+                    })
+                    .post({
+                        let new_handler = handler.clone();
+                        move |host: Host, request_parts: Request<Body>| {
+                            custom_plugin_handler(host, request_parts, new_handler)
                         }
                     }),
                 );
@@ -374,28 +378,17 @@ struct CustomRejection {
 
 async fn custom_plugin_handler(
     Host(host): Host,
-    OriginalUri(original_uri): OriginalUri,
-    headers: HeaderMap,
-    RawBody(body): RawBody,
+    request: Request<Body>,
     handler: Handler,
 ) -> impl IntoResponse {
-    let mut req_builder = http_compat::RequestBuilder::new(
-        Method::GET,
-        Uri::from_str(&format!("http://{}{}", host, original_uri))
-            .expect("if the authority is some then the URL is valid; qed"),
-    );
-    for (header_name, header_value) in headers.iter() {
-        req_builder = req_builder.header(header_name.clone(), header_value.clone());
-    }
+    let (mut head, body) = request.into_parts();
     let body = hyper::body::to_bytes(body)
         .await
         .map_err(|err| err.to_string())?;
-    let res = handler
-        .oneshot(req_builder.body(body).expect(
-            "we know the body is already well formatted because it's coming from warp; qed",
-        ))
-        .await
-        .map_err(|err| err.to_string())?;
+    head.uri = Uri::from_str(&format!("http://{}{}", host, head.uri))
+        .expect("if the authority is some then the URL is valid; qed");
+    let req = http_compat::Request::from_parts(head, body);
+    let res = handler.oneshot(req).await.map_err(|err| err.to_string())?;
 
     let is_json = matches!(
         res.body(),

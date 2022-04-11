@@ -16,8 +16,10 @@ use bytes::Bytes;
 use crate::ResponseBody;
 
 use http::{
-    header::HeaderName, request::Builder, uri::InvalidUri, HeaderMap, HeaderValue, Method, Uri,
-    Version,
+    header::HeaderName,
+    request::{Builder, Parts},
+    uri::InvalidUri,
+    HeaderMap, HeaderValue, Method, Uri, Version,
 };
 
 #[derive(Debug)]
@@ -29,6 +31,14 @@ pub struct Request<T> {
 }
 
 impl<T> Request<T> {
+    /// Update the associated URL
+    pub fn from_parts(head: Parts, body: T) -> Request<T> {
+        Request {
+            url: head.uri.clone(),
+            inner: http::Request::from_parts(head, body),
+        }
+    }
+
     /// Update the associated URL
     pub fn set_url(&mut self, url: http::Uri) -> Result<(), http::Error> {
         *self.inner.uri_mut() = url.clone();

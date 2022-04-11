@@ -10,15 +10,13 @@ pub mod plugins;
 mod reload;
 mod router_factory;
 mod state_machine;
+pub mod subscriber;
 #[cfg(feature = "warp-server")]
 mod warp_http_server_factory;
-// mod warp_http_server_factory;
-pub mod subscriber;
 
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
-// use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
 #[cfg(feature = "axum-server")]
