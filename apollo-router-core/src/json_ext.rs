@@ -189,8 +189,7 @@ impl ValueExt for Value {
         for p in path.iter() {
             match p {
                 PathElement::Flatten => {
-                    let a = Vec::new();
-                    *current_node = Value::Array(a);
+                    return res_value;
                 }
 
                 &PathElement::Index(index) => match current_node {
@@ -660,7 +659,7 @@ mod tests {
     #[test]
     fn test_from_path() {
         let json = json!([{"prop1":1},{"prop1":2}]);
-        let path = Path::from("obj/arr/@");
+        let path = Path::from("obj/arr");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}}));
     }
