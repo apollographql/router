@@ -22,7 +22,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 -->
 
-# [v0.1.0-preview.4] - Unreleased
+# [v0.1.0-preview.4] - 2022-04-11
 ## ❗ BREAKING ❗
 - **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
 

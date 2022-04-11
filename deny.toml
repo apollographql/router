@@ -44,7 +44,7 @@ allow = [
     "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
-    "MPL-2.0"
+    "MPL-2.0",
 ]
 copyleft = "warn"
 allow-osi-fsf-free = "neither"
@@ -64,13 +64,13 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [[licenses.clarify]]
 name = "apollo-router"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
 name = "apollo-router-core"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
@@ -81,7 +81,7 @@ license-files = [{ path = "router-bridge/LICENSE", hash = 0xaceadac9 }]
 [[licenses.clarify]]
 name = "apollo-spaceport"
 expression = "LicenseRef-ELv2"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 license-files = [{ path = "LICENSE", hash = 0xaceadac9 }]
 
 [[licenses.clarify]]
