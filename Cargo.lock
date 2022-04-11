@@ -240,6 +240,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c58098d74c9866cbb71781eeb9b9c001c6334868fe45269ef42e700f2b5c9a7c"
 dependencies = [
  "apollo-encoder",
+ "apollo-parser 0.2.5",
  "arbitrary",
  "once_cell",
 ]
