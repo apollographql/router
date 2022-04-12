@@ -724,6 +724,22 @@ mod tests {
     }
 
     #[test]
+    fn line_precise_config_errors() {
+        let error = validate_configuration(
+            r#"
+plugins:
+  non_existant:
+    foo: "bar"
+
+telemetry:  
+  another_non_existant: 3
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
     fn validate_project_config_files() {
         let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
         let embedded_yaml_matcher =
