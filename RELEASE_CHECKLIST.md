@@ -32,13 +32,14 @@ in lieu of an official changelog.
 2.  Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
 3.  Update the version in `*/Cargo.toml`.
-3.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core` and `apollo-router`.
-4.  Run `cargo check` so the lock file gets updated.
-5.  Run `cargo xtask check-compliance` so the lock file gets updated.
-6.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
+4.  Update the date in `NEXT_CHANGELOG.md`.
+5.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core`, `apollo-router` and `apollo-spaceport`.
+6.  Run `cargo check` so the lock file gets updated.
+7.  Run `cargo xtask check-compliance`.
+8.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
     `NEXT_CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
-7.  Request review from the Router team.
+9.  Request review from the Router team.
 
 ### Review
 

@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.4",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "apollo-parser 0.2.5",
  "async-trait",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "bytes",
  "clap 3.1.8",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "futures",
  "graphql_client",
@@ -3662,7 +3662,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=a1846dd1780989cbad767249c9c4f59a649523ad#a1846dd1780989cbad767249c9c4f59a649523ad"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=59b38f09522b100c052ecf842c50870ec56cc1a4#59b38f09522b100c052ecf842c50870ec56cc1a4"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5404,7 +5404,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "ansi_term",
  "anyhow",

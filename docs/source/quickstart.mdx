@@ -7,6 +7,14 @@ Hello! This tutorial walks you through installing the Apollo Router and running 
 
 ## 1. Download and extract the Apollo Router binary
 
+### Automatic download (Linux, OSX, WSL)
+
+If you have a bash compatible terminal you can download the latest version of the Apollo Router directly to your current directory.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/apollographql/router/main/scripts/install.sh)  
+```
+
+### Manual download
 Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
 
 * Linux (x86_64)
@@ -30,30 +38,31 @@ You can now try running Apollo Router from your project's root directory with th
 If you do, you'll get the following:
 
 ```
-💫 Apollo Router requires a supergraph to be set using '--supergraph':
+APOLLO ROUTER <version>
 
-    $ ./router --supergraph <file>`
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-    Alternatively, to retrieve the supergraph from Apollo Studio, set the APOLLO_KEY
-    and APOLLO_GRAPH_REF environment variables to your graph's settings.
+👉 DO ONE:
+
+  * Pass a local schema file with the '--supergraph' option:
+
+      $ ./router --supergraph <file_path>
+
+  * Fetch a registered schema from Apollo Studio by setting
+    these environment variables:
 
       $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
-    For more on Apollo Studio and Managed Federation, see our documentation:
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/router/managed-federation/setup
 
-      https://www.apollographql.com/docs/router/managed-federation/
+🔬 TESTING THINGS OUT?
 
-🪐 The supergraph can be built or downloaded from the Apollo Registry
-    using the Rover CLI. To find out how, see:
-
-    https://www.apollographql.com/docs/rover/supergraphs/.
-
-🧪 If you're just experimenting, you can download and use an example
-    supergraph with pre-deployed subgraphs:
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
 
     $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
 
-    Then run the Apollo Router with that supergraph:
+  2. Run the Apollo Router with the supergraph schema:
 
     $ ./router --supergraph starstuff.graphql
 ```

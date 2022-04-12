@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-core"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -40,7 +40,7 @@ opentelemetry = "0.17.0"
 opentelemetry-http = "0.6.0"
 paste = "1.0.6"
 regex = "1.5.5"
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "a1846dd1780989cbad767249c9c4f59a649523ad" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "59b38f09522b100c052ecf842c50870ec56cc1a4" }
 schemars = { version = "0.8.8", features = ["url"] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
