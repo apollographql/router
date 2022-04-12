@@ -32,4 +32,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   For more info see the quickstart documentation.
 
 ## 🐛 Fixes
+
+- **Early return a better error when introspection is disabled** [PR #751](https://github.com/apollographql/router/pull/751)
+
+  Instead of returning an error coming from the query planner, we are now returning a proper error explaining that the introspection has been disabled.
+
 ## 🛠 Maintenance
+
+- **Switch web server framework from `warp` to `axum`** [PR #751](https://github.com/apollographql/router/pull/751)
+
+  The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
+  
+## 📚 Documentation

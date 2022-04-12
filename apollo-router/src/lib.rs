@@ -1,5 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
+#[cfg(feature = "axum-server")]
+mod axum_http_server_factory;
 pub mod configuration;
 mod executable;
 mod files;
@@ -9,14 +11,16 @@ mod reload;
 mod router_factory;
 mod state_machine;
 pub mod subscriber;
+#[cfg(feature = "warp-server")]
 mod warp_http_server_factory;
 
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
-use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
+#[cfg(feature = "axum-server")]
+use axum_http_server_factory::AxumHttpServerFactory;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
@@ -34,7 +38,14 @@ use thiserror::Error;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
 use url::Url;
+#[cfg(feature = "warp-server")]
+use warp_http_server_factory::WarpHttpServerFactory;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
+
+#[cfg(all(feature = "warp-server", feature = "axum-server"))]
+compile_error!(
+    r#"feature "warp-server" and feature "axum-server" cannot be enabled at the same time ("axum-server" is enabled by default)"#
+);
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
@@ -604,6 +615,9 @@ where
     ///
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
+        #[cfg(feature = "axum-server")]
+        let server_factory = AxumHttpServerFactory::new();
+        #[cfg(feature = "warp-server")]
         let server_factory = WarpHttpServerFactory::new();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = Self::generate_event_stream(

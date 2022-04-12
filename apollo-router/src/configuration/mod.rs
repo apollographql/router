@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error;
+use tower_http::cors::{Any, CorsLayer, Origin};
 use typed_builder::TypedBuilder;
 
 /// Configuration error.
@@ -352,6 +353,7 @@ impl Default for Server {
 }
 
 impl Cors {
+    #[cfg(feature = "warp-server")]
     pub fn into_warp_middleware(&self) -> warp::cors::Builder {
         let cors = warp::cors()
             .allow_credentials(self.allow_credentials.unwrap_or_default())
@@ -363,6 +365,45 @@ impl Cors {
             cors.allow_any_origin()
         } else {
             cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
+        }
+    }
+
+    pub fn into_layer(self) -> CorsLayer {
+        let cors =
+            CorsLayer::new()
+                .allow_credentials(self.allow_credentials.unwrap_or_default())
+                .allow_headers(self.allow_headers.iter().filter_map(|header| {
+                    header
+                        .parse()
+                        .map_err(|_| tracing::error!("header name '{header}' is not valid"))
+                        .ok()
+                }))
+                .expose_headers(self.expose_headers.unwrap_or_default().iter().filter_map(
+                    |header| {
+                        header
+                            .parse()
+                            .map_err(|_| tracing::error!("header name '{header}' is not valid"))
+                            .ok()
+                    },
+                ))
+                .allow_methods(self.methods.iter().filter_map(|method| {
+                    method
+                        .parse()
+                        .map_err(|_| tracing::error!("method '{method}' is not valid"))
+                        .ok()
+                }));
+
+        if self.allow_any_origin.unwrap_or_default() {
+            cors.allow_origin(Any)
+        } else {
+            cors.allow_origin(Origin::list(self.origins.into_iter().filter_map(
+                |header| {
+                    header
+                        .parse()
+                        .map_err(|_| tracing::error!("header value '{header}' is not valid"))
+                        .ok()
+                },
+            )))
         }
     }
 }
