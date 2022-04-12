@@ -7,13 +7,13 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::{apollo, TracingConfigurator};
 use crate::subscriber::replace_layer;
 use apollo_router_core::{
-    http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    http_compat, register_plugin, Handler, Path, Plugin, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse, ValueExt,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
 use futures::FutureExt;
-use http::StatusCode;
+use http::{HeaderValue, StatusCode};
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -21,6 +21,7 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
+use serde_json_bytes::json;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -34,6 +35,8 @@ mod config;
 mod metrics;
 mod otlp;
 mod tracing;
+
+static EXTENSION_KEY: &str = "telemetry";
 
 pub struct Telemetry {
     config: config::Conf,
@@ -210,6 +213,31 @@ impl Plugin for Telemetry {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
         service
+            .map_request(|req: RouterRequest| {
+                let client_name = req
+                    .context
+                    .request
+                    .headers()
+                    .get("apollographql-client-name")
+                    .map(HeaderValue::to_str)
+                    .unwrap_or(Ok("not found"))
+                    .unwrap_or("invalid apollographql-client-name header");
+
+                let client_version = req
+                    .context
+                    .request
+                    .headers()
+                    .get("apollographql-client-version")
+                    .map(HeaderValue::to_str)
+                    .unwrap_or(Ok("not found"))
+                    .unwrap_or("invalid apollographql-client-version header");
+
+                req.context.extensions.insert(
+                    EXTENSION_KEY.to_string(),
+                    json!({ "client_name": client_name, "client_version": client_version }),
+                );
+                req
+            })
             .map_future(move |f| {
                 let metrics = metrics.clone();
                 // Using Instant because it is guaranteed to be monotonically increasing.
@@ -234,6 +262,30 @@ impl Plugin for Telemetry {
                         .record(now.elapsed().as_secs_f64(), &[]);
                     r
                 })
+            })
+            .boxed()
+    }
+
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        service
+            .map_response(|res: QueryPlannerResponse| {
+                res.context.extensions.alter(
+                    EXTENSION_KEY,
+                    |_, mut telemetry_info: apollo_router_core::Value| {
+                        telemetry_info
+                            .insert(
+                                &Path::from("usage_reporting"),
+                                json!({ "signature": res.query_plan.usage_reporting_signature}),
+                            )
+                            .expect("inserting into a new path cannot fail; qed");
+                        telemetry_info
+                    },
+                );
+
+                res
             })
             .boxed()
     }

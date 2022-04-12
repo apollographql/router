@@ -75,14 +75,6 @@ checksum = "c2ae23d8a1f5cc1a4e33ec9b1f0d4d626f9e4736619b4c1a4f1482a594ac2e13"
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.4"
-source = "git+https://github.com/apollographql/apollo-rs.git?rev=e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac#e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac"
-dependencies = [
- "rowan",
-]
-
-[[package]]
-name = "apollo-parser"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb3f8fe8c9fb08c1e99bf4a50698adcd807cafba2d2aacc49d8ffc79123fce59"
@@ -95,7 +87,7 @@ name = "apollo-router"
 version = "0.1.0-preview.4"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.4",
+ "apollo-parser",
  "apollo-router-core",
  "apollo-spaceport",
  "apollo-uplink",
@@ -182,7 +174,7 @@ dependencies = [
 name = "apollo-router-core"
 version = "0.1.0-preview.4"
 dependencies = [
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "async-trait",
  "atty",
  "bytes",
@@ -240,7 +232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c58098d74c9866cbb71781eeb9b9c001c6334868fe45269ef42e700f2b5c9a7c"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
 ]
@@ -316,7 +308,7 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -697,7 +689,7 @@ name = "compose-your-graphql-router"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -744,7 +736,7 @@ name = "context-data"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -1365,7 +1357,7 @@ name = "forbid-anonymous-operations"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "futures",
@@ -1789,7 +1781,7 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
@@ -2148,7 +2140,7 @@ name = "jwt-auth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
@@ -3208,7 +3200,7 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-router",
  "apollo-router-core",
  "dashmap 5.2.0",
@@ -3552,7 +3544,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.5",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
