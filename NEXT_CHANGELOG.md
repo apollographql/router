@@ -49,6 +49,9 @@ Jaeger and Zipkin telemetry config produced JSON schema that was invalid.
 ### Early return a better error when introspection is disabled [PR #751](https://github.com/apollographql/router/pull/751)
 Instead of returning an error coming from the query planner, we are now returning a proper error explaining that the introspection has been disabled.
 
+### Add operation name to subquery fetches [PR #840](https://github.com/apollographql/router/pull/840)
+If present in the query plan fetch noede, the operation name will be added to sub-fetches.
+
 ## 🛠 Maintenance
 ### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/782)
 Router configuration files within the project are now largely validated via unit test.

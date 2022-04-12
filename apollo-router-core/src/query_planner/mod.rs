@@ -268,6 +268,9 @@ pub(crate) mod fetch {
         /// The GraphQL subquery that is used for the fetch.
         operation: String,
 
+        /// The GraphQL subquery operation name.
+        operation_name: Option<String>,
+
         /// The GraphQL operation kind that is used for the fetch.
         operation_kind: OperationKind,
     }
@@ -351,6 +354,7 @@ pub(crate) mod fetch {
             let FetchNode {
                 operation,
                 operation_kind,
+                operation_name,
                 service_name,
                 ..
             } = self;
@@ -383,6 +387,7 @@ pub(crate) mod fetch {
                 .body(
                     Request::builder()
                         .query(operation)
+                        .operation_name(operation_name.clone())
                         .variables(Arc::new(variables.clone()))
                         .build(),
                 )
