@@ -8,7 +8,20 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use http::{header::HeaderName, request::Builder, uri::InvalidUri, HeaderValue, Version};
+#[cfg(feature = "axum-server")]
+use axum::{body::boxed, response::IntoResponse};
+#[cfg(feature = "axum-server")]
+use bytes::Bytes;
+
+#[cfg(feature = "axum-server")]
+use crate::ResponseBody;
+
+use http::{
+    header::HeaderName,
+    request::{Builder, Parts},
+    uri::InvalidUri,
+    HeaderValue, Version,
+};
 
 #[derive(Debug)]
 pub struct Request<T> {
@@ -17,6 +30,13 @@ pub struct Request<T> {
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
 impl<T> Request<T> {
+    /// Update the associated URL
+    pub fn from_parts(head: Parts, body: T) -> Request<T> {
+        Request {
+            inner: http::Request::from_parts(head, body),
+        }
+    }
+
     /// Consumes the request, returning just the body.
     pub fn into_body(self) -> T {
         self.inner.into_body()
@@ -138,6 +158,13 @@ impl<T> From<Request<T>> for http::Request<T> {
     }
 }
 
+impl<T> TryFrom<http::Request<T>> for Request<T> {
+    type Error = InvalidUri;
+    fn try_from(request: http::Request<T>) -> Result<Self, Self::Error> {
+        Ok(Self { inner: request })
+    }
+}
+
 #[derive(Debug)]
 pub struct RequestBuilder {
     inner: Builder,
@@ -245,5 +272,31 @@ impl<T: Clone> Clone for Response<T> {
             .body(self.inner.body().clone())
             .expect("cloning a valid response creates a valid response");
         Self { inner: res }
+    }
+}
+
+pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
+    url::Url::parse(&uri.to_string())
+}
+
+#[cfg(feature = "axum-server")]
+impl IntoResponse for Response<ResponseBody> {
+    fn into_response(self) -> axum::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+        let json_body_bytes =
+            Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
+
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
+    }
+}
+
+#[cfg(feature = "axum-server")]
+impl IntoResponse for Response<Bytes> {
+    fn into_response(self) -> axum::response::Response {
+        // todo: chunks?
+        let (parts, body) = self.into_parts();
+
+        axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
     }
 }
