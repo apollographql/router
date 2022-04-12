@@ -427,14 +427,10 @@ async fn redirect_or_run_graphql_operation(
         return display_home_page().into_response();
     }
 
-    if query.is_some() {
-        if let Ok(request) =
-            graphql::Request::from_urlencoded_query(query.expect("checked before;qed"))
-        {
-            return run_graphql_request(service, Method::GET, request, headers, uri, host)
-                .await
-                .into_response();
-        }
+    if let Some(request) = query.and_then(|q| graphql::Request::from_urlencoded_query(q).ok()) {
+        return run_graphql_request(service, Method::GET, request, headers, uri, host)
+            .await
+            .into_response();
     }
 
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
