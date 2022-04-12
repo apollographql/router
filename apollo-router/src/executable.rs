@@ -232,7 +232,6 @@ pub async fn rt_main() -> Result<()> {
             let version = std::env!("CARGO_PKG_VERSION");
             return Err(anyhow!(
                 r#"
-===
 APOLLO ROUTER v{version}
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
@@ -261,7 +260,7 @@ APOLLO ROUTER v{version}
 
     $ ./router --supergraph starstuff.graphql
 
-    "#,
+    "#
             ));
         }
     };

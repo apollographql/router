@@ -1,6 +1,6 @@
 [package]
 name = "apollo-uplink"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 edition = "2021"
 build = "build.rs"
 
@@ -9,7 +9,10 @@ build = "build.rs"
 [dependencies]
 futures = "0.3.21"
 graphql_client = "0.10.0"
-reqwest = { version = "0.11.10", default_features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.11.10", default_features = false, features = [
+    "rustls-tls",
+    "json",
+] }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 tokio = "1.17.0"
 tokio-stream = "0.1.8"
@@ -17,8 +20,13 @@ tracing = "0.1.33"
 url = "2.2.2"
 
 [build-dependencies]
-launchpad = { git = "https://github.com/apollographql/rover.git", rev="94141242ba34cf00cde9630fc4a6dcd05d4fa5da" }
-reqwest = { version = "0.11.10", default_features = false, features = ["rustls-tls"] }
+launchpad = { git = "https://github.com/apollographql/rover.git", rev = "94141242ba34cf00cde9630fc4a6dcd05d4fa5da" }
+reqwest = { version = "0.11.10", default_features = false, features = [
+    "rustls-tls",
+] }
 
 [dev-dependencies]
-tokio = { version = "1.17.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.17.0", default-features = false, features = [
+    "macros",
+    "rt-multi-thread",
+] }

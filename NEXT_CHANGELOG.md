@@ -22,70 +22,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 -->
 
-# [v0.1.0-preview.4] - Unreleased
+# [v0.1.0-preview.5] - (unreleased)
 ## ❗ BREAKING ❗
-- **Telemetry simplification** [PR #782](https://github.com/apollographql/router/pull/782)
-
-  Telemetry configuration has been reworked to focus exporters rather than OpenTelemetry. Users can focus on what they are tying to integrate with rather than the fact that OpenTelemetry is used in the Apollo Router under the hood.
-
-  ```yaml
-  telemetry:
-    apollo:
-      endpoint:
-      apollo_graph_ref:
-      apollo_key:
-    metrics:
-      prometheus:
-        enabled: true
-    tracing:
-      propagation:
-        # Propagation is automatically enabled for any exporters that are enabled,
-        # but you can enable extras. This is mostly to support otlp and opentracing.
-        zipkin: true
-        datadog: false
-        trace_context: false
-        jaeger: false
-        baggage: false
-  
-      otlp:
-        endpoint: default
-        protocol: grpc
-        http:
-          ..
-        grpc:
-          ..
-      zipkin:
-        agent:
-          endpoint: default
-      jaeger:
-        agent:
-          endpoint: default
-      datadog:
-        endpoint: default
-  ```
 ## 🚀 Features
-- **Datadog support** [PR #782](https://github.com/apollographql/router/pull/782)
 
-  Datadog support has been added via `telemetry` yaml configuration.
+### Install experience [PR #820](https://github.com/apollographql/router/pull/820)
 
-- **Yaml env variable expansion** [PR #782](https://github.com/apollographql/router/pull/782)
+  Added an install script that will automatically download and unzip the router into the local directory.
+  For more info see the quickstart documentation.
 
-  All values in the router configuration outside the `server` section may use environment variable expansion.
-  Unix style expansion is used. Either:
-
-  * `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
-  * `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
-
-  Only values may be expanded (not keys):
-  ```yaml {4,8} title="router.yaml"
-  example:
-    passord: "${MY_PASSWORD}" 
-  ```
 ## 🐛 Fixes
-
-- **Accept arrays in keys for subgraph joins** [PR #822](https://github.com/apollographql/router/pull/822)
-
-  The router is now accepting arrays as part of the key joining between subgraphs.
-
 ## 🛠 Maintenance
-## 📚 Documentation
