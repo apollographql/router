@@ -45,15 +45,20 @@ impl Service<ExecutionRequest> for ExecutionService {
             let context = req.context;
             let response = req
                 .query_plan
-                .execute(&context, &this.subgraph_services, &this.schema)
+                .execute(
+                    &context,
+                    &this.subgraph_services,
+                    req.originating_request.clone(),
+                    &this.schema,
+                )
                 .await;
 
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
-            Ok(ExecutionResponse {
-                response: http::Response::new(response).into(),
+            Ok(ExecutionResponse::new(
+                http::Response::new(response).into(),
                 context,
-            })
+            ))
         }
         .in_current_span();
         Box::pin(fut)

@@ -8,6 +8,7 @@ use fetch::OperationKind;
 use futures::prelude::*;
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
@@ -84,6 +85,7 @@ impl QueryPlan {
         &'a self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
+        originating_request: Arc<http_compat::Request<Request>>,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
@@ -92,7 +94,14 @@ impl QueryPlan {
 
         let (value, errors) = self
             .root
-            .execute_recursively(&root, context, service_registry, schema, &Value::default())
+            .execute_recursively(
+                &root,
+                context,
+                service_registry,
+                schema,
+                originating_request,
+                &Value::default(),
+            )
             .await;
 
         Response::builder().data(value).errors(errors).build()
@@ -110,6 +119,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
+        originating_request: Arc<http_compat::Request<Request>>,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
@@ -129,6 +139,7 @@ impl PlanNode {
                                 context,
                                 service_registry,
                                 schema,
+                                originating_request.clone(),
                                 &value,
                             )
                             .instrument(span.clone())
@@ -151,6 +162,7 @@ impl PlanNode {
                                 context,
                                 service_registry,
                                 schema,
+                                originating_request.clone(),
                                 parent_value,
                             )
                             .instrument(span.clone())
@@ -175,6 +187,7 @@ impl PlanNode {
                             context,
                             service_registry,
                             schema,
+                            originating_request,
                             parent_value,
                         )
                         .instrument(tracing::trace_span!("flatten"))
@@ -185,7 +198,14 @@ impl PlanNode {
                 }
                 PlanNode::Fetch(fetch_node) => {
                     match fetch_node
-                        .fetch_node(parent_value, current_dir, context, service_registry, schema)
+                        .fetch_node(
+                            parent_value,
+                            current_dir,
+                            context,
+                            service_registry,
+                            originating_request,
+                            schema,
+                        )
                         .instrument(tracing::info_span!("fetch"))
                         .await
                     {
@@ -293,10 +313,10 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            context: &Context,
+            request: Arc<http_compat::Request<crate::Request>>,
             schema: &Schema,
         ) -> Option<Variables> {
-            let body = context.request.body();
+            let body = request.body();
             if !requires.is_empty() {
                 let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -347,6 +367,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
+            originating_request: Arc<http_compat::Request<Request>>,
             schema: &'a Schema,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
@@ -361,7 +382,8 @@ pub(crate) mod fetch {
                 self.variable_usages.as_ref(),
                 data,
                 current_dir,
-                context,
+                // Needs the original request here
+                originating_request.clone(),
                 schema,
             )
             .await
@@ -372,8 +394,9 @@ pub(crate) mod fetch {
                 }
             };
 
-            let subgraph_request = SubgraphRequest {
-                http_request: http_compat::RequestBuilder::new(
+            let subgraph_request = SubgraphRequest::new(
+                originating_request,
+                http_compat::RequestBuilder::new(
                     http::Method::POST,
                     schema
                         .subgraphs()
@@ -388,9 +411,9 @@ pub(crate) mod fetch {
                         .build(),
                 )
                 .expect("it won't fail because the url is correct and already checked; qed"),
-                context: context.clone(),
-                operation_kind: *operation_kind,
-            };
+                *operation_kind,
+                context.clone(),
+            );
 
             let service = service_registry
                 .get(service_name)

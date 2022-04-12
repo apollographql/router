@@ -5,8 +5,11 @@ use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
+use http::StatusCode;
+use http::{method::Method, request::Builder, Uri};
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
+use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
 use std::convert::Infallible;
 use std::ops::ControlFlow;
@@ -30,7 +33,9 @@ pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
-            context: Context::new().with_request(http_request),
+            originating_request: Arc::new(http_request),
+            // context: Context::new().with_request(http_request),
+            context: Context::new(),
         }
     }
 }
@@ -120,8 +125,65 @@ assert_impl_all!(RouterRequest: Send);
 ///
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
+    /// Original request to the Router.
+    pub originating_request: Arc<http_compat::Request<Request>>,
+
     // Context for extension
-    pub context: Context<http_compat::Request<Request>>,
+    pub context: Context,
+}
+
+/*
+query: Option<String>,
+operation_name: Option<String>,
+variables: Option<Arc<Object>>,
+#[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
+extensions: Option<Object>,
+context: Option<Context<http_compat::Request<crate::Request>>>,
+headers: Option<Vec<(String, String)>>,
+*/
+// #[buildstructor::builder]
+impl RouterRequest {
+    pub fn new(
+        query: Option<String>,
+        operation_name: Option<String>,
+        variables: Arc<Object>,
+        input_extensions: Vec<(&'static str, Value)>,
+        context: Context,
+        headers: Vec<(String, String)>,
+    ) -> RouterRequest {
+        let extensions: Object = input_extensions
+            .into_iter()
+            .map(|(name, value)| (ByteString::from(name.to_string()), value))
+            .collect();
+        let gql_request = crate::Request {
+            query,
+            operation_name,
+            variables,
+            extensions,
+        };
+
+        /*
+        let mut req = RequestBuilder::new(Method::GET, Uri::from_str("http://default").unwrap());
+
+        for (key, value) in headers {
+            req = req.header(key, value);
+        }
+        let req = req.body(gql_request).expect("body is always valid; qed");
+        */
+        let mut builder = Builder::new()
+            .method(Method::GET)
+            .uri(Uri::from_str("http://default").unwrap());
+        for (key, value) in headers {
+            builder = builder.header(key, value);
+        }
+        let req = builder.body(gql_request).expect("body is always valid qed");
+
+        let req = http_compat::Request { inner: req };
+        Self {
+            originating_request: Arc::new(req),
+            context,
+        }
+    }
 }
 
 assert_impl_all!(RouterResponse: Send);
@@ -134,10 +196,64 @@ pub struct RouterResponse {
     pub context: Context,
 }
 
+// #[buildstructor::builder]
+impl RouterResponse {
+    pub fn new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Object,
+        status_code: Option<StatusCode>,
+        context: Context,
+    ) -> RouterResponse {
+        // Build a response
+        let res = Response::builder()
+            .label(label)
+            .data(data.unwrap_or_default())
+            .path(path)
+            .errors(errors)
+            .extensions(extensions)
+            .build();
+
+        // Build an http Response
+        let http_response = http::Response::builder()
+            .status(status_code.unwrap_or(StatusCode::OK))
+            .body(ResponseBody::GraphQL(res))
+            .expect("ResponseBody is serializable; qed");
+
+        // Create a compatible Response
+        let compat_response = http_compat::Response {
+            inner: http_response,
+        };
+
+        Self {
+            response: compat_response,
+            context,
+        }
+    }
+}
+
 assert_impl_all!(QueryPlannerRequest: Send);
 /// [`Context`] for the request.
 pub struct QueryPlannerRequest {
+    /// Original request to the Router.
+    pub originating_request: Arc<http_compat::Request<Request>>,
+
     pub context: Context,
+}
+
+// #[buildstructor::builder]
+impl QueryPlannerRequest {
+    pub fn new(
+        originating_request: Arc<http_compat::Request<Request>>,
+        context: Context,
+    ) -> QueryPlannerRequest {
+        Self {
+            originating_request,
+            context,
+        }
+    }
 }
 
 assert_impl_all!(QueryPlannerResponse: Send);
@@ -148,14 +264,44 @@ pub struct QueryPlannerResponse {
     pub context: Context,
 }
 
+// #[buildstructor::builder]
+impl QueryPlannerResponse {
+    pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
+        Self {
+            query_plan,
+            context,
+        }
+    }
+}
+
 assert_impl_all!(SubgraphRequest: Send);
 /// [`Context`], [`OperationKind`] and [`http_compat::Request<Request>`] for the request.
 pub struct SubgraphRequest {
+    /// Original request to the Router.
+    pub originating_request: Arc<http_compat::Request<Request>>,
+
     pub http_request: http_compat::Request<Request>,
 
-    pub context: Context,
-
     pub operation_kind: OperationKind,
+
+    pub context: Context,
+}
+
+// #[buildstructor::builder]
+impl SubgraphRequest {
+    pub fn new(
+        originating_request: Arc<http_compat::Request<Request>>,
+        http_request: http_compat::Request<Request>,
+        operation_kind: OperationKind,
+        context: Context,
+    ) -> SubgraphRequest {
+        Self {
+            originating_request,
+            http_request,
+            operation_kind,
+            context,
+        }
+    }
 }
 
 assert_impl_all!(SubgraphResponse: Send);
@@ -169,12 +315,72 @@ pub struct SubgraphResponse {
     pub context: Context,
 }
 
+// #[buildstructor::builder]
+impl SubgraphResponse {
+    pub fn new(response: http_compat::Response<Response>, context: Context) -> SubgraphResponse {
+        Self { response, context }
+    }
+
+    pub fn new_from_bits(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Object,
+        status_code: Option<StatusCode>,
+        context: Context,
+    ) -> SubgraphResponse {
+        // Build a response
+        let res = Response::builder()
+            .label(label)
+            .data(data.unwrap_or_default())
+            .path(path)
+            .errors(errors)
+            .extensions(extensions)
+            .build();
+
+        // Build an http Response
+        let http_response = http::Response::builder()
+            .status(status_code.unwrap_or(StatusCode::OK))
+            .body(res)
+            .expect("Response is serializable; qed");
+
+        // Create a compatible Response
+        let compat_response = http_compat::Response {
+            inner: http_response,
+        };
+
+        Self {
+            response: compat_response,
+            context,
+        }
+    }
+}
+
 assert_impl_all!(ExecutionRequest: Send);
 /// [`Context`] and [`QueryPlan`] for the request.
 pub struct ExecutionRequest {
+    /// Original request to the Router.
+    pub originating_request: Arc<http_compat::Request<Request>>,
+
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
+}
+
+// #[buildstructor::builder]
+impl ExecutionRequest {
+    pub fn new(
+        originating_request: Arc<http_compat::Request<Request>>,
+        query_plan: Arc<QueryPlan>,
+        context: Context,
+    ) -> ExecutionRequest {
+        Self {
+            originating_request,
+            query_plan,
+            context,
+        }
+    }
 }
 
 assert_impl_all!(ExecutionResponse: Send);
@@ -185,6 +391,48 @@ pub struct ExecutionResponse {
     pub response: http_compat::Response<Response>,
 
     pub context: Context,
+}
+
+// #[buildstructor::builder]
+impl ExecutionResponse {
+    pub fn new(response: http_compat::Response<Response>, context: Context) -> ExecutionResponse {
+        Self { response, context }
+    }
+
+    pub fn new_from_bits(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Object,
+        status_code: Option<StatusCode>,
+        context: Context,
+    ) -> ExecutionResponse {
+        // Build a response
+        let res = Response::builder()
+            .label(label)
+            .data(data.unwrap_or_default())
+            .path(path)
+            .errors(errors)
+            .extensions(extensions)
+            .build();
+
+        // Build an http Response
+        let http_response = http::Response::builder()
+            .status(status_code.unwrap_or(StatusCode::OK))
+            .body(res)
+            .expect("Response is serializable; qed");
+
+        // Create a compatible Response
+        let compat_response = http_compat::Response {
+            inner: http_response,
+        };
+
+        Self {
+            response: compat_response,
+            context,
+        }
+    }
 }
 
 impl AsRef<Request> for http_compat::Request<Request> {

@@ -5,10 +5,10 @@ use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin::utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest,
-    ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
+    Introspection, Object, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -89,7 +89,7 @@ where
                 if let Some(response) =
                     naive_introspection
                         .get(
-                            req.context.request.body().query.as_ref().expect(
+                            req.originating_request.body().query.as_ref().expect(
                                 "apollo.ensure-query-is-present has checked this already; qed",
                             ),
                         )
@@ -97,13 +97,13 @@ where
                 {
                     return Ok(RouterResponse {
                         response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                        context: req.context.into(),
+                        context: req.context,
                     });
                 }
             }
 
             let context = req.context;
-            let body = context.request.body();
+            let body = req.originating_request.body();
             let variables = body.variables.clone();
             let query = query_cache
                 .get_query(
@@ -124,7 +124,7 @@ where
                         Ok(resp) => {
                             return Ok(RouterResponse {
                                 response: http::Response::new(ResponseBody::GraphQL(resp)).into(),
-                                context: context.into(),
+                                context,
                             });
                         }
                         Err(err) => return Err(BoxError::from(err)),
@@ -138,20 +138,22 @@ where
             {
                 Ok(RouterResponse {
                     response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                    context: context.into(),
+                    context,
                 })
             } else {
                 let operation_name = body.operation_name.clone();
                 let planned_query = planning
-                    .call(QueryPlannerRequest {
-                        context: context.into(),
-                    })
+                    .call(QueryPlannerRequest::new(
+                        req.originating_request.clone(),
+                        context,
+                    ))
                     .await?;
                 let mut response = execution
-                    .call(ExecutionRequest {
-                        query_plan: planned_query.query_plan,
-                        context: planned_query.context,
-                    })
+                    .call(ExecutionRequest::new(
+                        req.originating_request.clone(),
+                        planned_query.query_plan,
+                        planned_query.context,
+                    ))
                     .await?;
 
                 if let Some(query) = query {
@@ -172,14 +174,21 @@ where
             }
         }
         .or_else(|error: BoxError| async move {
-            Ok(utils::RouterResponse::builder()
-                .errors(vec![crate::Error {
-                    message: error.to_string(),
-                    ..Default::default()
-                }])
-                .context(context_cloned.into())
-                .build()
-                .with_status(StatusCode::INTERNAL_SERVER_ERROR))
+            let errors = vec![crate::Error {
+                message: error.to_string(),
+                ..Default::default()
+            }];
+            let res = RouterResponse::new(
+                None,
+                None,
+                None,
+                errors,
+                Object::new(),
+                Some(StatusCode::INTERNAL_SERVER_ERROR),
+                context_cloned,
+            );
+
+            Ok(res)
         });
 
         Box::pin(fut)

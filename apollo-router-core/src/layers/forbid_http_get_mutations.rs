@@ -2,8 +2,8 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::{checkpoint::CheckpointService, plugin::utils, ExecutionRequest, ExecutionResponse};
-use http::{Method, StatusCode};
+use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse, Object};
+use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
@@ -21,21 +21,29 @@ where
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
             |req: ExecutionRequest| {
-                if req.context.request.method() == Method::GET
+                if req.originating_request.method() == Method::GET
                     && req.query_plan.contains_mutations()
                 {
-                    let res = utils::ExecutionResponse::builder()
-                        .errors(vec![crate::Error {
-                            message: "GET supports only query operation".to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        }])
-                        .status(StatusCode::METHOD_NOT_ALLOWED)
-                        .headers(vec![("Allow".to_string(), "POST".to_string())])
-                        .context(req.context)
-                        .build()
-                        .into();
+                    let errors = vec![crate::Error {
+                        message: "GET supports only query operation".to_string(),
+                        locations: Default::default(),
+                        path: Default::default(),
+                        extensions: Default::default(),
+                    }];
+                    // let headers = vec![("Allow".to_string(), "POST".to_string())];
+                    let mut res = ExecutionResponse::new_from_bits(
+                        None,
+                        None,
+                        None,
+                        errors,
+                        Object::new(),
+                        Some(StatusCode::METHOD_NOT_ALLOWED),
+                        req.context,
+                    );
+                    res.response
+                        .inner
+                        .headers_mut()
+                        .insert::<HeaderName>("Allow".parse().unwrap(), "POST".parse().unwrap());
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))

@@ -1,7 +1,8 @@
 //! Mock subgraph implementation
 
-use crate::{plugin::utils, Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::{Object, Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
+use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tower::{BoxError, Service};
 
@@ -33,19 +34,36 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
-        let builder = utils::SubgraphResponse::builder().context(req.context);
+        // let builder = utils::SubgraphResponse::builder().context(req.context);
         let response = if let Some(response) = self.mocks.get(req.http_request.body()) {
-            builder.data(response.data.clone()).build().into()
+            // Build an http Response
+            let http_response = http::Response::builder()
+                .status(StatusCode::OK)
+                .body(response.clone())
+                .expect("Response is serializable; qed");
+
+            // Create a compatible Response
+            let compat_response = crate::http_compat::Response {
+                inner: http_response,
+            };
+
+            SubgraphResponse::new(compat_response, req.context)
         } else {
-            builder
-                .errors(vec![crate::Error {
-                    message: "couldn't find mock for query".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                }])
-                .build()
-                .into()
+            let errors = vec![crate::Error {
+                message: "couldn't find mock for query".to_string(),
+                locations: Default::default(),
+                path: Default::default(),
+                extensions: Default::default(),
+            }];
+            SubgraphResponse::new_from_bits(
+                None,
+                None,
+                None,
+                errors,
+                Object::new(),
+                None,
+                req.context,
+            )
         };
         future::ok(response)
     }

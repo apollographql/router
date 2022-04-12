@@ -198,6 +198,7 @@ dependencies = [
  "apollo-parser 0.2.5",
  "async-trait",
  "atty",
+ "buildstructor",
  "bytes",
  "dashmap 5.2.0",
  "derivative",
@@ -551,6 +552,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildstructor"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc933663359db4b1e6476b4ae3cf8570862f786829a9a676afee415b26740d87"
+dependencies = [
+ "convert_case 0.5.0",
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "str_inflector",
+ "syn",
+ "thiserror",
+ "try_match",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -776,6 +793,12 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
+name = "convert_case"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
 
 [[package]]
 name = "cookies-to-headers"
@@ -1102,7 +1125,7 @@ version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
 dependencies = [
- "convert_case",
+ "convert_case 0.4.0",
  "proc-macro2",
  "quote",
  "rustc_version",
@@ -4103,6 +4126,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "str_inflector"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0b848d5a7695b33ad1be00f84a3c079fe85c9278a325ff9159e6c99cef4ef7"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4796,6 +4829,27 @@ name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
+
+[[package]]
+name = "try_match"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "789f9cd474cc74c591dcc98669b846e158f2409ace4e6e342502ab44a41c584b"
+dependencies = [
+ "try_match_inner",
+]
+
+[[package]]
+name = "try_match_inner"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "607e6b75bc1bdf1a60d4201c500ca965834c11f30e25921cfd28569315db49a9"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "typed-builder"

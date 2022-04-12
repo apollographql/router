@@ -34,9 +34,7 @@ impl Plugin for OverrideSubgraphUrl {
         service
             .map_request(move |mut req: SubgraphRequest| {
                 if let Some(new_url) = new_url.clone() {
-                    req.http_request
-                        .set_url(new_url)
-                        .expect("url has been checked when we configured the plugin");
+                    *req.http_request.uri_mut() = new_url;
                 }
 
                 req

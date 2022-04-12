@@ -6,33 +6,20 @@ use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
-    str::FromStr,
 };
 
-use http::{header::HeaderName, request::Builder, uri::InvalidUri, HeaderValue, Uri, Version};
+use http::{header::HeaderName, request::Builder, uri::InvalidUri, HeaderValue, Version};
 
 #[derive(Debug)]
 pub struct Request<T> {
     // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
     // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
-    pub(super) url: Uri,
-    inner: http::Request<T>,
+    // pub(super) url: Uri,
+    pub inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
 impl<T> Request<T> {
-    /// Update the associated URL
-    pub fn set_url(&mut self, url: http::Uri) -> Result<(), http::Error> {
-        *self.inner.uri_mut() = url.clone();
-        self.url = url;
-        Ok(())
-    }
-
-    /// Returns a reference to the associated URL.
-    pub fn url(&self) -> &http::Uri {
-        &self.url
-    }
-
     /// Consumes the request, returning just the body.
     pub fn into_body(self) -> T {
         self.inner.into_body()
@@ -48,10 +35,8 @@ impl<T> Request<T> {
     where
         F: FnOnce(T) -> U,
     {
-        let new_req = self.inner.map(f);
         Ok(Request {
-            url: new_req.uri().clone(),
-            inner: new_req,
+            inner: self.inner.map(f),
         })
     }
 }
@@ -63,7 +48,7 @@ where
     // Only used for plugin::utils and tests
     pub fn mock() -> Request<T> {
         Request {
-            url: Uri::from_str("http://default").unwrap(),
+            // url: Uri::from_str("http://default").unwrap(),
             inner: http::Request::default(),
         }
     }
@@ -103,7 +88,7 @@ impl<T: Clone> Clone for Request<T> {
             .expect("cloning a valid request creates a valid request");
         Self {
             inner: req,
-            url: self.url.clone(),
+            // url: self.url.clone(),
         }
     }
 }
@@ -202,7 +187,7 @@ impl RequestBuilder {
     /// constructed `Request`.
     pub fn body<T>(self, body: T) -> http::Result<Request<T>> {
         Ok(Request {
-            url: self.url,
+            // url: self.url,
             inner: self.inner.body(body)?,
         })
     }

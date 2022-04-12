@@ -1,5 +1,5 @@
 use crate::{
-    plugin::utils, register_plugin, ExecutionRequest, ExecutionResponse, Plugin, ServiceBuilderExt,
+    register_plugin, ExecutionRequest, ExecutionResponse, Object, Plugin, ServiceBuilderExt,
 };
 use http::StatusCode;
 use std::ops::ControlFlow;
@@ -27,17 +27,21 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let res = utils::ExecutionResponse::builder()
-                            .errors(vec![crate::Error {
-                                message: "Mutations are forbidden".to_string(),
-                                locations: Default::default(),
-                                path: Default::default(),
-                                extensions: Default::default(),
-                            }])
-                            .status(StatusCode::BAD_REQUEST)
-                            .context(req.context)
-                            .build()
-                            .into();
+                        let errors = vec![crate::Error {
+                            message: "Mutations are forbidden".to_string(),
+                            locations: Default::default(),
+                            path: Default::default(),
+                            extensions: Default::default(),
+                        }];
+                        let res = ExecutionResponse::new_from_bits(
+                            None,
+                            None,
+                            None,
+                            errors,
+                            Object::new(),
+                            Some(StatusCode::BAD_REQUEST),
+                            req.context,
+                        );
                         Ok(ControlFlow::Break(res))
                     } else {
                         Ok(ControlFlow::Continue(req))

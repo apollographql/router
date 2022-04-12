@@ -5,7 +5,7 @@
 //! If the request does not contain a query, then the request is rejected.
 
 use crate::checkpoint::CheckpointService;
-use crate::{plugin::utils, RouterRequest, RouterResponse};
+use crate::{Object, RouterRequest, RouterResponse};
 use http::StatusCode;
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -25,18 +25,23 @@ where
         CheckpointService::new(
             |req: RouterRequest| {
                 // A query must be available at this point
-                let query = req.context.request.body().query.as_ref();
+                let query = req.originating_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
-                    let res = utils::RouterResponse::builder()
-                        .errors(vec![crate::Error {
-                            message: "Must provide query string.".to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        }])
-                        .context(req.context.into())
-                        .build()
-                        .with_status(StatusCode::BAD_REQUEST);
+                    let errors = vec![crate::Error {
+                        message: "Must provide query string.".to_string(),
+                        locations: Default::default(),
+                        path: Default::default(),
+                        extensions: Default::default(),
+                    }];
+                    let res = RouterResponse::new(
+                        None,
+                        None,
+                        None,
+                        errors,
+                        Object::new(),
+                        Some(StatusCode::BAD_REQUEST),
+                        req.context,
+                    );
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))

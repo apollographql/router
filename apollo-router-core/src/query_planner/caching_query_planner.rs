@@ -79,7 +79,7 @@ where
     }
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let body = request.context.request.body();
+        let body = request.originating_request.body();
 
         let key = (
             body.query
@@ -93,10 +93,7 @@ where
             cm.get(key)
                 .await
                 .map_err(|err| err.into())
-                .map(|query_plan| QueryPlannerResponse {
-                    query_plan,
-                    context: request.context,
-                })
+                .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
         })
     }
 }

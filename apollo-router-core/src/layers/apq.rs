@@ -5,11 +5,12 @@
 
 use std::ops::ControlFlow;
 
-use crate::{checkpoint::CheckpointService, plugin::utils, RouterRequest, RouterResponse};
+use crate::{checkpoint::CheckpointService, Object, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -49,8 +50,7 @@ where
         CheckpointService::new(
             move |mut req| {
                 let maybe_query_hash: Option<Vec<u8>> = req
-                    .context
-                    .request
+                    .originating_request
                     .body()
                     .extensions
                     .get("persistedQuery")
@@ -61,7 +61,7 @@ where
                         hex::decode(persisted_query.sha256hash.as_bytes()).ok()
                     });
 
-                let body_query = req.context.request.body().query.clone();
+                let body_query = req.originating_request.body().query.clone();
 
                 match (maybe_query_hash, body_query) {
                     (Some(query_hash), Some(query)) => {
@@ -78,28 +78,44 @@ where
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
                             tracing::trace!("apq: cache hit");
-                            req.context.request.body_mut().query = Some(cached_query);
+                            // XXX ORIGINALLY WE HAD A MODIFIABLE ORIGINATING REQUEST IN CONTEXT,
+                            // THIS WON'T WORK NOW BECAUSE IN ARC AND NOT MODIFIABLE.
+                            // HOW RESOLVE? MAY BE ABLE TO USE Arc::get_mut?
+                            match Arc::get_mut(&mut req.originating_request) {
+                                Some(v) => {
+                                    v.body_mut().query = Some(cached_query);
+                                }
+                                None => {
+                                    tracing::warn!("Could not update APQ cache");
+                                }
+                            }
+                            // req.originating_request.body_mut().query = Some(cached_query);
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
-                            let res = utils::RouterResponse::builder()
-                                .errors(vec![crate::Error {
-                                    message: "PersistedQueryNotFound".to_string(),
-                                    locations: Default::default(),
-                                    path: Default::default(),
-                                    extensions: serde_json_bytes::from_value(json!({
-                                          "code": "PERSISTED_QUERY_NOT_FOUND",
-                                          "exception": {
-                                          "stacktrace": [
-                                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                                          ],
-                                      },
-                                    }))
-                                    .unwrap(),
-                                }])
-                                .context(req.context.into())
-                                .build()
-                                .into();
+                            let errors = vec![crate::Error {
+                                message: "PersistedQueryNotFound".to_string(),
+                                locations: Default::default(),
+                                path: Default::default(),
+                                extensions: serde_json_bytes::from_value(json!({
+                                      "code": "PERSISTED_QUERY_NOT_FOUND",
+                                      "exception": {
+                                      "stacktrace": [
+                                          "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                                      ],
+                                  },
+                                }))
+                                .unwrap(),
+                            }];
+                            let res = RouterResponse::new(
+                                None,
+                                None,
+                                None,
+                                errors,
+                                Object::new(),
+                                None,
+                                req.context,
+                            );
 
                             Ok(ControlFlow::Break(res))
                         }
