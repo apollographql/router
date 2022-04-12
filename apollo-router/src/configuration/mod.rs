@@ -764,13 +764,13 @@ telemetry:
                 };
 
                 for yaml in yamls {
-                    validate_configuration(&yaml).err().map(|e| {
+                    if let Err(e) = validate_configuration(&yaml) {
                         panic!(
                             "{} configuration error: \n{}",
                             entry.path().to_string_lossy(),
                             e
                         )
-                    });
+                    }
                 }
             }
         }
