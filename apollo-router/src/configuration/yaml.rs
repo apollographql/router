@@ -130,6 +130,9 @@ impl MarkedYaml {
 }
 
 pub(crate) fn parse(source: &str) -> Result<MarkedYaml, ConfigurationError> {
+    // Yaml parser doesn't support CRLF. Remove CRs.
+    // https://github.com/chyh1990/yaml-rust/issues/165
+    let source = source.replace('\r', "");
     let mut parser = Parser::new(source.chars());
     let mut loader = MarkedYaml::default();
     parser
