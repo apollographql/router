@@ -56,7 +56,7 @@ where
 mod ensure_query_presence_tests {
     use super::*;
     use crate::plugin::utils::test::MockRouterService;
-    use crate::{plugin::utils, ResponseBody};
+    use crate::ResponseBody;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -65,12 +65,12 @@ mod ensure_query_presence_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_req| Ok(utils::RouterResponse::builder().build().into()));
+            .returning(move |_req| Ok(RouterResponse::builder().build().into()));
 
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = utils::RouterRequest::builder()
+        let request: crate::RouterRequest = RouterRequest::builder()
             .query("{__typename}".to_string())
             .build()
             .into();
@@ -87,7 +87,7 @@ mod ensure_query_presence_tests {
 
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = utils::RouterRequest::builder()
+        let request: crate::RouterRequest = RouterRequest::builder()
             .query("".to_string())
             .build()
             .into();
@@ -115,7 +115,7 @@ mod ensure_query_presence_tests {
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = utils::RouterRequest::builder().build().into();
+        let request: crate::RouterRequest = RouterRequest::builder().build().into();
 
         let response = service_stack
             .oneshot(request)

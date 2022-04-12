@@ -12,9 +12,6 @@ use http::{header::HeaderName, request::Builder, uri::InvalidUri, HeaderValue, V
 
 #[derive(Debug)]
 pub struct Request<T> {
-    // The goal of having a copy of the url is to keep the right type for `ReqwestSubgraphService` and avoid re-parsing.
-    // This url will stay the same than the uri in inner because we only can set a new url with `set_url` method
-    // pub(super) url: Uri,
     pub inner: http::Request<T>,
 }
 
@@ -48,7 +45,6 @@ where
     // Only used for plugin::utils and tests
     pub fn mock() -> Request<T> {
         Request {
-            // url: Uri::from_str("http://default").unwrap(),
             inner: http::Request::default(),
         }
     }
@@ -86,10 +82,7 @@ impl<T: Clone> Clone for Request<T> {
         let req = req
             .body(self.inner.body().clone())
             .expect("cloning a valid request creates a valid request");
-        Self {
-            inner: req,
-            // url: self.url.clone(),
-        }
+        Self { inner: req }
     }
 }
 
@@ -147,24 +140,19 @@ impl<T> From<Request<T>> for http::Request<T> {
 
 #[derive(Debug)]
 pub struct RequestBuilder {
-    url: http::Uri,
     inner: Builder,
 }
 
 impl RequestBuilder {
-    pub fn new(method: http::method::Method, url: http::Uri) -> Self {
-        // Enforce the need for a method and an url
-        let builder = Builder::new().method(method).uri(url.clone());
-        Self {
-            url,
-            inner: builder,
-        }
+    pub fn new(method: http::method::Method, uri: http::Uri) -> Self {
+        // Enforce the need for a method and an uri
+        let builder = Builder::new().method(method).uri(uri.clone());
+        Self { inner: builder }
     }
 
     /// Set the HTTP version for this request.
     pub fn version(self, version: Version) -> Self {
         Self {
-            url: self.url,
             inner: self.inner.version(version),
         }
     }
@@ -178,7 +166,6 @@ impl RequestBuilder {
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
         Self {
-            url: self.url,
             inner: self.inner.header(key, value),
         }
     }
@@ -187,7 +174,6 @@ impl RequestBuilder {
     /// constructed `Request`.
     pub fn body<T>(self, body: T) -> http::Result<Request<T>> {
         Ok(Request {
-            // url: self.url,
             inner: self.inner.body(body)?,
         })
     }

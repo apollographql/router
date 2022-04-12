@@ -136,10 +136,7 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
-    use crate::{
-        plugin::utils::{test::MockRouterService, RouterRequest, RouterResponse},
-        ResponseBody,
-    };
+    use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
     use tower::ServiceExt;
@@ -172,7 +169,7 @@ mod apq_tests {
 
         // the second one should have the right APQ header and the full query string
         mock_service.expect_call().times(1).returning(move |req| {
-            let body = req.context.request.body();
+            let body = req.originating_request.body();
 
             let as_json = body.extensions.get("persistedQuery").unwrap();
 
@@ -183,7 +180,10 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::builder().build().into())
+            Ok(RouterResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -191,7 +191,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
                 let persisted_query: PersistedQuery =
@@ -208,7 +208,10 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::builder()
+                    .extensions(Object::new())
+                    .context(Context::new())
+                    .build())
             });
 
         let mock = mock_service.build();
@@ -218,16 +221,35 @@ mod apq_tests {
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
             json!({
-                "version" : 1,
+                "version" : 1usize,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
         )]);
 
-        let hash_only = request_builder.clone().build();
+        let hash_only = request_builder.context(Context::new()).build();
 
-        let second_hash_only = request_builder.clone().build();
+        let request_builder = RouterRequest::builder().extensions(vec![(
+            "persistedQuery",
+            json!({
+                "version" : 1usize,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+            }),
+        )]);
 
-        let with_query = request_builder.query("{__typename}".to_string()).build();
+        let second_hash_only = request_builder.context(Context::new()).build();
+
+        let request_builder = RouterRequest::builder().extensions(vec![(
+            "persistedQuery",
+            json!({
+                "version" : 1usize,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
+            }),
+        )]);
+
+        let with_query = request_builder
+            .query("{__typename}".to_string())
+            .context(Context::new())
+            .build();
 
         let services = service_stack.ready().await.unwrap();
         let apq_error = services.call(hash_only.into()).await.unwrap();
@@ -272,7 +294,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
                 let persisted_query: PersistedQuery =
@@ -290,7 +312,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
 
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 

@@ -33,7 +33,14 @@ impl Plugin for ForbidMutations {
                             path: Default::default(),
                             extensions: Default::default(),
                         }];
-                        let res = ExecutionResponse::new_from_bits(
+                        let res = ExecutionResponse::builder()
+                            .errors(errors)
+                            .extensions(Object::new())
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(req.context)
+                            .build();
+                        /*
+                        let res = ExecutionResponse::new(
                             None,
                             None,
                             None,
@@ -42,6 +49,7 @@ impl Plugin for ForbidMutations {
                             Some(StatusCode::BAD_REQUEST),
                             req.context,
                         );
+                        */
                         Ok(ControlFlow::Break(res))
                     } else {
                         Ok(ControlFlow::Continue(req))
@@ -64,10 +72,7 @@ mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{
-        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
-        Context, QueryPlan,
-    };
+    use crate::{plugin::utils::test::MockExecutionService, Context, QueryPlan};
     use http::{Method, StatusCode, Uri};
     use serde_json::json;
     use std::str::FromStr;
@@ -170,16 +175,15 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
+        let request = Arc::new(
+            RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
+                .body(crate::Request::default())
+                .unwrap(),
+        );
         ExecutionRequest::builder()
+            .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))
-            .context(
-                Context::new().with_request(Arc::new(
-                    RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
-                        .body(crate::Request::default())
-                        .unwrap(),
-                )),
-            )
+            .context(Context::new())
             .build()
-            .into()
     }
 }

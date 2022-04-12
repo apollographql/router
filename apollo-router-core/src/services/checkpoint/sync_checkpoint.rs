@@ -163,7 +163,7 @@ where
 mod checkpoint_tests {
     use super::*;
     use crate::{
-        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
+        plugin::utils::test::MockExecutionService, Context, ExecutionRequest, ExecutionResponse,
         ServiceBuilderExt,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
@@ -224,7 +224,7 @@ mod checkpoint_tests {
         let service_stack =
             CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -279,7 +279,11 @@ mod checkpoint_tests {
         let service_stack =
             CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error))).layer(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::builder()
+            .originating_request(Request::new())
+            .query_plan(QueryPlan::new())
+            .context(Context::new())
+            .build();
 
         let actual_error = service_stack
             .oneshot(request)

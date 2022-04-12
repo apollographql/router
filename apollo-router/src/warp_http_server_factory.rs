@@ -923,7 +923,7 @@ mod tests {
         expectations
             .expect_service_call()
             .times(1)
-            .withf(|req| req.url().path() == "/graphql")
+            .withf(|req| req.uri().path() == "/graphql")
             .returning(move |_| {
                 Ok(http::Response::builder()
                     .status(200)

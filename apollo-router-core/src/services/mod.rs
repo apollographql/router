@@ -6,7 +6,7 @@ use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use http::StatusCode;
-use http::{method::Method, request::Builder, Uri};
+use http::{method::Method, Uri};
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
@@ -34,7 +34,6 @@ impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
         Self {
             originating_request: Arc::new(http_request),
-            // context: Context::new().with_request(http_request),
             context: Context::new(),
         }
     }
@@ -132,45 +131,28 @@ pub struct RouterRequest {
     pub context: Context,
 }
 
-/*
-query: Option<String>,
-operation_name: Option<String>,
-variables: Option<Arc<Object>>,
-#[builder(default, setter(!strip_option, transform = |extensions: Vec<(&str, Value)>| Some(from_names_and_values(extensions))))]
-extensions: Option<Object>,
-context: Option<Context<http_compat::Request<crate::Request>>>,
-headers: Option<Vec<(String, String)>>,
-*/
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl RouterRequest {
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Arc<Object>,
-        input_extensions: Vec<(&'static str, Value)>,
+        extensions: Vec<(&'static str, Value)>,
         context: Context,
         headers: Vec<(String, String)>,
     ) -> RouterRequest {
-        let extensions: Object = input_extensions
+        let object: Object = extensions
             .into_iter()
             .map(|(name, value)| (ByteString::from(name.to_string()), value))
             .collect();
-        let gql_request = crate::Request {
-            query,
-            operation_name,
-            variables,
-            extensions,
-        };
+        let gql_request = Request::builder()
+            .query(query.unwrap_or_default())
+            .operation_name(operation_name)
+            .variables(variables)
+            .extensions(object)
+            .build();
 
-        /*
-        let mut req = RequestBuilder::new(Method::GET, Uri::from_str("http://default").unwrap());
-
-        for (key, value) in headers {
-            req = req.header(key, value);
-        }
-        let req = req.body(gql_request).expect("body is always valid; qed");
-        */
-        let mut builder = Builder::new()
+        let mut builder = http::request::Builder::new()
             .method(Method::GET)
             .uri(Uri::from_str("http://default").unwrap());
         for (key, value) in headers {
@@ -196,7 +178,7 @@ pub struct RouterResponse {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl RouterResponse {
     pub fn new(
         label: Option<String>,
@@ -243,7 +225,7 @@ pub struct QueryPlannerRequest {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl QueryPlannerRequest {
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
@@ -264,7 +246,7 @@ pub struct QueryPlannerResponse {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl QueryPlannerResponse {
     pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
         Self {
@@ -280,24 +262,24 @@ pub struct SubgraphRequest {
     /// Original request to the Router.
     pub originating_request: Arc<http_compat::Request<Request>>,
 
-    pub http_request: http_compat::Request<Request>,
+    pub subgraph_request: http_compat::Request<Request>,
 
     pub operation_kind: OperationKind,
 
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl SubgraphRequest {
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
-        http_request: http_compat::Request<Request>,
+        subgraph_request: http_compat::Request<Request>,
         operation_kind: OperationKind,
         context: Context,
     ) -> SubgraphRequest {
         Self {
             originating_request,
-            http_request,
+            subgraph_request,
             operation_kind,
             context,
         }
@@ -315,13 +297,16 @@ pub struct SubgraphResponse {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl SubgraphResponse {
-    pub fn new(response: http_compat::Response<Response>, context: Context) -> SubgraphResponse {
+    pub fn new_with_response(
+        response: http_compat::Response<Response>,
+        context: Context,
+    ) -> SubgraphResponse {
         Self { response, context }
     }
 
-    pub fn new_from_bits(
+    pub fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
@@ -368,7 +353,7 @@ pub struct ExecutionRequest {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl ExecutionRequest {
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
@@ -393,13 +378,16 @@ pub struct ExecutionResponse {
     pub context: Context,
 }
 
-// #[buildstructor::builder]
+#[buildstructor::builder]
 impl ExecutionResponse {
-    pub fn new(response: http_compat::Response<Response>, context: Context) -> ExecutionResponse {
+    pub fn new_with_response(
+        response: http_compat::Response<Response>,
+        context: Context,
+    ) -> ExecutionResponse {
         Self { response, context }
     }
 
-    pub fn new_from_bits(
+    pub fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,

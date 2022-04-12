@@ -541,11 +541,10 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc933663359db4b1e6476b4ae3cf8570862f786829a9a676afee415b26740d87"
+checksum = "25c66de18be9a43a61276a8eea5f608b9e644daae3f41e062e1eb63162c2aaad"
 dependencies = [
- "convert_case 0.5.0",
  "lazy_static",
  "proc-macro2",
  "quote",
@@ -781,12 +780,6 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
-
-[[package]]
-name = "convert_case"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb4a24b1aaf0fd0ce8b45161144d6f42cd91677fd5940fd431183eb023b3a2b8"
 
 [[package]]
 name = "cookies-to-headers"
@@ -1113,7 +1106,7 @@ version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
 dependencies = [
- "convert_case 0.4.0",
+ "convert_case",
  "proc-macro2",
  "quote",
  "rustc_version",

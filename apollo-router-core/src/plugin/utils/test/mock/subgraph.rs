@@ -35,7 +35,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
 
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
         // let builder = utils::SubgraphResponse::builder().context(req.context);
-        let response = if let Some(response) = self.mocks.get(req.http_request.body()) {
+        let response = if let Some(response) = self.mocks.get(req.subgraph_request.body()) {
             // Build an http Response
             let http_response = http::Response::builder()
                 .status(StatusCode::OK)
@@ -47,7 +47,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 inner: http_response,
             };
 
-            SubgraphResponse::new(compat_response, req.context)
+            SubgraphResponse::new_with_response(compat_response, req.context)
         } else {
             let errors = vec![crate::Error {
                 message: "couldn't find mock for query".to_string(),
@@ -55,15 +55,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 path: Default::default(),
                 extensions: Default::default(),
             }];
-            SubgraphResponse::new_from_bits(
-                None,
-                None,
-                None,
-                errors,
-                Object::new(),
-                None,
-                req.context,
-            )
+            SubgraphResponse::builder()
+                .errors(errors)
+                .extensions(Object::new())
+                .context(req.context)
+                .build()
         };
         future::ok(response)
     }

@@ -55,7 +55,7 @@ impl Service<ExecutionRequest> for ExecutionService {
 
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
-            Ok(ExecutionResponse::new(
+            Ok(ExecutionResponse::new_with_response(
                 http::Response::new(response).into(),
                 context,
             ))

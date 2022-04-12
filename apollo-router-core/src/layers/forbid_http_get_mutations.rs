@@ -31,7 +31,7 @@ where
                         extensions: Default::default(),
                     }];
                     // let headers = vec![("Allow".to_string(), "POST".to_string())];
-                    let mut res = ExecutionResponse::new_from_bits(
+                    let mut res = ExecutionResponse::new(
                         None,
                         None,
                         None,
@@ -56,17 +56,15 @@ where
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{
-        plugin::utils::{test::MockExecutionService, ExecutionRequest, ExecutionResponse},
-        Context, QueryPlan,
-    };
+    use crate::{plugin::utils::test::MockExecutionService, Context, QueryPlan};
     use http::{StatusCode, Uri};
     use serde_json::json;
+    use std::str::FromStr;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -188,16 +186,16 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
+        let request = Arc::new(
+            RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
+                .body(crate::Request::default())
+                .unwrap(),
+        );
+
         ExecutionRequest::builder()
+            .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))
-            .context(
-                Context::new().with_request(Arc::new(
-                    RequestBuilder::new(method, Uri::from_static("http://test"))
-                        .body(crate::Request::default())
-                        .unwrap(),
-                )),
-            )
+            .context(Context::new())
             .build()
-            .into()
     }
 }

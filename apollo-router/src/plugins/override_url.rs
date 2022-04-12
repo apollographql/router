@@ -34,7 +34,7 @@ impl Plugin for OverrideSubgraphUrl {
         service
             .map_request(move |mut req: SubgraphRequest| {
                 if let Some(new_url) = new_url.clone() {
-                    *req.http_request.uri_mut() = new_url;
+                    *req.subgraph_request.uri_mut() = new_url;
                 }
 
                 req
@@ -47,9 +47,10 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use apollo_router_core::fetch::OperationKind;
     use apollo_router_core::{
-        plugin::utils::{self, test::MockSubgraphService},
-        Context, DynPlugin, SubgraphRequest,
+        plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest,
     };
     use http::Uri;
     use serde_json::Value;
@@ -63,14 +64,14 @@ mod tests {
             .expect_call()
             .withf(|req| {
                 assert_eq!(
-                    req.http_request.url(),
+                    req.subgraph_request.uri(),
                     &Uri::from_str("http://localhost:8001").unwrap()
                 );
                 true
             })
             .times(1)
             .returning(move |req: SubgraphRequest| {
-                Ok(utils::SubgraphResponse::builder()
+                Ok(SubgraphResponse::builder()
                     .context(req.context)
                     .build()
                     .into())
@@ -93,13 +94,17 @@ mod tests {
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = utils::SubgraphRequest::builder().context(context);
+        let subgraph_req = SubgraphRequest::builder()
+            .originating_request(RouterRequest::new())
+            .subgraph_request(SubgraphRequest::new())
+            .operation_kind(OperationKind::Query)
+            .context(context);
 
         let _subgraph_resp = subgraph_service
             .ready()
             .await
             .unwrap()
-            .call(subgraph_req.build().into())
+            .call(subgraph_req.build())
             .await
             .unwrap();
     }
