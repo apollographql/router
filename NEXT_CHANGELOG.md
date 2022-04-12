@@ -53,6 +53,9 @@ Instead of returning an error coming from the query planner, we are now returnin
 ### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/782)
 Router configuration files within the project are now largely validated via unit test.
 
+### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/782)
+Examples are built as part of CI.
+
 ### Switch web server framework from `warp` to `axum` [PR #751](https://github.com/apollographql/router/pull/751)
 
   The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
