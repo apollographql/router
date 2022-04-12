@@ -751,7 +751,7 @@ mod tests {
         ));
 
         // This time write garbage, there should not be an update.
-        write_and_flush(&mut file, ":").await;
+        write_and_flush(&mut file, ":garbage").await;
         assert!(stream.into_future().now_or_never().is_none());
     }
 
