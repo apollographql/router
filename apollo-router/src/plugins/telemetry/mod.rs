@@ -245,6 +245,16 @@ impl Plugin for Telemetry {
                 f.map(move |r| {
                     match &r {
                         Ok(response) => {
+                            response.context.extensions.alter(
+                                EXTENSION_KEY,
+                                |_, mut telemetry_info: apollo_router_core::Value| {
+                                    telemetry_info
+                                        .insert(&Path::from("elapsed"), json!(now.elapsed()))
+                                        .expect("inserting into a new path cannot fail; qed");
+                                    telemetry_info
+                                },
+                            );
+
                             metrics.http_requests_total.add(
                                 1,
                                 &[KeyValue::new(
@@ -262,6 +272,11 @@ impl Plugin for Telemetry {
                         .record(now.elapsed().as_secs_f64(), &[]);
                     r
                 })
+            })
+            .map_response(|res: RouterResponse| {
+                // TODO[igni]: push things to uplink \o/
+                dbg!(&res.context.extensions);
+                res
             })
             .boxed()
     }
