@@ -1,0 +1,10 @@
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    jaeger:
+      collector:
+        endpoint: "https://example.com"
+        username: "username"
+        password: "password"
+

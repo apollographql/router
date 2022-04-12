@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 526
 expression: "&schema"
 ---
 {
@@ -679,22 +680,10 @@ expression: "&schema"
                   "properties": {
                     "agent": {
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "default"
-                              ]
-                            },
-                            {
-                              "type": "string"
-                            }
-                          ]
+                          "default": "default",
+                          "type": "string"
                         }
                       },
                       "additionalProperties": false
@@ -733,7 +722,6 @@ expression: "&schema"
                   "additionalProperties": false
                 }
               ],
-              "additionalProperties": false,
               "nullable": true
             },
             "otlp": {
@@ -1045,63 +1033,10 @@ expression: "&schema"
               "nullable": true
             },
             "zipkin": {
-              "type": "object",
-              "oneOf": [
-                {
-                  "type": "object",
-                  "required": [
-                    "agent"
-                  ],
-                  "properties": {
-                    "agent": {
-                      "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
-                      "properties": {
-                        "endpoint": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "default"
-                              ]
-                            },
-                            {
-                              "type": "string"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "collector"
-                  ],
-                  "properties": {
-                    "collector": {
-                      "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
-                      "properties": {
-                        "endpoint": {
-                          "type": "string",
-                          "format": "uri"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  },
-                  "additionalProperties": false
-                }
+              "type": [
+                "object",
+                "string"
               ],
-              "additionalProperties": false,
               "nullable": true
             }
           },

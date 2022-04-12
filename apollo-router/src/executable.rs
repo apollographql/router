@@ -1,5 +1,6 @@
 //! Main entry point for CLI command to start server.
 
+use crate::configuration::generate_config_schema;
 use crate::{
     configuration::Configuration,
     subscriber::{set_global_subscriber, RouterSubscriber},
@@ -9,7 +10,6 @@ use anyhow::{anyhow, Context, Result};
 use clap::{AppSettings, CommandFactory, Parser};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
-use schemars::gen::SchemaSettings;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -144,13 +144,7 @@ pub async fn rt_main() -> Result<()> {
     copy_args_to_env();
 
     if opt.schema {
-        let settings = SchemaSettings::draft2019_09().with(|s| {
-            s.option_nullable = true;
-            s.option_add_null_type = false;
-            s.inline_subschemas = true;
-        });
-        let gen = settings.into_generator();
-        let schema = gen.into_root_schema_for::<Configuration>();
+        let schema = generate_config_schema();
         println!("{}", serde_json::to_string_pretty(&schema)?);
         return Ok(());
     }

@@ -8,28 +8,37 @@ use tower::BoxError;
 use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(flatten)]
+    #[schemars(with = "String")]
     pub endpoint: Endpoint,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum Endpoint {
-    Agent { endpoint: AgentEndpoint },
-    Collector { endpoint: Url },
+    Agent {
+        #[schemars(with = "String", default = "default_agent_endpoint")]
+        endpoint: AgentEndpoint,
+    },
+    Collector {
+        endpoint: Url,
+    },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+fn default_agent_endpoint() -> &'static str {
+    "default"
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", untagged)]
 pub enum AgentEndpoint {
     Default(AgentDefault),
     Socket(SocketAddr),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentDefault {
     Default,
 }

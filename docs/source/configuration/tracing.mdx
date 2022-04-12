@@ -80,8 +80,6 @@ telemetry:
       # https://zipkin.io/ (compliant with opentracing)
       zipkin: false
       
-    jaeger:
-      .. # Jaeger export configuration, no need to specify Jaeger propagation.
 ```
 Specifying explicit propagation is generally only required if you are using an exporter that supports multiple trace ID formats. For example OpenTelemetry Collector, Jaeger or OpenTracing compatible exporters.
 
