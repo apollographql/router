@@ -502,7 +502,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                                 e
                             ))
                         } else {
-                            Some(format!("{}. {}\n{}", idx + 1, e.instance_path, e))
+                            None
                         }
                     })
                     .join("\n\n");
