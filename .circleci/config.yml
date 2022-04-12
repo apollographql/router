@@ -261,7 +261,7 @@ commands:
           name: cargo check workspace and benchmarks
           command: |
             set -e -o pipefail
-            cargo check --locked --all --benches --workspace
+            cargo check --locked --all --benches
   build_workspace:
     parameters:
       os:
