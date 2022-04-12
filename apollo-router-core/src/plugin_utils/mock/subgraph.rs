@@ -1,4 +1,4 @@
-use crate::{plugin_utils, Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::{plugin_utils, Object, Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tower::{BoxError, Service};
@@ -9,13 +9,20 @@ type MockResponses = HashMap<Request, Response>;
 pub struct MockSubgraph {
     // using an arc to improve efficiency when service is cloned
     mocks: Arc<MockResponses>,
+    extensions: Option<Object>,
 }
 
 impl MockSubgraph {
     pub fn new(mocks: MockResponses) -> Self {
         Self {
             mocks: Arc::new(mocks),
+            extensions: None,
         }
+    }
+
+    pub fn with_extensions(mut self, extensions: Object) -> Self {
+        self.extensions = Some(extensions);
+        self
     }
 }
 
@@ -40,7 +47,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                     message: "couldn't find mock for query".to_string(),
                     locations: Default::default(),
                     path: Default::default(),
-                    extensions: Default::default(),
+                    extensions: self.extensions.clone().unwrap_or_default(),
                 }])
                 .build()
                 .into()

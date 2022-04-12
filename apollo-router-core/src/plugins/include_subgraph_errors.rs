@@ -69,8 +69,8 @@ mod test {
     use super::*;
     use crate::plugin_utils::mock::subgraph::MockSubgraph;
     use crate::{
-        plugin_utils, DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-        RouterResponse, Schema,
+        plugin_utils, DynPlugin, Object, PluggableRouterServiceBuilder, ResponseBody,
+        RouterRequest, RouterResponse, Schema,
     };
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
@@ -78,7 +78,7 @@ mod test {
     use tower::{util::BoxCloneService, Service};
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": {}}]}"#).unwrap())
+        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
@@ -127,6 +127,9 @@ mod test {
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
     ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+        let mut extensions = Object::new();
+        extensions.insert("test", Value::String(ByteString::from("value")));
+
         let account_mocks = vec![
             (
                 r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
@@ -153,7 +156,8 @@ mod test {
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
-        let product_service = MockSubgraph::new(product_mocks);
+
+        let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
         let schema: Arc<Schema> = Arc::new(
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
