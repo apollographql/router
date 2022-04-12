@@ -1,0 +1,292 @@
+---
+source: apollo-router/src/configuration/yaml.rs
+assertion_line: 178
+expression: "format!(\"{:#?}\", root)"
+---
+Mapping(
+    {
+        Label {
+            name: "test",
+            marker: Some(
+                Marker {
+                    index: 0,
+                    line: 1,
+                    col: 0,
+                },
+            ),
+        }: Mapping(
+            {
+                Label {
+                    name: "a",
+                    marker: Some(
+                        Marker {
+                            index: 8,
+                            line: 2,
+                            col: 2,
+                        },
+                    ),
+                }: String(
+                    "4",
+                    Marker {
+                        index: 11,
+                        line: 2,
+                        col: 5,
+                    },
+                ),
+                Label {
+                    name: "b",
+                    marker: Some(
+                        Marker {
+                            index: 15,
+                            line: 3,
+                            col: 2,
+                        },
+                    ),
+                }: String(
+                    "3",
+                    Marker {
+                        index: 18,
+                        line: 3,
+                        col: 5,
+                    },
+                ),
+                Label {
+                    name: "c",
+                    marker: Some(
+                        Marker {
+                            index: 29,
+                            line: 4,
+                            col: 2,
+                        },
+                    ),
+                }: Sequence(
+                    [
+                        String(
+                            "d",
+                            Marker {
+                                index: 43,
+                                line: 5,
+                                col: 4,
+                            },
+                        ),
+                        String(
+                            "e",
+                            Marker {
+                                index: 49,
+                                line: 6,
+                                col: 4,
+                            },
+                        ),
+                        Mapping(
+                            {
+                                Label {
+                                    name: "f",
+                                    marker: Some(
+                                        Marker {
+                                            index: 55,
+                                            line: 7,
+                                            col: 4,
+                                        },
+                                    ),
+                                }: Sequence(
+                                    [
+                                        String(
+                                            "g",
+                                            Marker {
+                                                index: 65,
+                                                line: 8,
+                                                col: 7,
+                                            },
+                                        ),
+                                        Mapping(
+                                            {
+                                                Label {
+                                                    name: "h",
+                                                    marker: Some(
+                                                        Marker {
+                                                            index: 74,
+                                                            line: 9,
+                                                            col: 7,
+                                                        },
+                                                    ),
+                                                }: Mapping(
+                                                    {
+                                                        Label {
+                                                            name: "i",
+                                                            marker: Some(
+                                                                Marker {
+                                                                    index: 86,
+                                                                    line: 10,
+                                                                    col: 9,
+                                                                },
+                                                            ),
+                                                        }: String(
+                                                            "k",
+                                                            Marker {
+                                                                index: 89,
+                                                                line: 10,
+                                                                col: 12,
+                                                            },
+                                                        ),
+                                                    },
+                                                    Marker {
+                                                        index: 87,
+                                                        line: 10,
+                                                        col: 10,
+                                                    },
+                                                ),
+                                            },
+                                            Marker {
+                                                index: 75,
+                                                line: 9,
+                                                col: 8,
+                                            },
+                                        ),
+                                    ],
+                                    Marker {
+                                        index: 63,
+                                        line: 8,
+                                        col: 5,
+                                    },
+                                ),
+                            },
+                            Marker {
+                                index: 56,
+                                line: 7,
+                                col: 5,
+                            },
+                        ),
+                    ],
+                    Marker {
+                        index: 41,
+                        line: 5,
+                        col: 2,
+                    },
+                ),
+                Label {
+                    name: "l",
+                    marker: Some(
+                        Marker {
+                            index: 94,
+                            line: 11,
+                            col: 2,
+                        },
+                    ),
+                }: Sequence(
+                    [
+                        String(
+                            "d",
+                            Marker {
+                                index: 43,
+                                line: 5,
+                                col: 4,
+                            },
+                        ),
+                        String(
+                            "e",
+                            Marker {
+                                index: 49,
+                                line: 6,
+                                col: 4,
+                            },
+                        ),
+                        Mapping(
+                            {
+                                Label {
+                                    name: "f",
+                                    marker: Some(
+                                        Marker {
+                                            index: 55,
+                                            line: 7,
+                                            col: 4,
+                                        },
+                                    ),
+                                }: Sequence(
+                                    [
+                                        String(
+                                            "g",
+                                            Marker {
+                                                index: 65,
+                                                line: 8,
+                                                col: 7,
+                                            },
+                                        ),
+                                        Mapping(
+                                            {
+                                                Label {
+                                                    name: "h",
+                                                    marker: Some(
+                                                        Marker {
+                                                            index: 74,
+                                                            line: 9,
+                                                            col: 7,
+                                                        },
+                                                    ),
+                                                }: Mapping(
+                                                    {
+                                                        Label {
+                                                            name: "i",
+                                                            marker: Some(
+                                                                Marker {
+                                                                    index: 86,
+                                                                    line: 10,
+                                                                    col: 9,
+                                                                },
+                                                            ),
+                                                        }: String(
+                                                            "k",
+                                                            Marker {
+                                                                index: 89,
+                                                                line: 10,
+                                                                col: 12,
+                                                            },
+                                                        ),
+                                                    },
+                                                    Marker {
+                                                        index: 87,
+                                                        line: 10,
+                                                        col: 10,
+                                                    },
+                                                ),
+                                            },
+                                            Marker {
+                                                index: 75,
+                                                line: 9,
+                                                col: 8,
+                                            },
+                                        ),
+                                    ],
+                                    Marker {
+                                        index: 63,
+                                        line: 8,
+                                        col: 5,
+                                    },
+                                ),
+                            },
+                            Marker {
+                                index: 56,
+                                line: 7,
+                                col: 5,
+                            },
+                        ),
+                    ],
+                    Marker {
+                        index: 41,
+                        line: 5,
+                        col: 2,
+                    },
+                ),
+            },
+            Marker {
+                index: 9,
+                line: 2,
+                col: 3,
+            },
+        ),
+    },
+    Marker {
+        index: 4,
+        line: 1,
+        col: 4,
+    },
+)

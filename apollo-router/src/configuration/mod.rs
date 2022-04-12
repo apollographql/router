@@ -1,12 +1,16 @@
 //! Logic for loading configuration in to an object model
 
+mod yaml;
+
 use crate::subscriber::is_global_subscriber_set;
 use apollo_router_core::plugins;
 use derivative::Derivative;
 use displaydoc::Display;
+use envmnt::{ExpandOptions, ExpansionType};
 use itertools::Itertools;
-use schemars::gen::SchemaGenerator;
-use schemars::schema::{ObjectValidation, Schema, SchemaObject};
+use jsonschema::{Draft, JSONSchema};
+use schemars::gen::{SchemaGenerator, SchemaSettings};
+use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
@@ -48,8 +52,11 @@ pub enum ConfigurationError {
     LayerUnknown(String),
     /// layer {layer} could not be configured: {error}
     LayerConfiguration { layer: String, error: String },
-    /// the configuration contained errors
-    InvalidConfiguration,
+    /// {message}: {error}
+    InvalidConfiguration {
+        message: &'static str,
+        error: String,
+    },
 }
 
 /// The configuration for the router.
@@ -130,7 +137,10 @@ impl FromStr for Configuration {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let config =
-            serde_yaml::from_str(s).map_err(|_| ConfigurationError::InvalidConfiguration)?;
+            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
+                message: "failed to parse configuration",
+                error: e.to_string(),
+            })?;
         Ok(config)
     }
 }
@@ -408,6 +418,118 @@ impl Cors {
     }
 }
 
+pub fn generate_config_schema() -> RootSchema {
+    let settings = SchemaSettings::draft07().with(|s| {
+        s.option_nullable = true;
+        s.option_add_null_type = false;
+        s.inline_subschemas = true;
+    });
+    let gen = settings.into_generator();
+    gen.into_root_schema_for::<Configuration>()
+}
+
+/// Validate config yaml against the generated json schema.
+/// This is a tricky problem, and the solution here is by no means complete.
+/// In the case that validation cannot be performed then it will let serde validate as normal. The
+/// goal is to give a good enough experience until more time can be spent making this better,
+///
+/// THe validation sequence is:
+/// 1. Parse the config into yaml
+/// 2. Create the json schema
+/// 3. Validate the yaml against the json schema.
+/// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
+/// 5. Convert the json paths from the error messages into nice error snippets.
+///
+/// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
+///
+pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> {
+    let yaml =
+        &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
+            message: "failed to parse yaml",
+            error: e.to_string(),
+        })?;
+    let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
+        ConfigurationError::InvalidConfiguration {
+            message: "failed to parse schema",
+            error: e.to_string(),
+        }
+    })?;
+    let schema = JSONSchema::options()
+        .with_draft(Draft::Draft7)
+        .compile(&schema)
+        .map_err(|e| ConfigurationError::InvalidConfiguration {
+            message: "failed to compile schema",
+            error: e.to_string(),
+        })?;
+    if let Err(errors) = schema.validate(yaml) {
+        // Validation failed, translate the errors into something nice for the user
+        // We have to reparse the yaml to get the line number information for each error.
+        match yaml::parse(raw_yaml) {
+            Ok(yaml) => {
+                let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
+
+                let errors = errors
+                    .enumerate()
+                    .filter_map(|(idx, e)| {
+                        if let Some(element) = yaml.get_element(&e.instance_path) {
+                            // Dirty hack.
+                            // If the element is a string and it has env variable expansion then we can't validate
+                            // Leave it up to serde to catch these.
+                            if let yaml::Value::String(value, _) = element {
+                                if &envmnt::expand(
+                                    value,
+                                    Some(ExpandOptions::new().clone_with_expansion_type(
+                                        ExpansionType::UnixBracketsWithDefaults,
+                                    )),
+                                ) != value
+                                {
+                                    return None;
+                                }
+                            }
+
+                            let marker = element.marker();
+                            let lines = yaml_split_by_lines
+                                [0.max(marker.line() as isize - 5) as usize..marker.line()]
+                                .iter()
+                                .join("\n");
+
+                            Some(format!(
+                                "{}. {}\n\n{}\n{}^----- {}",
+                                idx + 1,
+                                e.instance_path,
+                                lines,
+                                " ".repeat(marker.col()),
+                                e
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .join("\n\n");
+
+                // There were no remaining errors after expansion.
+                if errors.is_empty() {
+                    return Ok(());
+                }
+
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "configuration had errors",
+                    error: format!("\n{}", errors),
+                });
+            }
+            Err(e) => {
+                // the yaml failed to parse. Just let serde do it's thing.
+                tracing::warn!(
+                    "failed to parse yaml using marked parser: {}. Falling back to serde validation",
+                    e
+                );
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,9 +538,12 @@ mod tests {
     use http::Uri;
     #[cfg(unix)]
     use insta::assert_json_snapshot;
+    use regex::Regex;
     #[cfg(unix)]
     use schemars::gen::SchemaSettings;
     use std::collections::HashMap;
+    use std::fs;
+    use walkdir::WalkDir;
 
     macro_rules! assert_config_snapshot {
         ($file:expr) => {{
@@ -590,5 +715,64 @@ mod tests {
             !cors.allow_any_origin.unwrap_or_default(),
             "Allow any origin should be disabled by default"
         );
+    }
+
+    #[test]
+    fn line_precise_config_errors() {
+        let error = validate_configuration(
+            r#"
+plugins:
+  non_existant:
+    foo: "bar"
+
+telemetry:  
+  another_non_existant: 3
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn validate_project_config_files() {
+        let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
+        let embedded_yaml_matcher =
+            Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
+        for entry in WalkDir::new("..")
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry
+                .path()
+                .with_file_name(".skipconfigvalidation")
+                .exists()
+            {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy();
+            if filename_matcher.is_match(&name) {
+                let config = fs::read_to_string(entry.path()).expect("failed to read file");
+                let yamls = if name.ends_with(".mdx") {
+                    // Extract yaml from docs
+                    embedded_yaml_matcher
+                        .captures_iter(&config)
+                        .map(|i| i.get(1).unwrap().as_str().into())
+                        .collect()
+                } else {
+                    vec![config]
+                };
+
+                for yaml in yamls {
+                    if let Err(e) = validate_configuration(&yaml) {
+                        panic!(
+                            "{} configuration error: \n{}",
+                            entry.path().to_string_lossy(),
+                            e
+                        )
+                    }
+                }
+            }
+        }
     }
 }
