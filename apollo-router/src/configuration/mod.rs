@@ -425,8 +425,7 @@ pub fn generate_config_schema() -> RootSchema {
         s.inline_subschemas = true;
     });
     let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<Configuration>();
-    schema
+    gen.into_root_schema_for::<Configuration>()
 }
 
 /// Validate config yaml against the generated json schema.
@@ -445,7 +444,7 @@ pub fn generate_config_schema() -> RootSchema {
 ///
 pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> {
     let yaml =
-        &serde_yaml::from_str(&raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
+        &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
         })?;
@@ -467,7 +466,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
         // We have to reparse the yaml to get the line number information for each error.
         match yaml::parse(raw_yaml) {
             Ok(yaml) => {
-                let yaml_split_by_lines = raw_yaml.split("\n").collect::<Vec<_>>();
+                let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
                 let errors = errors
                     .enumerate()
@@ -500,15 +499,10 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                                 e.instance_path,
                                 lines,
                                 " ".repeat(marker.col()),
-                                e.to_string()
+                                e
                             ))
                         } else {
-                            Some(format!(
-                                "{}. {}\n{}",
-                                idx + 1,
-                                e.instance_path,
-                                e.to_string()
-                            ))
+                            Some(format!("{}. {}\n{}", idx + 1, e.instance_path, e))
                         }
                     })
                     .join("\n\n");

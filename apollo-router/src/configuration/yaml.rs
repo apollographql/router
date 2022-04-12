@@ -17,10 +17,7 @@ pub(crate) struct Label {
 
 impl From<String> for Label {
     fn from(name: String) -> Self {
-        Label {
-            name: name.to_string(),
-            marker: None,
-        }
+        Label { name, marker: None }
     }
 }
 
