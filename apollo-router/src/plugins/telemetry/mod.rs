@@ -89,6 +89,33 @@ fn apollo_graph_reference() -> Option<String> {
     std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
+impl Drop for Telemetry {
+    fn drop(&mut self) {
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            // Tracer providers must be flushed. This may happen as part of otel if the provider was set
+            // as the global, but may also happen in the case of an failed config reload.
+            // If the tracer prover is present then it was not handed over so we must flush it.
+            // The magic incantation seems to be that the flush MUST happen within a tokio runtime,
+            // and then within a spawn blocking.
+            ::tracing::debug!("flushing telemetry");
+            std::thread::spawn(|| {
+                let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+                runtime.block_on(async {
+                    let jh = tokio::task::spawn_blocking(move || {
+                        opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
+                    });
+                    futures::executor::block_on(jh).expect("failed to flush tracer provider");
+                });
+            });
+        }
+
+        if let Some(sender) = self.spaceport_shutdown.take() {
+            ::tracing::debug!("notifying spaceport to shut down");
+            let _ = sender.send(());
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -187,9 +214,6 @@ impl Plugin for Telemetry {
     }
 
     async fn shutdown(&mut self) -> Result<(), BoxError> {
-        if let Some(sender) = self.spaceport_shutdown.take() {
-            let _ = sender.send(());
-        }
         Ok(())
     }
 
