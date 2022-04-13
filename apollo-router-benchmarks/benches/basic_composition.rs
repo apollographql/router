@@ -18,15 +18,14 @@ static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $fir
 async fn basic_composition_benchmark(
     mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
 ) {
-    let request = utils::RouterRequest::builder()
+    let request = RouterRequest::fake_builder()
         .query(QUERY.to_string())
         .variables(Arc::new(
             vec![(ByteString::from("first"), Value::Number(2usize.into()))]
                 .into_iter()
                 .collect(),
         ))
-        .build()
-        .into();
+        .build();
 
     let response = router_service
         .ready()

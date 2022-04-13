@@ -195,17 +195,12 @@ where
                     message: error.to_string(),
                     ..Default::default()
                 }];
-                let res = RouterResponse::new(
-                    None,
-                    None,
-                    None,
-                    errors,
-                    Object::new(),
-                    Some(StatusCode::INTERNAL_SERVER_ERROR),
-                    context_cloned,
-                );
-
-                Ok(res)
+                Ok(RouterResponse::builder()
+                    .errors(errors)
+                    .extensions(Object::new())
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(context_cloned)
+                    .build())
             });
 
         Box::pin(fut)

@@ -161,8 +161,8 @@ where
 mod async_checkpoint_tests {
     use super::*;
     use crate::{
-        http_compat, plugin::utils::test::MockExecutionService, Context, ExecutionRequest,
-        ExecutionResponse, Object, ServiceBuilderExt,
+        plugin::utils::test::MockExecutionService, ExecutionRequest, ExecutionResponse,
+        ServiceBuilderExt,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
 
@@ -176,10 +176,8 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req: crate::ExecutionRequest| {
-                Ok(ExecutionResponse::builder()
+                Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .extensions(Object::new())
-                    .context(Context::new())
                     .build())
             });
 
@@ -191,11 +189,7 @@ mod async_checkpoint_tests {
             })
             .service(service);
 
-        let request = ExecutionRequest::builder()
-            .originating_request(http_compat::Request::mock())
-            .query_plan(Arc::new(Default::default()))
-            .context(Context::new())
-            .build();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -218,10 +212,8 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req| {
-                Ok(ExecutionResponse::builder()
+                Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .extensions(Object::new())
-                    .context(Context::new())
                     .build())
             });
 
@@ -231,11 +223,7 @@ mod async_checkpoint_tests {
             AsyncCheckpointLayer::new(|req| Box::pin(async { Ok(ControlFlow::Continue(req)) }))
                 .layer(service);
 
-        let request = ExecutionRequest::builder()
-            .originating_request(http_compat::Request::mock())
-            .query_plan(Arc::new(Default::default()))
-            .context(Context::new())
-            .build();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -259,21 +247,15 @@ mod async_checkpoint_tests {
         let service_stack = AsyncCheckpointLayer::new(|_req| {
             Box::pin(async {
                 Ok(ControlFlow::Break(
-                    ExecutionResponse::builder()
+                    ExecutionResponse::fake_builder()
                         .label("returned_before_mock_service".to_string())
-                        .extensions(Object::new())
-                        .context(Context::new())
                         .build(),
                 ))
             })
         })
         .layer(service);
 
-        let request = ExecutionRequest::builder()
-            .originating_request(http_compat::Request::mock())
-            .query_plan(Arc::new(Default::default()))
-            .context(Context::new())
-            .build();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -299,11 +281,7 @@ mod async_checkpoint_tests {
         })
         .layer(service);
 
-        let request = ExecutionRequest::builder()
-            .originating_request(http_compat::Request::mock())
-            .query_plan(Arc::new(Default::default()))
-            .context(Context::new())
-            .build();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_error = service_stack
             .oneshot(request)

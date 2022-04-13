@@ -69,8 +69,8 @@ mod test {
     use super::*;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        Context, DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-        RouterResponse, Schema,
+        DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
+        Schema,
     };
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
@@ -104,16 +104,14 @@ mod test {
         body: &ResponseBody,
         mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     ) {
-        let request = RouterRequest::builder()
+        let request = RouterRequest::fake_builder()
             .query(query.to_string())
             .variables(Arc::new(
                 vec![(ByteString::from("first"), Value::Number(2usize.into()))]
                     .into_iter()
                     .collect(),
             ))
-            .context(Context::new())
             .build();
-        // .into();
 
         let response = router_service
             .ready()

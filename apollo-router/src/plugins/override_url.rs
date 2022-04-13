@@ -48,15 +48,12 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_router_core::http_compat;
-    use apollo_router_core::OperationKind;
     use apollo_router_core::{
-        plugin::utils::test::MockSubgraphService, Context, DynPlugin, Object, SubgraphRequest,
+        plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest,
     };
     use http::Uri;
     use serde_json::Value;
     use std::str::FromStr;
-    use std::sync::Arc;
     use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test]
@@ -73,9 +70,7 @@ mod tests {
             })
             .times(1)
             .returning(move |req: SubgraphRequest| {
-                Ok(SubgraphResponse::builder()
-                    .errors(vec![])
-                    .extensions(Object::new())
+                Ok(SubgraphResponse::fake_builder()
                     .context(req.context)
                     .build())
             });
@@ -97,11 +92,7 @@ mod tests {
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = SubgraphRequest::builder()
-            .originating_request(Arc::new(http_compat::Request::mock()))
-            .subgraph_request(http_compat::Request::mock())
-            .operation_kind(OperationKind::Query)
-            .context(context);
+        let subgraph_req = SubgraphRequest::fake_builder().context(context);
 
         let _subgraph_resp = subgraph_service
             .ready()

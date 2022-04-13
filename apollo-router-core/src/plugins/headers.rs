@@ -371,7 +371,7 @@ mod test {
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
     use http::{Method, Uri};
-    use std::collections::BTreeSet;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use tower::BoxError;
 
@@ -638,27 +638,23 @@ mod test {
     fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
         Ok(SubgraphResponse::new_with_response(
             http::Response::builder()
-                .header("da", "vda")
-                .header("db", "vdb")
-                .header("dc", "vdc")
-                .header(HOST, "host")
-                .header(CONTENT_LENGTH, "2")
-                .header(CONTENT_TYPE, "graphql")
                 .body(Response::builder().build())
                 .unwrap()
                 .into(),
-            example_originating_request(),
+            Context::new(),
         ))
-    }
-
-    fn example_originating_request() -> Context {
-        Context::new()
     }
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
                 RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("dc", "vdc")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
                     .body(Request::builder().query("query").build())
                     .unwrap(),
             ),
@@ -675,7 +671,7 @@ mod test {
             .body(Request::builder().query("query").build())
             .unwrap(),
             operation_kind: OperationKind::Query,
-            context: example_originating_request(),
+            context: Context::new(),
         }
     }
 
@@ -690,8 +686,8 @@ mod test {
                 .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
-                .collect::<BTreeSet<_>>();
-            assert_eq!(actual_headers, headers.into_iter().collect::<BTreeSet<_>>());
+                .collect::<HashSet<_>>();
+            assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
 
             true
         }

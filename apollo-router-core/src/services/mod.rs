@@ -133,6 +133,16 @@ pub struct RouterRequest {
 
 #[buildstructor::builder]
 impl RouterRequest {
+    pub fn new_with_request(
+        originating_request: http_compat::Request<Request>,
+        context: Context,
+    ) -> RouterRequest {
+        Self {
+            originating_request,
+            context,
+        }
+    }
+
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
@@ -167,14 +177,22 @@ impl RouterRequest {
         }
     }
 
-    pub fn new_with_request(
-        originating_request: http_compat::Request<Request>,
-        context: Context,
+    pub fn fake_new(
+        query: Option<String>,
+        operation_name: Option<String>,
+        variables: Option<Arc<Object>>,
+        extensions: Vec<(&'static str, Value)>,
+        context: Option<Context>,
+        headers: Vec<(String, String)>,
     ) -> RouterRequest {
-        Self {
-            originating_request,
-            context,
-        }
+        RouterRequest::new(
+            query,
+            operation_name,
+            variables.unwrap_or_else(|| Arc::new(vec![].into_iter().collect())),
+            extensions,
+            context.unwrap_or_default(),
+            headers,
+        )
     }
 }
 
@@ -223,6 +241,25 @@ impl RouterResponse {
             response: compat_response,
             context,
         }
+    }
+    pub fn fake_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Option<Object>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+    ) -> RouterResponse {
+        RouterResponse::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions.unwrap_or_default(),
+            status_code,
+            context.unwrap_or_default(),
+        )
     }
 }
 
@@ -281,6 +318,10 @@ pub struct SubgraphRequest {
 
 #[buildstructor::builder]
 impl SubgraphRequest {
+    /// This is the constructor (or builder) to use when constructing a real SubgraphRequest.
+    ///
+    /// The parameters are not optional, because in a live situation all of these properties must be
+    /// set and be correct to create a SubgraphRequest.
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
         subgraph_request: http_compat::Request<Request>,
@@ -293,6 +334,25 @@ impl SubgraphRequest {
             operation_kind,
             context,
         }
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" SubgraphRequest.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// SubgraphRequest. It's usually enough for testing, when a fully consructed SubgraphRequest is
+    /// difficult to construct and not required for the pusposes of the test.
+    pub fn fake_new(
+        originating_request: Option<Arc<http_compat::Request<Request>>>,
+        subgraph_request: Option<http_compat::Request<Request>>,
+        operation_kind: Option<OperationKind>,
+        context: Option<Context>,
+    ) -> SubgraphRequest {
+        SubgraphRequest::new(
+            originating_request.unwrap_or_else(|| Arc::new(http_compat::Request::mock())),
+            subgraph_request.unwrap_or_else(http_compat::Request::mock),
+            operation_kind.unwrap_or(OperationKind::Query),
+            context.unwrap_or_default(),
+        )
     }
 }
 
@@ -309,6 +369,10 @@ pub struct SubgraphResponse {
 
 #[buildstructor::builder]
 impl SubgraphResponse {
+    /// This is the constructor to use when constructing a real SubgraphResponse..
+    ///
+    /// In this case, you already hve a valid response and just wish to associate it with a context
+    /// and create a SubgraphResponse.
     pub fn new_with_response(
         response: http_compat::Response<Response>,
         context: Context,
@@ -316,6 +380,10 @@ impl SubgraphResponse {
         Self { response, context }
     }
 
+    /// This is the constructor (or builder) to use when constructing a real SubgraphResponse.
+    ///
+    /// The parameters are not optional, because in a live situation all of these properties must be
+    /// set and be correct to create a SubgraphResponse.
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -350,6 +418,31 @@ impl SubgraphResponse {
             context,
         }
     }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" SubgraphResponse.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// SubgraphResponse. It's usually enough for testing, when a fully consructed SubgraphResponse is
+    /// difficult to construct and not required for the pusposes of the test.
+    pub fn fake_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Option<Object>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+    ) -> SubgraphResponse {
+        SubgraphResponse::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions.unwrap_or_default(),
+            status_code,
+            context.unwrap_or_default(),
+        )
+    }
 }
 
 assert_impl_all!(ExecutionRequest: Send);
@@ -375,6 +468,18 @@ impl ExecutionRequest {
             query_plan,
             context,
         }
+    }
+
+    pub fn fake_new(
+        originating_request: Option<http_compat::Request<Request>>,
+        query_plan: Option<Arc<QueryPlan>>,
+        context: Option<Context>,
+    ) -> ExecutionRequest {
+        ExecutionRequest::new(
+            originating_request.unwrap_or_else(http_compat::Request::mock),
+            query_plan.unwrap_or_default(),
+            context.unwrap_or_default(),
+        )
     }
 }
 
@@ -430,6 +535,25 @@ impl ExecutionResponse {
             response: compat_response,
             context,
         }
+    }
+    pub fn fake_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<crate::Error>,
+        extensions: Option<Object>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+    ) -> ExecutionResponse {
+        ExecutionResponse::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions.unwrap_or_default(),
+            status_code,
+            context.unwrap_or_default(),
+        )
     }
 }
 

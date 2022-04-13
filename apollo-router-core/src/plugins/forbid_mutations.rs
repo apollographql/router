@@ -61,7 +61,7 @@ mod forbid_http_get_mutations_tests {
     use super::*;
     use crate::http_compat::RequestBuilder;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{plugin::utils::test::MockExecutionService, Context, QueryPlan};
+    use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
     use http::{Method, StatusCode, Uri};
     use serde_json::json;
     use std::str::FromStr;
@@ -71,12 +71,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(ExecutionResponse::builder()
-                .extensions(Object::new())
-                .context(Context::new())
-                .build())
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -115,12 +113,10 @@ mod forbid_http_get_mutations_tests {
     async fn configuration_set_to_false_lets_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service.expect_call().times(1).returning(move |_| {
-            Ok(ExecutionResponse::builder()
-                .extensions(Object::new())
-                .context(Context::new())
-                .build())
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -171,10 +167,9 @@ mod forbid_http_get_mutations_tests {
         let request = RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
             .body(crate::Request::default())
             .unwrap();
-        ExecutionRequest::builder()
+        ExecutionRequest::fake_builder()
             .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))
-            .context(Context::new())
             .build()
     }
 }
