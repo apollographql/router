@@ -1,6 +1,5 @@
 ---
 source: apollo-router-core/src/query_planner/bridge_query_planner.rs
-assertion_line: 132
 expression: result
 ---
 QueryPlan {
@@ -10,6 +9,7 @@ QueryPlan {
             requires: [],
             variable_usages: [],
             operation: "{me{name{first last}}}",
+            operation_name: None,
             operation_kind: Query,
         },
     ),
