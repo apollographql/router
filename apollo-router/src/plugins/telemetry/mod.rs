@@ -11,6 +11,7 @@ use apollo_router_core::{
     ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse, ValueExt,
 };
 use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::Reporter;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
@@ -21,11 +22,12 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
+use serde::Deserialize;
 use serde_json_bytes::json;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tower::steer::Steer;
 use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceExt};
@@ -38,10 +40,23 @@ mod tracing;
 
 static EXTENSION_KEY: &str = "telemetry";
 
+#[derive(Deserialize, Debug)]
+struct UsageReporting {
+    signature: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct QueryStats {
+    client_name: String,
+    client_version: String,
+    elapsed: Duration,
+    usage_reporting: UsageReporting,
+}
+
 pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
-
+    reporter: Option<Reporter>,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
@@ -130,6 +145,13 @@ impl Plugin for Telemetry {
             _ => (None, None),
         };
 
+        // Get the endpoint URL so we can set up a reporter later.
+        let endpoint_url = apollo
+            .endpoint
+            .as_ref()
+            .map(|url| url.to_string())
+            .unwrap_or_else(tracing::apollo_telemetry::default_collector);
+
         //If store the shutdown handle.
         self.spaceport_shutdown = shutdown_tx;
 
@@ -146,7 +168,7 @@ impl Plugin for Telemetry {
         self.meter_provider = builder.meter_provider();
         self.custom_endpoints = builder.custom_endpoints();
 
-        // Finally actually start spaceport
+        // Start spaceport
         if let Some(spaceport) = spaceport {
             tokio::spawn(async move {
                 if let Err(e) = spaceport.serve().await {
@@ -161,6 +183,11 @@ impl Plugin for Telemetry {
                 };
             });
         }
+
+        // Create a reporter.
+        // dbg!("here", &endpoint_url);
+        // self.reporter = Some(Reporter::try_new(endpoint_url).await?);
+        // dbg!("there");
 
         Ok(())
     }
@@ -203,6 +230,7 @@ impl Plugin for Telemetry {
             custom_endpoints: Default::default(),
             _metrics_exporters: Default::default(),
             meter_provider: Default::default(),
+            reporter: None,
             config,
         })
     }
@@ -220,8 +248,8 @@ impl Plugin for Telemetry {
                     .headers()
                     .get("apollographql-client-name")
                     .map(HeaderValue::to_str)
-                    .unwrap_or(Ok("not found"))
-                    .unwrap_or("invalid apollographql-client-name header");
+                    .unwrap_or(Ok(""))
+                    .unwrap_or_default();
 
                 let client_version = req
                     .context
@@ -229,8 +257,8 @@ impl Plugin for Telemetry {
                     .headers()
                     .get("apollographql-client-version")
                     .map(HeaderValue::to_str)
-                    .unwrap_or(Ok("not found"))
-                    .unwrap_or("invalid apollographql-client-version header");
+                    .unwrap_or(Ok(""))
+                    .unwrap_or("");
 
                 req.context.extensions.insert(
                     EXTENSION_KEY.to_string(),
@@ -275,7 +303,17 @@ impl Plugin for Telemetry {
             })
             .map_response(|res: RouterResponse| {
                 // TODO[igni]: push things to uplink \o/
-                dbg!(&res.context.extensions);
+                let json_query_stats = {
+                    let extension = &res.context.extensions.get(EXTENSION_KEY);
+                    extension
+                        .as_ref()
+                        .map(|e| e.value().clone())
+                        .unwrap_or(serde_json_bytes::Value::Null)
+                };
+
+                let as_query_stats: QueryStats =
+                    serde_json_bytes::from_value(json_query_stats).unwrap();
+                dbg!(&as_query_stats);
                 res
             })
             .boxed()

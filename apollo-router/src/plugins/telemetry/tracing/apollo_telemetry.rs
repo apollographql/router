@@ -51,7 +51,7 @@ use tokio::task::JoinError;
 
 const DEFAULT_SERVER_URL: &str = "https://127.0.0.1:50051";
 
-fn default_collector() -> String {
+pub(crate) fn default_collector() -> String {
     DEFAULT_SERVER_URL.to_string()
 }
 
