@@ -266,7 +266,13 @@ impl ConfigurationKind {
                             if watch {
                                 files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(ConfigurationKind::read_config(&path).ok())
+                                        future::ready(match ConfigurationKind::read_config(&path) {
+                                            Ok(config) => Some(config),
+                                            Err(err) => {
+                                                tracing::error!("{}", err);
+                                                None
+                                            }
+                                        })
                                     })
                                     .map(|x| UpdateConfiguration(Box::new(x)))
                                     .boxed()
