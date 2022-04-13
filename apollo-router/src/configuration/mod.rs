@@ -337,7 +337,7 @@ pub struct Cors {
 }
 
 fn default_origins() -> Vec<String> {
-    vec!["https://studio.apollographql.com/".into()]
+    vec!["https://studio.apollographql.com".into()]
 }
 
 fn default_cors_headers() -> Vec<String> {
@@ -407,10 +407,10 @@ impl Cors {
             cors.allow_origin(Any)
         } else {
             cors.allow_origin(Origin::list(self.origins.into_iter().filter_map(
-                |header| {
-                    header
+                |origin| {
+                    origin
                         .parse()
-                        .map_err(|_| tracing::error!("header value '{header}' is not valid"))
+                        .map_err(|_| tracing::error!("origin '{origin}' is not valid"))
                         .ok()
                 },
             )))
