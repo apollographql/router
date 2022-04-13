@@ -381,10 +381,12 @@ pub(crate) mod fetch {
                     schema
                         .subgraphs()
                         .find_map(|(name, url)| (name == service_name).then(|| url))
-                        .expect(&format!(
-                            "schema uri for subgraph '{}' should already have been checked",
-                            service_name
-                        ))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "schema uri for subgraph '{}' should already have been checked",
+                                service_name
+                            )
+                        })
                         .clone(),
                 )
                 .body(
