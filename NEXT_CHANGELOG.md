@@ -43,7 +43,10 @@ telemetry:
   For more info see the quickstart documentation.
 
 ## 🐛 Fixes
-### Telemetry configuration [PR #830](https://github.com/apollographql/router/pull/782)
+### Propagate error extensions originating from subgraphs [PR #839](https://github.com/apollographql/router/pull/839)
+Extensions are now propagated following the configuration of the `include_subgraph_error` plugin.
+
+### Telemetry configuration [PR #830](https://github.com/apollographql/router/pull/830)
 Jaeger and Zipkin telemetry config produced JSON schema that was invalid.
 
 ### Early return a better error when introspection is disabled [PR #751](https://github.com/apollographql/router/pull/751)
@@ -53,11 +56,8 @@ Instead of returning an error coming from the query planner, we are now returnin
 If present in the query plan fetch noede, the operation name will be added to sub-fetches.
 
 ## 🛠 Maintenance
-### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/782)
+### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/830)
 Router configuration files within the project are now largely validated via unit test.
-
-### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/782)
-Examples are built as part of CI.
 
 ### Switch web server framework from `warp` to `axum` [PR #751](https://github.com/apollographql/router/pull/751)
 
