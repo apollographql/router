@@ -381,7 +381,10 @@ pub(crate) mod fetch {
                     schema
                         .subgraphs()
                         .find_map(|(name, url)| (name == service_name).then(|| url))
-                        .expect("we can unwrap here because we already checked the subgraph url")
+                        .expect(&format!(
+                            "schema uri for subgraph '{}' should already have been checked",
+                            service_name
+                        ))
                         .clone(),
                 )
                 .body(
@@ -525,10 +528,19 @@ mod log {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::sync::Arc;
+    use tower::{ServiceBuilder, ServiceExt};
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
+        };
+    }
+
+    macro_rules! test_schema {
+        () => {
+            include_str!("testdata/schema.graphql")
         };
     }
 
@@ -547,5 +559,36 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["product", "books", "product", "books", "product"]
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_includes_operation_name() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+        };
+
+        let mut mock_products_service = plugin_utils::MockSubgraphService::new();
+        mock_products_service
+            .expect_call()
+            .times(1)
+            .withf(|request| {
+                assert_eq!(
+                    request.http_request.body().operation_name,
+                    Some("topProducts_product_0".into())
+                );
+                true
+            });
+        query_plan
+            .execute(
+                &Context::new().with_request(Arc::new(http_compat::Request::mock())),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
     }
 }

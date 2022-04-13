@@ -10,7 +10,9 @@ Sequence {
                 requires: [],
                 variable_usages: [],
                 operation: "{topProducts{__typename ...on Book{__typename isbn}...on Furniture{name}}product(upc:\"1\"){__typename ...on Book{__typename isbn}...on Furniture{name}}}",
-                operation_name: None,
+                operation_name: Some(
+                    "topProducts_product_0",
+                ),
                 operation_kind: Query,
             },
         ),
