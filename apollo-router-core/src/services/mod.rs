@@ -25,7 +25,7 @@ mod router_service;
 mod tower_subgraph_service;
 pub use tower_subgraph_service::TowerSubgraphService;
 
-pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
+pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
     fn from(http_request: http_compat::Request<Request>) -> Self {
