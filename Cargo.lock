@@ -3724,6 +3724,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.20.4",
+ "rustls-native-certs",
  "rustls-pemfile 0.3.0",
  "serde",
  "serde_json",
