@@ -4,7 +4,7 @@ use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
 };
-use crate::plugins::telemetry::tracing::{apollo, TracingConfigurator};
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use apollo_router_core::{
     http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
@@ -30,6 +30,7 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceExt};
 use url::Url;
 
+mod apollo;
 mod config;
 mod metrics;
 mod otlp;
@@ -160,6 +161,7 @@ impl Plugin for Telemetry {
                 apollo_key: Some(_),
                 apollo_graph_ref: Some(_),
                 endpoint: None,
+                ..
             } => {
                 ::tracing::debug!("starting Spaceport");
                 let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
