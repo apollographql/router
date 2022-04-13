@@ -6,14 +6,15 @@ use crate::plugins::telemetry::metrics::{
 };
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
+use ::tracing::{info_span, Span};
 use apollo_router_core::{
     http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
 use futures::FutureExt;
-use http::StatusCode;
+use http::{HeaderValue, StatusCode};
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -27,7 +28,7 @@ use std::fmt;
 use std::time::Instant;
 use tower::steer::Steer;
 use tower::util::BoxService;
-use tower::{service_fn, BoxError, ServiceExt};
+use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 mod apollo;
@@ -228,12 +229,14 @@ impl Plugin for Telemetry {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
-        service
+        ServiceBuilder::new()
+            .instrument(self.router_service_span())
+            .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
                 // Using Instant because it is guaranteed to be monotonically increasing.
                 let now = Instant::now();
-                f.map(move |r| {
+                let out = move |r: Result<RouterResponse, BoxError>| {
                     match &r {
                         Ok(response) => {
                             metrics.http_requests_total.add(
@@ -252,7 +255,8 @@ impl Plugin for Telemetry {
                         .http_requests_duration
                         .record(now.elapsed().as_secs_f64(), &[]);
                     r
-                })
+                };
+                f.map(out)
             })
             .boxed()
     }
@@ -410,6 +414,51 @@ impl Telemetry {
             opentelemetry::global::set_tracer_provider(tracer_provider);
         });
         futures::executor::block_on(jh).expect("failed to replace tracer provider");
+    }
+
+    fn router_service_span(&self) -> impl Fn(&RouterRequest) -> Span + Clone {
+        let config = self.config.apollo.clone().unwrap_or_default();
+        let client_name_header = config.client_name_header;
+        let client_version_header = config.client_version_header;
+
+        move |request: &RouterRequest| {
+            let query = request
+                .context
+                .request
+                .body()
+                .query
+                .clone()
+                .unwrap_or_default();
+            let operation_name = request
+                .context
+                .request
+                .body()
+                .operation_name
+                .clone()
+                .unwrap_or_else(|| "".to_string());
+            let client_name = request
+                .context
+                .request
+                .headers()
+                .get(&client_name_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""));
+            let client_version = request
+                .context
+                .request
+                .headers()
+                .get(&client_version_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""));
+            let span = info_span!(
+                "graphql_request",
+                query = query.as_str(),
+                operation_name = operation_name.as_str(),
+                client_name = client_name.to_str().unwrap_or_default(),
+                client_version = client_version.to_str().unwrap_or_default()
+            );
+            span
+        }
     }
 }
 

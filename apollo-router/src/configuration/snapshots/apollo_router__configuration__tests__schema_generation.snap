@@ -430,6 +430,14 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "client_name_header": {
+              "type": "string",
+              "nullable": true
+            },
+            "client_version_header": {
+              "type": "string",
+              "nullable": true
+            },
             "endpoint": {
               "type": "string",
               "format": "uri",

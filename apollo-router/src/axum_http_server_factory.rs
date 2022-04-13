@@ -456,17 +456,6 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
-// graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
-#[tracing::instrument(skip_all,
-    level = "info"
-    name = "graphql_request",
-    fields(
-        query = %http_request.body().query.as_deref().unwrap_or_default(),
-        operation_name = %http_request.body().operation_name.as_deref().unwrap_or_default(),
-        client_name,
-        client_version
-    )
-)]
 async fn run_graphql_request(
     service: Buffer<
         BoxService<
@@ -478,18 +467,6 @@ async fn run_graphql_request(
     >,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse {
-    if let Some(client_name) = http_request.headers().get("apollographql-client-name") {
-        // Record the client name as part of the current span
-        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
-    }
-    if let Some(client_version) = http_request.headers().get("apollographql-client-version") {
-        // Record the client version as part of the current span
-        Span::current().record(
-            "client_version",
-            &client_version.to_str().unwrap_or_default(),
-        );
-    }
-
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();

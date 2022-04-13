@@ -5,4 +5,5 @@
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
+pub mod serde_utils;
 mod traffic_shaping;
