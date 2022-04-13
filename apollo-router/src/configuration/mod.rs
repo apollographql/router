@@ -708,7 +708,7 @@ mod tests {
         let cors = Cors::builder().build();
 
         assert_eq!(
-            ["https://studio.apollographql.com/"],
+            ["https://studio.apollographql.com"],
             cors.origins.as_slice()
         );
         assert!(
