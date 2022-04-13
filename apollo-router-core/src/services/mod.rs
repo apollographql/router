@@ -31,9 +31,9 @@ pub use tower_subgraph_service::TowerSubgraphService;
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 impl From<http_compat::Request<Request>> for RouterRequest {
-    fn from(http_request: http_compat::Request<Request>) -> Self {
+    fn from(originating_request: http_compat::Request<Request>) -> Self {
         Self {
-            originating_request: Arc::new(http_request),
+            originating_request,
             context: Context::new(),
         }
     }
@@ -125,7 +125,7 @@ assert_impl_all!(RouterRequest: Send);
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
     /// Original request to the Router.
-    pub originating_request: Arc<http_compat::Request<Request>>,
+    pub originating_request: http_compat::Request<Request>,
 
     // Context for extension
     pub context: Context,
@@ -160,9 +160,19 @@ impl RouterRequest {
         }
         let req = builder.body(gql_request).expect("body is always valid qed");
 
-        let req = http_compat::Request { inner: req };
+        let originating_request = http_compat::Request { inner: req };
         Self {
-            originating_request: Arc::new(req),
+            originating_request,
+            context,
+        }
+    }
+
+    pub fn new_with_request(
+        originating_request: http_compat::Request<Request>,
+        context: Context,
+    ) -> RouterRequest {
+        Self {
+            originating_request,
             context,
         }
     }
@@ -220,7 +230,7 @@ assert_impl_all!(QueryPlannerRequest: Send);
 /// [`Context`] for the request.
 pub struct QueryPlannerRequest {
     /// Original request to the Router.
-    pub originating_request: Arc<http_compat::Request<Request>>,
+    pub originating_request: http_compat::Request<Request>,
 
     pub context: Context,
 }
@@ -228,7 +238,7 @@ pub struct QueryPlannerRequest {
 #[buildstructor::builder]
 impl QueryPlannerRequest {
     pub fn new(
-        originating_request: Arc<http_compat::Request<Request>>,
+        originating_request: http_compat::Request<Request>,
         context: Context,
     ) -> QueryPlannerRequest {
         Self {
@@ -346,7 +356,7 @@ assert_impl_all!(ExecutionRequest: Send);
 /// [`Context`] and [`QueryPlan`] for the request.
 pub struct ExecutionRequest {
     /// Original request to the Router.
-    pub originating_request: Arc<http_compat::Request<Request>>,
+    pub originating_request: http_compat::Request<Request>,
 
     pub query_plan: Arc<QueryPlan>,
 
@@ -356,7 +366,7 @@ pub struct ExecutionRequest {
 #[buildstructor::builder]
 impl ExecutionRequest {
     pub fn new(
-        originating_request: Arc<http_compat::Request<Request>>,
+        originating_request: http_compat::Request<Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> ExecutionRequest {

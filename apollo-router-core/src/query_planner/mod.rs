@@ -4,11 +4,11 @@ mod selection;
 use crate::prelude::graphql::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
-use fetch::OperationKind;
+// XXX DUE TO PROMOTION, NOT REQUIRED
+// use fetch::OperationKind;
 use futures::prelude::*;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
@@ -85,7 +85,7 @@ impl QueryPlan {
         &'a self,
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
-        originating_request: Arc<http_compat::Request<Request>>,
+        originating_request: http_compat::Request<Request>,
         schema: &'a Schema,
     ) -> Response {
         let root = Path::empty();
@@ -119,7 +119,7 @@ impl PlanNode {
         context: &'a Context,
         service_registry: &'a ServiceRegistry,
         schema: &'a Schema,
-        originating_request: Arc<http_compat::Request<Request>>,
+        originating_request: http_compat::Request<Request>,
         parent_value: &'a Value,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
@@ -263,8 +263,18 @@ impl PlanNode {
     }
 }
 
+// XXX PROMOTED IN VISIBILITY SO THAT PLUGINS IN APOLLO_ROUTER TESTING WORK
+#[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationKind {
+    Query,
+    Mutation,
+    Subscription,
+}
+
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
+    pub use super::OperationKind;
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
@@ -293,14 +303,6 @@ pub(crate) mod fetch {
         operation_kind: OperationKind,
     }
 
-    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub enum OperationKind {
-        Query,
-        Mutation,
-        Subscription,
-    }
-
     struct Variables {
         variables: Object,
         paths: Vec<Path>,
@@ -313,7 +315,7 @@ pub(crate) mod fetch {
             variable_usages: &[String],
             data: &Value,
             current_dir: &Path,
-            request: Arc<http_compat::Request<crate::Request>>,
+            request: http_compat::Request<crate::Request>,
             schema: &Schema,
         ) -> Option<Variables> {
             let body = request.body();
@@ -367,7 +369,7 @@ pub(crate) mod fetch {
             current_dir: &'a Path,
             context: &'a Context,
             service_registry: &'a ServiceRegistry,
-            originating_request: Arc<http_compat::Request<Request>>,
+            originating_request: http_compat::Request<Request>,
             schema: &'a Schema,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
@@ -395,7 +397,7 @@ pub(crate) mod fetch {
             };
 
             let subgraph_request = SubgraphRequest::new(
-                originating_request,
+                Arc::new(originating_request),
                 http_compat::RequestBuilder::new(
                     http::Method::POST,
                     schema

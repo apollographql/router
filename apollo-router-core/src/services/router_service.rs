@@ -125,7 +125,7 @@ where
                                     return Ok(RouterResponse {
                                         response: http::Response::new(ResponseBody::GraphQL(resp))
                                             .into(),
-                                        context: context,
+                                        context,
                                     });
                                 }
                                 Err(err) => return Err(BoxError::from(err)),
@@ -155,7 +155,7 @@ where
                 {
                     Ok(RouterResponse {
                         response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                        context: context,
+                        context,
                     })
                 } else {
                     let operation_name = body.operation_name.clone();

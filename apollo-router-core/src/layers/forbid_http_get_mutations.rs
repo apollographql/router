@@ -71,10 +71,12 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(ExecutionResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
+        });
 
         let mock = mock_service.build();
 
@@ -90,10 +92,12 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(ExecutionResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
+        });
 
         let mock = mock_service.build();
 
@@ -109,10 +113,12 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_get_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(ExecutionResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
+        });
 
         let mock = mock_service.build();
 
@@ -186,11 +192,9 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
-        let request = Arc::new(
-            RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
-                .body(crate::Request::default())
-                .unwrap(),
-        );
+        let request = RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
+            .body(crate::Request::default())
+            .unwrap();
 
         ExecutionRequest::builder()
             .originating_request(request)

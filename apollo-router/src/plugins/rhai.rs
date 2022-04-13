@@ -93,10 +93,13 @@ mod rhai_plugin_mod {
     use super::RhaiContext;
 
     pub(crate) fn get_operation_name(context: &mut RhaiContext) -> String {
+        todo!()
+        /*
         match &context.context.request.body().operation_name {
             Some(n) => n.clone(),
             None => "".to_string(),
         }
+            */
     }
 }
 
@@ -379,33 +382,33 @@ impl RhaiObjectSetterGetter for Extensions {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiContext {
-    context: Context<http_compat::Request<Request>>,
+    context: Context,
 }
 
 impl RhaiContext {
-    fn new(context: Context<http_compat::Request<Request>>) -> Self {
+    fn new(context: Context) -> Self {
         Self { context }
     }
+    /*
     fn get_headers(&mut self) -> Headers {
         Headers(self.context.request.headers().clone())
     }
     fn set_headers(&mut self, headers: Headers) {
         *self.context.request.headers_mut() = headers.0;
     }
-    fn get_extensions(&mut self) -> Dynamic {
-        to_dynamic(self.context.extensions.clone()).unwrap()
+    */
+    /*
+    fn get_entries(&mut self) -> Dynamic {
+        to_dynamic(self.context.entries.clone()).unwrap()
     }
-    fn set_extensions(&mut self, extensions: Dynamic) {
-        self.context.extensions = from_dynamic(&extensions).unwrap();
+    fn set_entries(&mut self, entries: Dynamic) {
+        self.context.entries = from_dynamic(&entries).unwrap();
     }
+    */
 }
 
 impl Rhai {
-    fn run_rhai_script(
-        &self,
-        function_name: &str,
-        context: Context<http_compat::Request<Request>>,
-    ) -> Result<Context<http_compat::Request<Request>>, String> {
+    fn run_rhai_script(&self, function_name: &str, context: Context) -> Result<Context, String> {
         let mut scope = Scope::new();
         let response: RhaiContext = self
             .engine
@@ -423,12 +426,11 @@ impl Rhai {
     fn run_rhai_script_arc(
         &self,
         function_name: &str,
-        context: Context<Arc<http_compat::Request<Request>>>,
-    ) -> Result<Context<Arc<http_compat::Request<Request>>>, String> {
+        context: Context,
+    ) -> Result<Context, String> {
         let mut scope = Scope::new();
 
-        let mut new_context = Context::new().with_request((*context.request).clone());
-        new_context.extensions = context.extensions;
+        let new_context = context.clone();
         let response: RhaiContext = self
             .engine
             .call_fn(
@@ -459,17 +461,21 @@ impl Rhai {
             .register_indexer_get(Object::get_cloned)
             .register_indexer_set(Extensions::set)
             .register_indexer_get(Extensions::get_cloned)
-            .register_type::<RhaiContext>()
-            .register_get_set(
-                "headers",
-                RhaiContext::get_headers,
-                RhaiContext::set_headers,
-            )
-            .register_get_set(
-                "extensions",
-                RhaiContext::get_extensions,
-                RhaiContext::set_extensions,
-            );
+            .register_type::<RhaiContext>();
+        /*
+        .register_get_set(
+            "headers",
+            RhaiContext::get_headers,
+            RhaiContext::set_headers,
+        );
+        */
+        /*
+        .register_get_set(
+            "entries",
+            RhaiContext::get_entries,
+            RhaiContext::set_entries,
+        );
+        */
 
         engine
     }
@@ -557,7 +563,7 @@ mod tests {
         }
 
         assert_eq!(headers.get("coucou").unwrap(), &"hello");
-        assert_eq!(headers.get("coming_from_extensions").unwrap(), &"value_15");
+        assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
         assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
         assert_eq!(
             context.get::<_, String>("addition").unwrap().unwrap(),

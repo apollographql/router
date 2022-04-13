@@ -10,7 +10,6 @@ use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -78,6 +77,7 @@ where
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
                             tracing::trace!("apq: cache hit");
+                            /*
                             // XXX ORIGINALLY WE HAD A MODIFIABLE ORIGINATING REQUEST IN CONTEXT,
                             // THIS WON'T WORK NOW BECAUSE IN ARC AND NOT MODIFIABLE.
                             // HOW RESOLVE? MAY BE ABLE TO USE Arc::get_mut?
@@ -89,7 +89,8 @@ where
                                     tracing::warn!("Could not update APQ cache");
                                 }
                             }
-                            // req.originating_request.body_mut().query = Some(cached_query);
+                            */
+                            req.originating_request.body_mut().query = Some(cached_query);
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
@@ -107,15 +108,11 @@ where
                                 }))
                                 .unwrap(),
                             }];
-                            let res = RouterResponse::new(
-                                None,
-                                None,
-                                None,
-                                errors,
-                                Object::new(),
-                                None,
-                                req.context,
-                            );
+                            let res = RouterResponse::builder()
+                                .errors(errors)
+                                .extensions(Object::new())
+                                .context(req.context)
+                                .build();
 
                             Ok(ControlFlow::Break(res))
                         }
@@ -139,6 +136,7 @@ mod apq_tests {
     use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -221,46 +219,57 @@ mod apq_tests {
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
             json!({
-                "version" : 1usize,
+                "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
         )]);
 
-        let hash_only = request_builder.context(Context::new()).build();
+        let hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
             json!({
-                "version" : 1usize,
+                "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
         )]);
 
-        let second_hash_only = request_builder.context(Context::new()).build();
+        let second_hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
 
         let request_builder = RouterRequest::builder().extensions(vec![(
             "persistedQuery",
             json!({
-                "version" : 1usize,
+                "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
         )]);
 
         let with_query = request_builder
             .query("{__typename}".to_string())
+            .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
             .build();
 
         let services = service_stack.ready().await.unwrap();
-        let apq_error = services.call(hash_only.into()).await.unwrap();
+        let apq_error = services.call(hash_only).await.unwrap();
 
+        eprintln!("expect: {:?}", expected_apq_miss_error);
+        if let ResponseBody::GraphQL(graphql_response) = apq_error.response.body() {
+            eprintln!("got: {:?}", graphql_response);
+        }
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         let services = services.ready().await.unwrap();
-        services.call(with_query.into()).await.unwrap();
+        services.call(with_query).await.unwrap();
 
         let services = services.ready().await.unwrap();
-        services.call(second_hash_only.into()).await.unwrap();
+        services.call(second_hash_only).await.unwrap();
     }
 
     #[tokio::test]
@@ -304,7 +313,10 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::builder()
+                    .extensions(Object::new())
+                    .context(Context::new())
+                    .build())
             });
         mock_service_builder
             // the second last one should have the right APQ header and the full query string
@@ -330,7 +342,10 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::builder()
+                    .extensions(Object::new())
+                    .context(Context::new())
+                    .build())
             });
 
         let mock_service = mock_service_builder.build();
@@ -345,24 +360,56 @@ mod apq_tests {
             }),
         )]);
 
-        let hash_only = request_builder.clone().build();
-        let second_hash_only = request_builder.clone().build();
-        let with_query = request_builder.query("{__typename}".to_string()).build();
+        let hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
+
+        let request_builder = RouterRequest::builder().extensions(vec![(
+            "persistedQuery",
+            json!({
+                "version" : 1,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+            }),
+        )]);
+
+        let second_hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
+
+        let request_builder = RouterRequest::builder().extensions(vec![(
+            "persistedQuery",
+            json!({
+                "version" : 1,
+                "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+            }),
+        )]);
+
+        let with_query = request_builder
+            .query("{__typename}".to_string())
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
 
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss the APQ cache
-        let apq_error = services.call(hash_only.into()).await.unwrap();
+        let apq_error = services.call(hash_only).await.unwrap();
 
+        eprintln!("expect: {:?}", expected_apq_miss_error);
+        if let ResponseBody::GraphQL(graphql_response) = apq_error.response.body() {
+            eprintln!("got: {:?}", graphql_response);
+        }
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
         let services = services.ready().await.unwrap();
-        services.call(with_query.into()).await.unwrap();
+        services.call(with_query).await.unwrap();
 
         let services = services.ready().await.unwrap();
 
         // apq insert failed, this call will miss
-        let second_apq_error = services.call(second_hash_only.into()).await.unwrap();
+        let second_apq_error = services.call(second_hash_only).await.unwrap();
 
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }

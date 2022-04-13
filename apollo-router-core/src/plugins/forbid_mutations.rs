@@ -39,17 +39,6 @@ impl Plugin for ForbidMutations {
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build();
-                        /*
-                        let res = ExecutionResponse::new(
-                            None,
-                            None,
-                            None,
-                            errors,
-                            Object::new(),
-                            Some(StatusCode::BAD_REQUEST),
-                            req.context,
-                        );
-                        */
                         Ok(ControlFlow::Break(res))
                     } else {
                         Ok(ControlFlow::Continue(req))
@@ -82,10 +71,12 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_queries_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(ExecutionResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
+        });
 
         let mock = mock_service.build();
 
@@ -124,10 +115,12 @@ mod forbid_http_get_mutations_tests {
     async fn configuration_set_to_false_lets_mutations_pass_through() {
         let mut mock_service = MockExecutionService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+        mock_service.expect_call().times(1).returning(move |_| {
+            Ok(ExecutionResponse::builder()
+                .extensions(Object::new())
+                .context(Context::new())
+                .build())
+        });
 
         let mock = mock_service.build();
 
@@ -175,11 +168,9 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
-        let request = Arc::new(
-            RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
-                .body(crate::Request::default())
-                .unwrap(),
-        );
+        let request = RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
+            .body(crate::Request::default())
+            .unwrap();
         ExecutionRequest::builder()
             .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))

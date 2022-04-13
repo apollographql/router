@@ -173,7 +173,7 @@ pub struct RequestBuilder {
 impl RequestBuilder {
     pub fn new(method: http::method::Method, uri: http::Uri) -> Self {
         // Enforce the need for a method and an uri
-        let builder = Builder::new().method(method).uri(uri.clone());
+        let builder = Builder::new().method(method).uri(uri);
         Self { inner: builder }
     }
 

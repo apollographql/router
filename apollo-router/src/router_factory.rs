@@ -97,7 +97,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             pluggable_router_service
                 .map_request(
                     |http_request: Request<apollo_router_core::Request>| RouterRequest {
-                        originating_request: Arc::new(http_request),
+                        originating_request: http_request,
                         context: Context::new(),
                     },
                 )

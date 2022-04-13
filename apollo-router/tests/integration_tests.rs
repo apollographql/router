@@ -33,9 +33,9 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let originating_request = Arc::new(http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
+        let originating_request = http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap());
+            .unwrap();
 
         let request = graphql::RouterRequest {
             originating_request,
@@ -96,11 +96,10 @@ async fn api_schema_hides_field() {
         ))
         .build();
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -186,11 +185,10 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -217,11 +215,10 @@ async fn service_errors_should_be_propagated() {
 
     let expected_service_hits = hashmap! {};
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -265,11 +262,10 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -316,11 +312,10 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -345,11 +340,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_request_with_query)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -369,11 +363,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
             .body(apq_only_request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -433,11 +426,10 @@ async fn missing_variables() {
         )
         .build();
 
-    let originating_request = Arc::new(
+    let originating_request =
         http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
             .body(request)
-            .unwrap(),
-    );
+            .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
