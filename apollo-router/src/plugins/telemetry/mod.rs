@@ -24,6 +24,7 @@ use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tower::steer::Steer;
 use tower::util::BoxService;
@@ -36,6 +37,11 @@ mod otlp;
 mod tracing;
 
 pub struct Telemetry {
+    // If the plugin is started up but not activated,
+    // the router will hang.
+    // This will allow us to make sure
+    // we're dropping the plugin cleanly
+    activated: AtomicBool,
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
 
@@ -167,34 +173,29 @@ impl Plugin for Telemetry {
         // The rest of this code in this method is expected to succeed.
         // The issue is that Otel uses globals for a bunch of stuff.
         // If we move to a completely tower based architecture then we could make this nicer.
-        let tracer_provider = self
-            .tracer_provider
-            .take()
-            .expect("trace_provider will have been set in startup, qed");
-        let tracer = tracer_provider.versioned_tracer(
-            "apollo-router",
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-        Self::replace_tracer_provider(tracer_provider);
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            let tracer = tracer_provider.versioned_tracer(
+                "apollo-router",
+                Some(env!("CARGO_PKG_VERSION")),
+                None,
+            );
+            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+            Self::replace_tracer_provider(tracer_provider);
 
-        replace_layer(Box::new(telemetry))
-            .expect("set_global_subscriber() was not called at startup, fatal");
+            replace_layer(Box::new(telemetry))
+                .expect("set_global_subscriber() was not called at startup, fatal");
+        }
+
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
         global::set_text_map_propagator(Self::create_propagator(&self.config));
-    }
 
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        if let Some(sender) = self.spaceport_shutdown.take() {
-            let _ = sender.send(());
-        }
-        Ok(())
+        self.activated.store(true, Ordering::SeqCst);
     }
 
     fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(Telemetry {
+            activated: Default::default(),
             spaceport_shutdown: None,
             tracer_provider: None,
             custom_endpoints: Default::default(),
@@ -305,6 +306,20 @@ impl Plugin for Telemetry {
         .boxed();
 
         Some(Handler::new(svc))
+    }
+}
+
+impl Drop for Telemetry {
+    fn drop(&mut self) {
+        // This allows us to make sure the telemetry related globals
+        // are in the right state before we shut it down
+        #[allow(deprecated)]
+        if !self.activated.load(Ordering::SeqCst) {
+            self.activate();
+        }
+        if let Some(sender) = self.spaceport_shutdown.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
