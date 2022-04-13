@@ -35,20 +35,11 @@ impl Service<SubgraphRequest> for MockSubgraph {
         let response = if let Some(response) = self.mocks.get(req.http_request.body()) {
             builder.data(response.data.clone()).build().into()
         } else {
-            tracing::error!(
+            panic!(
                 "could not find mock for query: {}",
                 serde_json::to_string(req.http_request.body())
                     .expect("could not serialise request")
             );
-            builder
-                .errors(vec![crate::Error {
-                    message: "couldn't find mock for query".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                }])
-                .build()
-                .into()
         };
         future::ok(response)
     }
