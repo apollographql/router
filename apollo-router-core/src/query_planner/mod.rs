@@ -555,7 +555,6 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::str::FromStr;
-    use std::sync::Arc;
     use tower::{ServiceBuilder, ServiceExt};
     macro_rules! test_query_plan {
         () => {
@@ -592,26 +591,27 @@ mod tests {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
         };
 
-        let mut mock_products_service = plugin_utils::MockSubgraphService::new();
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
             .withf(|request| {
                 assert_eq!(
-                    request.http_request.body().operation_name,
+                    request.subgraph_request.body().operation_name,
                     Some("topProducts_product_0".into())
                 );
                 true
             });
         query_plan
             .execute(
-                &Context::new().with_request(Arc::new(http_compat::Request::mock())),
+                &Context::new(),
                 &ServiceRegistry::new(HashMap::from([(
                     "product".into(),
                     ServiceBuilder::new()
                         .buffer(1)
                         .service(mock_products_service.build().boxed()),
                 )])),
+                http_compat::Request::mock(),
                 &Schema::from_str(test_schema!()).unwrap(),
             )
             .await;

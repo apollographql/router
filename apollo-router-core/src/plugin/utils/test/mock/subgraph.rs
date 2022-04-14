@@ -60,7 +60,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .build()];
             SubgraphResponse::fake_builder()
                 .errors(errors)
-                .extensions(self.extensions.clone())
+                .extensions(self.extensions.clone().unwrap_or_default())
                 .context(req.context)
                 .build()
         };
