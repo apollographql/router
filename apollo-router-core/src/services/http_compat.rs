@@ -16,20 +16,62 @@ use bytes::Bytes;
 #[cfg(feature = "axum-server")]
 use crate::ResponseBody;
 
-use http::{
-    header::HeaderName,
-    request::{Builder, Parts},
-    uri::InvalidUri,
-    HeaderValue, Version,
-};
+use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method, Uri};
 
 #[derive(Debug)]
 pub struct Request<T> {
-    pub inner: http::Request<T>,
+    inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.
+#[buildstructor::builder]
 impl<T> Request<T> {
+    /// This is the constructor (or builder) to use when constructing a real Request.
+    ///
+    /// Required parameters are required in non-testing code to create a Request.
+    pub fn new(
+        headers: Vec<(HeaderName, HeaderValue)>,
+        uri: http::Uri,
+        method: http::Method,
+        body: T,
+    ) -> http::Result<Request<T>> {
+        let mut builder = http::request::Builder::new().method(method).uri(uri);
+        for (key, value) in headers {
+            builder = builder.header(key, value);
+        }
+        let req = builder.body(body)?;
+
+        Ok(Self { inner: req })
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" Request.
+    ///
+    /// This does not enforce the provision of the uri and method that is required for a fully functional
+    /// Request. It's usually enough for testing, when a fully consructed Request is
+    /// difficult to construct and not required for the purposes of the test.
+    pub fn fake_new(
+        headers: Vec<(HeaderName, HeaderValue)>,
+        uri: Option<http::Uri>,
+        method: Option<http::Method>,
+        body: T,
+    ) -> http::Result<Request<T>>
+// where
+    //     HeaderName: TryFrom<K>,
+    //     <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
+    //     HeaderValue: TryFrom<V>,
+    //     <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        let mut builder = http::request::Builder::new()
+            .method(method.unwrap_or(Method::GET))
+            .uri(uri.unwrap_or_else(|| Uri::from_static("http://test")));
+        for (key, value) in headers {
+            builder = builder.header(key, value);
+        }
+        let req = builder.body(body)?;
+
+        Ok(Self { inner: req })
+    }
+
     /// Update the associated URL
     pub fn from_parts(head: Parts, body: T) -> Request<T> {
         Request {
@@ -151,60 +193,6 @@ impl<T: PartialEq> PartialEq for Request<T> {
 }
 
 impl<T: PartialEq> Eq for Request<T> {}
-
-impl<T> From<Request<T>> for http::Request<T> {
-    fn from(request: Request<T>) -> Self {
-        request.inner
-    }
-}
-
-impl<T> TryFrom<http::Request<T>> for Request<T> {
-    type Error = InvalidUri;
-    fn try_from(request: http::Request<T>) -> Result<Self, Self::Error> {
-        Ok(Self { inner: request })
-    }
-}
-
-#[derive(Debug)]
-pub struct RequestBuilder {
-    inner: Builder,
-}
-
-impl RequestBuilder {
-    pub fn new(method: http::method::Method, uri: http::Uri) -> Self {
-        // Enforce the need for a method and an uri
-        let builder = Builder::new().method(method).uri(uri);
-        Self { inner: builder }
-    }
-
-    /// Set the HTTP version for this request.
-    pub fn version(self, version: Version) -> Self {
-        Self {
-            inner: self.inner.version(version),
-        }
-    }
-
-    /// Appends a header to this request builder.
-    pub fn header<K, V>(self, key: K, value: V) -> Self
-    where
-        HeaderName: TryFrom<K>,
-        <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
-        HeaderValue: TryFrom<V>,
-        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
-    {
-        Self {
-            inner: self.inner.header(key, value),
-        }
-    }
-
-    /// "Consumes" this builder, using the provided `body` to return a
-    /// constructed `Request`.
-    pub fn body<T>(self, body: T) -> http::Result<Request<T>> {
-        Ok(Request {
-            inner: self.inner.body(body)?,
-        })
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct Response<T> {

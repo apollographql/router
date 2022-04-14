@@ -366,11 +366,10 @@ where
 mod test {
     use super::*;
     use crate::fetch::OperationKind;
-    use crate::http_compat::RequestBuilder;
+    use crate::http_compat;
     use crate::plugin::utils::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
-    use http::{Method, Uri};
     use std::collections::HashSet;
     use std::sync::Arc;
     use tower::BoxError;
@@ -648,28 +647,45 @@ mod test {
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
             originating_request: Arc::new(
-                RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-                    .header("da", "vda")
-                    .header("db", "vdb")
-                    .header("dc", "vdc")
-                    .header(HOST, "host")
-                    .header(CONTENT_LENGTH, "2")
-                    .header(CONTENT_TYPE, "graphql")
+                http_compat::Request::fake_builder()
+                    .header((
+                        HeaderName::from_static("da"),
+                        HeaderValue::from_static("vda"),
+                    ))
+                    .header((
+                        HeaderName::from_static("db"),
+                        HeaderValue::from_static("vdb"),
+                    ))
+                    .header((
+                        HeaderName::from_static("db"),
+                        HeaderValue::from_static("vdb"),
+                    ))
+                    .header((HOST, HeaderValue::from_static("host")))
+                    .header((CONTENT_LENGTH, HeaderValue::from_static("2")))
+                    .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
                     .body(Request::builder().query("query").build())
+                    .build()
                     .unwrap(),
             ),
-            subgraph_request: RequestBuilder::new(
-                Method::GET,
-                Uri::from_str("http://test").unwrap(),
-            )
-            .header("aa", "vaa")
-            .header("ab", "vab")
-            .header("ac", "vac")
-            .header(HOST, "rhost")
-            .header(CONTENT_LENGTH, "22")
-            .header(CONTENT_TYPE, "graphql")
-            .body(Request::builder().query("query").build())
-            .unwrap(),
+            subgraph_request: http_compat::Request::fake_builder()
+                .header((
+                    HeaderName::from_static("aa"),
+                    HeaderValue::from_static("vaa"),
+                ))
+                .header((
+                    HeaderName::from_static("ab"),
+                    HeaderValue::from_static("vab"),
+                ))
+                .header((
+                    HeaderName::from_static("ac"),
+                    HeaderValue::from_static("vac"),
+                ))
+                .header((HOST, HeaderValue::from_static("rhost")))
+                .header((CONTENT_LENGTH, HeaderValue::from_static("22")))
+                .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
+                .body(Request::builder().query("query").build())
+                .build()
+                .unwrap(),
             operation_kind: OperationKind::Query,
             context: Context::new(),
         }

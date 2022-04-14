@@ -5,7 +5,7 @@ use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
-use http::StatusCode;
+use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
@@ -141,13 +141,16 @@ impl RouterRequest {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// Required parameters are required in non-testing code to create a RouterRequest.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Arc<Object>,
         extensions: Vec<(&'static str, Value)>,
         context: Context,
-        headers: Vec<(String, String)>,
+        headers: Vec<(HeaderName, HeaderValue)>,
+        uri: Uri,
+        method: Method,
     ) -> RouterRequest {
         let object: Object = extensions
             .into_iter()
@@ -160,15 +163,14 @@ impl RouterRequest {
             .extensions(object)
             .build();
 
-        let mut builder = http::request::Builder::new()
-            .method(Method::GET)
-            .uri(Uri::from_str("http://default").unwrap());
-        for (key, value) in headers {
-            builder = builder.header(key, value);
-        }
-        let req = builder.body(gql_request).expect("body is always valid qed");
+        let originating_request = http_compat::Request::builder()
+            .headers(headers)
+            .uri(uri)
+            .method(method)
+            .body(gql_request)
+            .build()
+            .expect("body is always valid qed");
 
-        let originating_request = http_compat::Request { inner: req };
         Self {
             originating_request,
             context,
@@ -186,7 +188,7 @@ impl RouterRequest {
         variables: Option<Arc<Object>>,
         extensions: Vec<(&'static str, Value)>,
         context: Option<Context>,
-        headers: Vec<(String, String)>,
+        headers: Vec<(HeaderName, HeaderValue)>,
     ) -> RouterRequest {
         RouterRequest::new(
             query,
@@ -195,6 +197,8 @@ impl RouterRequest {
             extensions,
             context.unwrap_or_default(),
             headers,
+            Uri::from_static("http://default"),
+            Method::GET,
         )
     }
 }

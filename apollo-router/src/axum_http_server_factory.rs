@@ -505,12 +505,9 @@ async fn run_graphql_request(
                 .unwrap();
             *http_request.headers_mut() = header_map.clone();
 
+            let (head, body) = http_request.into_parts();
             service
-                .call(
-                    http_request
-                        .try_into()
-                        .expect("uri must be valid at this point; qed"),
-                )
+                .call(http_compat::Request::from_parts(head, body))
                 .await
                 .map(|response| {
                     tracing::trace_span!("serialize_response").in_scope(|| response.into_response())
