@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "router.fullname" . }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "router.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "router.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "router.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if or .Values.router.args .Values.router.configuration }}
+          args:
+            {{- if .Values.router.args }}
+            {{- toYaml .Values.router.args | nindent 12 }}
+            {{- end }}
+            {{- if .Values.router.configuration }}
+            - --config
+            - /app/configuration.yaml
+            {{- end }}
+          {{- end }}
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef }}
+          env:
+            {{- if not (empty .Values.managedFederation.apiKey) }}
+            - name: APOLLO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "router.fullname" . }}
+                  key: managedFederationApiKey
+            {{- end }}
+            {{- if not (empty .Values.managedFederation.graphRef) }}
+            - name: APOLLO_GRAPH_REF
+              value: {{ .Values.managedFederation.graphRef }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPorts.http }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /.well-known/apollo/server-health
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /.well-known/apollo/server-health
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.router.configuration }}
+          volumeMounts:
+            - name: router-configuration
+              mountPath: /app/configuration.yaml
+              subPath: configuration.yaml
+              readOnly: true
+          {{- end }}
+      {{- if .Values.router.configuration }}
+      volumes:
+        - name: router-configuration
+          configMap:
+            name: {{ include "router.fullname" . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

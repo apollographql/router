@@ -1,0 +1,39 @@
+{{ template "chart.header" . }}
+[router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+## Prerequisites
+
+* Kubernetes v1.19+
+
+## Get Repo Info
+
+```console
+helm repo add apollographql https://todo/where-to-host-helm-repo
+helm repo update
+```
+
+## Install Chart
+
+**Important:** only helm3 is supported
+
+```console
+helm upgrade --install [RELEASE_NAME] apollographql/router --values my-values.yaml
+```
+
+_See [configuration](#configuration) below._
+
+## Configuration
+
+See [Customizing the Chart Before Installing](https://helm.sh/docs/intro/using_helm/#customizing-the-chart-before-installing). To see all configurable options with detailed comments, visit the chart's [values.yaml](./values.yaml), or run these configuration commands:
+
+```console
+helm show values apollographql/router
+```
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}
