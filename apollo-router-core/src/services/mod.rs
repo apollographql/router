@@ -30,15 +30,6 @@ pub use tower_subgraph_service::TowerSubgraphService;
 
 pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
-impl From<http_compat::Request<Request>> for RouterRequest {
-    fn from(originating_request: http_compat::Request<Request>) -> Self {
-        Self {
-            originating_request,
-            context: Context::new(),
-        }
-    }
-}
-
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(untagged)]

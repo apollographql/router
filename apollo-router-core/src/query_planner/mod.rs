@@ -4,8 +4,7 @@ mod selection;
 use crate::prelude::graphql::*;
 pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
-// XXX DUE TO PROMOTION, NOT REQUIRED
-// use fetch::OperationKind;
+use fetch::OperationKind;
 use futures::prelude::*;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -263,23 +262,21 @@ impl PlanNode {
     }
 }
 
-// XXX PROMOTED IN VISIBILITY SO THAT PLUGINS IN APOLLO_ROUTER TESTING WORK
-#[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum OperationKind {
-    Query,
-    Mutation,
-    Subscription,
-}
-
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
-    pub use super::OperationKind;
     use crate::prelude::graphql::*;
     use serde::Deserialize;
     use std::sync::Arc;
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
+
+    #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum OperationKind {
+        Query,
+        Mutation,
+        Subscription,
+    }
 
     /// A fetch node.
     #[derive(Debug, PartialEq, Deserialize)]
