@@ -228,7 +228,7 @@ mod test {
     struct AlwaysFailsToStartPlugin {}
 
     #[async_trait::async_trait]
-    impl Plugin for AlwaysFailsToCreatePlugin {
+    impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
         async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
