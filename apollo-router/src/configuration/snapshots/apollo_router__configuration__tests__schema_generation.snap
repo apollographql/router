@@ -431,10 +431,12 @@ expression: "&schema"
               "nullable": true
             },
             "client_name_header": {
+              "default": "apollographql-client-name",
               "type": "string",
               "nullable": true
             },
             "client_version_header": {
+              "default": "apollographql-client-version",
               "type": "string",
               "nullable": true
             },

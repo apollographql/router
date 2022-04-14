@@ -1,0 +1,22 @@
+server:
+  listen: 1.2.3.4:5
+telemetry:
+  tracing:
+    otlp:
+      endpoint: default
+      grpc:
+        ca:
+          env: ""
+        cert:
+          env: ""
+        domain_name: ""
+        key:
+          env: ""
+        metadata:
+          foo: bar
+      http:
+        headers:
+          foo: bar
+      timeout: 4s
+      protocol: grpc
+

@@ -568,53 +568,6 @@ mod tests {
     }
 
     #[test]
-    fn test_supergraph_config_serde() {
-        assert_config_snapshot!("testdata/supergraph_config.yaml");
-    }
-
-    #[test]
-    fn ensure_configuration_api_does_not_change() {
-        assert_config_snapshot!("testdata/config_basic.yml");
-        assert_config_snapshot!("testdata/config_full.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_jaeger_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_jaeger_full.yml");
-    }
-
-    #[test]
-    fn ensure_configuration_api_does_not_change_common() {
-        // NOTE: don't take a snapshot here because the optional fields appear with ~ and they vary
-        // per implementation
-
-        serde_yaml::from_str::<Configuration>(include_str!(
-            "testdata/config_opentelemetry_otlp_tracing_http_common.yml"
-        ))
-        .unwrap();
-
-        serde_yaml::from_str::<Configuration>(include_str!(
-            "testdata/config_opentelemetry_otlp_tracing_grpc_common.yml"
-        ))
-        .unwrap();
-    }
-
-    #[test]
-    fn ensure_configuration_api_does_not_change_grpc() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_full.yml");
-    }
-
-    #[test]
-    fn ensure_configuration_api_does_not_change_http() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_basic.yml");
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_http_full.yml");
-    }
-
-    #[cfg(all(feature = "otlp-grpc"))]
-    #[test]
-    fn ensure_configuration_api_does_not_change_tls_config() {
-        assert_config_snapshot!("testdata/config_opentelemetry_otlp_tracing_grpc_tls.yml");
-    }
-
-    #[test]
     fn routing_url_in_schema() {
         let schema: graphql::Schema = r#"
         schema
