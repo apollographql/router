@@ -57,10 +57,10 @@ impl Service<SubgraphRequest> for MockSubgraph {
         } else {
             let errors = vec![crate::Error::builder()
                 .message("couldn't find mock for query".to_string())
+                .extensions(self.extensions.clone().unwrap_or_default())
                 .build()];
             SubgraphResponse::fake_builder()
                 .errors(errors)
-                .extensions(self.extensions.clone().unwrap_or_default())
                 .context(req.context)
                 .build()
         };
