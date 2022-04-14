@@ -9,6 +9,7 @@ anyhow = "1.0.55"
 apollo-parser = "0.2.3"
 apollo-router = { path = "../../apollo-router" }
 apollo-router-core = { path = "../../apollo-router-core" }
+async-trait = "0.1.53"
 futures = "0.3.21"
 http = "0.2.6"
 serde = "1.0.136"

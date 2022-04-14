@@ -19,10 +19,11 @@ struct AllowClientIdFromFile {
     allowed_ids_path: PathBuf,
 }
 
+#[async_trait::async_trait]
 impl Plugin for AllowClientIdFromFile {
     type Config = AllowClientIdConfig;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         let AllowClientIdConfig { path, header } = configuration;
         let allowed_ids_path = PathBuf::from(path.as_str());
         Ok(Self {

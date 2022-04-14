@@ -5,8 +5,8 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::Schema;
 use apollo_router_core::{prelude::*, Handler};
+use apollo_router_core::{DynPlugin, Schema};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
@@ -29,6 +29,8 @@ enum PrivateState<RS> {
         #[derivative(Debug = "ignore")]
         router_service: RS,
         server_handle: HttpServerHandle,
+        #[derivative(Debug = "ignore")]
+        plugins: Vec<(String, Box<dyn DynPlugin>)>,
     },
     Stopped,
     Errored(FederatedServerError),
@@ -160,6 +162,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                     },
                     UpdateSchema(new_schema),
                 ) => {
@@ -169,6 +172,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                         None,
                         Some(Arc::new(*new_schema)),
                     )
@@ -183,6 +187,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                     },
                     UpdateConfiguration(new_configuration),
                 ) => {
@@ -192,6 +197,7 @@ where
                         schema,
                         router_service,
                         server_handle,
+                        plugins,
                         Some(Arc::new(*new_configuration)),
                         None,
                     )
@@ -259,7 +265,7 @@ where
             let configuration = Arc::new(configuration);
             let schema = Arc::new(schema);
 
-            let router = self
+            let (router, plugins) = self
                 .router_factory
                 .create(configuration.clone(), schema.clone(), None)
                 .await
@@ -268,9 +274,7 @@ where
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
 
-            let plugin_handlers: HashMap<String, Handler> = self
-                .router_factory
-                .plugins()
+            let plugin_handlers: HashMap<String, Handler> = plugins
                 .iter()
                 .filter_map(|(plugin_name, plugin)| {
                     (plugin_name.starts_with("apollo.") || plugin_name.starts_with("experimental."))
@@ -294,6 +298,7 @@ where
                 schema,
                 router_service: router,
                 server_handle,
+                plugins,
             })
         } else {
             Ok(state)
@@ -305,6 +310,7 @@ where
         schema: Arc<Schema>,
         router_service: <FA as RouterServiceFactory>::RouterService,
         server_handle: HttpServerHandle,
+        plugins: Vec<(String, Box<dyn DynPlugin>)>,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
@@ -323,10 +329,8 @@ where
             )
             .await
         {
-            Ok(new_router_service) => {
-                let plugin_handlers: HashMap<String, Handler> = self
-                    .router_factory
-                    .plugins()
+            Ok((new_router_service, plugins)) => {
+                let plugin_handlers: HashMap<String, Handler> = plugins
                     .iter()
                     .filter_map(|(plugin_name, plugin)| {
                         (plugin_name.starts_with("apollo.")
@@ -354,6 +358,7 @@ where
                     schema: new_schema,
                     router_service: new_router_service,
                     server_handle,
+                    plugins,
                 })
             }
             Err(err) => {
@@ -366,6 +371,7 @@ where
                     schema,
                     router_service,
                     server_handle,
+                    plugins,
                 })
             }
         }
@@ -392,7 +398,7 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::router_factory::RouterServiceFactory;
     use apollo_router_core::http_compat::{Request, Response};
-    use apollo_router_core::{DynPlugin, ResponseBody};
+    use apollo_router_core::ResponseBody;
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use mockall::{mock, Sequence};
@@ -602,10 +608,6 @@ mod tests {
             .times(1)
             .returning(|_, _, _| Err(BoxError::from("Error")));
 
-        router_factory
-            .expect_plugins()
-            .times(0)
-            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert!(matches!(
@@ -635,7 +637,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok(router)
+                Ok((router, Vec::new()))
             });
         router_factory
             .expect_create()
@@ -643,10 +645,6 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _| Err(BoxError::from("error")));
 
-        router_factory
-            .expect_plugins()
-            .times(1)
-            .return_const(Vec::new());
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert!(matches!(
@@ -688,9 +686,7 @@ mod tests {
                 configuration: Arc<Configuration>,
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
-            ) -> Result<MockMyRouter, BoxError>;
-
-            fn plugins(&self) -> &[(String, Box<dyn DynPlugin>)];
+            ) -> Result<(MockMyRouter, Vec<(String, Box<dyn DynPlugin>)>), BoxError>;
         }
     }
 
@@ -821,12 +817,8 @@ mod tests {
             .returning(move |_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok(router)
+                Ok((router, Vec::new()))
             });
-        router_factory
-            .expect_plugins()
-            .times(expect_times_called)
-            .return_const(Vec::new());
         router_factory
     }
 }

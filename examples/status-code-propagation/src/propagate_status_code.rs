@@ -19,10 +19,11 @@ struct PropagateStatusCode {
     status_codes: Vec<u16>,
 }
 
+#[async_trait::async_trait]
 impl Plugin for PropagateStatusCode {
     type Config = PropagateStatusCodeConfig;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self {
             status_codes: configuration.status_codes,
         })

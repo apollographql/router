@@ -1057,28 +1057,6 @@ expression: "&schema"
         }
       }
     },
-    "test.always_fails_to_start_and_stop": {
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      }
-    },
-    "test.always_fails_to_stop": {
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      }
-    },
     "test.always_starts_and_stops": {
       "type": "object",
       "required": [

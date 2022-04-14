@@ -152,10 +152,11 @@ impl Headers {
     }
 }
 
+#[async_trait::async_trait]
 impl Plugin for Rhai {
     type Config = Conf;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         let engine = Arc::new(Rhai::new_rhai_engine());
         let ast = engine.compile_file(configuration.filename)?;
         Ok(Self { ast, engine })
@@ -582,6 +583,7 @@ mod tests {
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
             )
+            .await
             .unwrap();
         let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
         let context = Context::new();
@@ -645,6 +647,7 @@ mod tests {
             .create_instance(
                 &Value::from_str(r#"{"filename":"tests/fixtures/test.rhai"}"#).unwrap(),
             )
+            .await
             .unwrap();
         let mut router_service =
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
