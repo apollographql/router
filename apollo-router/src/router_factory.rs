@@ -88,7 +88,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         // We're good to go with the new service. Let the plugins know that this is about to happen.
         // This is needed so that the Telemetry plugin can swap in the new propagator.
         // The alternative is that we introduce another service on Plugin that wraps the request
-        // as a much earlier stage.
+        // at a much earlier stage.
         for (_, plugin) in &mut plugins {
             tracing::debug!("activating plugin {}", plugin.name());
             plugin.activate();
@@ -228,7 +228,7 @@ mod test {
     struct AlwaysFailsToStartPlugin {}
 
     #[async_trait::async_trait]
-    impl Plugin for AlwaysFailsToStartPlugin {
+    impl Plugin for AlwaysFailsToCreatePlugin {
         type Config = Conf;
 
         async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
