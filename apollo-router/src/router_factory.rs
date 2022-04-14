@@ -439,6 +439,41 @@ mod test {
         assert!(service.is_err())
     }
 
+    #[tokio::test]
+    async fn test_telemetry_doesnt_hang_with_invalid_schema() {
+        use crate::subscriber::{set_global_subscriber, RouterSubscriber};
+        use tracing_subscriber::EnvFilter;
+
+        // A global subscriber must be set before we start up the telemetry plugin
+        let _ = set_global_subscriber(RouterSubscriber::JsonSubscriber(
+            tracing_subscriber::fmt::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .json()
+                .finish(),
+        ));
+
+        let config: Configuration = serde_yaml::from_str(
+            r#"
+            telemetry:
+              tracing:
+                trace_config:
+                  service_name: router
+                otlp:
+                  endpoint: default
+        "#,
+        )
+        .unwrap();
+
+        let schema: Schema = include_str!("testdata/invalid_supergraph.graphql")
+            .parse()
+            .unwrap();
+
+        let service = YamlRouterServiceFactory::default()
+            .create(Arc::new(config), Arc::new(schema), None)
+            .await;
+        service.map(|_| ()).unwrap_err();
+    }
+
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
 
