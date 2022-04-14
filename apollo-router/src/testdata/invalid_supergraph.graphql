@@ -1,4 +1,4 @@
-# This supergraph is almost valid. the only difference is that the reviews field in the Product type joins on REVIEWS which is incorrect
+# This supergraph is almost valid. the only difference is that the reviews field in the Product type joins on PRODUCTS which is incorrect
 
 schema @core(feature: "https://specs.apollo.dev/core/v0.1") @core(feature: "https://specs.apollo.dev/join/v0.1") @core(feature: "https://specs.apollo.dev/tag/v0.1") @apollo_studio_metadata(launchId: "2396d4fb-a1e4-457d-8da4-347479b852f1", buildId: "2396d4fb-a1e4-457d-8da4-347479b852f1", checkId: null) @core(feature: "https://specs.apollo.dev/inaccessible/v0.1") {
   query: Query
