@@ -25,7 +25,7 @@ use http::{
 
 #[derive(Debug)]
 pub struct Request<T> {
-    pub inner: http::Request<T>,
+    inner: http::Request<T>,
 }
 
 // Most of the required functionality is provided by our Deref and DerefMut implementations.

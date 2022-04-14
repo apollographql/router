@@ -171,7 +171,9 @@ impl RouterRequest {
 
         let req = builder.body(gql_request).expect("body is always valid qed");
 
-        let originating_request = http_compat::Request { inner: req };
+        let originating_request: http_compat::Request<Request> = req
+            .try_into()
+            .expect("built carefully from inputs to be correct; qed");
 
         Self {
             originating_request,
