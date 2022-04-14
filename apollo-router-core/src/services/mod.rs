@@ -218,6 +218,7 @@ impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -225,6 +226,7 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
+        headers: Vec<(HeaderName, HeaderValue)>,
         context: Context,
     ) -> RouterResponse {
         // Build a response
@@ -237,8 +239,13 @@ impl RouterResponse {
             .build();
 
         // Build an http Response
-        let http_response = http::Response::builder()
-            .status(status_code.unwrap_or(StatusCode::OK))
+        let mut http_response_builder =
+            http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (k, v) in headers {
+            http_response_builder = http_response_builder.header(k, v);
+        }
+
+        let http_response = http_response_builder
             .body(ResponseBody::GraphQL(res))
             .expect("ResponseBody is serializable; qed");
 
@@ -258,6 +265,7 @@ impl RouterResponse {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// RouterResponse. It's usually enough for testing, when a fully consructed RouterResponse is
     /// difficult to construct and not required for the pusposes of the test.
+    #[allow(clippy::too_many_arguments)]
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -265,6 +273,7 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
+        headers: Vec<(HeaderName, HeaderValue)>,
         context: Option<Context>,
     ) -> RouterResponse {
         RouterResponse::new(
@@ -274,6 +283,7 @@ impl RouterResponse {
             errors,
             extensions.unwrap_or_default(),
             status_code,
+            headers,
             context.unwrap_or_default(),
         )
     }
