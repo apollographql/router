@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Request {
     /// The graphql query.
-    #[builder(default, setter(strip_option))]
+    #[builder(default)]
     pub query: Option<String>,
 
     /// The optional graphql operation.
@@ -80,7 +80,7 @@ impl Request {
             .extensions(extensions);
 
         let request = if let Some(query_str) = query {
-            request_builder.query(query_str).build()
+            request_builder.query(Some(query_str.to_string())).build()
         } else {
             request_builder.build()
         };

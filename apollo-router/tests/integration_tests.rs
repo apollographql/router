@@ -18,7 +18,7 @@ use tower::ServiceExt;
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = graphql::Request::builder()
-            .query($query.to_string())
+            .query(Some($query.to_string()))
             .variables(Arc::new(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
@@ -85,7 +85,7 @@ async fn basic_composition() {
 #[tokio::test]
 async fn api_schema_hides_field() {
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { name inStock } }"#)
+        .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
         .variables(Arc::new(
             vec![
                 ("topProductsFirst".into(), 2.into()),
@@ -168,7 +168,10 @@ async fn basic_mutation() {
 #[tokio::test]
 async fn queries_should_work_over_get() {
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
         .variables(Arc::new(
             vec![
                 ("topProductsFirst".into(), 2.into()),
@@ -209,7 +212,7 @@ async fn service_errors_should_be_propagated() {
     };
 
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { name } }"#)
+        .query(Some(r#"{ topProducts { name } }"#.to_string()))
         .operation_name(Some("invalidOperationName".to_string()))
         .build();
 
@@ -234,7 +237,7 @@ async fn service_errors_should_be_propagated() {
 #[tokio::test]
 async fn mutation_should_not_work_over_get() {
     let request = graphql::Request::builder()
-        .query(
+        .query(Some(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -247,8 +250,9 @@ async fn mutation_should_not_work_over_get() {
                   id
                   body
                 }
-              }"#,
-        )
+              }"#
+            .to_string(),
+        ))
         .variables(Arc::new(
             vec![
                 ("topProductsFirst".into(), 2.into()),
@@ -332,7 +336,7 @@ async fn automated_persisted_queries() {
 
     let apq_request_with_query = request_builder
         .clone()
-        .query("query Query { me { name } }")
+        .query(Some("query Query { me { name } }".to_string()))
         .build();
 
     // Services should have been queried once
@@ -407,7 +411,7 @@ async fn variables() {
 #[tokio::test]
 async fn missing_variables() {
     let request = graphql::Request::builder()
-        .query(
+        .query(Some(
             r#"
             query ExampleQuery(
                 $missingVariable: Int!,
@@ -423,7 +427,7 @@ async fn missing_variables() {
             }
             "#
             .to_string(),
-        )
+        ))
         .build();
 
     let originating_request =

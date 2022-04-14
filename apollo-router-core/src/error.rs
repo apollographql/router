@@ -123,7 +123,6 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
-    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.

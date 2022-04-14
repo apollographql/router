@@ -153,8 +153,9 @@ impl RouterRequest {
             .into_iter()
             .map(|(name, value)| (ByteString::from(name.to_string()), value))
             .collect();
+
         let gql_request = Request::builder()
-            .query(query.unwrap_or_default())
+            .query(query)
             .operation_name(operation_name)
             .variables(variables)
             .extensions(object)
@@ -163,12 +164,15 @@ impl RouterRequest {
         let mut builder = http::request::Builder::new()
             .method(Method::GET)
             .uri(Uri::from_str("http://default").unwrap());
+
         for (key, value) in headers {
             builder = builder.header(key, value);
         }
+
         let req = builder.body(gql_request).expect("body is always valid qed");
 
         let originating_request = http_compat::Request { inner: req };
+
         Self {
             originating_request,
             context,
@@ -216,7 +220,7 @@ impl RouterResponse {
     /// Required parameters are required in non-testing code to create a RouterResponse..
     pub fn new(
         label: Option<String>,
-        data: Option<Value>,
+        data: Value,
         path: Option<Path>,
         errors: Vec<crate::Error>,
         extensions: Object,
@@ -226,7 +230,8 @@ impl RouterResponse {
         // Build a response
         let res = Response::builder()
             .label(label)
-            .data(data.unwrap_or_default())
+            // .data(data.unwrap_or_default())
+            .data(data)
             .path(path)
             .errors(errors)
             .extensions(extensions)
@@ -265,7 +270,7 @@ impl RouterResponse {
     ) -> RouterResponse {
         RouterResponse::new(
             label,
-            data,
+            data.unwrap_or_default(),
             path,
             errors,
             extensions.unwrap_or_default(),

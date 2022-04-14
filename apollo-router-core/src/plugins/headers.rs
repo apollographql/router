@@ -655,7 +655,7 @@ mod test {
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
-                    .body(Request::builder().query("query").build())
+                    .body(Request::builder().query(Some("query".to_string())).build())
                     .unwrap(),
             ),
             subgraph_request: RequestBuilder::new(
@@ -668,7 +668,7 @@ mod test {
             .header(HOST, "rhost")
             .header(CONTENT_LENGTH, "22")
             .header(CONTENT_TYPE, "graphql")
-            .body(Request::builder().query("query").build())
+            .body(Request::builder().query(Some("query".to_string())).build())
             .unwrap(),
             operation_kind: OperationKind::Query,
             context: Context::new(),

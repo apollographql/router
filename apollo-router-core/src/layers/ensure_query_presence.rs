@@ -5,7 +5,7 @@
 //! If the request does not contain a query, then the request is rejected.
 
 use crate::checkpoint::CheckpointService;
-use crate::{Object, RouterRequest, RouterResponse};
+use crate::{RouterRequest, RouterResponse};
 use http::StatusCode;
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -33,15 +33,13 @@ where
                         path: Default::default(),
                         extensions: Default::default(),
                     }];
-                    let res = RouterResponse::new(
-                        None,
-                        None,
-                        None,
-                        errors,
-                        Object::new(),
-                        Some(StatusCode::BAD_REQUEST),
-                        req.context,
-                    );
+                    let res = RouterResponse::builder()
+                        .data(Default::default())
+                        .errors(errors)
+                        .extensions(Default::default())
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .context(req.context)
+                        .build();
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
