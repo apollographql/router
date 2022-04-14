@@ -304,6 +304,8 @@ where
             Ok(state)
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
     async fn reload_server(
         &mut self,
         configuration: Arc<Configuration>,
