@@ -1,6 +1,6 @@
 //! Mock subgraph implementation
 
-use crate::{Request, Response, SubgraphRequest, SubgraphResponse};
+use crate::{Object, Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
 use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};
@@ -12,13 +12,20 @@ type MockResponses = HashMap<Request, Response>;
 pub struct MockSubgraph {
     // using an arc to improve efficiency when service is cloned
     mocks: Arc<MockResponses>,
+    extensions: Option<Object>,
 }
 
 impl MockSubgraph {
     pub fn new(mocks: MockResponses) -> Self {
         Self {
             mocks: Arc::new(mocks),
+            extensions: None,
         }
+    }
+
+    pub fn with_extensions(mut self, extensions: Object) -> Self {
+        self.extensions = Some(extensions);
+        self
     }
 }
 
@@ -53,6 +60,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 .build()];
             SubgraphResponse::fake_builder()
                 .errors(errors)
+                .extensions(self.extensions.clone())
                 .context(req.context)
                 .build()
         };

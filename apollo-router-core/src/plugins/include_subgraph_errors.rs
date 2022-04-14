@@ -69,8 +69,8 @@ mod test {
     use super::*;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
-        Schema,
+        DynPlugin, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+        RouterResponse, Schema,
     };
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
@@ -78,7 +78,7 @@ mod test {
     use tower::{util::BoxCloneService, Service};
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": {}}]}"#).unwrap())
+        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
@@ -126,9 +126,12 @@ mod test {
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
     ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+        let mut extensions = Object::new();
+        extensions.insert("test", Value::String(ByteString::from("value")));
+
         let account_mocks = vec![
             (
-                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
+                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"},{"name":"Ada Lovelace"}]}}"#
             )
         ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
@@ -136,7 +139,7 @@ mod test {
 
         let review_mocks = vec![
             (
-                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
@@ -144,15 +147,16 @@ mod test {
 
         let product_mocks = vec![
             (
-                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","variables":{"first":2}}"#,
+                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
             ),
             (
-                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
-        let product_service = MockSubgraph::new(product_mocks);
+
+        let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
         let schema: Arc<Schema> = Arc::new(
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
