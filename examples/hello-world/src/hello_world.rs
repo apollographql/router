@@ -97,6 +97,7 @@ mod tests {
             .get("example.hello_world")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"name" : "Bob"}))
+            .await
             .unwrap();
     }
 }

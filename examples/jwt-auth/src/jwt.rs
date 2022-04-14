@@ -386,12 +386,13 @@ mod tests {
     // find our `JwtAuth` plugin,
     // and deserialize an hmac configured yml configuration into it
     // see `router.yaml` for more information
-    #[test]
-    fn plugin_registered() {
+    #[tokio::test]
+    async fn plugin_registered() {
         apollo_router_core::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
+            .await
             .unwrap();
     }
 
@@ -585,7 +586,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -643,7 +646,9 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -698,7 +703,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 

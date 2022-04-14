@@ -188,6 +188,7 @@ mod tests {
             .get("example.allow_client_id_from_file")
             .expect("Plugin not found")
             .create_instance(&json!({"header": "x-client-id","path": "allowedClientIds.json"}))
+            .await
             .unwrap();
     }
 
@@ -204,6 +205,7 @@ mod tests {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
+        .await
         .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 
@@ -242,6 +244,7 @@ mod tests {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
+        .await
         .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 
@@ -311,6 +314,7 @@ mod tests {
             path: "allowedClientIds.json".to_string(),
             header: "x-client-id".to_string(),
         })
+        .await
         .expect("couldn't create AllowClientIdFromFile")
         .router_service(mock_service.boxed());
 

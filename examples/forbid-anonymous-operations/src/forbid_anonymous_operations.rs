@@ -107,6 +107,7 @@ mod tests {
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
+            .await
             .unwrap();
     }
 
