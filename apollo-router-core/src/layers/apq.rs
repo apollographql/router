@@ -96,6 +96,7 @@ where
                                 .unwrap(),
                             }];
                             let res = RouterResponse::builder()
+                                .data(Default::default())
                                 .errors(errors)
                                 .extensions(Object::new())
                                 .context(req.context)
@@ -117,7 +118,6 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
     hash == digest.finalize().as_slice()
 }
 
-/*
 #[cfg(test)]
 mod apq_tests {
     use super::*;
@@ -361,4 +361,3 @@ mod apq_tests {
         }
     }
 }
-*/

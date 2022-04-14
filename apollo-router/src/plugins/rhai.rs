@@ -3,7 +3,7 @@
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
-    register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
+    register_plugin, Error, Object, Plugin, ResponseBody, RouterRequest, RouterResponse, Value,
 };
 use apollo_router_core::{
     Context, Entries, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
@@ -197,7 +197,58 @@ impl Plugin for Rhai {
         }
 
         const FUNCTION_NAME_RESPONSE: &str = "router_service_response";
-        service_handle_response!(self, service, FUNCTION_NAME_RESPONSE, RouterResponse);
+        let this = self.clone();
+        let function_found = self
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
+        service = service
+            .map_response(move |mut response: RouterResponse| {
+                let previous_err: Option<String> = response
+                    .context
+                    .get(CONTEXT_ERROR)
+                    .expect("we put the context error ourself so it will be deserializable; qed");
+                if let Some(err) = previous_err {
+                    response.response = response.response.map(|body| match body {
+                        ResponseBody::GraphQL(mut res) => {
+                            res.errors.push(
+                                Error::builder()
+                                    .message(format!("RHAI plugin error: {}", err.as_str()))
+                                    .build(),
+                            );
+
+                            ResponseBody::GraphQL(res)
+                        }
+                        _ => body,
+                    });
+
+                    return response;
+                }
+                if function_found {
+                    let rhai_context = match this.run_rhai_script_arc(
+                        FUNCTION_NAME_RESPONSE,
+                        response.context,
+                        response.response.headers().clone(),
+                    ) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            let context = Context::new();
+                            context
+                                .insert(CONTEXT_ERROR, err)
+                                .expect("error is always a string; qed");
+
+                            return RouterResponse::new_with_response(response.response, context);
+                        }
+                    };
+                    response.context = rhai_context.context;
+                    *response.response.headers_mut() = rhai_context.headers;
+
+                    response.response.headers_mut().remove(CONTENT_LENGTH);
+                }
+
+                response
+            })
+            .boxed();
 
         service
     }

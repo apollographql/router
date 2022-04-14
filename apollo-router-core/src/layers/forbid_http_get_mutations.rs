@@ -2,7 +2,7 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse, Object};
+use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse};
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -30,20 +30,16 @@ where
                         path: Default::default(),
                         extensions: Default::default(),
                     }];
-                    // let headers = vec![("Allow".to_string(), "POST".to_string())];
-                    let mut res = ExecutionResponse::new(
-                        None,
-                        None,
-                        None,
-                        errors,
-                        Object::new(),
-                        Some(StatusCode::METHOD_NOT_ALLOWED),
-                        req.context,
+                    let mut res = ExecutionResponse::builder()
+                        .errors(errors)
+                        .extensions(Default::default())
+                        .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                        .context(req.context)
+                        .build();
+                    res.response.inner.headers_mut().insert(
+                        "Allow".parse::<HeaderName>().unwrap(),
+                        "POST".parse().unwrap(),
                     );
-                    res.response
-                        .inner
-                        .headers_mut()
-                        .insert::<HeaderName>("Allow".parse().unwrap(), "POST".parse().unwrap());
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))

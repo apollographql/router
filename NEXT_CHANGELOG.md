@@ -43,6 +43,10 @@ telemetry:
   For more info see the quickstart documentation.
 
 ## 🐛 Fixes
+
+### Do not hang when tracing provider was not set as global [#849](https://github.com/apollographql/router/issues/847)
+The telemetry plugin will now Drop cleanly when the Router service stack fails to build.
+
 ### Propagate error extensions originating from subgraphs [PR #839](https://github.com/apollographql/router/pull/839)
 Extensions are now propagated following the configuration of the `include_subgraph_error` plugin.
 

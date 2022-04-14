@@ -663,7 +663,7 @@ mod test {
                     .header((HOST, HeaderValue::from_static("host")))
                     .header((CONTENT_LENGTH, HeaderValue::from_static("2")))
                     .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
-                    .body(Request::builder().query("query").build())
+                    .body(Request::builder().query(Some("query".to_string())).build())
                     .build()
                     .unwrap(),
             ),
@@ -683,7 +683,7 @@ mod test {
                 .header((HOST, HeaderValue::from_static("rhost")))
                 .header((CONTENT_LENGTH, HeaderValue::from_static("22")))
                 .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
-                .body(Request::builder().query("query").build())
+                .body(Request::builder().query(Some("query".to_string())).build())
                 .build()
                 .unwrap(),
             operation_kind: OperationKind::Query,

@@ -156,8 +156,9 @@ impl RouterRequest {
             .into_iter()
             .map(|(name, value)| (ByteString::from(name.to_string()), value))
             .collect();
+
         let gql_request = Request::builder()
-            .query(query.unwrap_or_default())
+            .query(query)
             .operation_name(operation_name)
             .variables(variables)
             .extensions(object)
@@ -221,7 +222,7 @@ impl RouterResponse {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         label: Option<String>,
-        data: Option<Value>,
+        data: Value,
         path: Option<Path>,
         errors: Vec<crate::Error>,
         extensions: Object,
@@ -232,7 +233,7 @@ impl RouterResponse {
         // Build a response
         let res = Response::builder()
             .label(label)
-            .data(data.unwrap_or_default())
+            .data(data)
             .path(path)
             .errors(errors)
             .extensions(extensions)
@@ -278,7 +279,7 @@ impl RouterResponse {
     ) -> RouterResponse {
         RouterResponse::new(
             label,
-            data,
+            data.unwrap_or_default(),
             path,
             errors,
             extensions.unwrap_or_default(),
@@ -286,6 +287,13 @@ impl RouterResponse {
             headers,
             context.unwrap_or_default(),
         )
+    }
+
+    pub fn new_with_response(
+        response: http_compat::Response<ResponseBody>,
+        context: Context,
+    ) -> Self {
+        Self { response, context }
     }
 }
 

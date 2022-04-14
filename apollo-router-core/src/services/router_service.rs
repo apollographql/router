@@ -6,9 +6,9 @@ use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    Introspection, Object, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
-    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt, SubgraphRequest,
+    SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -160,17 +160,21 @@ where
                 } else {
                     let operation_name = body.operation_name.clone();
                     let planned_query = planning
-                        .call(QueryPlannerRequest::new(
-                            req.originating_request.clone(),
-                            context,
-                        ))
+                        .call(
+                            QueryPlannerRequest::builder()
+                                .originating_request(req.originating_request.clone())
+                                .context(context)
+                                .build(),
+                        )
                         .await?;
                     let mut response = execution
-                        .call(ExecutionRequest::new(
-                            req.originating_request.clone(),
-                            planned_query.query_plan,
-                            planned_query.context,
-                        ))
+                        .call(
+                            ExecutionRequest::builder()
+                                .originating_request(req.originating_request.clone())
+                                .query_plan(planned_query.query_plan)
+                                .context(planned_query.context)
+                                .build(),
+                        )
                         .await?;
 
                     if let Some(query) = query {
@@ -196,8 +200,9 @@ where
                     ..Default::default()
                 }];
                 Ok(RouterResponse::builder()
+                    .data(Default::default())
                     .errors(errors)
-                    .extensions(Object::new())
+                    .extensions(Default::default())
                     .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)
                     .build())

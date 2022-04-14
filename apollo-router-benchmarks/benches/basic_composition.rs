@@ -1,7 +1,6 @@
 use apollo_router_core::plugin::utils::test::mock::subgraph::MockSubgraph;
 use apollo_router_core::{
-    plugin::utils, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
-    Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
 use once_cell::sync::Lazy;
