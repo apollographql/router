@@ -118,12 +118,16 @@ pub struct RouterRequest {
     /// Original request to the Router.
     pub originating_request: http_compat::Request<Request>,
 
-    // Context for extension
+    /// Context for extension
     pub context: Context,
 }
 
 #[buildstructor::builder]
 impl RouterRequest {
+    /// This is the constructor to use when constructing a real RouterRequest.
+    ///
+    /// In this case, you already hve a valid request and just wish to associate it with a context
+    /// and create a RouterRequest.
     pub fn new_with_request(
         originating_request: http_compat::Request<Request>,
         context: Context,
@@ -134,6 +138,9 @@ impl RouterRequest {
         }
     }
 
+    /// This is the constructor (or builder) to use when constructing a real RouterRequest.
+    ///
+    /// Required parameters are required in non-testing code to create a RouterRequest.
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
@@ -168,6 +175,11 @@ impl RouterRequest {
         }
     }
 
+    /// This is the constructor (or builder) to use when constructing a "fake" RouterRequest.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// RouterRequest. It's usually enough for testing, when a fully consructed RouterRequest is
+    /// difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
@@ -199,6 +211,9 @@ pub struct RouterResponse {
 
 #[buildstructor::builder]
 impl RouterResponse {
+    /// This is the constructor (or builder) to use when constructing a real RouterResponse..
+    ///
+    /// Required parameters are required in non-testing code to create a RouterResponse..
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -233,6 +248,12 @@ impl RouterResponse {
             context,
         }
     }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" RouterResponse.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// RouterResponse. It's usually enough for testing, when a fully consructed RouterResponse is
+    /// difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -265,6 +286,9 @@ pub struct QueryPlannerRequest {
 
 #[buildstructor::builder]
 impl QueryPlannerRequest {
+    /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
+    ///
+    /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     pub fn new(
         originating_request: http_compat::Request<Request>,
         context: Context,
@@ -286,6 +310,9 @@ pub struct QueryPlannerResponse {
 
 #[buildstructor::builder]
 impl QueryPlannerResponse {
+    /// This is the constructor (or builder) to use when constructing a real QueryPlannerResponse.
+    ///
+    /// Required parameters are required in non-testing code to create a QueryPlannerResponse.
     pub fn new(query_plan: Arc<QueryPlan>, context: Context) -> QueryPlannerResponse {
         Self {
             query_plan,
@@ -311,8 +338,7 @@ pub struct SubgraphRequest {
 impl SubgraphRequest {
     /// This is the constructor (or builder) to use when constructing a real SubgraphRequest.
     ///
-    /// The parameters are not optional, because in a live situation all of these properties must be
-    /// set and be correct to create a SubgraphRequest.
+    /// Required parameters are required in non-testing code to create a SubgraphRequest.
     pub fn new(
         originating_request: Arc<http_compat::Request<Request>>,
         subgraph_request: http_compat::Request<Request>,
@@ -461,6 +487,11 @@ impl ExecutionRequest {
         }
     }
 
+    /// This is the constructor (or builder) to use when constructing a "fake" ExecutionRequest.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// ExecutionRequest. It's usually enough for testing, when a fully consructed ExecutionRequest is
+    /// difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         originating_request: Option<http_compat::Request<Request>>,
         query_plan: Option<Arc<QueryPlan>>,
@@ -486,6 +517,10 @@ pub struct ExecutionResponse {
 
 #[buildstructor::builder]
 impl ExecutionResponse {
+    /// This is the constructor to use when constructing a real ExecutionResponse.
+    ///
+    /// In this case, you already hve a valid request and just wish to associate it with a context
+    /// and create a ExecutionResponse.
     pub fn new_with_response(
         response: http_compat::Response<Response>,
         context: Context,
@@ -493,6 +528,10 @@ impl ExecutionResponse {
         Self { response, context }
     }
 
+    /// This is the constructor (or builder) to use when constructing a real RouterRequest.
+    ///
+    /// The parameters are not optional, because in a live situation all of these properties must be
+    /// set and be correct to create a RouterRequest.
     pub fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -527,6 +566,12 @@ impl ExecutionResponse {
             context,
         }
     }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" ExecutionResponse.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// ExecutionResponse. It's usually enough for testing, when a fully consructed
+    /// ExecutionResponse is difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
