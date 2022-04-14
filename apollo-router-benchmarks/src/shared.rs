@@ -226,10 +226,10 @@ pub fn setup() -> PluggableRouterServiceBuilder {
             .unwrap(),
     );
 
-    let builder = PluggableRouterServiceBuilder::new(schema.clone());
+    let builder = PluggableRouterServiceBuilder::new(schema);
 
     builder
-        .with_subgraph_service("accounts", account_service.clone())
-        .with_subgraph_service("reviews", review_service.clone())
-        .with_subgraph_service("products", product_service.clone())
+        .with_subgraph_service("accounts", account_service)
+        .with_subgraph_service("reviews", review_service)
+        .with_subgraph_service("products", product_service)
 }
