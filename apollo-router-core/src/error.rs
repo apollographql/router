@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::planner::BridgeError;
+pub use router_bridge::planner::{PlanError, PlannerSetupError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -228,11 +228,11 @@ pub enum ServiceBuildError {
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// couldn't instantiate QueryPlanner: {0}
-    QueryPlannerError(BridgeErrors),
+    /// couldn't instantiate query planner; invalid schema: {0}
+    SchemaValidationErrors(PlannerSetupErrors),
 
-    /// query planning had errors: {0}
-    PlanningErrors(BridgeErrors),
+    /// couldn't plan query: {0}
+    PlanningErrors(PlanErrors),
 
     /// query planning panicked: {0}
     JoinError(Arc<JoinError>),
@@ -250,25 +250,51 @@ pub enum QueryPlannerError {
     RouterBridgeError(router_bridge::error::Error),
 }
 
-#[derive(Debug, Clone)]
-pub struct BridgeErrors(Arc<Vec<BridgeError>>);
+#[derive(Clone, Debug, Error)]
+/// Container for planner setup errors
+pub struct PlannerSetupErrors(Arc<Vec<PlannerSetupError>>);
 
-impl std::fmt::Display for BridgeErrors {
+impl std::fmt::Display for PlannerSetupErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "bridge errors: {}",
+            "Schema validation errors: {}",
             self.0
                 .iter()
-                .map(|e| e.to_string())
+                .map(|e| e
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
                 .collect::<Vec<String>>()
                 .join(", ")
         ))
     }
 }
 
-impl From<Vec<BridgeError>> for QueryPlannerError {
-    fn from(err: Vec<BridgeError>) -> Self {
-        QueryPlannerError::PlanningErrors(BridgeErrors(Arc::new(err)))
+impl From<Vec<PlannerSetupError>> for QueryPlannerError {
+    fn from(errors: Vec<PlannerSetupError>) -> Self {
+        QueryPlannerError::SchemaValidationErrors(PlannerSetupErrors(Arc::new(errors)))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanErrors(Arc<Vec<PlanError>>);
+
+impl From<Vec<PlanError>> for QueryPlannerError {
+    fn from(errors: Vec<PlanError>) -> Self {
+        QueryPlannerError::PlanningErrors(PlanErrors(Arc::new(errors)))
+    }
+}
+
+impl std::fmt::Display for PlanErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "query validation errors: {}",
+            self.0
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
     }
 }
 

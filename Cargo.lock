@@ -3790,7 +3790,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=59b38f09522b100c052ecf842c50870ec56cc1a4#59b38f09522b100c052ecf842c50870ec56cc1a4"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=33659ef40f44af593da047d7f3349a1b3d86136c#33659ef40f44af593da047d7f3349a1b3d86136c"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3801,6 +3801,8 @@ dependencies = [
  "tokio",
  "tower",
  "tower-service",
+ "tracing",
+ "uuid",
  "which",
 ]
 

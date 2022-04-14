@@ -137,7 +137,7 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::from(Vec::new())));
+            .return_const(Err(QueryPlannerError::from(Vec::<PlanError>::new())));
 
         let planner = CachingQueryPlanner::new(delegate, 10);
 

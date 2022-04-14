@@ -169,7 +169,7 @@ mod tests {
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
-            "query planning had errors: bridge errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
+            "couldn't plan query: query validation errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
