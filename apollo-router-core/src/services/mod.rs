@@ -230,7 +230,6 @@ impl RouterResponse {
         // Build a response
         let res = Response::builder()
             .label(label)
-            // .data(data.unwrap_or_default())
             .data(data)
             .path(path)
             .errors(errors)
