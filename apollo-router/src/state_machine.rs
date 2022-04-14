@@ -5,8 +5,8 @@ use super::Event::{UpdateConfiguration, UpdateSchema};
 use super::FederatedServerError::{NoConfiguration, NoSchema};
 use super::{Event, FederatedServerError, State};
 use crate::configuration::Configuration;
-use apollo_router_core::{prelude::*, Handler};
-use apollo_router_core::{DynPlugin, Schema};
+use apollo_router_core::Schema;
+use apollo_router_core::{prelude::*, Handler, Plugins};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ enum PrivateState<RS> {
         router_service: RS,
         server_handle: HttpServerHandle,
         #[derivative(Debug = "ignore")]
-        plugins: Vec<(String, Box<dyn DynPlugin>)>,
+        plugins: Plugins,
     },
     Stopped,
     Errored(FederatedServerError),
@@ -310,7 +310,7 @@ where
         schema: Arc<Schema>,
         router_service: <FA as RouterServiceFactory>::RouterService,
         server_handle: HttpServerHandle,
-        plugins: Vec<(String, Box<dyn DynPlugin>)>,
+        plugins: Plugins,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
@@ -637,7 +637,7 @@ mod tests {
             .returning(|_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok((router, Vec::new()))
+                Ok((router, Default::default()))
             });
         router_factory
             .expect_create()
@@ -686,7 +686,7 @@ mod tests {
                 configuration: Arc<Configuration>,
                 schema: Arc<graphql::Schema>,
                 previous_router: Option<&'a MockMyRouter>,
-            ) -> Result<(MockMyRouter, Vec<(String, Box<dyn DynPlugin>)>), BoxError>;
+            ) -> Result<(MockMyRouter, Plugins), BoxError>;
         }
     }
 
@@ -817,7 +817,7 @@ mod tests {
             .returning(move |_, _, _| {
                 let mut router = MockMyRouter::new();
                 router.expect_clone().return_once(MockMyRouter::new);
-                Ok((router, Vec::new()))
+                Ok((router, Default::default()))
             });
         router_factory
     }

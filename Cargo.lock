@@ -204,6 +204,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "include_dir",
+ "indexmap",
  "insta",
  "itertools",
  "lazy_static",

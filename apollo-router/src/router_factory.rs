@@ -37,7 +37,7 @@ pub trait RouterServiceFactory: Send + Sync + 'static {
         configuration: Arc<Configuration>,
         schema: Arc<graphql::Schema>,
         previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Vec<(String, Box<dyn DynPlugin>)>), BoxError>;
+    ) -> Result<(Self::RouterService, Plugins), BoxError>;
 }
 
 /// Main implementation of the RouterService factory, supporting the extensions system
@@ -57,7 +57,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
         _previous_router: Option<&'a Self::RouterService>,
-    ) -> Result<(Self::RouterService, Vec<(String, Box<dyn DynPlugin>)>), BoxError> {
+    ) -> Result<(Self::RouterService, Plugins), BoxError> {
         let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
         if configuration.server.introspection {
             builder = builder.with_naive_introspection();

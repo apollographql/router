@@ -12,6 +12,7 @@ use crate::{
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
+use indexmap::IndexMap;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -19,6 +20,8 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use typed_builder::TypedBuilder;
+
+pub type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(TypedBuilder, Clone)]
@@ -220,7 +223,7 @@ where
 /// response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
-    plugins: Vec<(String, Box<dyn DynPlugin>)>,
+    plugins: Plugins,
     subgraph_services: Vec<(
         String,
         BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
@@ -243,7 +246,7 @@ impl PluggableRouterServiceBuilder {
         plugin_name: String,
         plugin: E,
     ) -> PluggableRouterServiceBuilder {
-        self.plugins.push((plugin_name, Box::new(plugin)));
+        self.plugins.insert(plugin_name, Box::new(plugin));
         self
     }
 
@@ -252,13 +255,8 @@ impl PluggableRouterServiceBuilder {
         plugin_name: String,
         plugin: Box<dyn DynPlugin>,
     ) -> PluggableRouterServiceBuilder {
-        self.plugins.push((plugin_name, plugin));
+        self.plugins.insert(plugin_name, plugin);
         self
-    }
-
-    // Consume the builder and retrieve its plugins
-    pub fn plugins(self) -> Vec<(String, Box<dyn DynPlugin>)> {
-        self.plugins
     }
 
     pub fn with_subgraph_service<
@@ -291,7 +289,7 @@ impl PluggableRouterServiceBuilder {
     ) -> Result<
         (
             BoxCloneService<RouterRequest, RouterResponse, BoxError>,
-            Vec<(String, Box<dyn DynPlugin>)>,
+            Plugins,
         ),
         crate::ServiceBuildError,
     > {
