@@ -1,6 +1,18 @@
 //! Plugin system for the router.
 //!
 //! Provides a customization mechanism for the router.
+//!
+//! Requests received by the router make their way through a processing pipeline. Each request is
+//! processed at:
+//!  - router
+//!  - query planning
+//!  - execution
+//!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
+//!  stages.
+//!
+//! A plugin can choose to interact with the flow of requests at any or all of these stages of
+//! processing. At each stage a [`Service`] is provided which provides an appropriate
+//! mechanism for interacting with the request and response.
 
 pub mod utils;
 

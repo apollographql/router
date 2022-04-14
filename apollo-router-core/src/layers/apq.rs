@@ -12,6 +12,7 @@ use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
 use tower::{BoxError, Layer, Service};
 
+/// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
     pub version: u8,
@@ -19,6 +20,7 @@ pub struct PersistedQuery {
     pub sha256hash: String,
 }
 
+/// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub struct APQLayer {
     cache: Cache<Vec<u8>, String>,

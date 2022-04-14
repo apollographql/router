@@ -1,3 +1,5 @@
+//! Implementation of the various steps in the router's processing pipeline.
+
 pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer};
 pub use self::execution_service::*;
 pub use self::router_service::*;
@@ -111,7 +113,7 @@ impl FromStr for ResponseBody {
 }
 
 assert_impl_all!(RouterRequest: Send);
-/// [`Context`] for the request.
+/// Represents the router processing step of the processing pipeline.
 ///
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
 pub struct RouterRequest {
@@ -481,6 +483,10 @@ pub struct ExecutionRequest {
 
 #[buildstructor::builder]
 impl ExecutionRequest {
+    /// This is the constructor (or builder) to use when constructing a real ExecutionRequest.
+    ///
+    /// The parameters are not optional, because in a live situation all of these properties must be
+    /// set and be correct to create a ExecutionRequest.
     pub fn new(
         originating_request: http_compat::Request<Request>,
         query_plan: Arc<QueryPlan>,
