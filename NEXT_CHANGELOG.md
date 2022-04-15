@@ -62,6 +62,10 @@ Instead of returning an error coming from the query planner, we are now returnin
 ### Add operation name to subquery fetches [PR #840](https://github.com/apollographql/router/pull/840)
 If present in the query plan fetch noede, the operation name will be added to sub-fetches.
 
+### Remove trailing slash from Datadog agent endpoint URL [PR #863](https://github.com/apollographql/router/pull/863)
+due to the way the endpoint URL is constructed in opentelemetry-datadog, we
+cannot set the agent endpoint to a URL with a trailing slash
+
 ## 🛠 Maintenance
 ### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/830)
 Router configuration files within the project are now largely validated via unit test.
