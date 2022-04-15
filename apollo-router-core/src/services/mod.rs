@@ -291,7 +291,7 @@ impl RouterResponse {
         )
     }
 
-    pub fn new_with_response(
+    pub fn new_from_response(
         response: http_compat::Response<ResponseBody>,
         context: Context,
     ) -> Self {

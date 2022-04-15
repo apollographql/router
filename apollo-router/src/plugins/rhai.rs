@@ -237,7 +237,7 @@ impl Plugin for Rhai {
                                 .insert(CONTEXT_ERROR, err)
                                 .expect("error is always a string; qed");
 
-                            return RouterResponse::new_with_response(response.response, context);
+                            return RouterResponse::new_from_response(response.response, context);
                         }
                     };
                     response.context = rhai_context.context;
