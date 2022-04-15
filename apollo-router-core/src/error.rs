@@ -257,7 +257,7 @@ pub struct PlannerSetupErrors(Arc<Vec<PlannerSetupError>>);
 impl std::fmt::Display for PlannerSetupErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "Schema validation errors: {}",
+            "schema validation errors: {}",
             self.0
                 .iter()
                 .map(|e| e
