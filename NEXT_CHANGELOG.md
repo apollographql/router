@@ -64,7 +64,9 @@ If present in the query plan fetch noede, the operation name will be added to su
 Router configuration files within the project are now largely validated via unit test.
 
 ### Switch web server framework from `warp` to `axum` [PR #751](https://github.com/apollographql/router/pull/751)
+The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
 
-  The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
+### Improve the way we handle Request with axum [PR #845](https://github.com/apollographql/router/pull/845)
+Take advantages of new extractors given by `axum`
   
 ## 📚 Documentation
