@@ -34,7 +34,7 @@ impl TracingConfigurator for Config {
         };
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |b, e| {
-                b.with_agent_endpoint(e.to_string().trim_end_matches("/"))
+                b.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
             .with(&trace_config.service_name, |b, n| b.with_service_name(n))
             .with_trace_config(trace_config.into())
