@@ -392,6 +392,7 @@ register_plugin!("example", "jwt", JwtAuth);
 mod tests {
     use super::*;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use http::{header::HeaderName, HeaderValue};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -453,8 +454,8 @@ mod tests {
         // Let's create a request with a badly formatted authorization header
         let request_with_no_bearer_in_auth = RouterRequest::fake_builder()
             .headers(vec![(
-                "authorization".to_string(),
-                "should start with Bearer".to_string(),
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_static("should start with Bearer"),
             )])
             .build();
 
@@ -490,7 +491,10 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
-            .headers(vec![("authorization".to_string(), "Bearer  ".to_string())])
+            .headers(vec![(
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_static("Bearer  "),
+            )])
             .build();
 
         // ...And call our service stack with it
@@ -527,8 +531,8 @@ mod tests {
         // Note: (The token isn't valid, but the format is...)
         let request_with_appropriate_auth = RouterRequest::fake_builder()
             .headers(vec![(
-                "authorization".to_string(),
-                "Bearer atoken".to_string(),
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_static("Bearer atoken"),
             )])
             .build();
 
@@ -612,8 +616,8 @@ mod tests {
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
             .headers(vec![(
-                "authorization".to_string(),
-                format!("Bearer {token}"),
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
             )])
             .build();
 
@@ -645,8 +649,8 @@ mod tests {
         // Create valid configuration for testing HMAC algorithm HS256
         let key = "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba";
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "algorithm": "HS256".to_string(),
-            "key": key.to_string(),
+            "algorithm": "HS256",
+            "key": key,
             "max_token_life": 60,
         }))
         .expect("json must be valid");
@@ -663,8 +667,8 @@ mod tests {
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
             .headers(vec![(
-                "authorization".to_string(),
-                format!("Bearer {token}"),
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
             )])
             .build();
 
@@ -719,8 +723,8 @@ mod tests {
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
             .headers(vec![(
-                "authorization".to_string(),
-                format!("Bearer {token}"),
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
             )])
             .build();
 

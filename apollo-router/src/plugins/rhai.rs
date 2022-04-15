@@ -44,7 +44,7 @@ macro_rules! service_handle_response {
                         .build();
                 }
                 if function_found {
-                    let rhai_context = match this.run_rhai_script_arc(
+                    let rhai_context = match this.run_rhai_script(
                         $function_name,
                         response.context,
                         response.response.headers().clone(),
@@ -225,7 +225,7 @@ impl Plugin for Rhai {
                     return response;
                 }
                 if function_found {
-                    let rhai_context = match this.run_rhai_script_arc(
+                    let rhai_context = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context,
                         response.response.headers().clone(),
@@ -269,7 +269,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |mut request: QueryPlannerRequest| {
                     let rhai_context = handle_error!(
-                        this.run_rhai_script_arc(
+                        this.run_rhai_script(
                             FUNCTION_NAME_REQUEST,
                             request.context.clone(),
                             request.originating_request.headers().clone()
@@ -298,7 +298,7 @@ impl Plugin for Rhai {
             let this = self.clone();
             service = service
                 .map_response(move |mut response: QueryPlannerResponse| {
-                    let rhai_context = match this.run_rhai_script_arc(
+                    let rhai_context = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context,
                         HeaderMap::new(),
@@ -343,7 +343,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |mut request: ExecutionRequest| {
                     let rhai_context = handle_error!(
-                        this.run_rhai_script_arc(
+                        this.run_rhai_script(
                             FUNCTION_NAME_REQUEST,
                             request.context.clone(),
                             request.originating_request.headers().clone()
@@ -385,7 +385,7 @@ impl Plugin for Rhai {
             service = service
                 .map_request(move |mut request: SubgraphRequest| {
                     let rhai_context = handle_error!(
-                        this.run_rhai_script_arc(
+                        this.run_rhai_script(
                             FUNCTION_NAME_REQUEST,
                             request.context.clone(),
                             request.subgraph_request.headers().clone()
@@ -426,7 +426,7 @@ impl Plugin for Rhai {
                         .build();
                 }
                 if function_found {
-                    let rhai_context = match this.run_rhai_script_arc(
+                    let rhai_context = match this.run_rhai_script(
                         FUNCTION_NAME_RESPONSE,
                         response.context,
                         response.response.headers().clone(),
@@ -512,28 +512,6 @@ impl Rhai {
         Ok(response)
     }
 
-    fn run_rhai_script_arc(
-        &self,
-        function_name: &str,
-        context: Context,
-        headers: HeaderMap,
-    ) -> Result<RhaiContext, String> {
-        let mut scope = Scope::new();
-
-        let new_context = context.clone();
-        let response: RhaiContext = self
-            .engine
-            .call_fn(
-                &mut scope,
-                &self.ast,
-                function_name,
-                (RhaiContext::new(new_context, headers),),
-            )
-            .map_err(|err| err.to_string())?;
-
-        Ok(response)
-    }
-
     fn new_rhai_engine() -> Engine {
         let mut engine = Engine::new();
 
@@ -594,7 +572,7 @@ mod tests {
                         HeaderName::from_static("x-custom-header"),
                         HeaderValue::from_static("CUSTOM_VALUE"),
                     ))
-                    .context(req.context.into())
+                    .context(req.context)
                     .build())
             });
 
