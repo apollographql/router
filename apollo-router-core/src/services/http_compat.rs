@@ -54,13 +54,7 @@ impl<T> Request<T> {
         uri: Option<http::Uri>,
         method: Option<http::Method>,
         body: T,
-    ) -> http::Result<Request<T>>
-// where
-    //     HeaderName: TryFrom<K>,
-    //     <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
-    //     HeaderValue: TryFrom<V>,
-    //     <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
-    {
+    ) -> http::Result<Request<T>> {
         let mut builder = http::request::Builder::new()
             .method(method.unwrap_or(Method::GET))
             .uri(uri.unwrap_or_else(|| Uri::from_static("http://test")));
