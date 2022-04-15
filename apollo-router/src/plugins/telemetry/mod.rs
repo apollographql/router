@@ -8,7 +8,8 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
 use apollo_router_core::{
-    http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
+    http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
+    QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
 };
 use apollo_spaceport::server::ReportSpaceport;
@@ -107,6 +108,7 @@ impl Drop for Telemetry {
                         opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
                     });
                     futures::executor::block_on(jh).expect("failed to flush tracer provider");
+                    global::shutdown_tracer_provider();
                 });
             });
         }
@@ -230,7 +232,9 @@ impl Plugin for Telemetry {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
         ServiceBuilder::new()
-            .instrument(self.router_service_span())
+            .instrument(Self::router_service_span(
+                self.config.apollo.clone().unwrap_or_default(),
+            ))
             .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
@@ -261,6 +265,26 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("query_planning"))
+            .service(service)
+            .boxed()
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("execution"))
+            .service(service)
+            .boxed()
+    }
+
     fn subgraph_service(
         &mut self,
         name: &str,
@@ -268,7 +292,10 @@ impl Plugin for Telemetry {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
-        service
+        let name = name.to_owned();
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("subgraph", name = name.as_str()))
+            .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
                 let subgraph_attribute = subgraph_attribute.clone();
@@ -416,42 +443,29 @@ impl Telemetry {
         futures::executor::block_on(jh).expect("failed to replace tracer provider");
     }
 
-    fn router_service_span(&self) -> impl Fn(&RouterRequest) -> Span + Clone {
-        let config = self.config.apollo.clone().unwrap_or_default();
+    fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
         let client_name_header = config.client_name_header;
         let client_version_header = config.client_version_header;
 
         move |request: &RouterRequest| {
-            let query = request
-                .context
-                .request
-                .body()
-                .query
-                .clone()
-                .unwrap_or_default();
-            let operation_name = request
-                .context
-                .request
+            let http_request = &request.context.request;
+            let headers = http_request.headers();
+            let query = http_request.body().query.clone().unwrap_or_default();
+            let operation_name = http_request
                 .body()
                 .operation_name
                 .clone()
                 .unwrap_or_else(|| "".to_string());
-            let client_name = request
-                .context
-                .request
-                .headers()
+            let client_name = headers
                 .get(&client_name_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
-            let client_version = request
-                .context
-                .request
-                .headers()
+            let client_version = headers
                 .get(&client_version_header)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
-                "graphql_request",
+                "router",
                 query = query.as_str(),
                 operation_name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
@@ -480,6 +494,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 
 #[cfg(test)]
 mod tests {
+
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()

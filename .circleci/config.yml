@@ -41,12 +41,33 @@ commands:
           command: |
             sudo apt-get update
             sudo apt-get install -y libssl-dev cmake
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-linux-amd64 jaeger
   macos_install_baseline:
     steps:
       - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
       - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
       - run: test -e "$OPENSSL_ROOT_DIR"
       - run: brew install cmake
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-darwin-amd64 jaeger
+  windows_install_baseline:
+    steps:
+      - run:
+          name: Download jaeger
+          shell: bash.exe
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-windows-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-windows-amd64 jaeger
 
   # This job sets up our nodejs dependencies,
   # and makes sure everything is ready to run integration tests

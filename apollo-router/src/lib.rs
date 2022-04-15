@@ -1,5 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
+extern crate core;
+
 #[cfg(feature = "axum-server")]
 mod axum_http_server_factory;
 pub mod configuration;

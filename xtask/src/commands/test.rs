@@ -64,14 +64,17 @@ impl Test {
             };
 
             let demo = FederationDemoRunner::new()?;
-            let guard = demo.start_background()?;
+            let demo_guard = demo.start_background()?;
+
+            let jaeger = JaegerRunner::new()?;
+            let jaeger_guard = jaeger.start_background()?;
 
             if let Some(sub_process) = maybe_pre_compile.as_mut() {
                 eprintln!("Waiting for background process that pre-compiles the test to finish...");
                 sub_process.wait()?;
             }
 
-            Box::new((demo, guard))
+            Box::new((demo, demo_guard, jaeger, jaeger_guard))
         };
 
         eprintln!("Running tests");

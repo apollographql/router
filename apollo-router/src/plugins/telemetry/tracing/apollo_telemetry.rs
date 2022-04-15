@@ -333,7 +333,7 @@ impl SpanExporter for Exporter {
         /*
          * Process the batch
          */
-        for span in batch.iter().filter(|span| span.name == "graphql_request") {
+        for span in batch.iter().filter(|span| span.name == "router") {
             // We can't process a span if we don't have a query
             if let Some(query) = span
                 .attributes

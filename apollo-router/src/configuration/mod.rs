@@ -545,15 +545,6 @@ mod tests {
     use std::fs;
     use walkdir::WalkDir;
 
-    macro_rules! assert_config_snapshot {
-        ($file:expr) => {{
-            let config = serde_yaml::from_str::<Configuration>(include_str!($file)).unwrap();
-            insta::with_settings!({sort_maps => true}, {
-                insta::assert_yaml_snapshot!(config);
-            });
-        }};
-    }
-
     #[cfg(unix)]
     #[test]
     fn schema_generation() {

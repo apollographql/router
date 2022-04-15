@@ -66,7 +66,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
-    #[tracing::instrument(skip_all, level = "info", name = "plan")]
     async fn get(
         &self,
         query: String,
