@@ -13,6 +13,7 @@ use tower::{BoxError, Layer, Service};
 
 type Sentinel<Value> = Arc<RwLock<Option<Value>>>;
 
+/// [`Service`] for cache.
 pub struct CachingService<S, Request, Key, Value>
 where
     Request: Send,
@@ -111,6 +112,7 @@ where
     }
 }
 
+/// [`Layer`] for cache.
 pub struct CachingLayer<Request, Response, Key, Value>
 where
     Request: Send,

@@ -1,3 +1,5 @@
+//! A library for processing GraphQL requests.
+
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 
 macro_rules! failfast_debug {

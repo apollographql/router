@@ -263,10 +263,6 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-pub fn convert_uri(uri: http::Uri) -> Result<url::Url, url::ParseError> {
-    url::Url::parse(&uri.to_string())
-}
-
 #[cfg(feature = "axum-server")]
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
