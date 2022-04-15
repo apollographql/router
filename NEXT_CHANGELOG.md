@@ -25,6 +25,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.5] - (unreleased)
 ## ❗ BREAKING ❗
 ## 🚀 Features
+### Helm chart for the router [PR #861](https://github.com/apollographql/router/pull/861)
+
+  [Helm](https://helm.sh) support provided by @damienpontifex.
+
 ### Line precise error reporting [PR #830](https://github.com/apollographql/router/pull/782)
 The router will make a best effort to give line precise error reporting if the configuration was invalid.
 ```yaml

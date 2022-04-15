@@ -1,0 +1,11 @@
+{{- if .Values.router.configuration }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "router.fullname" . }}
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+data:
+  configuration.yaml: |
+    {{- toYaml .Values.router.configuration | nindent 4 }}
+{{- end }}
