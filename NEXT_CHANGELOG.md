@@ -44,6 +44,9 @@ telemetry:
 
 ## 🐛 Fixes
 
+### Make sure concurrent query plan are not mixed up [#846](https://github.com/apollographql/router/issues/846)
+The query planner has been reworked to make sure concurrent plan requests will be dispatched to the relevant requester.
+
 ### Do not hang when tracing provider was not set as global [#849](https://github.com/apollographql/router/issues/847)
 The telemetry plugin will now Drop cleanly when the Router service stack fails to build.
 
