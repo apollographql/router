@@ -2,13 +2,12 @@ use apollo_router_core::{
     http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
     RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
-use http::{Method, Uri};
+use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
@@ -33,8 +32,9 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let originating_request = http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
+        let originating_request = http_compat::Request::fake_builder().method(Method::POST)
             .body(request)
+            .build()
             .unwrap();
 
         let request = graphql::RouterRequest {
@@ -88,18 +88,19 @@ async fn api_schema_hides_field() {
         .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
         .variables(Arc::new(
             vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
+                ("topProductsFirst".into(), 2i32.into()),
+                ("reviewsForAuthorAuthorId".into(), 1i32.into()),
             ]
             .into_iter()
             .collect(),
         ))
         .build();
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -188,10 +189,10 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -218,10 +219,10 @@ async fn service_errors_should_be_propagated() {
 
     let expected_service_hits = hashmap! {};
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -266,10 +267,10 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -316,10 +317,10 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_only_request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_only_request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -344,10 +345,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_request_with_query)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_request_with_query)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -367,10 +368,10 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_only_request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_only_request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,
@@ -430,10 +431,11 @@ async fn missing_variables() {
         ))
         .build();
 
-    let originating_request =
-        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
         originating_request,

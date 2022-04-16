@@ -10,13 +10,15 @@ use std::sync::Arc;
 use tower::BoxError;
 
 /// Holds [`Context`] entries.
-type Entries = Arc<DashMap<String, Value>>;
+pub type Entries = Arc<DashMap<String, Value>>;
 
 /// Context for a [`http_compat::Request`]
 #[derive(Clone, Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
-    entries: Entries,
+    // This should be private, the only reason it's public for now (and should disappear) is for the RHAI plugin.
+    // Please do not use Entries directly, but use public api.
+    pub entries: Entries,
 }
 
 impl Context {

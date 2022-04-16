@@ -400,27 +400,31 @@ pub(crate) mod fetch {
             let subgraph_request = SubgraphRequest::builder()
                 .originating_request(Arc::new(originating_request))
                 .subgraph_request(
-                    http_compat::RequestBuilder::new(
-                        http::Method::POST,
-                        schema
-                            .subgraphs()
-                            .find_map(|(name, url)| (name == service_name).then(|| url))
-                            .unwrap_or_else(|| {
-                                panic!(
+                    http_compat::Request::builder()
+                        .method(http::Method::POST)
+                        .uri(
+                            schema
+                                .subgraphs()
+                                .find_map(|(name, url)| (name == service_name).then(|| url))
+                                .unwrap_or_else(|| {
+                                    panic!(
                                     "schema uri for subgraph '{}' should already have been checked",
                                     service_name
                                 )
-                            })
-                            .clone(),
-                    )
-                    .body(
-                        Request::builder()
-                            .query(Some(operation.to_string()))
-                            .operation_name(operation_name.clone())
-                            .variables(Arc::new(variables.clone()))
-                            .build(),
-                    )
-                    .expect("it won't fail because the url is correct and already checked; qed"),
+                                })
+                                .clone(),
+                        )
+                        .body(
+                            Request::builder()
+                                .query(Some(operation.to_string()))
+                                .operation_name(operation_name.clone())
+                                .variables(Arc::new(variables.clone()))
+                                .build(),
+                        )
+                        .build()
+                        .expect(
+                            "it won't fail because the url is correct and already checked; qed",
+                        ),
                 )
                 .operation_kind(*operation_kind)
                 .context(context.clone())

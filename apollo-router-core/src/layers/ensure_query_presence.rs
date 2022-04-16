@@ -6,7 +6,7 @@
 
 use crate::checkpoint::CheckpointService;
 use crate::{RouterRequest, RouterResponse};
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
@@ -23,7 +23,7 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
-            |req: RouterRequest| {
+            |mut req: RouterRequest| {
                 // A query must be available at this point
                 let query = req.originating_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
@@ -33,12 +33,18 @@ where
                         path: Default::default(),
                         extensions: Default::default(),
                     }];
+                    let headers =
+                        std::mem::replace(req.originating_request.headers_mut(), HeaderMap::new())
+                            .into_iter()
+                            .filter_map(|(k, v)| k.map(|k| (k, v)))
+                            .collect();
                     let res = RouterResponse::builder()
                         .data(Default::default())
                         .errors(errors)
                         .extensions(Default::default())
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
+                        .headers(headers)
                         .build();
                     Ok(ControlFlow::Break(res))
                 } else {

@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 526
+assertion_line: 567
 expression: "&schema"
 ---
 {
@@ -273,6 +273,18 @@ expression: "&schema"
               "additionalProperties": {
                 "type": "boolean"
               }
+            }
+          },
+          "additionalProperties": false
+        },
+        "experimental.rhai": {
+          "type": "object",
+          "required": [
+            "filename"
+          ],
+          "properties": {
+            "filename": {
+              "type": "string"
             }
           },
           "additionalProperties": false

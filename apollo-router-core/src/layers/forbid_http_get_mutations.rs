@@ -54,12 +54,11 @@ where
 mod forbid_http_get_mutations_tests {
 
     use super::*;
-    use crate::http_compat::RequestBuilder;
+    use crate::http_compat;
     use crate::query_planner::fetch::OperationKind;
     use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
-    use http::{StatusCode, Uri};
+    use http::StatusCode;
     use serde_json::json;
-    use std::str::FromStr;
     use std::sync::Arc;
     use tower::ServiceExt;
 
@@ -182,8 +181,10 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
-        let request = RequestBuilder::new(method, Uri::from_str("http://test").unwrap())
+        let request = http_compat::Request::fake_builder()
+            .method(method)
             .body(crate::Request::default())
+            .build()
             .unwrap();
 
         ExecutionRequest::fake_builder()

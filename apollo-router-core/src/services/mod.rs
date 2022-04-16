@@ -7,7 +7,7 @@ use crate::fetch::OperationKind;
 use crate::layers::cache::CachingLayer;
 use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
-use http::StatusCode;
+use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
 use moka::sync::Cache;
 use serde::{Deserialize, Serialize};
@@ -143,13 +143,16 @@ impl RouterRequest {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// Required parameters are required in non-testing code to create a RouterRequest.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Arc<Object>,
         extensions: Vec<(&'static str, Value)>,
         context: Context,
-        headers: Vec<(String, String)>,
+        headers: Vec<(HeaderName, HeaderValue)>,
+        uri: Uri,
+        method: Method,
     ) -> RouterRequest {
         let object: Object = extensions
             .into_iter()
@@ -163,19 +166,13 @@ impl RouterRequest {
             .extensions(object)
             .build();
 
-        let mut builder = http::request::Builder::new()
-            .method(Method::GET)
-            .uri(Uri::from_str("http://default").unwrap());
-
-        for (key, value) in headers {
-            builder = builder.header(key, value);
-        }
-
-        let req = builder.body(gql_request).expect("body is always valid qed");
-
-        let originating_request: http_compat::Request<Request> = req
-            .try_into()
-            .expect("built carefully from inputs to be correct; qed");
+        let originating_request = http_compat::Request::builder()
+            .headers(headers)
+            .uri(uri)
+            .method(method)
+            .body(gql_request)
+            .build()
+            .expect("body is always valid qed");
 
         Self {
             originating_request,
@@ -194,7 +191,7 @@ impl RouterRequest {
         variables: Option<Arc<Object>>,
         extensions: Vec<(&'static str, Value)>,
         context: Option<Context>,
-        headers: Vec<(String, String)>,
+        headers: Vec<(HeaderName, HeaderValue)>,
     ) -> RouterRequest {
         RouterRequest::new(
             query,
@@ -203,6 +200,8 @@ impl RouterRequest {
             extensions,
             context.unwrap_or_default(),
             headers,
+            Uri::from_static("http://default"),
+            Method::GET,
         )
     }
 }
@@ -222,6 +221,7 @@ impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a real RouterResponse..
     ///
     /// Required parameters are required in non-testing code to create a RouterResponse..
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         label: Option<String>,
         data: Value,
@@ -229,6 +229,7 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
+        headers: Vec<(HeaderName, HeaderValue)>,
         context: Context,
     ) -> RouterResponse {
         // Build a response
@@ -241,8 +242,13 @@ impl RouterResponse {
             .build();
 
         // Build an http Response
-        let http_response = http::Response::builder()
-            .status(status_code.unwrap_or(StatusCode::OK))
+        let mut http_response_builder =
+            http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (k, v) in headers {
+            http_response_builder = http_response_builder.header(k, v);
+        }
+
+        let http_response = http_response_builder
             .body(ResponseBody::GraphQL(res))
             .expect("ResponseBody is serializable; qed");
 
@@ -262,6 +268,7 @@ impl RouterResponse {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// RouterResponse. It's usually enough for testing, when a fully consructed RouterResponse is
     /// difficult to construct and not required for the pusposes of the test.
+    #[allow(clippy::too_many_arguments)]
     pub fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -269,6 +276,7 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
+        headers: Vec<(HeaderName, HeaderValue)>,
         context: Option<Context>,
     ) -> RouterResponse {
         RouterResponse::new(
@@ -278,8 +286,16 @@ impl RouterResponse {
             errors,
             extensions.unwrap_or_default(),
             status_code,
+            headers,
             context.unwrap_or_default(),
         )
+    }
+
+    pub fn new_from_response(
+        response: http_compat::Response<ResponseBody>,
+        context: Context,
+    ) -> Self {
+        Self { response, context }
     }
 }
 
