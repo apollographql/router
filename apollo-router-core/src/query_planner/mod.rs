@@ -467,7 +467,16 @@ pub(crate) mod fetch {
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
                             for (path, entity_idx) in paths {
-                                value.insert(&path, array.get(entity_idx).unwrap().clone())?;
+                                value.insert(
+                                    &path,
+                                    array
+                                        .get(entity_idx)
+                                        .ok_or_else(|| FetchError::ExecutionInvalidContent {
+                                            reason: "Received invalid content for key `_entities`!"
+                                                .to_string(),
+                                        })?
+                                        .clone(),
+                                )?;
                             }
                             return Ok(value);
                         } else {
