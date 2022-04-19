@@ -27,11 +27,14 @@ impl FederationDemoRunner {
 
         eprintln!("Running federation-demo in background...");
         let mut command = Command::new(which::which("npm")?);
+
+        // Pipe to NULL is required for Windows to not hang
+        // https://github.com/rust-lang/rust/issues/45572
         command
             .current_dir(&self.path)
             .args(["run", "start"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         let task = BackgroundTask::new(command)?;
 
         eprintln!("Waiting for federation-demo services and gateway to be ready...");

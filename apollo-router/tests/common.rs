@@ -6,7 +6,7 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_http::HttpClient;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tower::BoxError;
@@ -39,25 +39,29 @@ impl TracingTest {
         tracing::subscriber::set_global_default(subscriber).unwrap();
         global::set_text_map_propagator(propagator);
 
-        let config_location = Path::new("apollo-router/src/testdata").join(config_location);
-        tracing::debug!(
-            "starting router with config: {}",
-            config_location.to_string_lossy()
-        );
+        let router_location = if cfg!(windows) {
+            PathBuf::from_iter(["..", "target", "debug", "router.exe"])
+        } else {
+            PathBuf::from_iter(["..", "target", "debug", "router"])
+        };
+
+        let mut command = Command::new(router_location);
+        command = set_command_log(command);
 
         Self {
-            router: Command::new("target/debug/router")
-                .current_dir("..")
-                .env("RUST_LOG", "INFO")
+            router: command
                 .args([
                     "--hr",
                     "--config",
-                    &config_location.to_string_lossy().to_string(),
+                    &PathBuf::from_iter(["..", "apollo-router", "src", "testdata"])
+                        .join(config_location)
+                        .to_string_lossy()
+                        .to_string(),
                     "--supergraph",
-                    "examples/graphql/local.graphql",
+                    &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
+                        .to_string_lossy()
+                        .to_string(),
                 ])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
                 .spawn()
                 .expect("Router should start"),
         }
@@ -101,6 +105,20 @@ impl TracingTest {
         }
         panic!("unable to send successful request to router")
     }
+}
+
+#[cfg(windows)]
+fn set_command_log(mut command: Command) -> Command {
+    // Pipe to NULL is required for Windows to not hang
+    // https://github.com/rust-lang/rust/issues/45572
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    command
+}
+
+#[cfg(not(windows))]
+fn set_command_log(mut command: Command) -> Command {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
 }
 
 impl Drop for TracingTest {

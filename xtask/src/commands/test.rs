@@ -34,15 +34,7 @@ impl Test {
         );
 
         // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
-        let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
-            .ok()
-            .unwrap_or_default()
-            .is_empty()
-            && cfg!(windows)
-        {
-            eprintln!("Not running federation-demo because it makes the step hang on Circle CI.");
-            Box::new(())
-        } else if self.no_demo {
+        let _guard: Box<dyn std::any::Any> = if self.no_demo {
             eprintln!("Flag --no-demo is the default now. Not running federation-demo.");
             Box::new(())
         } else if !self.with_demo {
