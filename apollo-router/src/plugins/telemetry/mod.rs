@@ -7,6 +7,7 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
+use apollo_router_core::prelude::graphql;
 use apollo_router_core::{
     http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
@@ -455,7 +456,16 @@ impl Telemetry {
                 .body()
                 .operation_name
                 .clone()
-                .unwrap_or_else(|| "".to_string());
+                .or_else(|| {
+                    http_request
+                        .url()
+                        .query()
+                        .and_then(|query| {
+                            graphql::Request::from_urlencoded_query(query.to_string()).ok()
+                        })
+                        .and_then(|q| q.operation_name)
+                })
+                .unwrap_or_default();
             let client_name = headers
                 .get(&client_name_header)
                 .cloned()
