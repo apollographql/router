@@ -474,8 +474,8 @@ async fn health_check() -> impl IntoResponse {
     level = "info"
     name = "graphql_request",
     fields(
-        query = %http_request.uri().query().unwrap_or_default(),
-        operation_name = %http_request.body().operation_name.clone().unwrap_or_else(|| "".to_string()),
+        query = %http_request.uri().query().unwrap_or_else(|| http_request.body().query.as_deref().unwrap_or_default()),
+        operation_name = %get_operation_name(&http_request),
         client_name,
         client_version
     )
@@ -531,6 +531,21 @@ async fn run_graphql_request(
                 .into_response()
         }
     }
+}
+
+fn get_operation_name(http_request: &Request<graphql::Request>) -> String {
+    http_request
+        .body()
+        .operation_name
+        .clone()
+        .or_else(|| {
+            http_request
+                .uri()
+                .query()
+                .and_then(|query| graphql::Request::from_urlencoded_query(query.to_string()).ok())
+                .and_then(|q| q.operation_name)
+        })
+        .unwrap_or_default()
 }
 
 fn prefers_html(accept_header: &HeaderValue) -> bool {
