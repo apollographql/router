@@ -327,7 +327,7 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "warp", "rhai", "hotwatch", "miette"))
+            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "rhai", "hotwatch", "miette"))
             {
               cargo build -p $package
             }
@@ -376,7 +376,7 @@ commands:
       - run:
           name: precompile large dependencies
           command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "warp", "rhai", "hotwatch", "miette"))
+            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "rhai", "hotwatch", "miette"))
             {
               cargo build -p $package
             }
