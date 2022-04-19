@@ -48,6 +48,9 @@ telemetry:
 
 ## 🐛 Fixes
 
+### Export the right operation name in Studio [#866](https://github.com/apollographql/router/issues/866)
+Due to the switch to axum, when the query was coming from a POST request, we didn't take the `operation_name` from the body.
+
 ### Make sure concurrent query plan are not mixed up [#846](https://github.com/apollographql/router/issues/846)
 The query planner has been reworked to make sure concurrent plan requests will be dispatched to the relevant requester.
 
