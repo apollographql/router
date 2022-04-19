@@ -72,6 +72,14 @@ impl Test {
         eprintln!("Running tests");
         cargo!(TEST_DEFAULT_ARGS);
 
+        #[cfg(windows)]
+        {
+            // dirty hack. Node processes on windows will not shut down cleanly.
+            let _ = std::process::Command::new("taskkill")
+                .args(["/f", "/im", "node.exe"])
+                .spawn();
+        }
+
         Ok(())
     }
 }
