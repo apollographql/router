@@ -446,13 +446,12 @@ async fn run_graphql_operation(
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
-    let mut http_request = Request::builder()
-        .uri(
-            Uri::from_str(&format!("http://{}{}", host, uri))
-                .expect("the URL is already valid because it comes from axum; qed"),
-        )
-        .body(request)
-        .expect("body has already been parsed; qed");
+    let mut http_request = Request::post(
+        Uri::from_str(&format!("http://{}{}", host, uri))
+            .expect("the URL is already valid because it comes from axum; qed"),
+    )
+    .body(request)
+    .expect("body has already been parsed; qed");
     *http_request.headers_mut() = header_map;
 
     run_graphql_request(service, http_request)

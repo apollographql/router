@@ -63,13 +63,7 @@ mod tests {
         let mut mock_service = MockSubgraphService::new();
         mock_service
             .expect_call()
-            .withf(|req| {
-                assert_eq!(
-                    req.http_request.url(),
-                    &Uri::from_str("http://localhost:8001").unwrap()
-                );
-                true
-            })
+            .withf(|req| req.http_request.url() == &Uri::from_str("http://localhost:8001").unwrap())
             .times(1)
             .returning(move |req: SubgraphRequest| {
                 Ok(plugin_utils::SubgraphResponse::builder()

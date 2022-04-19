@@ -28,7 +28,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features
 
 ## 🐛 Fixes
-
+### Correctly flag incoming POST requests [#865](https://github.com/apollographql/router/issues/865)
+A regression happened during our recent switch to axum that would propagate incoming POST requests as GET requests. This has been fixed and we now have several regression tests, pending more integration tests.
 ## 🛠 Maintenance
 
 ## 📚 Documentation
