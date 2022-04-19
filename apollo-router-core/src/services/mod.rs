@@ -30,7 +30,7 @@ mod router_service;
 mod tower_subgraph_service;
 pub use tower_subgraph_service::TowerSubgraphService;
 
-pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
+pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]

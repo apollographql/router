@@ -1,17 +1,17 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::prelude::*;
 use apollo_router_core::ResponseBody;
 use apollo_router_core::{http_compat, Handler};
-use axum::extract::{Extension, Host, OriginalUri, RawQuery};
+use apollo_router_core::{prelude::*, DEFAULT_BUFFER_SIZE};
+use axum::extract::{Extension, Host, OriginalUri};
 use axum::http::{header::HeaderMap, StatusCode};
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::{channel::oneshot, prelude::*};
-use http::{HeaderValue, Method, Request, Uri};
+use http::{HeaderValue, Request, Uri};
 use hyper::server::conn::Http;
 use hyper::Body;
 use opentelemetry::global;
@@ -79,7 +79,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         <RS as Service<http_compat::Request<apollo_router_core::Request>>>::Future:
             std::marker::Send,
     {
-        let boxed_service = Buffer::new(service.boxed(), 2000);
+        let boxed_service = Buffer::new(service.boxed(), DEFAULT_BUFFER_SIZE);
         Box::pin(async move {
             let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
             let listen_address = configuration.server.listen.clone();
@@ -97,16 +97,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     get({
                         let display_landing_page = configuration.server.landing_page;
                         move |host: Host,
-                              query: RawQuery,
-                              headers: HeaderMap,
-                              original_uri: OriginalUri,
-                              service: Extension<BufferedService>| {
+                              service: Extension<BufferedService>,
+                              http_request: Request<Body>| {
                             redirect_or_run_graphql_operation(
                                 host,
-                                query,
-                                headers,
-                                original_uri,
                                 service,
+                                http_request,
                                 display_landing_page,
                             )
                         }
@@ -118,16 +114,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     get({
                         let display_landing_page = configuration.server.landing_page;
                         move |host: Host,
-                              query: RawQuery,
-                              headers: HeaderMap,
-                              original_uri: OriginalUri,
-                              service: Extension<BufferedService>| {
+                              service: Extension<BufferedService>,
+                              http_request: Request<Body>| {
                             redirect_or_run_graphql_operation(
                                 host,
-                                query,
-                                headers,
-                                original_uri,
                                 service,
+                                http_request,
                                 display_landing_page,
                             )
                         }
@@ -416,19 +408,30 @@ async fn custom_plugin_handler(
 }
 
 async fn redirect_or_run_graphql_operation(
-    host: Host,
-    RawQuery(query): RawQuery,
-    headers: HeaderMap,
-    OriginalUri(uri): OriginalUri,
+    Host(host): Host,
     Extension(service): Extension<BufferedService>,
+    http_request: Request<Body>,
     display_landing_page: bool,
 ) -> impl IntoResponse {
-    if headers.get("accept").map(prefers_html).unwrap_or_default() && display_landing_page {
+    if http_request
+        .headers()
+        .get(&http::header::ACCEPT)
+        .map(prefers_html)
+        .unwrap_or_default()
+        && display_landing_page
+    {
         return display_home_page().into_response();
     }
 
-    if let Some(request) = query.and_then(|q| graphql::Request::from_urlencoded_query(q).ok()) {
-        return run_graphql_request(service, Method::GET, request, headers, uri, host)
+    if let Some(request) = http_request
+        .uri()
+        .query()
+        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    {
+        let mut http_request = http_request.map(|_| request);
+        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+            .expect("the URL is already valid because it comes from axum; qed");
+        return run_graphql_request(service, http_request)
             .await
             .into_response();
     }
@@ -437,13 +440,22 @@ async fn redirect_or_run_graphql_operation(
 }
 
 async fn run_graphql_operation(
-    host: Host,
+    Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
-    run_graphql_request(service, Method::POST, request, header_map, uri, host)
+    let mut http_request = Request::builder()
+        .uri(
+            Uri::from_str(&format!("http://{}{}", host, uri))
+                .expect("the URL is already valid because it comes from axum; qed"),
+        )
+        .body(request)
+        .expect("body has already been parsed; qed");
+    *http_request.headers_mut() = header_map;
+
+    run_graphql_request(service, http_request)
         .await
         .into_response()
 }
@@ -462,8 +474,8 @@ async fn health_check() -> impl IntoResponse {
     level = "info"
     name = "graphql_request",
     fields(
-        query = %request.query.clone().unwrap_or_default(),
-        operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()),
+        query = %http_request.uri().query().unwrap_or_default(),
+        operation_name = %http_request.body().operation_name.clone().unwrap_or_else(|| "".to_string()),
         client_name,
         client_version
     )
@@ -477,17 +489,13 @@ async fn run_graphql_request(
         >,
         http_compat::Request<graphql::Request>,
     >,
-    method: Method,
-    request: graphql::Request,
-    header_map: HeaderMap,
-    uri: Uri,
-    Host(host): Host,
+    http_request: Request<graphql::Request>,
 ) -> impl IntoResponse {
-    if let Some(client_name) = header_map.get("apollographql-client-name") {
+    if let Some(client_name) = http_request.headers().get("apollographql-client-name") {
         // Record the client name as part of the current span
         Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
     }
-    if let Some(client_version) = header_map.get("apollographql-client-version") {
+    if let Some(client_version) = http_request.headers().get("apollographql-client-version") {
         // Record the client version as part of the current span
         Span::current().record(
             "client_version",
@@ -497,15 +505,8 @@ async fn run_graphql_request(
 
     match service.ready_oneshot().await {
         Ok(mut service) => {
-            let uri = format!("http://{}{}", host, uri);
-            let mut http_request = http::Request::builder()
-                .method(method)
-                .uri(uri)
-                .body(request)
-                .unwrap();
-            *http_request.headers_mut() = header_map.clone();
-
             let (head, body) = http_request.into_parts();
+
             service
                 .call(http_compat::Request::from_parts(head, body))
                 .await

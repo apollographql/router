@@ -25,6 +25,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.5] - (unreleased)
 ## ❗ BREAKING ❗
 ## 🚀 Features
+### Helm chart for the router [PR #861](https://github.com/apollographql/router/pull/861)
+
+  [Helm](https://helm.sh) support provided by @damienpontifex.
+
 ### Line precise error reporting [PR #830](https://github.com/apollographql/router/pull/782)
 The router will make a best effort to give line precise error reporting if the configuration was invalid.
 ```yaml
@@ -44,6 +48,9 @@ telemetry:
 
 ## 🐛 Fixes
 
+### Make sure concurrent query plan are not mixed up [#846](https://github.com/apollographql/router/issues/846)
+The query planner has been reworked to make sure concurrent plan requests will be dispatched to the relevant requester.
+
 ### Do not hang when tracing provider was not set as global [#849](https://github.com/apollographql/router/issues/847)
 The telemetry plugin will now Drop cleanly when the Router service stack fails to build.
 
@@ -59,12 +66,18 @@ Instead of returning an error coming from the query planner, we are now returnin
 ### Add operation name to subquery fetches [PR #840](https://github.com/apollographql/router/pull/840)
 If present in the query plan fetch noede, the operation name will be added to sub-fetches.
 
+### Remove trailing slash from Datadog agent endpoint URL [PR #863](https://github.com/apollographql/router/pull/863)
+due to the way the endpoint URL is constructed in opentelemetry-datadog, we
+cannot set the agent endpoint to a URL with a trailing slash
+
 ## 🛠 Maintenance
 ### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/830)
 Router configuration files within the project are now largely validated via unit test.
 
 ### Switch web server framework from `warp` to `axum` [PR #751](https://github.com/apollographql/router/pull/751)
+The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
 
-  The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
+### Improve the way we handle Request with axum [PR #845](https://github.com/apollographql/router/pull/845)
+Take advantages of new extractors given by `axum`
   
 ## 📚 Documentation
