@@ -279,17 +279,12 @@ commands:
             set -e -o pipefail
             cargo sweep --version || cargo install cargo-sweep
 
-      - run:
-          name: precompile large dependencies
-          command: |
-            ./precompile.sh
-
       - save_cache:
-          name: Save .cargo and precompiled dependencies
+          name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - ~/.cargo
-            - target/
+
       - run: cargo sweep -s
       - restore_cache:
           name: Restore target/
@@ -324,20 +319,11 @@ commands:
             }
             exit $LASTEXITCODE
 
-      - run:
-          name: precompile large dependencies
-          command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "rhai", "hotwatch", "miette"))
-            {
-              cargo build -p $package
-            }
-
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - C:\\Users\\circleci\.cargo
-            - target/
 
       - run: cargo sweep -s
       - restore_cache:
@@ -373,20 +359,11 @@ commands:
             }
             exit $LASTEXITCODE
 
-      - run:
-          name: precompile large dependencies
-          command: |
-            foreach ($package in @("router-bridge","opentelemetry","opentelemetry-otlp","opentelemetry-jaeger","opentelemetry-prometheus","tracing","tokio","moka","mockall","tower-http","tonic","hyper-rustls", "rhai", "hotwatch", "miette"))
-            {
-              cargo build -p $package
-            }
-
       - save_cache:
-          name: Save .cargo and precompiled dependencies
+          name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - C:\\Users\\circleci\.cargo
-            - target/
 
       - run: cargo sweep -s
       - restore_cache:
@@ -421,17 +398,12 @@ commands:
           command: |
             set -e -o pipefail
             cargo sweep --version || cargo install cargo-sweep
-      - run:
-          name: precompile large dependencies
-          command: |
-            ./precompile.sh
 
       - save_cache:
-          name: Save .cargo, precompiled dependencies and node_modules
+          name: Save .cargo and node_modules
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - ~/.cargo
-            - target/
             - dockerfiles/federation-demo/federation-demo/node_modules
 
       - run: cargo sweep -s
