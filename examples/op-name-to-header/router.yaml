@@ -1,3 +1,0 @@
-plugins:
-  experimental.rhai:
-    filename: src/op_name_to_header.rhai
