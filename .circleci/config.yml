@@ -27,7 +27,7 @@ parameters:
   cache_version:
     type: string
     # increment that one to invalidate all the caches
-    default: v3.{{ checksum "rust-toolchain.toml" }}
+    default: v4.{{ checksum "rust-toolchain.toml" }}
 
 commands:
   initialize_submodules:
@@ -300,7 +300,7 @@ commands:
 
       - build_all_permutations
       - run: cargo sweep -f
-      
+
       - save_cache:
           name: Save target/
           key: rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
