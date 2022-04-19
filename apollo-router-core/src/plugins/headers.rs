@@ -635,7 +635,7 @@ mod test {
     }
 
     fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
-        Ok(SubgraphResponse::new_with_response(
+        Ok(SubgraphResponse::new_from_response(
             http::Response::builder()
                 .body(Response::builder().build())
                 .unwrap()

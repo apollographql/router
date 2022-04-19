@@ -61,7 +61,7 @@ where
                         Ok(value) => {
                             return value
                                 .map(|response| {
-                                    SubgraphResponse::new_with_response(
+                                    SubgraphResponse::new_from_response(
                                         response.response,
                                         request.context,
                                     )
@@ -108,7 +108,7 @@ where
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
                     return res.map(|response| {
-                        SubgraphResponse::new_with_response(response.response, context)
+                        SubgraphResponse::new_from_response(response.response, context)
                     });
                 }
             }

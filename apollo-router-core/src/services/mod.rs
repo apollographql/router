@@ -124,22 +124,17 @@ pub struct RouterRequest {
     pub context: Context,
 }
 
-#[buildstructor::builder]
-impl RouterRequest {
-    /// This is the constructor to use when constructing a real RouterRequest.
-    ///
-    /// In this case, you already hve a valid request and just wish to associate it with a context
-    /// and create a RouterRequest.
-    pub fn new_with_request(
-        originating_request: http_compat::Request<Request>,
-        context: Context,
-    ) -> RouterRequest {
+impl From<http_compat::Request<Request>> for RouterRequest {
+    fn from(originating_request: http_compat::Request<Request>) -> Self {
         Self {
             originating_request,
-            context,
+            context: Context::new(),
         }
     }
+}
 
+#[buildstructor::builder]
+impl RouterRequest {
     /// This is the constructor (or builder) to use when constructing a real RouterRequest.
     ///
     /// Required parameters are required in non-testing code to create a RouterRequest.
@@ -414,7 +409,7 @@ impl SubgraphResponse {
     ///
     /// In this case, you already hve a valid response and just wish to associate it with a context
     /// and create a SubgraphResponse.
-    pub fn new_with_response(
+    pub fn new_from_response(
         response: http_compat::Response<Response>,
         context: Context,
     ) -> SubgraphResponse {
@@ -549,7 +544,7 @@ impl ExecutionResponse {
     ///
     /// In this case, you already hve a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
-    pub fn new_with_response(
+    pub fn new_from_response(
         response: http_compat::Response<Response>,
         context: Context,
     ) -> ExecutionResponse {

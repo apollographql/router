@@ -53,7 +53,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                 inner: http_response,
             };
 
-            SubgraphResponse::new_with_response(compat_response, req.context)
+            SubgraphResponse::new_from_response(compat_response, req.context)
         } else {
             let errors = vec![crate::Error::builder()
                 .message("couldn't find mock for query".to_string())

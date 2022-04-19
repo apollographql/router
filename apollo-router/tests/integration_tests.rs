@@ -1,6 +1,6 @@
 use apollo_router_core::{
-    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+    RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -37,12 +37,7 @@ macro_rules! assert_federated_response {
             .build()
             .unwrap();
 
-        let request = graphql::RouterRequest {
-            originating_request,
-            context: Context::new(),
-        };
-
-        let (actual, registry) = query_rust(request).await;
+        let (actual, registry) = query_rust(originating_request.into()).await;
 
 
         tracing::debug!("query:\n{}\n", $query);
@@ -102,12 +97,7 @@ async fn api_schema_hides_field() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let (actual, _) = query_rust(request).await;
+    let (actual, _) = query_rust(originating_request.into()).await;
 
     assert!(actual.errors[0]
         .message
@@ -194,12 +184,7 @@ async fn queries_should_work_over_get() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = query_rust(originating_request.into()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -224,12 +209,7 @@ async fn service_errors_should_be_propagated() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = query_rust(originating_request.into()).await;
 
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), expected_service_hits);
@@ -272,12 +252,7 @@ async fn mutation_should_not_work_over_get() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = query_rust(originating_request.into()).await;
 
     assert_eq!(1, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -322,12 +297,7 @@ async fn automated_persisted_queries() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let actual = query_with_router(router.clone(), request).await;
+    let actual = query_with_router(router.clone(), originating_request.into()).await;
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -350,12 +320,7 @@ async fn automated_persisted_queries() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let actual = query_with_router(router.clone(), request).await;
+    let actual = query_with_router(router.clone(), originating_request.into()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -373,12 +338,7 @@ async fn automated_persisted_queries() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: graphql::Context::new(),
-    };
-
-    let actual = query_with_router(router, request).await;
+    let actual = query_with_router(router, originating_request.into()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -437,11 +397,7 @@ async fn missing_variables() {
         .build()
         .unwrap();
 
-    let request = graphql::RouterRequest {
-        originating_request,
-        context: Context::new(),
-    };
-    let (response, _) = query_rust(request).await;
+    let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
         graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),
