@@ -365,7 +365,7 @@ where
 /// A GraphQL path element that is composes of strings or numbers.
 /// e.g `/book/3/name`
 #[doc(hidden)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(untagged)]
 pub enum PathElement {
     /// A path element that given an array will flatmap the content.
@@ -424,7 +424,7 @@ where
 ///
 /// This can be composed of strings and numbers
 #[doc(hidden)]
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default, Hash)]
 #[serde(transparent)]
 pub struct Path(pub Vec<PathElement>);
 

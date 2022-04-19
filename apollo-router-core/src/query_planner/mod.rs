@@ -245,8 +245,9 @@ impl PlanNode {
 pub(crate) mod fetch {
     use super::selection::{select_object, Selection};
     use crate::prelude::graphql::*;
+    use indexmap::IndexSet;
     use serde::Deserialize;
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
     use tower::ServiceExt;
     use tracing::{instrument, Instrument};
 
@@ -285,7 +286,7 @@ pub(crate) mod fetch {
 
     struct Variables {
         variables: Object,
-        paths: Vec<Path>,
+        paths: HashMap<Path, usize>,
     }
 
     impl Variables {
@@ -308,13 +309,20 @@ pub(crate) mod fetch {
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
-                let mut paths = Vec::new();
-                let mut values = Vec::new();
+                let mut values: IndexSet<Value> = IndexSet::new();
+                let mut paths: HashMap<Path, usize> = HashMap::new();
                 data.select_values_and_paths(current_dir, |path, value| {
                     if let Value::Object(content) = value {
                         if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            paths.push(path);
-                            values.push(value);
+                            match values.get_index_of(&value) {
+                                Some(index) => {
+                                    paths.insert(path, index);
+                                }
+                                None => {
+                                    paths.insert(path, values.len());
+                                    values.insert(value);
+                                }
+                            }
                         }
                     }
                 });
@@ -323,7 +331,7 @@ pub(crate) mod fetch {
                     return None;
                 }
 
-                variables.insert("representations", Value::Array(values));
+                variables.insert("representations", Value::Array(Vec::from_iter(values)));
 
                 Some(Variables { variables, paths })
             } else {
@@ -336,7 +344,7 @@ pub(crate) mod fetch {
                                 .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                         })
                         .collect::<Object>(),
-                    paths: Vec::new(),
+                    paths: HashMap::new(),
                 })
             }
         }
@@ -446,7 +454,7 @@ pub(crate) mod fetch {
         fn response_at_path<'a>(
             &'a self,
             current_dir: &'a Path,
-            paths: Vec<Path>,
+            paths: HashMap<Path, usize>,
             data: Value,
         ) -> Result<Value, FetchError> {
             if !self.requires.is_empty() {
@@ -458,9 +466,8 @@ pub(crate) mod fetch {
 
                         if let Value::Array(array) = entities {
                             let mut value = Value::default();
-
-                            for (entity, path) in array.into_iter().zip(paths.into_iter()) {
-                                value.insert(&path, entity)?;
+                            for (path, entity_idx) in paths {
+                                value.insert(&path, array.get(entity_idx).unwrap().clone())?;
                             }
                             return Ok(value);
                         } else {
