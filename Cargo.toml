@@ -18,8 +18,9 @@ members = [
     "xtask",
 ]
 
+# Temporarily comment out to see if Circle-CI build env in linux is broken by this
 # this makes build scripts and proc macros faster to compile
-[profile.dev.build-override]
-debug = false
-strip = "debuginfo"
-incremental = false
+# [profile.dev.build-override]
+# debug = false
+# strip = "debuginfo"
+# incremental = false
