@@ -45,11 +45,10 @@ impl TracingTest {
             PathBuf::from_iter(["..", "target", "debug", "router"])
         };
 
-        let mut command = Command::new(router_location);
-        command = set_command_log(command);
-
         Self {
-            router: command
+            router: Command::new(router_location)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .args([
                     "--hr",
                     "--config",
@@ -105,20 +104,6 @@ impl TracingTest {
         }
         panic!("unable to send successful request to router")
     }
-}
-
-#[cfg(windows)]
-fn set_command_log(mut command: Command) -> Command {
-    // Pipe to NULL is required for Windows to not hang
-    // https://github.com/rust-lang/rust/issues/45572
-    command.stdout(Stdio::null()).stderr(Stdio::null());
-    command
-}
-
-#[cfg(not(windows))]
-fn set_command_log(mut command: Command) -> Command {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    command
 }
 
 impl Drop for TracingTest {
