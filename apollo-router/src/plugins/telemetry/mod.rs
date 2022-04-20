@@ -456,15 +456,6 @@ impl Telemetry {
                 .body()
                 .operation_name
                 .clone()
-                .or_else(|| {
-                    http_request
-                        .url()
-                        .query()
-                        .and_then(|query| {
-                            graphql::Request::from_urlencoded_query(query.to_string()).ok()
-                        })
-                        .and_then(|q| q.operation_name)
-                })
                 .unwrap_or_default();
             let client_name = headers
                 .get(&client_name_header)
