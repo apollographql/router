@@ -474,8 +474,8 @@ async fn health_check() -> impl IntoResponse {
     level = "info"
     name = "graphql_request",
     fields(
-        query = %http_request.uri().query().unwrap_or_else(|| http_request.body().query.as_deref().unwrap_or_default()),
-        operation_name = %get_operation_name(&http_request),
+        query = %http_request.body().query.as_deref().unwrap_or_default(),
+        operation_name = %http_request.body().operation_name.as_deref().unwrap_or_default(),
         client_name,
         client_version
     )
@@ -531,21 +531,6 @@ async fn run_graphql_request(
                 .into_response()
         }
     }
-}
-
-fn get_operation_name(http_request: &Request<graphql::Request>) -> String {
-    http_request
-        .body()
-        .operation_name
-        .clone()
-        .or_else(|| {
-            http_request
-                .uri()
-                .query()
-                .and_then(|query| graphql::Request::from_urlencoded_query(query.to_string()).ok())
-                .and_then(|q| q.operation_name)
-        })
-        .unwrap_or_default()
 }
 
 fn prefers_html(accept_header: &HeaderValue) -> bool {
@@ -826,6 +811,112 @@ mod tests {
         let response = client
             .get(url.as_str())
             .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_extracts_query_and_operation_name_on_get_requests(
+    ) -> Result<(), FederatedServerError> {
+        let query = "query";
+        let expected_query = query;
+        let operation_name = "operationName";
+        let expected_operation_name = operation_name;
+
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(move |req| {
+                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
+                assert_eq!(
+                    req.body().operation_name.as_deref().unwrap(),
+                    expected_operation_name
+                );
+                true
+            })
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/graphql", server.listen_address());
+
+        let response = client
+            .get(url.as_str())
+            .query(&[("query", query), ("operationName", operation_name)])
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_extracts_query_and_operation_name_on_post_requests(
+    ) -> Result<(), FederatedServerError> {
+        let query = "query";
+        let expected_query = query;
+        let operation_name = "operationName";
+        let expected_operation_name = operation_name;
+
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(move |req| {
+                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
+                assert_eq!(
+                    req.body().operation_name.as_deref().unwrap(),
+                    expected_operation_name
+                );
+                true
+            })
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/graphql", server.listen_address());
+
+        let response = client
+            .post(url.as_str())
+            .body(json!({ "query": query, "operationName": operation_name }).to_string())
             .send()
             .await
             .unwrap()
