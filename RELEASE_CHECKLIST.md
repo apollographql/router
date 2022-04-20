@@ -12,34 +12,35 @@ If you are releasing a beta or a release candidate, no official changelog is
 needed, but you're not off the hook! You'll need to write testing instructions
 in lieu of an official changelog.
 
-1.  Open the associated milestone. All issues and PRs should be closed. If
+1. Open the associated milestone. All issues and PRs should be closed. If
     they are not you should reassign all open issues and PRs to future
     milestones.
-2.  Go through the commit history since the last release. Ensure that all PRs
+2. Go through the commit history since the last release. Ensure that all PRs
     that have landed are marked with the milestone. You can use this to
     show all the PRs that are merged on or after YYYY-MM-DD:
     `https://github.com/issues?utf8=%E2%9C%93&q=repo%3Aapollographql%2Frouter+merged%3A%3E%3DYYYY-MM-DD`
-3.  Go through the closed PRs in the milestone. Each should have a changelog
+3. Go through the closed PRs in the milestone. Each should have a changelog
     label indicating if the change is documentation, feature, fix, or
     maintenance. If there is a missing label, please add one. If it is a
     breaking change, also add a BREAKING label.
-4.  Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
+4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
     `CHANGELOG.md`. Use the structure of previous entries.
 
 ### Start a release PR
 
-1.  Make sure you have `cargo` installed on your machine and in your `PATH`.
-2.  Create a new branch "#.#.#" where "#.#.#" is this release's version
+1. Make sure you have `cargo` installed on your machine and in your `PATH`.
+2. Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
-3.  Update the version in `*/Cargo.toml`.
-4.  Update the date in `NEXT_CHANGELOG.md`.
-5.  Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core`, `apollo-router` and `apollo-spaceport`.
-6.  Run `cargo check` so the lock file gets updated.
-7.  Run `cargo xtask check-compliance`.
-8.  Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
+3. Update the version in `*/Cargo.toml`.
+4. Update the version in `NEXT_CHANGELOG.md`.
+5. Clear `NEXT_CHANGELOG.md` leaving only the template.
+6. Update the version in `deny.toml` in the `[[licenses.clarify]]` sections for `apollo-router-core`, `apollo-router` and `apollo-spaceport`.
+7. Run `cargo check` so the lock file gets updated.
+8. Run `cargo xtask check-compliance`.
+9. Push up a commit with the `*/Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and
     `NEXT_CHANGELOG.md` changes. The commit message should be "release: v#.#.#" or
     "release: v#.#.#-rc.#"
-9.  Request review from the Router team.
+10. Request review from the Router team.
 
 ### Review
 
