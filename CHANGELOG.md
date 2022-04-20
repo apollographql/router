@@ -50,8 +50,7 @@ Instead of returning an error coming from the query planner, we are now returnin
 If present in the query plan fetch node, the operation name will be added to sub-fetches.
 
 ### Remove trailing slash from Datadog agent endpoint URL [PR #863](https://github.com/apollographql/router/pull/863)
-due to the way the endpoint URL is constructed in opentelemetry-datadog, we
-cannot set the agent endpoint to a URL with a trailing slash
+Due to the way the endpoint URL is constructed in opentelemetry-datadog, we cannot set the agent endpoint to a URL with a trailing slash.
 
 ## 🛠 Maintenance
 ### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/830)
@@ -61,7 +60,7 @@ Router configuration files within the project are now largely validated via unit
 The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
 
 ### Improve the way we handle Request with axum [PR #845](https://github.com/apollographql/router/pull/845) [PR #877](https://github.com/apollographql/router/pull/877)
-Take advantages of new extractors given by `axum`
+Take advantages of new extractors given by `axum`.
 
 ## 📚 Documentation
 
