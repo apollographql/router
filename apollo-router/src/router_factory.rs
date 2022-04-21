@@ -2,7 +2,7 @@ use crate::configuration::{Configuration, ConfigurationError};
 use apollo_router_core::prelude::*;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, Schema, ServiceBuilderExt,
+    PluggableRouterServiceBuilder, Plugins, ResponseBody, Schema, ServiceBuilderExt,
 };
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
 use envmnt::types::ExpandOptions;
