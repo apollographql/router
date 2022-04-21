@@ -1,5 +1,5 @@
 use apollo_router_core::{
-    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -60,15 +60,18 @@ impl Plugin for AllowClientIdFromFile {
             .async_checkpoint(move |req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
                 // We are going to check the headers for the presence of the header we're looking for
-                if !req.context.request.headers().contains_key(&header_key) {
+                if !req.originating_request.headers().contains_key(&header_key) {
                     // Prepare an HTTP 401 response with a GraphQL error message
-                    let res = plugin_utils::RouterResponse::builder()
+                    let res = RouterResponse::builder()
+                        .data(Default::default())
                         .errors(vec![apollo_router_core::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         }])
-                        .build()
-                        .with_status(StatusCode::UNAUTHORIZED);
+                        .extensions(Default::default())
+                        .status_code(StatusCode::UNAUTHORIZED)
+                        .context(req.context)
+                        .build();
                     return Box::pin(async { Ok(ControlFlow::Break(res)) });
                 }
 
@@ -76,8 +79,7 @@ impl Plugin for AllowClientIdFromFile {
                 // And to use `expect()` instead of `unwrap()`, with a message
                 // that explains why the use of `expect()` is safe
                 let client_id = req
-                    .context
-                    .request
+                    .originating_request
                     .headers()
                     .get("x-client-id")
                     .expect("this cannot fail; we checked for header presence above;qed")
@@ -87,13 +89,16 @@ impl Plugin for AllowClientIdFromFile {
                     Ok(client_id) => client_id.to_string(),
                     Err(_not_a_string_error) => {
                         // Prepare an HTTP 400 response with a GraphQL error message
-                        let res = plugin_utils::RouterResponse::builder()
+                        let res = RouterResponse::builder()
+                            .data(Default::default())
                             .errors(vec![apollo_router_core::Error {
                                 message: format!("'{header_key}' value is not a string"),
                                 ..Default::default()
                             }])
-                            .build()
-                            .with_status(StatusCode::BAD_REQUEST);
+                            .extensions(Default::default())
+                            .status_code(StatusCode::BAD_REQUEST)
+                            .context(req.context)
+                            .build();
                         return Box::pin(async { Ok(ControlFlow::Break(res)) });
                     }
                 };
@@ -120,13 +125,16 @@ impl Plugin for AllowClientIdFromFile {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         // Prepare an HTTP 403 response with a GraphQL error message
-                        let res = plugin_utils::RouterResponse::builder()
+                        let res = RouterResponse::builder()
+                            .data(Default::default())
                             .errors(vec![apollo_router_core::Error {
                                 message: "client-id is not allowed".to_string(),
                                 ..Default::default()
                             }])
-                            .build()
-                            .with_status(StatusCode::FORBIDDEN);
+                            .extensions(Default::default())
+                            .status_code(StatusCode::FORBIDDEN)
+                            .context(req.context)
+                            .build();
                         Ok(ControlFlow::Break(res))
                     }
                 })
@@ -164,8 +172,8 @@ mod tests {
     use crate::allow_client_id_from_file::AllowClientIdConfig;
 
     use super::AllowClientIdFromFile;
-    use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
-    use http::StatusCode;
+    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
+    use http::{header::HeaderName, HeaderValue, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -188,7 +196,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
@@ -199,7 +207,7 @@ mod tests {
         .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
-        let request_without_client_id = plugin_utils::RouterRequest::builder().build().into();
+        let request_without_client_id = RouterRequest::fake_builder().build();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -226,7 +234,7 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know AllowClientIdFromFile did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
         let service_stack = AllowClientIdFromFile::new(AllowClientIdConfig {
@@ -237,13 +245,12 @@ mod tests {
         .router_service(mock_service.boxed());
 
         // Let's create a request with a not allowed client id...
-        let request_with_unauthorized_client_id = plugin_utils::RouterRequest::builder()
+        let request_with_unauthorized_client_id = RouterRequest::fake_builder()
             .headers(vec![(
-                "x-client-id".to_string(),
-                "invalid_client_id".to_string(),
+                HeaderName::from_static("x-client-id"),
+                HeaderValue::from_static("invalid_client_id"),
             )])
-            .build()
-            .into();
+            .build();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -269,7 +276,7 @@ mod tests {
         let valid_client_id = "jeremy";
 
         // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockRouterService::new();
+        let mut mock = utils::test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -282,8 +289,7 @@ mod tests {
                     valid_client_id,
                     // we're ok with unwrap's here because we're running a test
                     // we would not do this in actual code
-                    req.context
-                        .request
+                    req.originating_request
                         .headers()
                         .get("x-client-id")
                         .unwrap()
@@ -291,10 +297,9 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data.into())
-                    .build()
-                    .into())
+                    .build())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -309,13 +314,12 @@ mod tests {
         .router_service(mock_service.boxed());
 
         // Let's create a request with an valid client id...
-        let request_with_valid_client_id = plugin_utils::RouterRequest::builder()
+        let request_with_valid_client_id = RouterRequest::fake_builder()
             .headers(vec![(
-                "x-client-id".to_string(),
-                valid_client_id.to_string(),
+                HeaderName::from_static("x-client-id"),
+                HeaderValue::from_static(valid_client_id),
             )])
-            .build()
-            .into();
+            .build();
 
         // ...And call our service stack with it
         let service_response = service_stack

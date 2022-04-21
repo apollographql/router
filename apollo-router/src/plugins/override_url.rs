@@ -34,9 +34,7 @@ impl Plugin for OverrideSubgraphUrl {
         service
             .map_request(move |mut req: SubgraphRequest| {
                 if let Some(new_url) = new_url.clone() {
-                    req.http_request
-                        .set_url(new_url)
-                        .expect("url has been checked when we configured the plugin");
+                    *req.subgraph_request.uri_mut() = new_url;
                 }
 
                 req
@@ -49,9 +47,9 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use apollo_router_core::{
-        plugin_utils::{self, MockSubgraphService},
-        Context, DynPlugin, SubgraphRequest,
+        plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest,
     };
     use http::Uri;
     use serde_json::Value;
@@ -63,13 +61,14 @@ mod tests {
         let mut mock_service = MockSubgraphService::new();
         mock_service
             .expect_call()
-            .withf(|req| req.http_request.url() == &Uri::from_str("http://localhost:8001").unwrap())
+            .withf(|req| {
+                req.subgraph_request.uri() == &Uri::from_str("http://localhost:8001").unwrap()
+            })
             .times(1)
             .returning(move |req: SubgraphRequest| {
-                Ok(plugin_utils::SubgraphResponse::builder()
+                Ok(SubgraphResponse::fake_builder()
                     .context(req.context)
-                    .build()
-                    .into())
+                    .build())
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -89,13 +88,13 @@ mod tests {
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = plugin_utils::SubgraphRequest::builder().context(context);
+        let subgraph_req = SubgraphRequest::fake_builder().context(context);
 
         let _subgraph_resp = subgraph_service
             .ready()
             .await
             .unwrap()
-            .call(subgraph_req.build().into())
+            .call(subgraph_req.build())
             .await
             .unwrap();
     }

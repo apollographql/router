@@ -316,7 +316,7 @@ impl Plugin for Telemetry {
             // How we pick which service to send the request to
             move |req: &http_compat::Request<Bytes>, _services: &[_]| {
                 let endpoint = req
-                    .url()
+                    .uri()
                     .path()
                     .trim_start_matches("/plugins/apollo.telemetry");
                 if let Some(index) = paths.iter().position(|path| path == endpoint) {

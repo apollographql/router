@@ -1,12 +1,18 @@
+//!  (A)utomatic (P)ersisted (Q)ueries cache.
+//!
+//!  For more information on APQ see:
+//!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
+
 use std::ops::ControlFlow;
 
-use crate::{checkpoint::CheckpointService, plugin_utils, RouterRequest, RouterResponse};
+use crate::{checkpoint::CheckpointService, Object, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use sha2::{Digest, Sha256};
 use tower::{BoxError, Layer, Service};
 
+/// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
 pub struct PersistedQuery {
     pub version: u8,
@@ -14,6 +20,7 @@ pub struct PersistedQuery {
     pub sha256hash: String,
 }
 
+/// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub struct APQLayer {
     cache: Cache<Vec<u8>, String>,
@@ -44,8 +51,7 @@ where
         CheckpointService::new(
             move |mut req| {
                 let maybe_query_hash: Option<Vec<u8>> = req
-                    .context
-                    .request
+                    .originating_request
                     .body()
                     .extensions
                     .get("persistedQuery")
@@ -56,7 +62,7 @@ where
                         hex::decode(persisted_query.sha256hash.as_bytes()).ok()
                     });
 
-                let body_query = req.context.request.body().query.clone();
+                let body_query = req.originating_request.body().query.clone();
 
                 match (maybe_query_hash, body_query) {
                     (Some(query_hash), Some(query)) => {
@@ -73,28 +79,30 @@ where
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
                             tracing::trace!("apq: cache hit");
-                            req.context.request.body_mut().query = Some(cached_query);
+                            req.originating_request.body_mut().query = Some(cached_query);
                             Ok(ControlFlow::Continue(req))
                         } else {
                             tracing::trace!("apq: cache miss");
-                            let res = plugin_utils::RouterResponse::builder()
-                                .errors(vec![crate::Error {
-                                    message: "PersistedQueryNotFound".to_string(),
-                                    locations: Default::default(),
-                                    path: Default::default(),
-                                    extensions: serde_json_bytes::from_value(json!({
-                                          "code": "PERSISTED_QUERY_NOT_FOUND",
-                                          "exception": {
-                                          "stacktrace": [
-                                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                                          ],
-                                      },
-                                    }))
-                                    .unwrap(),
-                                }])
-                                .context(req.context.into())
-                                .build()
-                                .into();
+                            let errors = vec![crate::Error {
+                                message: "PersistedQueryNotFound".to_string(),
+                                locations: Default::default(),
+                                path: Default::default(),
+                                extensions: serde_json_bytes::from_value(json!({
+                                      "code": "PERSISTED_QUERY_NOT_FOUND",
+                                      "exception": {
+                                      "stacktrace": [
+                                          "PersistedQueryNotFoundError: PersistedQueryNotFound",
+                                      ],
+                                  },
+                                }))
+                                .unwrap(),
+                            }];
+                            let res = RouterResponse::builder()
+                                .data(Default::default())
+                                .errors(errors)
+                                .extensions(Object::new())
+                                .context(req.context)
+                                .build();
 
                             Ok(ControlFlow::Break(res))
                         }
@@ -115,12 +123,10 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 #[cfg(test)]
 mod apq_tests {
     use super::*;
-    use crate::{
-        plugin_utils::{MockRouterService, RouterRequest, RouterResponse},
-        ResponseBody,
-    };
+    use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -151,7 +157,7 @@ mod apq_tests {
 
         // the second one should have the right APQ header and the full query string
         mock_service.expect_call().times(1).returning(move |req| {
-            let body = req.context.request.body();
+            let body = req.originating_request.body();
 
             let as_json = body.extensions.get("persistedQuery").unwrap();
 
@@ -162,7 +168,7 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::builder().build().into())
+            Ok(RouterResponse::fake_builder().build())
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -170,7 +176,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
                 let persisted_query: PersistedQuery =
@@ -187,37 +193,44 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::fake_builder().build())
             });
 
         let mock = mock_service.build();
 
         let mut service_stack = APQLayer::default().layer(mock);
 
-        let request_builder = RouterRequest::builder().extensions(vec![(
+        let extensions = vec![(
             "persistedQuery",
             json!({
                 "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
-        )]);
+        )];
 
-        let hash_only = request_builder.clone().build();
+        let hash_only = RouterRequest::fake_builder()
+            .extensions(extensions.clone())
+            .build();
 
-        let second_hash_only = request_builder.clone().build();
+        let second_hash_only = RouterRequest::fake_builder()
+            .extensions(extensions.clone())
+            .build();
 
-        let with_query = request_builder.query("{__typename}".to_string()).build();
+        let with_query = RouterRequest::fake_builder()
+            .extensions(extensions)
+            .query("{__typename}".to_string())
+            .build();
 
         let services = service_stack.ready().await.unwrap();
-        let apq_error = services.call(hash_only.into()).await.unwrap();
+        let apq_error = services.call(hash_only).await.unwrap();
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         let services = services.ready().await.unwrap();
-        services.call(with_query.into()).await.unwrap();
+        services.call(with_query).await.unwrap();
 
         let services = services.ready().await.unwrap();
-        services.call(second_hash_only.into()).await.unwrap();
+        services.call(second_hash_only).await.unwrap();
     }
 
     #[tokio::test]
@@ -251,7 +264,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
                 let persisted_query: PersistedQuery =
@@ -261,7 +274,7 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::fake_builder().build())
             });
         mock_service_builder
             // the second last one should have the right APQ header and the full query string
@@ -269,7 +282,7 @@ mod apq_tests {
             .expect_call()
             .times(1)
             .returning(move |req| {
-                let body = req.context.request.body();
+                let body = req.originating_request.body();
 
                 let as_json = body.extensions.get("persistedQuery").unwrap();
 
@@ -287,39 +300,57 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::builder().build().into())
+                Ok(RouterResponse::fake_builder().build())
             });
 
         let mock_service = mock_service_builder.build();
 
         let mut service_stack = APQLayer::default().layer(mock_service);
 
-        let request_builder = RouterRequest::builder().extensions(vec![(
+        let extensions = vec![(
             "persistedQuery",
             json!({
                 "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
             }),
-        )]);
+        )];
 
-        let hash_only = request_builder.clone().build();
-        let second_hash_only = request_builder.clone().build();
-        let with_query = request_builder.query("{__typename}".to_string()).build();
+        let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
+
+        let hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
+
+        let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
+
+        let second_hash_only = request_builder
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
+
+        let request_builder = RouterRequest::fake_builder().extensions(extensions);
+
+        let with_query = request_builder
+            .query("{__typename}".to_string())
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .context(Context::new())
+            .build();
 
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss the APQ cache
-        let apq_error = services.call(hash_only.into()).await.unwrap();
+        let apq_error = services.call(hash_only).await.unwrap();
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
         let services = services.ready().await.unwrap();
-        services.call(with_query.into()).await.unwrap();
+        services.call(with_query).await.unwrap();
 
         let services = services.ready().await.unwrap();
 
         // apq insert failed, this call will miss
-        let second_apq_error = services.call(second_hash_only.into()).await.unwrap();
+        let second_apq_error = services.call(second_hash_only).await.unwrap();
 
         assert_error_matches(&expected_apq_miss_error, second_apq_error);
     }

@@ -1,9 +1,9 @@
 use crate::configuration::{Configuration, ConfigurationError};
+use apollo_router_core::prelude::*;
 use apollo_router_core::{
     http_compat::{Request, Response},
-    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, Schema, ServiceBuilderExt,
+    PluggableRouterServiceBuilder, ResponseBody, Schema, ServiceBuilderExt,
 };
-use apollo_router_core::{prelude::*, Context};
 use apollo_router_core::{DynPlugin, TowerSubgraphService};
 use envmnt::types::ExpandOptions;
 use envmnt::ExpansionType;
@@ -95,11 +95,9 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
         let mut previous_plugins = std::mem::replace(&mut self.plugins, plugins);
         let service = ServiceBuilder::new().buffered().service(
             pluggable_router_service
-                .map_request(
-                    |http_request: Request<apollo_router_core::Request>| RouterRequest {
-                        context: Context::new().with_request(http_request),
-                    },
-                )
+                .map_request(|http_request: Request<apollo_router_core::Request>| {
+                    http_request.into()
+                })
                 .map_response(|response| response.response)
                 .boxed_clone(),
         );

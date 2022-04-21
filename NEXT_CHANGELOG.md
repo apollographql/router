@@ -24,6 +24,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [v0.1.0-preview.7] - (unreleased)
 ## ❗ BREAKING ❗
+### Plugin utilities cleanup ([PR #819](https://github.com/apollographql/router/pull/819))
+Utilities around creating Request and Response structures have been migrated to builders.
+
+Migration:
+* `plugin_utils::RouterRequest::builder()`->`RouterRequest::fake_builder()`
+* `plugin_utils::RouterResponse::builder()`->`RouterResponse::fake_builder()`
+
+In addition, the `plugin_utils` module has been removed. Mock service functionality has been migrated to `plugin::utils::test`.
 
 ## 🚀 Features
 
@@ -32,3 +40,5 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🛠 Maintenance
 
 ## 📚 Documentation
+### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
+Many more rust docs have been added.

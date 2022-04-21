@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use apollo_router_core::{
-    plugin_utils, register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
@@ -41,7 +41,7 @@ impl Plugin for ForbidAnonymousOperations {
                 // - Zero or one operation_name
                 // - Zero or more variables
                 // - Zero or more extensions
-                let maybe_operation_name = req.context.request.body().operation_name.as_ref();
+                let maybe_operation_name = req.originating_request.body().operation_name.as_ref();
                 if maybe_operation_name.is_none()
                     || maybe_operation_name
                         .expect("is_none() has been checked before; qed")
@@ -51,13 +51,16 @@ impl Plugin for ForbidAnonymousOperations {
                     tracing::error!("Operation is not allowed!");
 
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    let res = plugin_utils::RouterResponse::builder()
+                    let res = RouterResponse::builder()
+                        .data(Default::default())
                         .errors(vec![apollo_router_core::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         }])
-                        .build()
-                        .with_status(StatusCode::BAD_REQUEST);
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .extensions(Default::default())
+                        .context(req.context)
+                        .build();
                     Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
@@ -88,7 +91,7 @@ register_plugin!(
 #[cfg(test)]
 mod tests {
     use super::ForbidAnonymousOperations;
-    use apollo_router_core::{plugin_utils, Plugin, RouterRequest};
+    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use http::StatusCode;
     use serde_json::Value;
     use tower::ServiceExt;
@@ -112,15 +115,14 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request without an operation name...
-        let request_without_any_operation_name =
-            plugin_utils::RouterRequest::builder().build().into();
+        let request_without_any_operation_name = RouterRequest::fake_builder().build();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -147,17 +149,16 @@ mod tests {
         // It does not have any behavior, because we do not expect it to be called.
         // If it is called, the test will panic,
         // letting us know ForbidAnonymousOperations did not behave as expected.
-        let mock_service = plugin_utils::MockRouterService::new().build();
+        let mock_service = utils::test::MockRouterService::new().build();
 
         // In this service_stack, ForbidAnonymousOperations is `decorating` or `wrapping` our mock_service.
         let service_stack =
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an empty operation name...
-        let request_with_empty_operation_name = plugin_utils::RouterRequest::builder()
+        let request_with_empty_operation_name = RouterRequest::fake_builder()
             .operation_name("".to_string())
-            .build()
-            .into();
+            .build();
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -183,7 +184,7 @@ mod tests {
         let operation_name = "validOperationName";
 
         // create a mock service we will use to test our plugin
-        let mut mock = plugin_utils::MockRouterService::new();
+        let mut mock = utils::test::MockRouterService::new();
 
         // The expected reply is going to be JSON returned in the RouterResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
@@ -196,13 +197,16 @@ mod tests {
                     operation_name,
                     // we're ok with unwrap's here because we're running a test
                     // we would not do this in actual code
-                    req.context.request.body().operation_name.as_ref().unwrap()
+                    req.originating_request
+                        .body()
+                        .operation_name
+                        .as_ref()
+                        .unwrap()
                 );
                 // let's return the expected data
-                Ok(plugin_utils::RouterResponse::builder()
+                Ok(RouterResponse::fake_builder()
                     .data(expected_mock_response_data.into())
-                    .build()
-                    .into())
+                    .build())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -213,10 +217,9 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request with an valid operation name...
-        let request_with_operation_name = plugin_utils::RouterRequest::builder()
+        let request_with_operation_name = RouterRequest::fake_builder()
             .operation_name(operation_name.to_string())
-            .build()
-            .into();
+            .build();
 
         // ...And call our service stack with it
         let service_response = service_stack

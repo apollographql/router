@@ -1,7 +1,17 @@
+//! Asynchronous Checkpoint [`Layer`].
+//!
+//! Provides a general mechanism for controlling the flow of a request. Useful in any situation
+//! where the caller wishes to provide control flow for a request.
+//!
+//! If the evaluated closure succeeds then the request is passed onto the next service in the
+//! chain of responsibilities. If it fails, then the control flow is broken a response is passed
+//! back to the invoking service.
+
 use futures::future::BoxFuture;
 use std::{ops::ControlFlow, sync::Arc};
 use tower::{BoxError, Layer, Service, ServiceExt};
 
+/// [`Layer`] for Asynchronous Checkpoints.
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Request>
 where
@@ -64,6 +74,7 @@ where
     }
 }
 
+/// [`Service`] for Asynchronous Checkpoints.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointService<S, Request>
@@ -150,7 +161,7 @@ where
 mod async_checkpoint_tests {
     use super::*;
     use crate::{
-        plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
+        plugin::utils::test::MockExecutionService, ExecutionRequest, ExecutionResponse,
         ServiceBuilderExt,
     };
     use tower::{BoxError, Layer, ServiceBuilder, ServiceExt};
@@ -165,10 +176,9 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req: crate::ExecutionRequest| {
-                Ok(ExecutionResponse::builder()
+                Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build()
-                    .into())
+                    .build())
             });
 
         let service = execution_service.build();
@@ -179,7 +189,7 @@ mod async_checkpoint_tests {
             })
             .service(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -202,10 +212,9 @@ mod async_checkpoint_tests {
             .expect_call()
             .times(1)
             .returning(move |_req| {
-                Ok(ExecutionResponse::builder()
+                Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build()
-                    .into())
+                    .build())
             });
 
         let service = router_service.build();
@@ -214,7 +223,7 @@ mod async_checkpoint_tests {
             AsyncCheckpointLayer::new(|req| Box::pin(async { Ok(ControlFlow::Continue(req)) }))
                 .layer(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -238,16 +247,15 @@ mod async_checkpoint_tests {
         let service_stack = AsyncCheckpointLayer::new(|_req| {
             Box::pin(async {
                 Ok(ControlFlow::Break(
-                    ExecutionResponse::builder()
+                    ExecutionResponse::fake_builder()
                         .label("returned_before_mock_service".to_string())
-                        .build()
-                        .into(),
+                        .build(),
                 ))
             })
         })
         .layer(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_label = service_stack
             .oneshot(request)
@@ -273,7 +281,7 @@ mod async_checkpoint_tests {
         })
         .layer(service);
 
-        let request = ExecutionRequest::builder().build().into();
+        let request = ExecutionRequest::fake_builder().build();
 
         let actual_error = service_stack
             .oneshot(request)

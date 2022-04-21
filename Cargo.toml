@@ -20,6 +20,7 @@ members = [
 
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
-debug = false
+# If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
+# debug = false
 strip = "debuginfo"
 incremental = false

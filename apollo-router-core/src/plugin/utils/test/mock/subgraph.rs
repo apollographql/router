@@ -1,5 +1,8 @@
-use crate::{plugin_utils, Object, Request, Response, SubgraphRequest, SubgraphResponse};
+//! Mock subgraph implementation
+
+use crate::{Object, Request, Response, SubgraphRequest, SubgraphResponse};
 use futures::future;
+use http::StatusCode;
 use std::{collections::HashMap, sync::Arc, task::Poll};
 use tower::{BoxError, Service};
 
@@ -38,19 +41,28 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, req: SubgraphRequest) -> Self::Future {
-        let builder = plugin_utils::SubgraphResponse::builder().context(req.context);
-        let response = if let Some(response) = self.mocks.get(req.http_request.body()) {
-            builder.data(response.data.clone()).build().into()
+        let response = if let Some(response) = self.mocks.get(req.subgraph_request.body()) {
+            // Build an http Response
+            let http_response = http::Response::builder()
+                .status(StatusCode::OK)
+                .body(response.clone())
+                .expect("Response is serializable; qed");
+
+            // Create a compatible Response
+            let compat_response = crate::http_compat::Response {
+                inner: http_response,
+            };
+
+            SubgraphResponse::new_from_response(compat_response, req.context)
         } else {
-            builder
-                .errors(vec![crate::Error {
-                    message: "couldn't find mock for query".to_string(),
-                    locations: Default::default(),
-                    path: Default::default(),
-                    extensions: self.extensions.clone().unwrap_or_default(),
-                }])
+            let error = crate::Error::builder()
+                .message("couldn't find mock for query".to_string())
+                .extensions(self.extensions.clone().unwrap_or_default())
+                .build();
+            SubgraphResponse::fake_builder()
+                .error(error)
+                .context(req.context)
                 .build()
-                .into()
         };
         future::ok(response)
     }

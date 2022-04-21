@@ -1,12 +1,14 @@
+//! Implements the router phase of the request lifecycle.
+
 use crate::apq::APQLayer;
 use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
-    plugin_utils, BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, Error, ExecutionRequest,
-    ExecutionResponse, Introspection, Plugin, QueryCache, QueryPlannerRequest,
-    QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
+    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
+    RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt, SubgraphRequest,
+    SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
@@ -18,6 +20,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
 use typed_builder::TypedBuilder;
 
+/// Containing [`Service`] in the request lifecyle.
 #[derive(TypedBuilder, Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
@@ -86,20 +89,20 @@ where
                 if let Some(naive_introspection) = naive_introspection.as_ref() {
                     if let Some(response) =
                         naive_introspection
-                            .get(req.context.request.body().query.as_ref().expect(
+                            .get(req.originating_request.body().query.as_ref().expect(
                                 "apollo.ensure-query-is-present has checked this already; qed",
                             ))
                             .await
                     {
                         return Ok(RouterResponse {
                             response: http::Response::new(ResponseBody::GraphQL(response)).into(),
-                            context: req.context.into(),
+                            context: req.context,
                         });
                     }
                 }
 
                 let context = req.context;
-                let body = context.request.body();
+                let body = req.originating_request.body();
                 let variables = body.variables.clone();
                 let query = query_cache
                     .get_query(
@@ -122,7 +125,7 @@ where
                                     return Ok(RouterResponse {
                                         response: http::Response::new(ResponseBody::GraphQL(resp))
                                             .into(),
-                                        context: context.into(),
+                                        context,
                                     });
                                 }
                                 Err(err) => return Err(BoxError::from(err)),
@@ -131,7 +134,7 @@ where
                         None => {
                             let mut resp = http::Response::new(ResponseBody::GraphQL(
                                 crate::Response::builder()
-                                    .errors(vec![Error::builder()
+                                    .errors(vec![crate::Error::builder()
                                         .message(String::from("introspection has been disabled"))
                                         .build()])
                                     .build(),
@@ -140,7 +143,7 @@ where
 
                             return Ok(RouterResponse {
                                 response: resp.into(),
-                                context: context.into(),
+                                context,
                             });
                         }
                     }
@@ -152,20 +155,26 @@ where
                 {
                     Ok(RouterResponse {
                         response: http::Response::new(ResponseBody::GraphQL(err)).into(),
-                        context: context.into(),
+                        context,
                     })
                 } else {
                     let operation_name = body.operation_name.clone();
                     let planned_query = planning
-                        .call(QueryPlannerRequest {
-                            context: context.into(),
-                        })
+                        .call(
+                            QueryPlannerRequest::builder()
+                                .originating_request(req.originating_request.clone())
+                                .context(context)
+                                .build(),
+                        )
                         .await?;
                     let mut response = execution
-                        .call(ExecutionRequest {
-                            query_plan: planned_query.query_plan,
-                            context: planned_query.context,
-                        })
+                        .call(
+                            ExecutionRequest::builder()
+                                .originating_request(req.originating_request.clone())
+                                .query_plan(planned_query.query_plan)
+                                .context(planned_query.context)
+                                .build(),
+                        )
                         .await?;
 
                     if let Some(query) = query {
@@ -186,20 +195,29 @@ where
                 }
             }
             .or_else(|error: BoxError| async move {
-                Ok(plugin_utils::RouterResponse::builder()
-                    .errors(vec![crate::Error {
-                        message: error.to_string(),
-                        ..Default::default()
-                    }])
-                    .context(context_cloned.into())
-                    .build()
-                    .with_status(StatusCode::INTERNAL_SERVER_ERROR))
+                let errors = vec![crate::Error {
+                    message: error.to_string(),
+                    ..Default::default()
+                }];
+                Ok(RouterResponse::builder()
+                    .data(Default::default())
+                    .errors(errors)
+                    .extensions(Default::default())
+                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                    .context(context_cloned)
+                    .build())
             });
 
         Box::pin(fut)
     }
 }
 
+/// Builder which generates a plugin pipeline.
+///
+/// This is at the heart of the delegation of responsibility model for the router. A schema,
+/// collection of plugins, collection of subgraph services are assembled to generate a
+/// [`BoxCloneService`] capable of processing a router request through the entire stack to return a
+/// response.
 pub struct PluggableRouterServiceBuilder {
     schema: Arc<Schema>,
     plugins: Vec<(String, Box<dyn DynPlugin>)>,

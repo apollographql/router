@@ -18,6 +18,7 @@ apollo-parser = "0.2.5"
 async-trait = "0.1.53"
 atty = "0.2.14"
 axum = { version = "0.5.1", optional = true }
+buildstructor = "0.1.5"
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }
 derivative = "2.2.0"

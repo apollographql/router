@@ -123,7 +123,6 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
-    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
@@ -219,6 +218,7 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+/// Error types for service building.
 #[derive(Error, Debug, Display, Clone)]
 pub enum ServiceBuildError {
     /// couldn't build Router Service: {0}
@@ -331,6 +331,7 @@ pub enum SchemaError {
     Api(String),
 }
 
+/// Collection of schema parsing errors.
 #[derive(Debug)]
 pub struct ParseErrors {
     pub(crate) raw_schema: String,

@@ -1,3 +1,7 @@
+//! De-duplicate subgraph requests in flight. Implemented as a tower Layer.
+//!
+//! See [`Layer`] and [`tower::Service`] for more details.
+
 use crate::{fetch::OperationKind, http_compat, Request, SubgraphRequest, SubgraphResponse};
 use futures::{future::BoxFuture, lock::Mutex};
 use std::{collections::HashMap, sync::Arc, task::Poll};
@@ -47,7 +51,7 @@ where
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            match locked_wait_map.get_mut(&request.http_request) {
+            match locked_wait_map.get_mut(&request.subgraph_request) {
                 Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
@@ -56,9 +60,11 @@ where
                     match receiver.recv().await {
                         Ok(value) => {
                             return value
-                                .map(|response| SubgraphResponse {
-                                    response: response.response,
-                                    context: request.context,
+                                .map(|response| {
+                                    SubgraphResponse::new_from_response(
+                                        response.response,
+                                        request.context,
+                                    )
                                 })
                                 .map_err(|e| e.into())
                         }
@@ -69,11 +75,11 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert(request.http_request.clone(), tx.clone());
+                    locked_wait_map.insert(request.subgraph_request.clone(), tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let http_request = request.http_request.clone();
+                    let http_request = request.subgraph_request.clone();
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -101,9 +107,8 @@ where
                     }).await
                     .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
 
-                    return res.map(|response| SubgraphResponse {
-                        response: response.response,
-                        context,
+                    return res.map(|response| {
+                        SubgraphResponse::new_from_response(response.response, context)
                     });
                 }
             }
