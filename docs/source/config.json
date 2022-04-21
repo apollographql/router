@@ -18,7 +18,6 @@
       "Tracing": "/configuration/tracing",
       "Traffic shaping": "/configuration/traffic-shaping",
       "Subgraph Error Inclusion": "/configuration/subgraph-error-inclusion",
-      "Usage reporting": "/configuration/apollo-telemetry"
     },
     "Containerization": {
       "Overview": "/containerization/overview",
