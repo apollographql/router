@@ -37,6 +37,8 @@ parameters:
 # additional configuration.
 common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: true
+  NODE_VERSION: 14.17.5
+  NPM_VERSION: 7.10.0
 
 commands:
   initialize_submodules:
@@ -435,8 +437,6 @@ jobs:
   lint:
     environment:
       <<: *common_job_environment
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
     parameters:
       platform:
         type: executor
@@ -472,8 +472,6 @@ jobs:
   build:
     environment:
       <<: *common_job_environment
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
     parameters:
       platform:
         type: executor
@@ -508,8 +506,6 @@ jobs:
   test:
     environment:
       <<: *common_job_environment
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
     parameters:
       platform:
         type: executor
@@ -551,8 +547,6 @@ jobs:
     executor: << parameters.platform >>
     environment:
       <<: *common_job_environment
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
