@@ -22,18 +22,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 -->
 
-# [v0.1.0-preview.6] - (unreleased)
+# [v0.1.0-preview.7] - (unreleased)
 ## ❗ BREAKING ❗
 
 ## 🚀 Features
 
 ## 🐛 Fixes
 
-### Restore the health check route [#883](https://github.com/apollographql/router/issues/883)
-Our axum rework caused the healthckeck route `/.well-known/apollo/server-health` to change. The route is now restored.
-
-### Correctly flag incoming POST requests [#865](https://github.com/apollographql/router/issues/865)
-A regression happened during our recent switch to axum that would propagate incoming POST requests as GET requests. This has been fixed and we now have several regression tests, pending more integration tests.
 ## 🛠 Maintenance
 
 ## 📚 Documentation

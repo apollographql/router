@@ -4,9 +4,16 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [v0.1.0-preview.6] - 2022-04-21
+## 🐛 Fixes
+
+### Restore the health check route [#883](https://github.com/apollographql/router/issues/883)
+Axum rework caused the healthckeck route `/.well-known/apollo/server-health` to change. The route is now restored.
+
+### Correctly flag incoming POST requests [#865](https://github.com/apollographql/router/issues/865)
+A regression happened during our recent switch to Axum that would propagate incoming POST requests as GET requests. Fixed and added regression tests.
 
 # [v0.1.0-preview.5] - 2022-04-20
-## ❗ BREAKING ❗
 ## 🚀 Features
 ### Helm chart for the router [PR #861](https://github.com/apollographql/router/pull/861)
 
@@ -61,8 +68,6 @@ The router is now running by default with an [axum](https://github.com/tokio-rs/
 
 ### Improve the way we handle Request with axum [PR #845](https://github.com/apollographql/router/pull/845) [PR #877](https://github.com/apollographql/router/pull/877)
 Take advantages of new extractors given by `axum`.
-
-## 📚 Documentation
 
 
 # [v0.1.0-preview.4] - 2022-04-11
