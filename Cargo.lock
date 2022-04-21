@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.4",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "apollo-parser 0.2.5",
  "async-trait",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "bytes",
  "clap 3.1.8",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "futures",
  "graphql_client",
@@ -5545,7 +5545,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-preview.5"
+version = "0.1.0-preview.6"
 dependencies = [
  "ansi_term",
  "anyhow",
