@@ -38,6 +38,8 @@ mod metrics;
 mod otlp;
 mod tracing;
 
+pub static ROUTER_SPAN_NAME: &str = "router";
+
 pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
@@ -464,7 +466,7 @@ impl Telemetry {
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static(""));
             let span = info_span!(
-                "router",
+                ROUTER_SPAN_NAME,
                 query = query.as_str(),
                 operation_name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
