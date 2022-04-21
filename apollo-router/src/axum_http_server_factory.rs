@@ -116,9 +116,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     })
                     .post(handle_post),
                 )
-                .route("/.well-known", get(health_check))
-                .route("/apollo", get(health_check))
-                .route("/server-health", get(health_check))
+                .route("/.well-known/apollo/server-health", get(health_check))
                 .layer(
                     TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
                         DefaultMakeSpan::new().level(Level::INFO),
@@ -1116,5 +1114,18 @@ Content-Type: application/json\r
         let body = stream.buffer().to_vec();
         assert!(header_first_line.contains(" 200 "), "");
         body
+    }
+
+    #[test(tokio::test)]
+    async fn test_health_check() {
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!(
+            "{}/.well-known/apollo/server-health",
+            server.listen_address()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
