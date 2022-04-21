@@ -501,7 +501,7 @@ async fn run_graphql_request(
                     tracing::trace_span!("serialize_response").in_scope(|| response.into_response())
                 })
                 .unwrap_or_else(|e| {
-                    tracing::error!("router serivce call failed: {}", e);
+                    tracing::error!("router service call failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "router service call failed",

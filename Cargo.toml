@@ -12,6 +12,7 @@ members = [
     "examples/forbid-anonymous-operations",
     "examples/hello-world",
     "examples/status-code-propagation",
+    "examples/op-name-to-header",
     "examples/jwt-auth",
     "fuzz",
     "uplink",

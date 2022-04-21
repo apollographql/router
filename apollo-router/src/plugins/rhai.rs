@@ -1,9 +1,10 @@
 //! Customization via Rhai.
 
+use std::sync::Mutex;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 
 use apollo_router_core::{
-    register_plugin, Error, Object, Plugin, ResponseBody, RouterRequest, RouterResponse, Value,
+    register_plugin, Error, Object, Plugin, RouterRequest, RouterResponse, Value,
 };
 use apollo_router_core::{
     Context, Entries, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
@@ -88,18 +89,51 @@ macro_rules! handle_error {
     };
 }
 
+type SharedService = Arc<Mutex<Option<BoxService<RouterRequest, RouterResponse, BoxError>>>>;
+
 use rhai::plugin::*; // a "prelude" import for macros
 
 #[export_module]
 mod rhai_plugin_mod {
     // use super::RhaiContext;
 
-    //     pub(crate) fn get_operation_name(context: &mut RhaiContext) -> String {
-    //         match &context.originating_request.body().operation_name {
-    //             Some(n) => n.clone(),
-    //             None => "".to_string(),
-    //         }
-    //     }
+    // This is a getter for 'RouterRequest::context'.
+    #[rhai_fn(get = "context")]
+    pub fn get_context(obj: &mut RouterRequest) -> Context {
+        obj.context.clone()
+    }
+
+    // This is a setter for 'RouterRequest::context'.
+    #[rhai_fn(set = "context")]
+    pub fn set_context(obj: &mut RouterRequest, value: Context) {
+        obj.context = value;
+    }
+
+    pub(crate) fn map_request(rhai_service: &mut RhaiService, function_name: String) {
+        println!("rhai service: {:?}", rhai_service);
+        let mut guard = rhai_service.service.lock().unwrap();
+        let service_opt = guard.take();
+        match service_opt {
+            Some(service) => {
+                let engine = rhai_service.engine.clone();
+                let ast = rhai_service.ast.clone();
+                let new_service = service
+                    .map_request(move |request: RouterRequest| {
+                        println!("IN THE MAPPING");
+
+                        let mut scope = Scope::new();
+                        let request: RouterRequest = engine
+                            .call_fn(&mut scope, &ast, function_name.clone(), (request,))
+                            .map_err(|err| err.to_string())
+                            .expect("XXX NEED TO HANDLE ERRORS");
+                        request
+                    })
+                    .boxed();
+                guard.replace(new_service);
+            }
+            None => panic!("surely there is a service here..."),
+        };
+    }
 }
 
 #[derive(Default, Clone)]
@@ -165,90 +199,21 @@ impl Plugin for Rhai {
         &mut self,
         mut service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        const FUNCTION_NAME_REQUEST: &str = "router_service_request";
+        println!("router_service invoked");
+        const FUNCTION_NAME_SERVICE: &str = "router_service";
+        let shared_service = Arc::new(Mutex::new(Some(service)));
         if self
             .ast
             .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_REQUEST)
+            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
         {
             let this = self.clone();
-            tracing::debug!("router_service_request function found");
+            tracing::debug!("router_service function found");
 
-            service = service
-                .map_request(move |mut request: RouterRequest| {
-                    let rhai_context = handle_error!(
-                        this.run_rhai_script(
-                            FUNCTION_NAME_REQUEST,
-                            request.context.clone(),
-                            request.originating_request.headers().clone()
-                        ),
-                        request
-                    );
-                    request.context = rhai_context.context;
-                    *request.originating_request.headers_mut() = rhai_context.headers;
-                    request
-                        .originating_request
-                        .headers_mut()
-                        .remove(CONTENT_LENGTH);
-
-                    request
-                })
-                .boxed();
+            this.run_rhai_service(FUNCTION_NAME_SERVICE, shared_service.clone())
+                .expect("XXX FIX THIS");
         }
-
-        const FUNCTION_NAME_RESPONSE: &str = "router_service_response";
-        let this = self.clone();
-        let function_found = self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_RESPONSE);
-        service = service
-            .map_response(move |mut response: RouterResponse| {
-                let previous_err: Option<String> = response
-                    .context
-                    .get(CONTEXT_ERROR)
-                    .expect("we put the context error ourself so it will be deserializable; qed");
-                if let Some(err) = previous_err {
-                    response.response = response.response.map(|body| match body {
-                        ResponseBody::GraphQL(mut res) => {
-                            res.errors.push(
-                                Error::builder()
-                                    .message(format!("RHAI plugin error: {}", err.as_str()))
-                                    .build(),
-                            );
-
-                            ResponseBody::GraphQL(res)
-                        }
-                        _ => body,
-                    });
-
-                    return response;
-                }
-                if function_found {
-                    let rhai_context = match this.run_rhai_script(
-                        FUNCTION_NAME_RESPONSE,
-                        response.context,
-                        response.response.headers().clone(),
-                    ) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            let context = Context::new();
-                            context
-                                .insert(CONTEXT_ERROR, err)
-                                .expect("error is always a string; qed");
-
-                            return RouterResponse::new_from_response(response.response, context);
-                        }
-                    };
-                    response.context = rhai_context.context;
-                    *response.response.headers_mut() = rhai_context.headers;
-
-                    response.response.headers_mut().remove(CONTENT_LENGTH);
-                }
-
-                response
-            })
-            .boxed();
+        service = shared_service.lock().unwrap().take().unwrap();
 
         service
     }
@@ -467,6 +432,13 @@ impl RhaiObjectSetterGetter for Entries {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct RhaiService {
+    service: SharedService,
+    engine: Arc<Engine>,
+    ast: AST,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct RhaiContext {
     headers: HeaderMap,
     context: Context,
@@ -492,6 +464,25 @@ impl RhaiContext {
 }
 
 impl Rhai {
+    fn run_rhai_service(
+        &self,
+        function_name: &str,
+        service: SharedService,
+    ) -> Result<String, String> {
+        let mut scope = Scope::new();
+        let rhai_service = RhaiService {
+            service,
+            engine: self.engine.clone(),
+            ast: self.ast.clone(),
+        };
+        let response: String = self
+            .engine
+            .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
+            .map_err(|err| err.to_string())?;
+
+        Ok(response)
+    }
+
     fn run_rhai_script(
         &self,
         function_name: &str,
