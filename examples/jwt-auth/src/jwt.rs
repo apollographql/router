@@ -141,28 +141,6 @@ struct JwtAuth {
 impl JwtAuth {
     const DEFAULT_MAX_TOKEN_LIFE: u64 = 900;
 
-    fn new(configuration: Conf) -> Result<Self, BoxError> {
-        // Try to figure out which authentication mechanism to use
-        let key = configuration.key.trim().to_string();
-
-        let time_tolerance = match configuration.time_tolerance {
-            Some(t) => Duration::from_secs(t),
-            None => Duration::from_secs(DEFAULT_TIME_TOLERANCE_SECS),
-        };
-        let max_token_life = match configuration.max_token_life {
-            Some(t) => Duration::from_secs(t),
-            None => Duration::from_secs(JwtAuth::DEFAULT_MAX_TOKEN_LIFE),
-        };
-        let hmac = JwtAuth::try_initialize_hmac(&configuration, key);
-
-        Ok(Self {
-            time_tolerance,
-            max_token_life,
-            configuration,
-            hmac,
-        })
-    }
-
     // HMAC support
     fn try_initialize_hmac(configuration: &Conf, key: String) -> Option<JwtHmac> {
         let mut hmac = None;
@@ -201,12 +179,26 @@ struct Conf {
 impl Plugin for JwtAuth {
     type Config = Conf;
 
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        // Try to figure out which authentication mechanism to use
+        let key = configuration.key.trim().to_string();
 
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Ok(())
+        let time_tolerance = match configuration.time_tolerance {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(DEFAULT_TIME_TOLERANCE_SECS),
+        };
+        let max_token_life = match configuration.max_token_life {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(JwtAuth::DEFAULT_MAX_TOKEN_LIFE),
+        };
+        let hmac = JwtAuth::try_initialize_hmac(&configuration, key);
+
+        Ok(Self {
+            time_tolerance,
+            max_token_life,
+            configuration,
+            hmac,
+        })
     }
 
     fn router_service(
@@ -371,10 +363,6 @@ impl Plugin for JwtAuth {
             .service(service)
             .boxed()
     }
-
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        JwtAuth::new(configuration)
-    }
 }
 
 // This macro allows us to use it in our plugin registry!
@@ -398,12 +386,13 @@ mod tests {
     // find our `JwtAuth` plugin,
     // and deserialize an hmac configured yml configuration into it
     // see `router.yaml` for more information
-    #[test]
-    fn plugin_registered() {
+    #[tokio::test]
+    async fn plugin_registered() {
         apollo_router_core::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
+            .await
             .unwrap();
     }
 
@@ -597,7 +586,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -655,7 +646,9 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -710,7 +703,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 

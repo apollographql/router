@@ -24,19 +24,7 @@ struct Conf {
 impl Plugin for HelloWorld {
     type Config = Conf;
 
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        // Perform any startup code for your plugin here
-        // This will be called before any requests are served.
-        Ok(())
-    }
-
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        // Perform any shutdown code for your plugin here
-        // No new requests will be served after this is called.
-        Ok(())
-    }
-
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(HelloWorld { configuration })
     }
 
@@ -109,6 +97,7 @@ mod tests {
             .get("example.hello_world")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({"name" : "Bob"}))
+            .await
             .unwrap();
     }
 }

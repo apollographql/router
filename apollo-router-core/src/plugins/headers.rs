@@ -94,10 +94,11 @@ fn option_string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::s
     Option::<String>::json_schema(gen)
 }
 
+#[async_trait::async_trait]
 impl Plugin for Headers {
     type Config = Config;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(Headers { config })
     }
     fn subgraph_service(

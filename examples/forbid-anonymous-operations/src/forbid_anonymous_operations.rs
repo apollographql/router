@@ -11,6 +11,7 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // We don't need any in this example
 struct ForbidAnonymousOperations {}
 
+#[async_trait::async_trait]
 impl Plugin for ForbidAnonymousOperations {
     // We either forbid anonymous operations,
     // Or we don't. This is the reason why we don't need
@@ -19,7 +20,7 @@ impl Plugin for ForbidAnonymousOperations {
     // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = ();
 
-    fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
@@ -106,6 +107,7 @@ mod tests {
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
+            .await
             .unwrap();
     }
 

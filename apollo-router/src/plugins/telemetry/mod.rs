@@ -120,9 +120,33 @@ impl Drop for Telemetry {
 impl Plugin for Telemetry {
     type Config = config::Conf;
 
-    async fn startup(&mut self) -> Result<(), BoxError> {
+    fn activate(&mut self) {
+        // The active service is about to be swapped in.
+        // The rest of this code in this method is expected to succeed.
+        // The issue is that Otel uses globals for a bunch of stuff.
+        // If we move to a completely tower based architecture then we could make this nicer.
+        let tracer_provider = self
+            .tracer_provider
+            .take()
+            .expect("trace_provider will have been set in startup, qed");
+        let tracer = tracer_provider.versioned_tracer(
+            "apollo-router",
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        Self::replace_tracer_provider(tracer_provider);
+
+        replace_layer(Box::new(telemetry))
+            .expect("set_global_subscriber() was not called at startup, fatal");
+        opentelemetry::global::set_error_handler(handle_error)
+            .expect("otel error handler lock poisoned, fatal");
+        global::set_text_map_propagator(Self::create_propagator(&self.config));
+    }
+
+    async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = self.config.apollo.get_or_insert_with(Default::default);
+        let apollo = config.apollo.get_or_insert_with(Default::default);
         if apollo.apollo_key.is_none() {
             apollo.apollo_key = apollo_key()
         }
@@ -154,21 +178,29 @@ impl Plugin for Telemetry {
             _ => (None, None),
         };
 
-        //If store the shutdown handle.
-        self.spaceport_shutdown = shutdown_tx;
-
-        // Now that spaceport is set up it is possible to set up the tracer providers.
-        self.tracer_provider = Some(Self::create_tracer_provider(&self.config)?);
-
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
         // eventually be one.
-        let mut builder = Self::create_metrics_exporters(&self.config)?;
-        self._metrics_exporters = builder.exporters();
-        self.meter_provider = builder.meter_provider();
-        self.custom_endpoints = builder.custom_endpoints();
+        let mut builder = Self::create_metrics_exporters(&config)?;
+
+        //// THIS IS IMPORTANT
+        // Once the trace provider has been created this method MUST NOT FAIL
+        // The trace provider will not be shut down if drop is not called and it will result in a hang.
+        // Don't add anything fallible after the tracer provider has been created.
+        let tracer_provider = Self::create_tracer_provider(&config)?;
+
+        let plugin = Ok(Telemetry {
+            spaceport_shutdown: shutdown_tx,
+            tracer_provider: Some(tracer_provider),
+            custom_endpoints: builder.custom_endpoints(),
+            _metrics_exporters: builder.exporters(),
+            meter_provider: builder.meter_provider(),
+            config,
+        });
+
+        // We're safe now for shutdown.
 
         // Finally actually start spaceport
         if let Some(spaceport) = spaceport {
@@ -186,46 +218,7 @@ impl Plugin for Telemetry {
             });
         }
 
-        Ok(())
-    }
-
-    fn activate(&mut self) {
-        // The active service is about to be swapped in.
-        // The rest of this code in this method is expected to succeed.
-        // The issue is that Otel uses globals for a bunch of stuff.
-        // If we move to a completely tower based architecture then we could make this nicer.
-        let tracer_provider = self
-            .tracer_provider
-            .take()
-            .expect("trace_provider will have been set in startup, qed");
-        let tracer = tracer_provider.versioned_tracer(
-            "apollo-router",
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-        Self::replace_tracer_provider(tracer_provider);
-
-        replace_layer(Box::new(telemetry))
-            .expect("set_global_subscriber() was not called at startup, fatal");
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
-        global::set_text_map_propagator(Self::create_propagator(&self.config));
-    }
-
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
-
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Telemetry {
-            spaceport_shutdown: None,
-            tracer_provider: None,
-            custom_endpoints: Default::default(),
-            _metrics_exporters: Default::default(),
-            meter_provider: Default::default(),
-            config,
-        })
+        plugin
     }
 
     fn router_service(
@@ -442,6 +435,7 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "tracing": null }))
+            .await
             .unwrap();
     }
 
@@ -468,6 +462,7 @@ mod tests {
                         }
                     }
             }))
+            .await
             .unwrap();
     }
 }

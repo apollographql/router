@@ -19,10 +19,11 @@ struct PropagateStatusCode {
     status_codes: Vec<u16>,
 }
 
+#[async_trait::async_trait]
 impl Plugin for PropagateStatusCode {
     type Config = PropagateStatusCodeConfig;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self {
             status_codes: configuration.status_codes,
         })
@@ -113,6 +114,7 @@ mod tests {
             .get("example.propagate_status_code")
             .expect("Plugin not found")
             .create_instance(&json!({ "status_codes" : [500, 403, 401] }))
+            .await
             .unwrap();
     }
 
@@ -139,6 +141,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
         })
+        .await
         .expect("couldn't create plugin")
         .subgraph_service("accounts", mock_service.boxed());
 
@@ -173,6 +176,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
         })
+        .await
         .expect("couldn't create plugin")
         .subgraph_service("accounts", mock_service.boxed());
 
@@ -215,6 +219,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
         })
+        .await
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 
@@ -247,6 +252,7 @@ mod tests {
         let service_stack = PropagateStatusCode::new(PropagateStatusCodeConfig {
             status_codes: vec![500, 403, 401],
         })
+        .await
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 

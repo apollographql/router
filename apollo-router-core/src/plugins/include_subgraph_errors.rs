@@ -36,10 +36,11 @@ struct IncludeSubgraphErrors {
     config: Config,
 }
 
+#[async_trait::async_trait]
 impl Plugin for IncludeSubgraphErrors {
     type Config = Config;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(IncludeSubgraphErrors { config })
     }
 
@@ -177,19 +178,20 @@ mod test {
         router
     }
 
-    fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
+    async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugins()
             .get("experimental.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance(config)
+            .await
             .expect("Plugin not created")
     }
 
     #[tokio::test]
     async fn it_returns_valid_response() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
@@ -197,7 +199,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_explicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -205,7 +207,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_implicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({}));
+        let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -213,7 +215,7 @@ mod test {
     #[tokio::test]
     async fn it_does_not_redact_all_subgraphs_explicit_allow() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -221,7 +223,8 @@ mod test {
     #[tokio::test]
     async fn it_does_not_redact_all_implicit_redact_product_explict_allow_for_product_query() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }}));
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -229,7 +232,8 @@ mod test {
     #[tokio::test]
     async fn it_does_redact_all_implicit_redact_product_explict_allow_for_review_query() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }}));
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -239,7 +243,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -249,7 +254,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -259,7 +265,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -269,7 +276,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
     }
