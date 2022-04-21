@@ -62,11 +62,7 @@ mod tests {
         mock_service
             .expect_call()
             .withf(|req| {
-                assert_eq!(
-                    req.subgraph_request.uri(),
-                    &Uri::from_str("http://localhost:8001").unwrap()
-                );
-                true
+                req.subgraph_request.uri() == &Uri::from_str("http://localhost:8001").unwrap()
             })
             .times(1)
             .returning(move |req: SubgraphRequest| {

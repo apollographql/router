@@ -559,8 +559,11 @@ mod log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use http::Method;
     use std::str::FromStr;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::{collections::HashMap, sync::atomic::AtomicBool};
     use tower::{ServiceBuilder, ServiceExt};
     macro_rules! test_query_plan {
         () => {
@@ -597,16 +600,18 @@ mod tests {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
         };
 
+        let succeeded: Arc<AtomicBool> = Default::default();
+        let inner_succeeded = Arc::clone(&succeeded);
+
         let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
         mock_products_service
             .expect_call()
             .times(1)
-            .withf(|request| {
-                assert_eq!(
-                    request.subgraph_request.body().operation_name,
-                    Some("topProducts_product_0".into())
-                );
-                true
+            .withf(move |request| {
+                let matches = request.subgraph_request.body().operation_name
+                    == Some("topProducts_product_0".into());
+                inner_succeeded.store(matches, Ordering::SeqCst);
+                matches
             });
         query_plan
             .execute(
@@ -621,5 +626,45 @@ mod tests {
                 &Schema::from_str(test_schema!()).unwrap(),
             )
             .await;
+
+        assert!(succeeded.load(Ordering::SeqCst), "incorrect operation name");
+    }
+
+    #[tokio::test]
+    async fn fetch_makes_post_requests() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+        };
+
+        let succeeded: Arc<AtomicBool> = Default::default();
+        let inner_succeeded = Arc::clone(&succeeded);
+
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        mock_products_service
+            .expect_call()
+            .times(1)
+            .withf(move |request| {
+                let matches = request.subgraph_request.method() == Method::POST;
+                inner_succeeded.store(matches, Ordering::SeqCst);
+                matches
+            });
+        query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+
+        assert!(
+            succeeded.load(Ordering::SeqCst),
+            "subgraph requests must be http post"
+        );
     }
 }

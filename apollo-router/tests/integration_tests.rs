@@ -191,6 +191,46 @@ async fn queries_should_work_over_get() {
 }
 
 #[tokio::test]
+async fn queries_should_work_over_post() {
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
+
+    let request = graphql::RouterRequest {
+        originating_request: http_request,
+        context: graphql::Context::new(),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
@@ -255,6 +295,57 @@ async fn mutation_should_not_work_over_get() {
     let (actual, registry) = query_rust(originating_request.into()).await;
 
     assert_eq!(1, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
+async fn mutation_should_work_over_post() {
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"mutation {
+                createProduct(upc:"8", name:"Bob") {
+                  upc
+                  name
+                  reviews {
+                    body
+                  }
+                }
+                createReview(upc: "8", id:"100", body: "Bif"){
+                  id
+                  body
+                }
+              }"#
+            .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>1,
+        "reviews".to_string()=>2,
+    };
+
+    let http_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
+
+    let request = graphql::RouterRequest {
+        originating_request: http_request,
+        context: graphql::Context::new(),
+    };
+
+    let (actual, registry) = query_rust(request).await;
+
+    assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
 

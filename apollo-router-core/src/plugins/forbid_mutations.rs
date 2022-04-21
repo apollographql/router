@@ -27,14 +27,14 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let errors = vec![crate::Error {
+                        let error = crate::Error {
                             message: "Mutations are forbidden".to_string(),
                             locations: Default::default(),
                             path: Default::default(),
                             extensions: Default::default(),
-                        }];
+                        };
                         let res = ExecutionResponse::builder()
-                            .errors(errors)
+                            .error(error)
                             .extensions(Object::new())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
