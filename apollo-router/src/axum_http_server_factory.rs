@@ -99,15 +99,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         move |host: Host,
                               service: Extension<BufferedService>,
                               http_request: Request<Body>| {
-                            redirect_or_run_graphql_operation(
-                                host,
-                                service,
-                                http_request,
-                                display_landing_page,
-                            )
+                            handle_get(host, service, http_request, display_landing_page)
                         }
                     })
-                    .post(run_graphql_operation),
+                    .post(handle_post),
                 )
                 .route(
                     "/graphql",
@@ -116,15 +111,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         move |host: Host,
                               service: Extension<BufferedService>,
                               http_request: Request<Body>| {
-                            redirect_or_run_graphql_operation(
-                                host,
-                                service,
-                                http_request,
-                                display_landing_page,
-                            )
+                            handle_get(host, service, http_request, display_landing_page)
                         }
                     })
-                    .post(run_graphql_operation),
+                    .post(handle_post),
                 )
                 .route("/.well-known", get(health_check))
                 .route("/apollo", get(health_check))
@@ -407,7 +397,7 @@ async fn custom_plugin_handler(
     Ok::<_, String>(res)
 }
 
-async fn redirect_or_run_graphql_operation(
+async fn handle_get(
     Host(host): Host,
     Extension(service): Extension<BufferedService>,
     http_request: Request<Body>,
@@ -439,7 +429,7 @@ async fn redirect_or_run_graphql_operation(
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
-async fn run_graphql_operation(
+async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
