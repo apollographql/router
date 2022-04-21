@@ -29,6 +29,15 @@ parameters:
     # increment that one to invalidate all the caches
     default: v3.{{ checksum "rust-toolchain.toml" }}
 
+# These are common environment variables that we want to set on on all jobs.
+# While these could conceivably be set on the CircleCI project settings'
+# as "Secrets", these are not really secrets, and its convenient to keep them in
+# code.  Also, most of our secrets are not necessary for _most_ of our jobs, so this enables
+# forks of the project to run their own tests on their own CircleCI deployments with no
+# additional configuration.
+common_job_environment: &common_job_environment
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+
 commands:
   initialize_submodules:
     steps:
@@ -425,6 +434,7 @@ commands:
 jobs:
   lint:
     environment:
+      <<: *common_job_environment
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
     parameters:
@@ -443,6 +453,8 @@ jobs:
             - xtask_lint:
                 os: linux
   check_compliance:
+    environment:
+      <<: *common_job_environment
     parameters:
       platform:
         type: executor
@@ -459,6 +471,7 @@ jobs:
                 os: linux
   build:
     environment:
+      <<: *common_job_environment
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
     parameters:
@@ -494,6 +507,7 @@ jobs:
                 os: macos
   test:
     environment:
+      <<: *common_job_environment
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
     parameters:
@@ -536,6 +550,7 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     environment:
+      <<: *common_job_environment
       NODE_VERSION: 14.17.5
       NPM_VERSION: 7.10.0
       RELEASE_BIN: router
@@ -700,6 +715,7 @@ jobs:
       - image: cimg/base:stable
     resource_class: small
     environment:
+      <<: *common_job_environment
       VERSION: << pipeline.git.tag >>
     steps:
       - checkout
