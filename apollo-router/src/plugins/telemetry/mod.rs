@@ -7,7 +7,6 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
-use apollo_router_core::prelude::graphql;
 use apollo_router_core::{
     http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
@@ -241,7 +240,7 @@ impl Plugin for Telemetry {
                 let metrics = metrics.clone();
                 // Using Instant because it is guaranteed to be monotonically increasing.
                 let now = Instant::now();
-                let out = move |r: Result<RouterResponse, BoxError>| {
+                f.map(move |r: Result<RouterResponse, BoxError>| {
                     match &r {
                         Ok(response) => {
                             metrics.http_requests_total.add(
@@ -260,8 +259,7 @@ impl Plugin for Telemetry {
                         .http_requests_duration
                         .record(now.elapsed().as_secs_f64(), &[]);
                     r
-                };
-                f.map(out)
+                })
             })
             .boxed()
     }

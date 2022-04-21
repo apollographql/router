@@ -33,7 +33,6 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
         let _guard: Box<dyn std::any::Any> = if self.no_demo {
             eprintln!("Flag --no-demo is the default now. Not running federation-demo.");
             Box::new(())
