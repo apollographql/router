@@ -60,3 +60,5 @@ In addition, the `activate` lifecycle hook is now not marked as deprecated, and 
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
+### Compatibility docs [PR #896](https://github.com/apollographql/router/pull/896)
+Add a page about compatibility with Federation versions. 

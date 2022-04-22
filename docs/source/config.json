@@ -39,6 +39,7 @@
       "Native Rust plugins": "/customizations/native",
       "Rhai scripts (experimental)": "/customizations/rhai"
     },
+    "Compatibility": "/compatibility",
     "Third-Party Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
