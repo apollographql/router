@@ -4,13 +4,15 @@
 //!
 //! Using ServiceBuilderExt:
 //! ```rust
-//! use tower::ServiceBuilder;
-//! use tracing::info_span;
-//! use apollo_router_core::ServiceBuilderExt;
-//!
+//! # use tower::ServiceBuilder;
+//! # use tower_service::Service;
+//! # use tracing::info_span;
+//! # use apollo_router_core::ServiceBuilderExt;
+//! # fn test<T>(service: impl Service<T>) {
 //! let instrumented = ServiceBuilder::new()
 //!             .instrument(|_request| info_span!("query_planning"))
 //!             .service(service);
+//! # }
 //! ```
 //! Now calls to the wrapped service will be wrapped in a span. You can attach attributes to the span from the request.
 //!
