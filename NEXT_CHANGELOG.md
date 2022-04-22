@@ -54,7 +54,7 @@ In addition, the `activate` lifecycle hook is now not marked as deprecated, and 
 ## 🚀 Features
 
 ###  Configurable client identification headers [PR #850](https://github.com/apollographql/router/pull/850)
-The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Thos headers can now be overriden in the configuration:
+The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Those headers can now be overriden in the configuration:
 ```yaml title="router.yaml"
 telemetry:
   apollo:
