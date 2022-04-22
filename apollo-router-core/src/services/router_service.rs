@@ -108,7 +108,7 @@ where
                 let body = req.originating_request.body();
                 let variables = body.variables.clone();
                 let query = query_cache
-                    .parse_query(
+                    .get(
                         body.query
                             .as_ref()
                             .expect("apollo.ensure-query-is-present has checked this already; qed")
