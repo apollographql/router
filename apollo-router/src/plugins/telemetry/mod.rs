@@ -444,7 +444,7 @@ impl Telemetry {
         let client_version_header = config.client_version_header;
 
         move |request: &RouterRequest| {
-            let http_request = &request.context.request;
+            let http_request = &request.originating_request;
             let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
