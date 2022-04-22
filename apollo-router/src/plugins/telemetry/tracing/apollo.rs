@@ -1,3 +1,4 @@
+//! Tracing configuration for apollo telemetry.
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::{SpaceportConfig, StudioGraph};

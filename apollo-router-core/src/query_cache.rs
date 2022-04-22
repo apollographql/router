@@ -1,3 +1,4 @@
+//! A cache for queries.
 use crate::prelude::graphql::*;
 use crate::CacheResolver;
 use std::sync::Arc;

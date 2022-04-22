@@ -1,3 +1,4 @@
+//! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
@@ -34,7 +35,7 @@ use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 
-/// A basic http server using warp.
+/// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 /// Redirects to studio for GET requests.
 #[derive(Debug)]

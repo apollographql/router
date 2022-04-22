@@ -1,3 +1,4 @@
+//! Configuration for apollo telemetry.
 use crate::graphql::serde_utils::deserialize_header_name;
 use http::header::HeaderName;
 use schemars::JsonSchema;

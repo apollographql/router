@@ -1,3 +1,4 @@
+//! Configuration for Otlp tracing.
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;

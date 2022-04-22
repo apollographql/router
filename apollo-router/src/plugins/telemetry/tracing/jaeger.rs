@@ -1,3 +1,4 @@
+//! Configuration for jaeger tracing.
 use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::{BatchSpanProcessor, Builder};

@@ -1,3 +1,20 @@
+//! Instrumentation layer that allows services to be wrapped in a span.
+//!
+//! See [`Layer`] and [`Service`] for more details.
+//!
+//! Using ServiceBuilderExt:
+//! ```rust
+//! use tower::ServiceBuilder;
+//! use tracing::info_span;
+//! use apollo_router_core::ServiceBuilderExt;
+//!
+//! let instrumented = ServiceBuilder::new()
+//!             .instrument(|_request| info_span!("query_planning"))
+//!             .service(service);
+//! ```
+//! Now calls to the wrapped service will be wrapped in a span. You can attach attributes to the span from the request.
+//!
+
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use std::marker::PhantomData;
@@ -6,6 +23,7 @@ use tower::Layer;
 use tower_service::Service;
 use tracing::Instrument;
 
+/// [`Layer`] for instrumentation.
 pub struct InstrumentLayer<F, Request>
 where
     F: Fn(&Request) -> tracing::Span,
@@ -42,6 +60,7 @@ where
     }
 }
 
+/// [`Service`] for instrumentation.
 pub struct InstrumentService<F, S, Request>
 where
     S: Service<Request>,
