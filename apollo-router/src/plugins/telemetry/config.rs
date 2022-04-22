@@ -1,3 +1,4 @@
+//! Configuration for the telemetry plugin.
 use super::*;
 use crate::plugins::telemetry::metrics;
 use opentelemetry::sdk::Resource;

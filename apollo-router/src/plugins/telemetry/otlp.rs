@@ -1,3 +1,4 @@
+//! Shared configuration for Otlp tracing and metrics.
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::GenericWith;
 use opentelemetry_otlp::{HttpExporterBuilder, TonicExporterBuilder, WithExportConfig};

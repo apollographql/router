@@ -4,16 +4,18 @@ use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
 };
-use crate::plugins::telemetry::tracing::{apollo, TracingConfigurator};
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
+use ::tracing::{info_span, Span};
 use apollo_router_core::{
-    http_compat, register_plugin, Handler, Plugin, ResponseBody, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
+    QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
 use futures::FutureExt;
-use http::StatusCode;
+use http::{HeaderValue, StatusCode};
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -27,13 +29,16 @@ use std::fmt;
 use std::time::Instant;
 use tower::steer::Steer;
 use tower::util::BoxService;
-use tower::{service_fn, BoxError, ServiceExt};
+use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
+mod apollo;
 mod config;
 mod metrics;
 mod otlp;
 mod tracing;
+
+pub static ROUTER_SPAN_NAME: &str = "router";
 
 pub struct Telemetry {
     config: config::Conf,
@@ -95,17 +100,13 @@ impl Drop for Telemetry {
             // Tracer providers must be flushed. This may happen as part of otel if the provider was set
             // as the global, but may also happen in the case of an failed config reload.
             // If the tracer prover is present then it was not handed over so we must flush it.
-            // The magic incantation seems to be that the flush MUST happen within a tokio runtime,
-            // and then within a spawn blocking.
+            // The magic incantation seems to be that the flush MUST happen in a separate thread.
             ::tracing::debug!("flushing telemetry");
-            std::thread::spawn(|| {
-                let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
-                runtime.block_on(async {
-                    let jh = tokio::task::spawn_blocking(move || {
-                        opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
-                    });
-                    futures::executor::block_on(jh).expect("failed to flush tracer provider");
+            std::thread::spawn(|| async {
+                let jh = tokio::task::spawn_blocking(move || {
+                    opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
                 });
+                futures::executor::block_on(jh).expect("failed to flush tracer provider");
             });
         }
 
@@ -160,6 +161,7 @@ impl Plugin for Telemetry {
                 apollo_key: Some(_),
                 apollo_graph_ref: Some(_),
                 endpoint: None,
+                ..
             } => {
                 ::tracing::debug!("starting Spaceport");
                 let (shutdown_tx, shutdown_rx) = futures::channel::oneshot::channel();
@@ -226,12 +228,16 @@ impl Plugin for Telemetry {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
-        service
+        ServiceBuilder::new()
+            .instrument(Self::router_service_span(
+                self.config.apollo.clone().unwrap_or_default(),
+            ))
+            .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
                 // Using Instant because it is guaranteed to be monotonically increasing.
                 let now = Instant::now();
-                f.map(move |r| {
+                f.map(move |r: Result<RouterResponse, BoxError>| {
                     match &r {
                         Ok(response) => {
                             metrics.http_requests_total.add(
@@ -255,6 +261,26 @@ impl Plugin for Telemetry {
             .boxed()
     }
 
+    fn query_planning_service(
+        &mut self,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+    ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("query_planning"))
+            .service(service)
+            .boxed()
+    }
+
+    fn execution_service(
+        &mut self,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+    ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("execution"))
+            .service(service)
+            .boxed()
+    }
+
     fn subgraph_service(
         &mut self,
         name: &str,
@@ -262,7 +288,10 @@ impl Plugin for Telemetry {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         let metrics = BasicMetrics::new(&self.meter_provider);
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
-        service
+        let name = name.to_owned();
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("subgraph", name = name.as_str()))
+            .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
                 let subgraph_attribute = subgraph_attribute.clone();
@@ -409,6 +438,38 @@ impl Telemetry {
         });
         futures::executor::block_on(jh).expect("failed to replace tracer provider");
     }
+
+    fn router_service_span(config: apollo::Config) -> impl Fn(&RouterRequest) -> Span + Clone {
+        let client_name_header = config.client_name_header;
+        let client_version_header = config.client_version_header;
+
+        move |request: &RouterRequest| {
+            let http_request = &request.originating_request;
+            let headers = http_request.headers();
+            let query = http_request.body().query.clone().unwrap_or_default();
+            let operation_name = http_request
+                .body()
+                .operation_name
+                .clone()
+                .unwrap_or_default();
+            let client_name = headers
+                .get(&client_name_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""));
+            let client_version = headers
+                .get(&client_version_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""));
+            let span = info_span!(
+                ROUTER_SPAN_NAME,
+                query = query.as_str(),
+                operation_name = operation_name.as_str(),
+                client_name = client_name.to_str().unwrap_or_default(),
+                client_version = client_version.to_str().unwrap_or_default()
+            );
+            span
+        }
+    }
 }
 
 fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
@@ -429,6 +490,7 @@ register_plugin!("apollo", "telemetry", Telemetry);
 
 #[cfg(test)]
 mod tests {
+
     #[tokio::test]
     async fn plugin_registered() {
         apollo_router_core::plugins()

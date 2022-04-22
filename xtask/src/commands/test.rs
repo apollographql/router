@@ -33,16 +33,7 @@ impl Test {
             "--no-demo and --with-demo are mutually exclusive",
         );
 
-        // NOTE: it worked nicely on GitHub Actions but it hangs on CircleCI on Windows
-        let _guard: Box<dyn std::any::Any> = if !std::env::var("CIRCLECI")
-            .ok()
-            .unwrap_or_default()
-            .is_empty()
-            && cfg!(windows)
-        {
-            eprintln!("Not running federation-demo because it makes the step hang on Circle CI.");
-            Box::new(())
-        } else if self.no_demo {
+        let _guard: Box<dyn std::any::Any> = if self.no_demo {
             eprintln!("Flag --no-demo is the default now. Not running federation-demo.");
             Box::new(())
         } else if !self.with_demo {
@@ -64,18 +55,29 @@ impl Test {
             };
 
             let demo = FederationDemoRunner::new()?;
-            let guard = demo.start_background()?;
+            let demo_guard = demo.start_background()?;
+
+            let jaeger = JaegerRunner::new()?;
+            let jaeger_guard = jaeger.start_background()?;
 
             if let Some(sub_process) = maybe_pre_compile.as_mut() {
                 eprintln!("Waiting for background process that pre-compiles the test to finish...");
                 sub_process.wait()?;
             }
 
-            Box::new((demo, guard))
+            Box::new((demo, demo_guard, jaeger, jaeger_guard))
         };
 
         eprintln!("Running tests");
         cargo!(TEST_DEFAULT_ARGS);
+
+        #[cfg(windows)]
+        {
+            // dirty hack. Node processes on windows will not shut down cleanly.
+            let _ = std::process::Command::new("taskkill")
+                .args(["/f", "/im", "node.exe"])
+                .spawn();
+        }
 
         Ok(())
     }

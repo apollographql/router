@@ -1,17 +1,50 @@
+//! Configuration for jaeger tracing.
 use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::{BatchSpanProcessor, Builder};
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{Schema, SchemaObject};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::time::Duration;
 use tower::BoxError;
 use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde()]
 pub struct Config {
     #[serde(flatten)]
+    #[schemars(schema_with = "endpoint_schema")]
     pub endpoint: Endpoint,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    pub scheduled_delay: Option<Duration>,
+}
+
+// This is needed because of the use of flatten.
+fn endpoint_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Endpoint>::json_schema(gen).into();
+
+    schema
+        .subschemas
+        .as_mut()
+        .unwrap()
+        .one_of
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .for_each(|s| {
+            if let Schema::Object(o) = s {
+                o.object
+                    .as_mut()
+                    .unwrap()
+                    .properties
+                    .insert("scheduled_delay".to_string(), String::json_schema(gen));
+            }
+        });
+
+    schema.into()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -73,42 +106,10 @@ impl TracingConfigurator for Config {
                 .init_async_exporter(opentelemetry::runtime::Tokio)?,
         };
 
-        Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::plugins::telemetry::tracing::test::run_query;
-    use opentelemetry::global;
-    use tower::BoxError;
-    use tracing::instrument::WithSubscriber;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::Registry;
-
-    // This test can be run manually from your IDE to help with testing otel
-    // It is set to ignore by default as jaeger may not be set up
-    #[ignore]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_tracing() -> Result<(), BoxError> {
-        tracing_subscriber::fmt().init();
-
-        global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-        let tracer = opentelemetry_jaeger::new_pipeline()
-            .with_service_name("my_app")
-            .install_batch(opentelemetry::runtime::Tokio)?;
-
-        // Create a tracing layer with the configured tracer
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        // Use the tracing subscriber `Registry`, or any other subscriber
-        // that impls `LookupSpan`
-        let subscriber = Registry::default().with(telemetry);
-
-        // Trace executed code
-        run_query().with_subscriber(subscriber).await;
-        global::shutdown_tracer_provider();
-
-        Ok(())
+        Ok(builder.with_span_processor(
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
+                .build(),
+        ))
     }
 }

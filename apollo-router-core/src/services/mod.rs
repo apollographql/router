@@ -22,12 +22,14 @@ use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
+use tracing::Span;
 
 pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
 mod router_service;
 mod tower_subgraph_service;
+use crate::instrument::InstrumentLayer;
 pub use tower_subgraph_service::TowerSubgraphService;
 
 pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -686,6 +688,15 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
     fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
+    fn instrument<F, Request>(
+        self,
+        span_fn: F,
+    ) -> ServiceBuilder<Stack<InstrumentLayer<F, Request>, L>>
+    where
+        F: Fn(&Request) -> Span,
+    {
+        self.layer(InstrumentLayer::new(span_fn))
+    }
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 

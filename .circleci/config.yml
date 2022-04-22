@@ -41,12 +41,33 @@ commands:
           command: |
             sudo apt-get update
             sudo apt-get install -y libssl-dev cmake
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-linux-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-linux-amd64 jaeger
   macos_install_baseline:
     steps:
       - run: echo "HOMEBREW_NO_AUTO_UPDATE=1" >> $BASH_ENV
       - run: echo "export OPENSSL_ROOT_DIR=/usr/local/opt/openssl@1.1" >> $BASH_ENV
       - run: test -e "$OPENSSL_ROOT_DIR"
       - run: brew install cmake
+      - run:
+          name: Download jaeger
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-darwin-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-darwin-amd64 jaeger
+  windows_install_baseline:
+    steps:
+      - run:
+          name: Download jaeger
+          shell: bash.exe
+          command: |
+            curl -L https://github.com/jaegertracing/jaeger/releases/download/v1.33.0/jaeger-1.33.0-windows-amd64.tar.gz --output jaeger.tar.gz
+            tar -xf jaeger.tar.gz
+            mv jaeger-1.33.0-windows-amd64 jaeger
 
   # This job sets up our nodejs dependencies,
   # and makes sure everything is ready to run integration tests
@@ -67,6 +88,12 @@ commands:
       - run:
           name: Assert npm version
           command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          # The jaeger exporter won't work without this
+          name: Increase udp packet size
+          command: |
+            sudo sysctl net.inet.udp.maxdgram=65536
+            sudo sysctl net.inet.udp.maxdgram
   linux_prepare_node_env:
     steps:
       #TODO[igni]: check for node version before we try to install it
@@ -121,33 +148,6 @@ commands:
           name: Assert npm version
           command: |
             if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
-
-  windows_prepare_test_env:
-    steps:
-      - restore_cache:
-          keys:
-            - subgraph-node-modules-v2-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - subgraph-node-modules-v2-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
-      - run:
-          name: npm clean-install
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm clean-install
-      - save_cache:
-          key: subgraph-node-modules-v2-windows-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-          paths:
-            - dockerfiles/federation-demo/federation-demo/node_modules
-
-      # TODO: normally xtask can run the federation by itself and it
-      #       works on GitHub Actions on Windows. Unfortunately it
-      #       doesn't work here on CircleCI on Windows only.
-      - run:
-          name: start federation-demo (background)
-          working_directory: dockerfiles/federation-demo/federation-demo
-          command: npm start
-          background: true
-      - run:
-          name: wait for federation demo to start
-          command: npx wait-on tcp:4001 tcp:4002 tcp:4003 tcp:4004 tcp:4100
 
   windows_prepare_rust_env:
     steps:
@@ -480,6 +480,7 @@ jobs:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
+            - windows_install_baseline
             - windows_prepare_node_env
             - windows_prepare_rust_env
             - windows_build_workspace
@@ -516,8 +517,8 @@ jobs:
           condition:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
+            - windows_install_baseline
             - windows_prepare_node_env
-            - windows_prepare_test_env
             - windows_prepare_rust_env
             - windows_test_workspace
       - when:
