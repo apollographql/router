@@ -12,15 +12,24 @@ use tower::BoxError;
 async fn test_jaeger_tracing() -> Result<(), BoxError> {
     let tracer = opentelemetry_jaeger::new_pipeline()
         .with_service_name("my_app")
-        .install_batch(opentelemetry::runtime::Tokio)?;
+        .install_simple()?;
 
     let router = TracingTest::new(
         tracer,
         opentelemetry_jaeger::Propagator::new(),
         Path::new("jaeger.router.yaml"),
     );
-    let id = router.run_query().await;
 
+    for _ in 0..10 {
+        let id = router.run_query().await;
+        query_jaeger_for_trace(id).await?;
+        router.touch_config()?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Ok(())
+}
+
+async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
     let tags = json!({ "unit_test": id });
     let params = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("service", "my_app")
@@ -37,9 +46,9 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
                 tracing::warn!("{}", e);
             }
         }
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    panic!("did not get full otel trace within 10 seconds");
+    panic!("did not get full otel trace");
 }
 
 async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
@@ -129,7 +138,7 @@ fn verify_spans_pesent(trace: &Value) -> Result<(), BoxError> {
             "request",
             "router",
             "fetch",
-            "parse_query",
+            //"parse_query", Parse query will only happen once
             "query_planning",
             "subgraph",
             "client_request",

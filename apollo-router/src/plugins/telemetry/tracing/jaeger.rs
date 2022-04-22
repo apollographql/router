@@ -1,17 +1,49 @@
 use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::{BatchSpanProcessor, Builder};
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{Schema, SchemaObject};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::time::Duration;
 use tower::BoxError;
 use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde()]
 pub struct Config {
     #[serde(flatten)]
+    #[schemars(schema_with = "endpoint_schema")]
     pub endpoint: Endpoint,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    pub scheduled_delay: Option<Duration>,
+}
+
+// This is needed because of the use of flatten.
+fn endpoint_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Endpoint>::json_schema(gen).into();
+
+    schema
+        .subschemas
+        .as_mut()
+        .unwrap()
+        .one_of
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .for_each(|s| {
+            if let Schema::Object(o) = s {
+                o.object
+                    .as_mut()
+                    .unwrap()
+                    .properties
+                    .insert("scheduled_delay".to_string(), String::json_schema(gen));
+            }
+        });
+
+    schema.into()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -73,6 +105,10 @@ impl TracingConfigurator for Config {
                 .init_async_exporter(opentelemetry::runtime::Tokio)?,
         };
 
-        Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
+        Ok(builder.with_span_processor(
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
+                .build(),
+        ))
     }
 }

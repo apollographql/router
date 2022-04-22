@@ -697,6 +697,9 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "scheduled_delay": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -727,11 +730,20 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "scheduled_delay": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
                 }
               ],
+              "properties": {
+                "scheduled_delay": {
+                  "default": null,
+                  "type": "string"
+                }
+              },
               "nullable": true
             },
             "otlp": {

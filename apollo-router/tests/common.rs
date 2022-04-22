@@ -6,6 +6,8 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry_http::HttpClient;
 use serde_json::Value;
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -19,6 +21,7 @@ use uuid::Uuid;
 
 pub struct TracingTest {
     router: Child,
+    test_config_location: PathBuf,
 }
 
 impl TracingTest {
@@ -36,6 +39,11 @@ impl TracingTest {
                 .with_filter(EnvFilter::from_default_env()),
         );
 
+        let config_location =
+            PathBuf::from_iter(["..", "apollo-router", "src", "testdata"]).join(config_location);
+        let test_config_location = PathBuf::from_iter(["..", "target", "test_config.yaml"]);
+        fs::copy(&config_location, &test_config_location).expect("could not copy config");
+
         tracing::subscriber::set_global_default(subscriber).unwrap();
         global::set_text_map_propagator(propagator);
 
@@ -46,16 +54,14 @@ impl TracingTest {
         };
 
         Self {
+            test_config_location: test_config_location.clone(),
             router: Command::new(router_location)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .args([
                     "--hr",
                     "--config",
-                    &PathBuf::from_iter(["..", "apollo-router", "src", "testdata"])
-                        .join(config_location)
-                        .to_string_lossy()
-                        .to_string(),
+                    &test_config_location.to_string_lossy().to_string(),
                     "--supergraph",
                     &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
                         .to_string_lossy()
@@ -64,6 +70,15 @@ impl TracingTest {
                 .spawn()
                 .expect("Router should start"),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn touch_config(&self) -> Result<(), BoxError> {
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .open(&self.test_config_location)?;
+        f.write_all("#touched\n".as_bytes())?;
+        Ok(())
     }
 
     pub async fn run_query(&self) -> String {

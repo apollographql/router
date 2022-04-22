@@ -110,7 +110,6 @@ impl Drop for Telemetry {
                         opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
                     });
                     futures::executor::block_on(jh).expect("failed to flush tracer provider");
-                    global::shutdown_tracer_provider();
                 });
             });
         }
