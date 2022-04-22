@@ -41,7 +41,7 @@ struct TrafficShaping {
 impl Plugin for TrafficShaping {
     type Config = Config;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(Self { config })
     }
 

@@ -6,12 +6,12 @@ use crate::plugins::telemetry::metrics::{
 };
 use crate::plugins::telemetry::tracing::{apollo, TracingConfigurator};
 use crate::subscriber::replace_layer;
+use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
-    http_compat, register_plugin, Handler, Path, Plugin, QueryPlannerRequest, QueryPlannerResponse,
-    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse, ValueExt,
+    http_compat, register_plugin, Handler, Plugin, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
 };
 use apollo_spaceport::server::ReportSpaceport;
-use apollo_spaceport::Reporter;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
@@ -22,8 +22,7 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
-use serde::Deserialize;
-use serde_json_bytes::json;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -40,12 +39,27 @@ mod tracing;
 
 static EXTENSION_KEY: &str = "telemetry";
 
-#[derive(Deserialize, Debug)]
-struct UsageReporting {
-    signature: String,
+#[derive(Deserialize, Serialize, Debug)]
+
+struct PartialQueryStats {
+    client_name: String,
+    client_version: String,
+    elapsed: Option<Duration>,
+    usage_reporting: Option<UsageReporting>,
 }
 
-#[derive(Deserialize, Debug)]
+impl PartialQueryStats {
+    pub fn new(client_name: String, client_version: String) -> Self {
+        Self {
+            client_name,
+            client_version,
+            elapsed: Default::default(),
+            usage_reporting: Default::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 struct QueryStats {
     client_name: String,
     client_version: String,
@@ -53,10 +67,29 @@ struct QueryStats {
     usage_reporting: UsageReporting,
 }
 
+impl TryFrom<PartialQueryStats> for QueryStats {
+    type Error = &'static str;
+
+    fn try_from(value: PartialQueryStats) -> Result<Self, Self::Error> {
+        if value.elapsed.is_none() {
+            return Err("elapsed is not set");
+        }
+        if value.usage_reporting.is_none() {
+            return Err("usage reporting is not set");
+        }
+
+        Ok(Self {
+            client_name: value.client_name,
+            client_version: value.client_version,
+            elapsed: value.elapsed.expect("checked above;qed"),
+            usage_reporting: value.usage_reporting.expect("checked above;qed"),
+        })
+    }
+}
+
 pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
-    reporter: Option<Reporter>,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
@@ -107,13 +140,64 @@ fn apollo_graph_reference() -> Option<String> {
     std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
+impl Drop for Telemetry {
+    fn drop(&mut self) {
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            // Tracer providers must be flushed. This may happen as part of otel if the provider was set
+            // as the global, but may also happen in the case of an failed config reload.
+            // If the tracer prover is present then it was not handed over so we must flush it.
+            // The magic incantation seems to be that the flush MUST happen within a tokio runtime,
+            // and then within a spawn blocking.
+            ::tracing::debug!("flushing telemetry");
+            std::thread::spawn(|| {
+                let runtime = tokio::runtime::Builder::new_multi_thread().build().unwrap();
+                runtime.block_on(async {
+                    let jh = tokio::task::spawn_blocking(move || {
+                        opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
+                    });
+                    futures::executor::block_on(jh).expect("failed to flush tracer provider");
+                });
+            });
+        }
+
+        if let Some(sender) = self.spaceport_shutdown.take() {
+            ::tracing::debug!("notifying spaceport to shut down");
+            let _ = sender.send(());
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
 
-    async fn startup(&mut self) -> Result<(), BoxError> {
+    fn activate(&mut self) {
+        // The active service is about to be swapped in.
+        // The rest of this code in this method is expected to succeed.
+        // The issue is that Otel uses globals for a bunch of stuff.
+        // If we move to a completely tower based architecture then we could make this nicer.
+        let tracer_provider = self
+            .tracer_provider
+            .take()
+            .expect("trace_provider will have been set in startup, qed");
+        let tracer = tracer_provider.versioned_tracer(
+            "apollo-router",
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
+        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+        Self::replace_tracer_provider(tracer_provider);
+
+        replace_layer(Box::new(telemetry))
+            .expect("set_global_subscriber() was not called at startup, fatal");
+        opentelemetry::global::set_error_handler(handle_error)
+            .expect("otel error handler lock poisoned, fatal");
+        global::set_text_map_propagator(Self::create_propagator(&self.config));
+    }
+
+    async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = self.config.apollo.get_or_insert_with(Default::default);
+        let apollo = config.apollo.get_or_insert_with(Default::default);
         if apollo.apollo_key.is_none() {
             apollo.apollo_key = apollo_key()
         }
@@ -145,28 +229,29 @@ impl Plugin for Telemetry {
             _ => (None, None),
         };
 
-        // Get the endpoint URL so we can set up a reporter later.
-        let endpoint_url = apollo
-            .endpoint
-            .as_ref()
-            .map(|url| url.to_string())
-            .unwrap_or_else(tracing::apollo_telemetry::default_collector);
-
-        //If store the shutdown handle.
-        self.spaceport_shutdown = shutdown_tx;
-
-        // Now that spaceport is set up it is possible to set up the tracer providers.
-        self.tracer_provider = Some(Self::create_tracer_provider(&self.config)?);
-
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio will
         // eventually be one.
-        let mut builder = Self::create_metrics_exporters(&self.config)?;
-        self._metrics_exporters = builder.exporters();
-        self.meter_provider = builder.meter_provider();
-        self.custom_endpoints = builder.custom_endpoints();
+        let mut builder = Self::create_metrics_exporters(&config)?;
+
+        //// THIS IS IMPORTANT
+        // Once the trace provider has been created this method MUST NOT FAIL
+        // The trace provider will not be shut down if drop is not called and it will result in a hang.
+        // Don't add anything fallible after the tracer provider has been created.
+        let tracer_provider = Self::create_tracer_provider(&config)?;
+
+        let plugin = Ok(Telemetry {
+            spaceport_shutdown: shutdown_tx,
+            tracer_provider: Some(tracer_provider),
+            custom_endpoints: builder.custom_endpoints(),
+            _metrics_exporters: builder.exporters(),
+            meter_provider: builder.meter_provider(),
+            config,
+        });
+
+        // We're safe now for shutdown.
 
         // Start spaceport
         if let Some(spaceport) = spaceport {
@@ -184,55 +269,7 @@ impl Plugin for Telemetry {
             });
         }
 
-        // Create a reporter.
-        // dbg!("here", &endpoint_url);
-        // self.reporter = Some(Reporter::try_new(endpoint_url).await?);
-        // dbg!("there");
-
-        Ok(())
-    }
-
-    fn activate(&mut self) {
-        // The active service is about to be swapped in.
-        // The rest of this code in this method is expected to succeed.
-        // The issue is that Otel uses globals for a bunch of stuff.
-        // If we move to a completely tower based architecture then we could make this nicer.
-        let tracer_provider = self
-            .tracer_provider
-            .take()
-            .expect("trace_provider will have been set in startup, qed");
-        let tracer = tracer_provider.versioned_tracer(
-            "apollo-router",
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-        Self::replace_tracer_provider(tracer_provider);
-
-        replace_layer(Box::new(telemetry))
-            .expect("set_global_subscriber() was not called at startup, fatal");
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
-        global::set_text_map_propagator(Self::create_propagator(&self.config));
-    }
-
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        if let Some(sender) = self.spaceport_shutdown.take() {
-            let _ = sender.send(());
-        }
-        Ok(())
-    }
-
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
-        Ok(Telemetry {
-            spaceport_shutdown: None,
-            tracer_provider: None,
-            custom_endpoints: Default::default(),
-            _metrics_exporters: Default::default(),
-            meter_provider: Default::default(),
-            reporter: None,
-            config,
-        })
+        plugin
     }
 
     fn router_service(
@@ -243,8 +280,7 @@ impl Plugin for Telemetry {
         service
             .map_request(|req: RouterRequest| {
                 let client_name = req
-                    .context
-                    .request
+                    .originating_request
                     .headers()
                     .get("apollographql-client-name")
                     .map(HeaderValue::to_str)
@@ -252,36 +288,39 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
 
                 let client_version = req
-                    .context
-                    .request
+                    .originating_request
                     .headers()
                     .get("apollographql-client-version")
                     .map(HeaderValue::to_str)
                     .unwrap_or(Ok(""))
                     .unwrap_or("");
 
-                req.context.extensions.insert(
+                if let Err(e)=req.context.insert(
                     EXTENSION_KEY.to_string(),
-                    json!({ "client_name": client_name, "client_version": client_version }),
-                );
+                    PartialQueryStats::new(client_name.to_string(), client_version.to_string()),
+                ) {
+                    ::tracing::warn!("telemetry: couldn't insert client id and version to the context : {e}");
+                }
                 req
             })
             .map_future(move |f| {
-                let metrics = metrics.clone();
                 // Using Instant because it is guaranteed to be monotonically increasing.
                 let now = Instant::now();
+                let metrics = metrics.clone();
+
                 f.map(move |r| {
                     match &r {
                         Ok(response) => {
-                            response.context.extensions.alter(
+                            if let Err(e)=response.context.upsert(
                                 EXTENSION_KEY,
-                                |_, mut telemetry_info: apollo_router_core::Value| {
-                                    telemetry_info
-                                        .insert(&Path::from("elapsed"), json!(now.elapsed()))
-                                        .expect("inserting into a new path cannot fail; qed");
-                                    telemetry_info
+                                |mut partial_query_stats: PartialQueryStats| {
+                                    partial_query_stats.elapsed = Some(now.elapsed());
+                                    partial_query_stats
                                 },
-                            );
+                                || panic!("no {EXTENSION_KEY} in context. This cannot happen;qed"),
+                            ) {
+                                ::tracing::warn!("telemetry: couldn't insert query elapsed time to the context : {e}");
+                            }
 
                             metrics.http_requests_total.add(
                                 1,
@@ -302,18 +341,21 @@ impl Plugin for Telemetry {
                 })
             })
             .map_response(|res: RouterResponse| {
-                // TODO[igni]: push things to uplink \o/
-                let json_query_stats = {
-                    let extension = &res.context.extensions.get(EXTENSION_KEY);
-                    extension
-                        .as_ref()
-                        .map(|e| e.value().clone())
-                        .unwrap_or(serde_json_bytes::Value::Null)
-                };
+                let partial_query_stats: PartialQueryStats = res
+                    .context
+                    .get(EXTENSION_KEY)
+                    .expect("no {EXTENSION_KEY} in context. This cannot happen;qed")
+                    .expect("{EXTENSION_KEY} in context is empty. This cannot happen;qed");
 
-                let as_query_stats: QueryStats =
-                    serde_json_bytes::from_value(json_query_stats).unwrap();
-                dbg!(&as_query_stats);
+                match QueryStats::try_from(partial_query_stats) {
+                    Ok(query_stats) => {
+                        // TODO: push things to uplink \o/
+                        dbg!(&query_stats);
+                    }
+                    Err(e) => {
+                        ::tracing::warn!("telemetry: couldn't gather query stats : {e}");
+                    }
+                }
                 res
             })
             .boxed()
@@ -325,18 +367,18 @@ impl Plugin for Telemetry {
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         service
             .map_response(|res: QueryPlannerResponse| {
-                res.context.extensions.alter(
-                    EXTENSION_KEY,
-                    |_, mut telemetry_info: apollo_router_core::Value| {
-                        telemetry_info
-                            .insert(
-                                &Path::from("usage_reporting"),
-                                json!({ "signature": res.query_plan.usage_reporting_signature}),
-                            )
-                            .expect("inserting into a new path cannot fail; qed");
-                        telemetry_info
-                    },
-                );
+                if let Err(e)=res.context
+                    .upsert(
+                        EXTENSION_KEY,
+                        |mut partial_query_stats: PartialQueryStats| {
+                            partial_query_stats.usage_reporting =
+                                res.query_plan.usage_reporting.clone();
+                            partial_query_stats
+                        },
+                        || panic!("no {EXTENSION_KEY} in context. This cannot happen;qed"),
+                    ) {
+                        ::tracing::warn!("telemetry: couldn't insert usage reporting to the telemetry extension : {e}");
+                    }
 
                 res
             })
@@ -397,7 +439,7 @@ impl Plugin for Telemetry {
             // How we pick which service to send the request to
             move |req: &http_compat::Request<Bytes>, _services: &[_]| {
                 let endpoint = req
-                    .url()
+                    .uri()
                     .path()
                     .trim_start_matches("/plugins/apollo.telemetry");
                 if let Some(index) = paths.iter().position(|path| path == endpoint) {
@@ -523,6 +565,7 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "tracing": null }))
+            .await
             .unwrap();
     }
 
@@ -549,6 +592,7 @@ mod tests {
                         }
                     }
             }))
+            .await
             .unwrap();
     }
 }

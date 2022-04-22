@@ -36,10 +36,11 @@ struct IncludeSubgraphErrors {
     config: Config,
 }
 
+#[async_trait::async_trait]
 impl Plugin for IncludeSubgraphErrors {
     type Config = Config;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(IncludeSubgraphErrors { config })
     }
 
@@ -67,9 +68,9 @@ impl Plugin for IncludeSubgraphErrors {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::plugin_utils::mock::subgraph::MockSubgraph;
+    use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        plugin_utils, DynPlugin, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+        DynPlugin, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
         RouterResponse, Schema,
     };
     use serde_json::Value as jValue;
@@ -78,7 +79,7 @@ mod test {
     use tower::{util::BoxCloneService, Service};
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": {}}]}"#).unwrap())
+        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "couldn't find mock for query", "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
@@ -104,15 +105,14 @@ mod test {
         body: &ResponseBody,
         mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     ) {
-        let request = plugin_utils::RouterRequest::builder()
+        let request = RouterRequest::fake_builder()
             .query(query.to_string())
             .variables(Arc::new(
                 vec![(ByteString::from("first"), Value::Number(2usize.into()))]
                     .into_iter()
                     .collect(),
             ))
-            .build()
-            .into();
+            .build();
 
         let response = router_service
             .ready()
@@ -127,9 +127,12 @@ mod test {
     async fn build_mock_router(
         plugin: Box<dyn DynPlugin>,
     ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+        let mut extensions = Object::new();
+        extensions.insert("test", Value::String(ByteString::from("value")));
+
         let account_mocks = vec![
             (
-                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
+                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"},{"name":"Ada Lovelace"}]}}"#
             )
         ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
@@ -137,7 +140,7 @@ mod test {
 
         let review_mocks = vec![
             (
-                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
@@ -145,15 +148,16 @@ mod test {
 
         let product_mocks = vec![
             (
-                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","variables":{"first":2}}"#,
+                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
             ),
             (
-                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
-        let product_service = MockSubgraph::new(product_mocks);
+
+        let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
         let schema: Arc<Schema> = Arc::new(
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
@@ -174,19 +178,20 @@ mod test {
         router
     }
 
-    fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
+    async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugins()
             .get("experimental.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance(config)
+            .await
             .expect("Plugin not created")
     }
 
     #[tokio::test]
     async fn it_returns_valid_response() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
@@ -194,7 +199,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_explicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -202,7 +207,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_implicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({}));
+        let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -210,7 +215,7 @@ mod test {
     #[tokio::test]
     async fn it_does_not_redact_all_subgraphs_explicit_allow() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true }));
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -218,7 +223,8 @@ mod test {
     #[tokio::test]
     async fn it_does_not_redact_all_implicit_redact_product_explict_allow_for_product_query() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }}));
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -226,7 +232,8 @@ mod test {
     #[tokio::test]
     async fn it_does_redact_all_implicit_redact_product_explict_allow_for_review_query() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }}));
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -236,7 +243,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -246,7 +254,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -256,7 +265,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -266,7 +276,8 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
-        );
+        )
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
     }

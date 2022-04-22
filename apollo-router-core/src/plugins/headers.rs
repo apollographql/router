@@ -94,10 +94,11 @@ fn option_string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::s
     Option::<String>::json_schema(gen)
 }
 
+#[async_trait::async_trait]
 impl Plugin for Headers {
     type Config = Config;
 
-    fn new(config: Self::Config) -> Result<Self, BoxError> {
+    async fn new(config: Self::Config) -> Result<Self, BoxError> {
         Ok(Headers { config })
     }
     fn subgraph_service(
@@ -180,15 +181,15 @@ where
         for operation in &self.operations {
             match operation {
                 Operation::Insert(config) => {
-                    req.http_request
+                    req.subgraph_request
                         .headers_mut()
                         .insert(&config.name, config.value.clone());
                 }
                 Operation::Remove(Remove::Named(name)) => {
-                    req.http_request.headers_mut().remove(name);
+                    req.subgraph_request.headers_mut().remove(name);
                 }
                 Operation::Remove(Remove::Matching(matching)) => {
-                    let headers = req.http_request.headers_mut();
+                    let headers = req.subgraph_request.headers_mut();
                     let matching_headers = headers
                         .iter()
                         .filter_map(|(name, _)| {
@@ -205,16 +206,15 @@ where
                     rename,
                     default,
                 }) => {
-                    let headers = req.http_request.headers_mut();
-                    let value = req.context.request.headers().get(named);
+                    let headers = req.subgraph_request.headers_mut();
+                    let value = req.originating_request.headers().get(named);
                     if let Some(value) = value.or(default.as_ref()) {
                         headers.insert(rename.as_ref().unwrap_or(named), value.clone());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
-                    let headers = req.http_request.headers_mut();
-                    req.context
-                        .request
+                    let headers = req.subgraph_request.headers_mut();
+                    req.originating_request
                         .headers()
                         .iter()
                         .filter(|(name, _)| matching.is_match(name.as_str()))
@@ -367,11 +367,10 @@ where
 mod test {
     use super::*;
     use crate::fetch::OperationKind;
-    use crate::http_compat::RequestBuilder;
-    use crate::plugin_utils::MockSubgraphService;
+    use crate::http_compat;
+    use crate::plugin::utils::test::MockSubgraphService;
     use crate::plugins::headers::{Config, HeadersLayer};
     use crate::{Context, Request, Response, SubgraphRequest, SubgraphResponse};
-    use http::{Method, Uri};
     use std::collections::HashSet;
     use std::sync::Arc;
     use tower::BoxError;
@@ -637,42 +636,59 @@ mod test {
     }
 
     fn example_response(_: SubgraphRequest) -> Result<SubgraphResponse, BoxError> {
-        Ok(SubgraphResponse {
-            response: http::Response::builder()
+        Ok(SubgraphResponse::new_from_response(
+            http::Response::builder()
                 .body(Response::builder().build())
                 .unwrap()
                 .into(),
-            context: example_originating_request(),
-        })
-    }
-
-    fn example_originating_request() -> Context {
-        Context::new().with_request(Arc::new(
-            RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-                .header("da", "vda")
-                .header("db", "vdb")
-                .header("dc", "vdc")
-                .header(HOST, "host")
-                .header(CONTENT_LENGTH, "2")
-                .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query("query").build())
-                .unwrap(),
+            Context::new(),
         ))
     }
 
     fn example_request() -> SubgraphRequest {
         SubgraphRequest {
-            http_request: RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-                .header("aa", "vaa")
-                .header("ab", "vab")
-                .header("ac", "vac")
-                .header(HOST, "rhost")
-                .header(CONTENT_LENGTH, "22")
-                .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query("query").build())
+            originating_request: Arc::new(
+                http_compat::Request::fake_builder()
+                    .header((
+                        HeaderName::from_static("da"),
+                        HeaderValue::from_static("vda"),
+                    ))
+                    .header((
+                        HeaderName::from_static("db"),
+                        HeaderValue::from_static("vdb"),
+                    ))
+                    .header((
+                        HeaderName::from_static("db"),
+                        HeaderValue::from_static("vdb"),
+                    ))
+                    .header((HOST, HeaderValue::from_static("host")))
+                    .header((CONTENT_LENGTH, HeaderValue::from_static("2")))
+                    .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
+                    .body(Request::builder().query(Some("query".to_string())).build())
+                    .build()
+                    .unwrap(),
+            ),
+            subgraph_request: http_compat::Request::fake_builder()
+                .header((
+                    HeaderName::from_static("aa"),
+                    HeaderValue::from_static("vaa"),
+                ))
+                .header((
+                    HeaderName::from_static("ab"),
+                    HeaderValue::from_static("vab"),
+                ))
+                .header((
+                    HeaderName::from_static("ac"),
+                    HeaderValue::from_static("vac"),
+                ))
+                .header((HOST, HeaderValue::from_static("rhost")))
+                .header((CONTENT_LENGTH, HeaderValue::from_static("22")))
+                .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
+                .body(Request::builder().query(Some("query".to_string())).build())
+                .build()
                 .unwrap(),
             operation_kind: OperationKind::Query,
-            context: example_originating_request(),
+            context: Context::new(),
         }
     }
 
@@ -683,7 +699,7 @@ mod test {
             headers.push((CONTENT_LENGTH.as_str(), "22"));
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
             let actual_headers = self
-                .http_request
+                .subgraph_request
                 .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))

@@ -79,7 +79,7 @@ where
     }
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
-        let body = request.context.request.body();
+        let body = request.originating_request.body();
 
         let key = (
             body.query
@@ -93,10 +93,7 @@ where
             cm.get(key)
                 .await
                 .map_err(|err| err.into())
-                .map(|query_plan| QueryPlannerResponse {
-                    query_plan,
-                    context: request.context,
-                })
+                .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
         })
     }
 }
@@ -137,12 +134,7 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::from(
-                router_bridge::planner::BridgeErrors {
-                    usage_reporting_signature: None,
-                    errors: Vec::new(),
-                },
-            )));
+            .return_const(Err(QueryPlannerError::from(Vec::<PlanError>::new())));
 
         let planner = CachingQueryPlanner::new(delegate, 10);
 

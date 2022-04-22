@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.4"
+version = "0.1.0-preview.6"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "LicenseRef-ELv2"
@@ -18,12 +18,10 @@ serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3.11", features = ["json", "env-filter"] }
+async-trait = "0.1.53"
+tower = "0.4.12"
 
 
 [[bench]]
 name = "basic_composition"
 harness = false
-
-[dependencies]
-async-trait = "0.1.53"
-tower = "0.4.12"

@@ -1,3 +1,21 @@
+//! Plugin system for the router.
+//!
+//! Provides a customization mechanism for the router.
+//!
+//! Requests received by the router make their way through a processing pipeline. Each request is
+//! processed at:
+//!  - router
+//!  - query planning
+//!  - execution
+//!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
+//!  stages.
+//!
+//! A plugin can choose to interact with the flow of requests at any or all of these stages of
+//! processing. At each stage a [`Service`] is provided which provides an appropriate
+//! mechanism for interacting with the request and response.
+
+pub mod utils;
+
 use crate::services::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
@@ -18,10 +36,11 @@ use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::{BoxError, Service, ServiceBuilder};
 
-type InstanceFactory = fn(&serde_json::Value) -> Result<Box<dyn DynPlugin>, BoxError>;
+type InstanceFactory = fn(&serde_json::Value) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
+/// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
     instance_factory: InstanceFactory,
@@ -36,11 +55,11 @@ impl PluginFactory {
         }
     }
 
-    pub fn create_instance(
+    pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration)
+        (self.instance_factory)(configuration).await
     }
 
     pub fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
@@ -53,6 +72,7 @@ static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(
     Mutex::new(m)
 });
 
+/// Register a plugin factory.
 pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
     PLUGIN_REGISTRY
         .lock()
@@ -60,39 +80,27 @@ pub fn register_plugin(name: String, plugin_factory: PluginFactory) {
         .insert(name, plugin_factory);
 }
 
+/// Get a copy of the registered plugin factories.
 pub fn plugins() -> HashMap<String, PluginFactory> {
     PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
 }
 
-/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// All router plugins must implement the Plugin trait.
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
-/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static + Sized {
     type Config: JsonSchema + DeserializeOwned;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
-    fn new(config: Self::Config) -> Result<Self, BoxError>;
+    async fn new(config: Self::Config) -> Result<Self, BoxError>;
 
-    /// Plugins will receive a notification that they should start up and shut down.
-    /// This is invoked whenever configuration is changed
-    /// during router execution, including at startup.
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
-
-    /// This method may be removed in future, do not use!
-    /// This is invoked after startup before a plugin goes live.
-    /// It must not panic.
-    #[deprecated]
+    /// This is invoked after all plugins have been created and we're ready to go live.
+    /// This method MUST not panic.
     fn activate(&mut self) {}
-
-    /// This is invoked whenever configuration is changed
-    /// during router execution, including at shutdown.
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
 
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define router_service if your customization needs to interact at the earliest or latest point possible.
@@ -148,25 +156,16 @@ fn get_type_of<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
 
-/// All router plugins must implement the Plugin trait. This trait defines lifecycle hooks that enable hooking into Apollo Router services.
+/// All router plugins must implement the DynPlugin trait.
+///
+/// This trait defines lifecycle hooks that enable hooking into Apollo Router services.
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
-/// For more information about the plugin lifecycle please check this documentation https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle
+/// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
 pub trait DynPlugin: Send + Sync + 'static {
-    /// Plugins will receive a notification that they should start up and shut down.
-    /// This is invoked whenever configuration is changed
-    /// during router execution, including at startup.
-    async fn startup(&mut self) -> Result<(), BoxError>;
-
-    /// This method may be removed in future, do not use!
-    /// This is invoked after startup before a plugin goes live.
-    /// It must not panic.
-    #[deprecated]
+    /// This is invoked after all plugins have been created and we're ready to go live.
+    /// This method MUST not panic.
     fn activate(&mut self);
-
-    /// This is invoked whenever configuration is changed
-    /// during router execution, including at shutdown.
-    async fn shutdown(&mut self) -> Result<(), BoxError>;
 
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
@@ -203,6 +202,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// The `custom_endpoint` method lets you declare a new endpoint exposed for your plugin.
     /// For now it's only accessible for official `apollo.` plugins and for `experimental.`. This endpoint will be accessible via `/plugins/group.plugin_name`
     fn custom_endpoint(&self) -> Option<Handler>;
+
     fn name(&self) -> &'static str;
 }
 
@@ -212,18 +212,9 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
-    // Plugins will receive a notification that they should start up and shut down.
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        self.startup().await
-    }
-
     #[allow(deprecated)]
     fn activate(&mut self) {
         self.activate()
-    }
-
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        self.shutdown().await
     }
 
     fn router_service(
@@ -254,6 +245,7 @@ where
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.subgraph_service(name, service)
     }
+
     fn custom_endpoint(&self) -> Option<Handler> {
         self.custom_endpoint()
     }
@@ -268,16 +260,6 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
-    ($name: literal, $value: ident) => {
-        startup::on_startup! {
-            let qualified_name = $name.to_string();
-
-            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {
-                let plugin = $value::new(serde_json::from_value(configuration.clone())?)?;
-                Ok(Box::new(plugin))
-            }, |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
-        }
-    };
     ($group: literal, $name: literal, $value: ident) => {
         $crate::reexports::startup::on_startup! {
             let qualified_name = if $group == "" {
@@ -287,10 +269,11 @@ macro_rules! register_plugin {
                 format!("{}.{}", $group, $name)
             };
 
-            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| {
-                let plugin = $value::new(serde_json::from_value(configuration.clone())?)?;
-                Ok(Box::new(plugin))
-            }, |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
+            $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| Box::pin(async move {
+                let configuration = serde_json::from_value(configuration.clone())?;
+                let plugin = $value::new(configuration).await?;
+                Ok(Box::new(plugin) as Box<dyn $crate::DynPlugin>)
+            }), |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));
         }
     };
 }

@@ -1,3 +1,5 @@
+//! GraphQL schema.
+
 use crate::*;
 use apollo_parser::ast;
 use http::Uri;
@@ -5,6 +7,7 @@ use itertools::Itertools;
 use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
+/// A GraphQL schema.
 #[derive(Debug)]
 pub struct Schema {
     string: String,

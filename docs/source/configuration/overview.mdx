@@ -219,7 +219,7 @@ By default, the Apollo Router extracts the routing URL for each of your subgraph
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so in your [YAML configuration file](./overview/#configuration-file) with the `override_subgraph_url` option:
 
-```yaml
+```yaml title="router.yaml"
 override_subgraph_url:
   accounts: http://localhost:8080
 ```
@@ -238,7 +238,7 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 ### OpenTelemetry tracing
 
-See [OpenTelemetry in the Apollo Router](./opentelemetry/).
+See [Tracing in the Apollo Router](./tracing/).
 
 ### Automatic persisted queries (APQ)
 
@@ -252,7 +252,7 @@ For more information on APQ, including client configuration, see [this article](
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section with arbitrary values in the configuration file:
 
-```yaml title="router.yaml"
+```yaml title="example-plugin-router.yaml"
 plugins:
   example.plugin:
     var1: "hello"
@@ -273,7 +273,7 @@ Unix style expansion is used. Either:
 Only values may be expanded (not keys):
 ```yaml {4,8} title="router.yaml"
 example:
-  passord: "${MY_PASSWORD}" 
+  passord: "${MY_PASSWORD}"
 ```
 
 ### Reusing configuration

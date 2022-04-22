@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 #[derivative(Debug, PartialEq, Eq, Hash)]
 pub struct Request {
     /// The graphql query.
-    #[builder(default, setter(strip_option))]
+    #[builder(default)]
     pub query: Option<String>,
 
     /// The optional graphql operation.
@@ -63,7 +63,14 @@ impl Request {
         let urldecoded: serde_json::Value =
             serde_urlencoded::from_bytes(&decoded_string).map_err(serde_json::Error::custom)?;
 
-        let operation_name = get_from_urldecoded(&urldecoded, "operationName")?;
+        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
+            urldecoded.get("operationName")
+        {
+            Some(operation_name.clone())
+        } else {
+            None
+        };
+
         let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
             Some(query.as_str())
         } else {
@@ -80,7 +87,7 @@ impl Request {
             .extensions(extensions);
 
         let request = if let Some(query_str) = query {
-            request_builder.query(query_str).build()
+            request_builder.query(Some(query_str.to_string())).build()
         } else {
             request_builder.build()
         };

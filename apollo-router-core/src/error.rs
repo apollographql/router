@@ -1,7 +1,8 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::planner::BridgeError;
+pub use router_bridge::planner::{PlanError, PlannerSetupError};
+use router_bridge::planner::{PlanErrors, UsageReporting};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -123,7 +124,6 @@ pub struct Error {
     pub locations: Vec<Location>,
 
     /// The path of the error.
-    #[builder(setter(strip_option))]
     pub path: Option<Path>,
 
     /// The optional graphql extensions.
@@ -219,6 +219,7 @@ pub enum JsonExtError {
     InvalidFlatten,
 }
 
+/// Error types for service building.
 #[derive(Error, Debug, Display, Clone)]
 pub enum ServiceBuildError {
     /// couldn't build Router Service: {0}
@@ -228,11 +229,11 @@ pub enum ServiceBuildError {
 /// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
-    /// couldn't instantiate QueryPlanner: {0}
-    QueryPlannerError(BridgeErrors),
+    /// couldn't instantiate query planner; invalid schema: {0}
+    SchemaValidationErrors(PlannerSetupErrors),
 
-    /// query planning had errors: {0}
-    PlanningErrors(BridgeErrors),
+    /// couldn't plan query: {0}
+    PlanningErrors(PlanErrors),
 
     /// query planning panicked: {0}
     JoinError(Arc<JoinError>),
@@ -241,7 +242,7 @@ pub enum QueryPlannerError {
     CacheResolverError(Arc<CacheResolverError>),
 
     /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
-    EmptyPlan(Option<String>), // usage_reporting_signature
+    EmptyPlan(Option<UsageReporting>), // usage_reporting_signature
 
     /// unhandled planner result
     UnhandledPlannerResult,
@@ -250,31 +251,35 @@ pub enum QueryPlannerError {
     RouterBridgeError(router_bridge::error::Error),
 }
 
-#[derive(Debug, Clone)]
-pub struct BridgeErrors {
-    pub errors: Arc<Vec<BridgeError>>,
-    pub usage_reporting_signature: Option<String>,
-}
+#[derive(Clone, Debug, Error)]
+/// Container for planner setup errors
+pub struct PlannerSetupErrors(Arc<Vec<PlannerSetupError>>);
 
-impl std::fmt::Display for BridgeErrors {
+impl std::fmt::Display for PlannerSetupErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "bridge errors: {}",
-            self.errors
+            "schema validation errors: {}",
+            self.0
                 .iter()
-                .map(|e| e.to_string())
+                .map(|e| e
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
                 .collect::<Vec<String>>()
                 .join(", ")
         ))
     }
 }
 
-impl From<router_bridge::planner::BridgeErrors> for QueryPlannerError {
-    fn from(err: router_bridge::planner::BridgeErrors) -> Self {
-        QueryPlannerError::PlanningErrors(BridgeErrors {
-            errors: Arc::new(err.errors),
-            usage_reporting_signature: err.usage_reporting_signature,
-        })
+impl From<Vec<PlannerSetupError>> for QueryPlannerError {
+    fn from(errors: Vec<PlannerSetupError>) -> Self {
+        QueryPlannerError::SchemaValidationErrors(PlannerSetupErrors(Arc::new(errors)))
+    }
+}
+
+impl From<PlanErrors> for QueryPlannerError {
+    fn from(errors: PlanErrors) -> Self {
+        QueryPlannerError::PlanningErrors(errors)
     }
 }
 
@@ -311,6 +316,7 @@ pub enum SchemaError {
     Api(String),
 }
 
+/// Collection of schema parsing errors.
 #[derive(Debug)]
 pub struct ParseErrors {
     pub(crate) raw_schema: String,

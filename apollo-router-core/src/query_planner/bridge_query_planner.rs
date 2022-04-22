@@ -3,6 +3,7 @@
 use crate::prelude::graphql::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
 use std::fmt::Debug;
@@ -43,7 +44,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = req.context.request.body();
+            let body = req.originating_request.body();
             match this
                 .get(
                     body.query.clone().expect(
@@ -54,10 +55,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 )
                 .await
             {
-                Ok(query_plan) => Ok(QueryPlannerResponse {
-                    query_plan,
-                    context: req.context,
-                }),
+                Ok(query_plan) => Ok(QueryPlannerResponse::new(query_plan, req.context)),
                 Err(e) => Err(tower::BoxError::from(e)),
             }
         };
@@ -84,16 +82,20 @@ impl QueryPlanner for BridgeQueryPlanner {
             .into_result()
             .map_err(QueryPlannerError::from)?;
 
-        let usage_reporting_signature = planner_result.usage_reporting_signature;
-
-        match planner_result.data {
-            QueryPlan { node: Some(node) } => Ok(Arc::new(query_planner::QueryPlan {
-                usage_reporting_signature,
+        match planner_result {
+            PlanSuccess {
+                data: QueryPlan { node: Some(node) },
+                usage_reporting,
+            } => Ok(Arc::new(query_planner::QueryPlan {
+                usage_reporting,
                 root: node,
             })),
-            QueryPlan { node: None } => {
+            PlanSuccess {
+                data: QueryPlan { node: None },
+                usage_reporting,
+            } => {
                 failfast_debug!("empty query plan");
-                Err(QueryPlannerError::EmptyPlan(usage_reporting_signature))
+                Err(QueryPlannerError::EmptyPlan(usage_reporting))
             }
         }
     }
@@ -127,10 +129,6 @@ mod tests {
             .await
             .unwrap();
         insta::assert_debug_snapshot!("plan", result);
-        assert_eq!(
-            r#"{me{name{first last}}}"#,
-            result.usage_reporting_signature.clone().unwrap()
-        );
     }
 
     #[test(tokio::test)]
@@ -186,7 +184,7 @@ mod tests {
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
-            "query planning had errors: bridge errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
+            "couldn't plan query: query validation errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }

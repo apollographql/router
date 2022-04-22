@@ -1,5 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
+#[cfg(feature = "axum-server")]
+mod axum_http_server_factory;
 pub mod configuration;
 mod executable;
 mod files;
@@ -9,14 +11,17 @@ mod reload;
 mod router_factory;
 mod state_machine;
 pub mod subscriber;
+#[cfg(feature = "warp-server")]
 mod warp_http_server_factory;
 
+use crate::configuration::validate_configuration;
 use crate::reload::Error as ReloadError;
 use crate::router_factory::{RouterServiceFactory, YamlRouterServiceFactory};
 use crate::state_machine::StateMachine;
-use crate::warp_http_server_factory::WarpHttpServerFactory;
 use crate::Event::{NoMoreConfiguration, NoMoreSchema};
 use apollo_router_core::prelude::*;
+#[cfg(feature = "axum-server")]
+use axum_http_server_factory::AxumHttpServerFactory;
 use configuration::{Configuration, ListenAddr};
 use derivative::Derivative;
 use derive_more::{Display, From};
@@ -26,6 +31,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use futures::FutureExt;
 use std::fmt::{Display, Formatter};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -34,7 +40,14 @@ use thiserror::Error;
 use tokio::task::spawn;
 use tracing::subscriber::SetGlobalDefaultError;
 use url::Url;
+#[cfg(feature = "warp-server")]
+use warp_http_server_factory::WarpHttpServerFactory;
 use Event::{Shutdown, UpdateConfiguration, UpdateSchema};
+
+#[cfg(all(feature = "warp-server", feature = "axum-server"))]
+compile_error!(
+    r#"feature "warp-server" and feature "axum-server" cannot be enabled at the same time ("axum-server" is enabled by default)"#
+);
 
 type SchemaStream = Pin<Box<dyn Stream<Item = graphql::Schema> + Send>>;
 
@@ -47,10 +60,10 @@ pub enum FederatedServerError {
     /// failed to stop HTTP Server
     HttpServerLifecycleError,
 
-    /// configuration was not supplied
+    /// no valid configuration was supplied
     NoConfiguration,
 
-    /// schema was not supplied
+    /// no valid schema was supplied
     NoSchema,
 
     /// could not deserialize configuration: {0}
@@ -58,6 +71,9 @@ pub enum FederatedServerError {
 
     /// could not read configuration: {0}
     ReadConfigError(std::io::Error),
+
+    /// {0}
+    ConfigError(configuration::ConfigurationError),
 
     /// could not read schema: {0}
     ReadSchemaError(graphql::SchemaError),
@@ -240,7 +256,7 @@ impl ConfigurationKind {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
-                        "Configuration file at path '{}' does not exist.",
+                        "configuration file at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
@@ -262,7 +278,7 @@ impl ConfigurationKind {
                             }
                         }
                         Err(err) => {
-                            tracing::error!("Failed to read configuration: {}", err);
+                            tracing::error!("{}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -274,9 +290,10 @@ impl ConfigurationKind {
     }
 
     fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
-        let file = std::fs::File::open(path).map_err(FederatedServerError::ReadConfigError)?;
-        let config = serde_yaml::from_reader::<_, Configuration>(&file)
-            .map_err(FederatedServerError::DeserializeConfigError)?;
+        let config = fs::read_to_string(path).map_err(FederatedServerError::ReadConfigError)?;
+        validate_configuration(&config).map_err(FederatedServerError::ConfigError)?;
+        let config =
+            serde_yaml::from_str(&config).map_err(FederatedServerError::DeserializeConfigError)?;
 
         Ok(config)
     }
@@ -604,6 +621,9 @@ where
     ///
     pub fn serve(self) -> FederatedServerHandle {
         let (state_listener, state_receiver) = mpsc::channel::<State>(1);
+        #[cfg(feature = "axum-server")]
+        let server_factory = AxumHttpServerFactory::new();
+        #[cfg(feature = "warp-server")]
         let server_factory = WarpHttpServerFactory::new();
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = Self::generate_event_stream(
@@ -682,7 +702,9 @@ mod tests {
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = graphql::Request::builder().query(request).build();
+        let request = graphql::Request::builder()
+            .query(Some(request.to_string()))
+            .build();
         let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();
@@ -731,7 +753,7 @@ mod tests {
         ));
 
         // This time write garbage, there should not be an update.
-        write_and_flush(&mut file, ":").await;
+        write_and_flush(&mut file, ":garbage").await;
         assert!(stream.into_future().now_or_never().is_none());
     }
 

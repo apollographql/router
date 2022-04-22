@@ -6,10 +6,10 @@ fn router_service_response(context) {
     if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
         context.headers.coucou = "hello";
     }
-    let value = context.extensions.test + 10;
-    context.headers["coming_from_extensions"] = `value_${value}`;
-    context.extensions.test = 42;
-    context.extensions.addition = "Here is a new element in the context";
+    let value = context.entries.test + 10;
+    context.headers["coming_from_entries"] = `value_${value}`;
+    context.entries.test = 42;
+    context.entries.addition = "Here is a new element in the context";
 
     context
 }
@@ -19,8 +19,8 @@ fn execution_service_request(context) {
     if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
         context.headers.coucou = "hello";
     }
-    context.extensions.test = 42;
-    context.extensions.addition = `Here is a new element in the context with value ${context.extensions.test}`;
-    context.extensions.test = 25;
+    context.entries.test = 42;
+    context.entries.addition = `Here is a new element in the context with value ${context.entries.test}`;
+    context.entries.test = 25;
     throw "An error occured";
 }
