@@ -50,7 +50,12 @@ macro_rules! assert_federated_response {
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
-        assert!(expected.data.eq_and_ordered(&actual.data));
+        assert!(
+            expected.data.eq_and_ordered(&actual.data),
+            "the gateway and the router didn't return the same data:\ngateway:\n{}\nrouter\n{}",
+            expected.data,
+            actual.data
+        );
         assert_eq!(registry.totals(), $service_requests);
     };
 }
@@ -233,7 +238,7 @@ async fn queries_should_work_over_post() {
 #[tokio::test]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
-        message :"value retrieval failed: couldn't plan query: query validation errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
+        message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
 

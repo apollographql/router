@@ -1,20 +1,23 @@
 ---
 source: apollo-router-core/src/query_planner/bridge_query_planner.rs
-assertion_line: 149
+assertion_line: 147
 expression: result
 ---
 PlanningErrors(
-    BridgeErrors {
+    PlanErrors {
         errors: [
-            BridgeError {
+            PlanError {
                 message: Some(
                     "Fragment \"UnusedTestFragment\" is never used.",
                 ),
                 extensions: None,
             },
         ],
-        usage_reporting_signature: Some(
-            "## GraphQLValidationFailure\n",
+        usage_reporting: Some(
+            UsageReporting {
+                stats_report_key: "## GraphQLValidationFailure\n",
+                referenced_fields_by_type: {},
+            },
         ),
     },
 )

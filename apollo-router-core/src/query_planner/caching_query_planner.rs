@@ -102,6 +102,7 @@ where
 mod tests {
     use super::*;
     use mockall::{mock, predicate::*};
+    use router_bridge::planner::PlanErrors;
     use test_log::test;
 
     mock! {
@@ -134,7 +135,10 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::from(Vec::<PlanError>::new())));
+            .return_const(Err(QueryPlannerError::from(PlanErrors {
+                errors: Default::default(),
+                usage_reporting: Default::default(),
+            })));
 
         let planner = CachingQueryPlanner::new(delegate, 10);
 

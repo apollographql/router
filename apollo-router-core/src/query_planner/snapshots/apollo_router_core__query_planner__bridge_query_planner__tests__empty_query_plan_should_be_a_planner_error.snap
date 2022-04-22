@@ -1,10 +1,44 @@
 ---
 source: apollo-router-core/src/query_planner/bridge_query_planner.rs
-assertion_line: 150
-expression: "BridgeQueryPlanner::new(Arc::new(example_schema())).await.unwrap().get(include_str!(\"testdata/unknown_introspection_query.graphql\").into(),\n                                                                       None,\n                                                                       Default::default()).await.unwrap_err()"
+assertion_line: 164
+expression: "BridgeQueryPlanner::new(Arc::new(example_schema())).await.unwrap().get(include_str!(\"testdata/unknown_introspection_query.graphql\").into(),\n            None, Default::default()).await.unwrap_err()"
 ---
 EmptyPlan(
     Some(
-        "{__schema{queryType{name}}}",
+        UsageReporting {
+            stats_report_key: "# -\n{__schema{queryType{name}}}",
+            referenced_fields_by_type: {
+                "Query": ReferencedFieldsForType {
+                    field_names: Some(
+                        [
+                            "__schema",
+                        ],
+                    ),
+                    is_interface: Some(
+                        false,
+                    ),
+                },
+                "__Schema": ReferencedFieldsForType {
+                    field_names: Some(
+                        [
+                            "queryType",
+                        ],
+                    ),
+                    is_interface: Some(
+                        false,
+                    ),
+                },
+                "__Type": ReferencedFieldsForType {
+                    field_names: Some(
+                        [
+                            "name",
+                        ],
+                    ),
+                    is_interface: Some(
+                        false,
+                    ),
+                },
+            },
+        },
     ),
 )

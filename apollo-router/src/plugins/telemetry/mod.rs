@@ -340,6 +340,7 @@ impl Plugin for Telemetry {
                     r
                 })
             })
+            // TODO: map an error as well, to try to extract usage reporting
             .map_response(|res: RouterResponse| {
                 let partial_query_stats: PartialQueryStats = res
                     .context
@@ -350,10 +351,10 @@ impl Plugin for Telemetry {
                 match QueryStats::try_from(partial_query_stats) {
                     Ok(query_stats) => {
                         // TODO: push things to uplink \o/
-                        dbg!(&query_stats);
+                        ::tracing::debug!("full query stats received: {:?}",&query_stats);
                     }
                     Err(e) => {
-                        ::tracing::warn!("telemetry: couldn't gather query stats : {e}");
+                        ::tracing::debug!("telemetry: couldn't gather query stats : {e}");
                     }
                 }
                 res

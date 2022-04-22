@@ -184,7 +184,7 @@ mod tests {
         let result = planner.get("".into(), None, Default::default()).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: UNKNOWN: Syntax Error: Unexpected <EOF>.",
+            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }

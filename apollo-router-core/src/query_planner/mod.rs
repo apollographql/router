@@ -601,6 +601,7 @@ mod tests {
     async fn fetch_includes_operation_name() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: None,
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
@@ -637,6 +638,7 @@ mod tests {
     async fn fetch_makes_post_requests() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: None,
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
