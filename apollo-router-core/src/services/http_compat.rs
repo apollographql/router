@@ -356,3 +356,32 @@ impl IntoResponse for Response<Bytes> {
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(body)))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::http_compat::Request;
+    use http::{HeaderValue, Method, Uri};
+
+    #[test]
+    fn builder() {
+        let request = Request::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .uri(Uri::from_static("http://example.com"))
+            .method(Method::POST)
+            .body("test")
+            .build()
+            .unwrap();
+        assert_eq!(
+            request
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        assert_eq!(request.uri(), &Uri::from_static("http://example.com"));
+        assert_eq!(request.method(), Method::POST);
+        assert_eq!(request.body(), &"test");
+    }
+}

@@ -719,3 +719,78 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.buffer(DEFAULT_BUFFER_SIZE)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::graphql;
+    use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
+    use http::{HeaderValue, Method, Uri};
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[test]
+    fn router_request_builder() {
+        let request = RouterRequest::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .uri(Uri::from_static("http://example.com"))
+            .method(Method::POST)
+            .query("query { topProducts }".to_string())
+            .operation_name("Default".to_string())
+            .context(Context::new())
+            // We need to follow up on this. How can users creat this easily?
+            .extensions(vec![].into_iter().collect())
+            // We need to follow up on this. How can users creat this easily?
+            .variables(Arc::new(vec![].into_iter().collect()))
+            .build()
+            .unwrap();
+        assert_eq!(
+            request
+                .originating_request
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        assert_eq!(
+            request.originating_request.uri(),
+            &Uri::from_static("http://example.com")
+        );
+        assert_eq!(request.originating_request.method(), Method::POST);
+        assert_eq!(
+            request.originating_request.body(),
+            &graphql::Request::builder()
+                .operation_name(Some("Default".to_string()))
+                .query(Some("query { topProducts }".to_string()))
+                .build()
+        );
+    }
+
+    #[test]
+    fn router_response_builder() {
+        let response = RouterResponse::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .context(Context::new())
+            // We need to follow up on this. How can users creat this easily?
+            .extensions(vec![].into_iter().collect())
+            .data(json!({}).into())
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            response
+                .response
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        assert_eq!(
+            response.response.body(),
+            &ResponseBody::GraphQL(graphql::Response::builder().data(json!({})).build())
+        );
+    }
+}
