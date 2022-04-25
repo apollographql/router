@@ -476,7 +476,7 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
-            .header("authorization", "Bearer")
+            .header("authorization", "Bearer  ")
             .build();
 
         // ...And call our service stack with it
