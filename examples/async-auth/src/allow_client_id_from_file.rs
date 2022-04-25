@@ -177,7 +177,7 @@ mod tests {
 
     use super::AllowClientIdFromFile;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use http::{header::HeaderName, HeaderValue, StatusCode};
+    use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -253,10 +253,7 @@ mod tests {
 
         // Let's create a request with a not allowed client id...
         let request_with_unauthorized_client_id = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("x-client-id"),
-                HeaderValue::from_static("invalid_client_id"),
-            )])
+            .header("x-client-id", "invalid_client_id")
             .build();
 
         // ...And call our service stack with it
@@ -323,10 +320,7 @@ mod tests {
 
         // Let's create a request with an valid client id...
         let request_with_valid_client_id = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("x-client-id"),
-                HeaderValue::from_static(valid_client_id),
-            )])
+            .header("x-client-id", valid_client_id)
             .build();
 
         // ...And call our service stack with it

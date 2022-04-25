@@ -34,6 +34,18 @@ impl From<&str> for IntoHeaderValue {
     }
 }
 
+impl From<&String> for IntoHeaderName {
+    fn from(name: &String) -> Self {
+        IntoHeaderName::String(name.to_owned())
+    }
+}
+
+impl From<&String> for IntoHeaderValue {
+    fn from(value: &String) -> Self {
+        IntoHeaderValue::String(value.to_owned())
+    }
+}
+
 impl TryFrom<IntoHeaderName> for HeaderName {
     type Error = http::Error;
 

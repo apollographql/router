@@ -380,7 +380,6 @@ register_plugin!("example", "jwt", JwtAuth);
 mod tests {
     use super::*;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use http::{header::HeaderName, HeaderValue};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
@@ -442,10 +441,7 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_no_bearer_in_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("should start with Bearer"),
-            )])
+            .header("authorization", "should start with Bearer")
             .build();
 
         // ...And call our service stack with it
@@ -480,10 +476,7 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("Bearer  "),
-            )])
+            .header("authorization", "Bearer")
             .build();
 
         // ...And call our service stack with it
@@ -519,10 +512,7 @@ mod tests {
         // Let's create a request with a properly formatted authorization header
         // Note: (The token isn't valid, but the format is...)
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("Bearer atoken"),
-            )])
+            .header("authorization", "Bearer atoken")
             .build();
 
         // ...And call our service stack with it
@@ -606,10 +596,7 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
+            .header("authorization", &format!("Bearer {token}"))
             .build();
 
         // ...And call our service stack with it
@@ -659,10 +646,7 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
+            .header("authorization", format!("Bearer {token}"))
             .build();
 
         // ...And call our service stack with it
@@ -717,10 +701,7 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
+            .header("authorization", format!("Bearer {token}"))
             .build();
 
         // Let's sleep until our token has expired
