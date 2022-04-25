@@ -562,16 +562,16 @@ mod tests {
     use tower::{util::BoxService, Service, ServiceExt};
 
     #[tokio::test]
-    async fn rhai_plugin_router_service() {
+    async fn rhai_plugin_router_service() -> Result<(), BoxError> {
         let mut mock_service = MockRouterService::new();
         mock_service
             .expect_call()
             .times(1)
             .returning(move |req: RouterRequest| {
-                Ok(RouterResponse::fake_builder()
+                RouterResponse::fake_builder()
                     .header("x-custom-header", "CUSTOM_VALUE")
                     .context(req.context)
-                    .build())
+                    .build()
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -585,15 +585,9 @@ mod tests {
         let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
-        let router_req = RouterRequest::fake_builder().context(context).build();
+        let router_req = RouterRequest::fake_builder().context(context).build()?;
 
-        let router_resp = router_service
-            .ready()
-            .await
-            .unwrap()
-            .call(router_req)
-            .await
-            .unwrap();
+        let router_resp = router_service.ready().await?.call(router_req).await?;
         assert_eq!(router_resp.response.status(), 200);
         let headers = router_resp.response.headers().clone();
         let context = router_resp.context;
@@ -624,10 +618,11 @@ mod tests {
             context.get::<_, String>("addition").unwrap().unwrap(),
             "Here is a new element in the context".to_string()
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn rhai_plugin_execution_service_error() {
+    async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
         let mut mock_service = MockExecutionService::new();
         mock_service
             .expect_call()
@@ -655,7 +650,7 @@ mod tests {
                     .query(String::new())
                     .build(),
             )
-            .build();
+            .build()?;
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let exec_req = ExecutionRequest::fake_builder()
@@ -688,5 +683,6 @@ mod tests {
             body.errors.get(0).unwrap().message.as_str(),
             "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function execution_service_request"
         );
+        Ok(())
     }
 }

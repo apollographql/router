@@ -33,7 +33,8 @@ async fn main() -> Result<()> {
     // ...then create a GraphQL request...
     let request = RouterRequest::fake_builder()
         .query(r#"query Query { me { name } }"#.to_string())
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     // ... and run it against the router service!
     let res = router_service

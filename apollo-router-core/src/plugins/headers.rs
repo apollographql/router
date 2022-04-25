@@ -524,7 +524,8 @@ mod test {
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
                     .body(Request::builder().query(Some("query".to_string())).build())
-                    .build(),
+                    .build()
+                    .expect("expecting valid request"),
             ),
             subgraph_request: http_compat::Request::fake_builder()
                 .header("aa", "vaa")
@@ -534,7 +535,8 @@ mod test {
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query(Some("query".to_string())).build())
-                .build(),
+                .build()
+                .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),
         }

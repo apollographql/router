@@ -34,7 +34,7 @@ macro_rules! assert_federated_response {
 
         let originating_request = http_compat::Request::fake_builder().method(Method::POST)
             .body(request)
-            .build();
+            .build().expect("expecting valid originating request");
 
         let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -93,7 +93,8 @@ async fn api_schema_hides_field() {
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
         .body(request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let (actual, _) = query_rust(originating_request.into()).await;
 
@@ -177,7 +178,10 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let originating_request = http_compat::Request::fake_builder().body(request).build();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -211,7 +215,8 @@ async fn queries_should_work_over_post() {
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
         .body(request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let request = graphql::RouterRequest {
         originating_request: http_request,
@@ -238,7 +243,10 @@ async fn service_errors_should_be_propagated() {
 
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder().body(request).build();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -278,7 +286,10 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let originating_request = http_compat::Request::fake_builder().body(request).build();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -323,7 +334,8 @@ async fn mutation_should_work_over_post() {
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
         .body(request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let request = graphql::RouterRequest {
         originating_request: http_request,
@@ -372,7 +384,8 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let actual = query_with_router(router.clone(), originating_request.into()).await;
 
@@ -394,7 +407,8 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_request_with_query)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let actual = query_with_router(router.clone(), originating_request.into()).await;
 
@@ -411,7 +425,8 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let actual = query_with_router(router, originating_request.into()).await;
 
@@ -469,7 +484,8 @@ async fn missing_variables() {
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
         .body(request)
-        .build();
+        .build()
+        .expect("expecting valid request");
 
     let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![

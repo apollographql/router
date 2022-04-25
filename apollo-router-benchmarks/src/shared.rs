@@ -27,7 +27,7 @@ pub async fn basic_composition_benchmark(
                 .into_iter()
                 .collect(),
         ))
-        .build();
+        .build().expect("expecting valid request");
 
     let response = router_service
         .ready()

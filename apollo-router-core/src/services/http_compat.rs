@@ -80,7 +80,7 @@ use bytes::Bytes;
 #[cfg(feature = "axum-server")]
 use crate::ResponseBody;
 
-use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method, Uri};
+use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method};
 
 #[derive(Debug)]
 pub struct Request<T> {
@@ -124,24 +124,13 @@ impl<T> Request<T> {
         uri: Option<http::Uri>,
         method: Option<http::Method>,
         body: T,
-    ) -> Request<T> {
-        let mut builder = http::request::Builder::new()
-            .method(method.unwrap_or(Method::GET))
-            .uri(uri.unwrap_or_else(|| Uri::from_static("http://test")));
-        for (key, values) in headers {
-            let header_name: HeaderName = key
-                .try_into()
-                .expect("invalid header for fake http::Reqeust");
-            for value in values {
-                let header_value: HeaderValue = value
-                    .try_into()
-                    .expect("invalid header value for fake http::Reqeust");
-                builder = builder.header(header_name.clone(), header_value);
-            }
-        }
-        let req = builder.body(body).expect("invalid fake http::Reqeust");
-
-        Self { inner: req }
+    ) -> http::Result<Request<T>> {
+        Self::new(
+            headers,
+            uri.unwrap_or_default(),
+            method.unwrap_or(Method::GET),
+            body,
+        )
     }
 
     /// Update the associated URL

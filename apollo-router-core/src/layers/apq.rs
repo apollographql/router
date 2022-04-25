@@ -169,7 +169,9 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::fake_builder().build())
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request"))
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -194,7 +196,9 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::fake_builder().build())
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request"))
             });
 
         let mock = mock_service.build();
@@ -211,16 +215,19 @@ mod apq_tests {
 
         let hash_only = RouterRequest::fake_builder()
             .extensions(extensions.clone())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let second_hash_only = RouterRequest::fake_builder()
             .extensions(extensions.clone())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let with_query = RouterRequest::fake_builder()
             .extensions(extensions)
             .query("{__typename}".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let services = service_stack.ready().await.unwrap();
         let apq_error = services.call(hash_only).await.unwrap();
@@ -275,7 +282,9 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(RouterResponse::fake_builder().build())
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request"))
             });
         mock_service_builder
             // the second last one should have the right APQ header and the full query string
@@ -301,7 +310,9 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::fake_builder().build())
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request"))
             });
 
         let mock_service = mock_service_builder.build();
@@ -321,14 +332,16 @@ mod apq_tests {
         let hash_only = request_builder
             .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
 
         let second_hash_only = request_builder
             .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let request_builder = RouterRequest::fake_builder().extensions(extensions);
 
@@ -336,7 +349,8 @@ mod apq_tests {
             .query("{__typename}".to_string())
             .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss the APQ cache

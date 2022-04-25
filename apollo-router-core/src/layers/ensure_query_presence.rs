@@ -63,17 +63,19 @@ mod ensure_query_presence_tests {
     #[tokio::test]
     async fn it_works_with_query() {
         let mut mock_service = MockRouterService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| Ok(RouterResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_req| {
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request"))
+        });
 
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
         let request: crate::RouterRequest = RouterRequest::fake_builder()
             .query("{__typename}".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let _ = service_stack.oneshot(request).await.unwrap();
     }
@@ -87,8 +89,10 @@ mod ensure_query_presence_tests {
 
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest =
-            RouterRequest::fake_builder().query("".to_string()).build();
+        let request: crate::RouterRequest = RouterRequest::fake_builder()
+            .query("".to_string())
+            .build()
+            .expect("expecting valid request");
 
         let response = service_stack
             .oneshot(request)
@@ -113,7 +117,9 @@ mod ensure_query_presence_tests {
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = RouterRequest::fake_builder().build();
+        let request: crate::RouterRequest = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         let response = service_stack
             .oneshot(request)

@@ -213,7 +213,9 @@ mod tests {
         .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
-        let request_without_client_id = RouterRequest::fake_builder().build();
+        let request_without_client_id = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -254,7 +256,8 @@ mod tests {
         // Let's create a request with a not allowed client id...
         let request_with_unauthorized_client_id = RouterRequest::fake_builder()
             .header("x-client-id", "invalid_client_id")
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -301,9 +304,9 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
+                RouterResponse::fake_builder()
                     .data(expected_mock_response_data.into())
-                    .build())
+                    .build()
             });
 
         // The mock has been set up, we can now build a service from it
@@ -321,7 +324,8 @@ mod tests {
         // Let's create a request with an valid client id...
         let request_with_valid_client_id = RouterRequest::fake_builder()
             .header("x-client-id", valid_client_id)
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack

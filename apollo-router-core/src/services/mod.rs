@@ -193,7 +193,7 @@ impl RouterRequest {
         extensions: Vec<(&'static str, Value)>,
         context: Option<Context>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
-    ) -> RouterRequest {
+    ) -> Result<RouterRequest, BoxError> {
         RouterRequest::new(
             query,
             operation_name,
@@ -204,7 +204,6 @@ impl RouterRequest {
             Uri::from_static("http://default"),
             Method::GET,
         )
-        .expect("not a valid fake RouterRequest")
     }
 }
 
@@ -283,7 +282,7 @@ impl RouterResponse {
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
-    ) -> RouterResponse {
+    ) -> Result<RouterResponse, BoxError> {
         RouterResponse::new(
             label,
             data.unwrap_or_default(),
@@ -294,7 +293,28 @@ impl RouterResponse {
             headers,
             context.unwrap_or_default(),
         )
-        .expect("not a valid fake RouterResponse")
+    }
+
+    /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
+    /// It has no path and no response data.
+    /// This is useful for things such as authentication errors.
+    #[allow(clippy::too_many_arguments)]
+    pub fn error_new(
+        errors: Vec<crate::Error>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        context: Context,
+    ) -> Result<RouterResponse, BoxError> {
+        RouterResponse::new(
+            None,
+            Default::default(),
+            None,
+            errors,
+            Default::default(),
+            status_code,
+            headers,
+            context,
+        )
     }
 
     pub fn new_from_response(

@@ -124,7 +124,9 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request without an operation name...
-        let request_without_any_operation_name = RouterRequest::fake_builder().build();
+        let request_without_any_operation_name = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -160,7 +162,8 @@ mod tests {
         // Let's create a request with an empty operation name...
         let request_with_empty_operation_name = RouterRequest::fake_builder()
             .operation_name("".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -206,9 +209,9 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
+                RouterResponse::fake_builder()
                     .data(expected_mock_response_data.into())
-                    .build())
+                    .build()
             });
 
         // The mock has been set up, we can now build a service from it
@@ -221,7 +224,8 @@ mod tests {
         // Let's create a request with an valid operation name...
         let request_with_operation_name = RouterRequest::fake_builder()
             .operation_name(operation_name.to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack

@@ -167,7 +167,8 @@ mod forbid_http_get_mutations_tests {
         let request = Request::fake_builder()
             .method(method)
             .body(crate::Request::default())
-            .build();
+            .build()
+            .expect("expecting valid request");
         ExecutionRequest::fake_builder()
             .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))
