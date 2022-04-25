@@ -61,7 +61,7 @@ impl Plugin for ForbidAnonymousOperations {
                         .status_code(StatusCode::BAD_REQUEST)
                         .extensions(Default::default())
                         .context(req.context)
-                        .build();
+                        .build()?;
                     Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!

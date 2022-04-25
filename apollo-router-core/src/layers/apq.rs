@@ -102,7 +102,8 @@ where
                                 .errors(errors)
                                 .extensions(Object::new())
                                 .context(req.context)
-                                .build();
+                                .build()
+                                .expect("response is valid");
 
                             Ok(ControlFlow::Break(res))
                         }

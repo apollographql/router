@@ -72,7 +72,8 @@ impl Plugin for AllowClientIdFromFile {
                         .extensions(Default::default())
                         .status_code(StatusCode::UNAUTHORIZED)
                         .context(req.context)
-                        .build();
+                        .build()
+                        .expect("response is valid");
                     return Box::pin(async { Ok(ControlFlow::Break(res)) });
                 }
 
@@ -99,7 +100,8 @@ impl Plugin for AllowClientIdFromFile {
                             .extensions(Default::default())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build();
+                            .build()
+                            .expect("response is valid");
                         return Box::pin(async { Ok(ControlFlow::Break(res)) });
                     }
                 };
@@ -135,7 +137,8 @@ impl Plugin for AllowClientIdFromFile {
                             .extensions(Default::default())
                             .status_code(StatusCode::FORBIDDEN)
                             .context(req.context)
-                            .build();
+                            .build()
+                            .expect("response is valid");
                         Ok(ControlFlow::Break(res))
                     }
                 })

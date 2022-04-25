@@ -569,10 +569,7 @@ mod tests {
             .times(1)
             .returning(move |req: RouterRequest| {
                 Ok(RouterResponse::fake_builder()
-                    .header((
-                        HeaderName::from_static("x-custom-header"),
-                        HeaderValue::from_static("CUSTOM_VALUE"),
-                    ))
+                    .header("x-custom-header", "CUSTOM_VALUE")
                     .context(req.context)
                     .build())
             });
@@ -652,17 +649,13 @@ mod tests {
         let mut router_service =
             dyn_plugin.execution_service(BoxService::new(mock_service.build()));
         let fake_req = http_compat::Request::fake_builder()
-            .header((
-                HeaderName::from_static("x-custom-header"),
-                HeaderValue::from_static("CUSTOM_VALUE"),
-            ))
+            .header("x-custom-header", "CUSTOM_VALUE")
             .body(
                 apollo_router_core::Request::builder()
                     .query(String::new())
                     .build(),
             )
-            .build()
-            .unwrap();
+            .build();
         let context = Context::new();
         context.insert("test", 5i64).unwrap();
         let exec_req = ExecutionRequest::fake_builder()

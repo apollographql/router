@@ -9,7 +9,10 @@ use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
+use http_compat::IntoHeaderName;
+use http_compat::IntoHeaderValue;
 use moka::sync::Cache;
+use multimap::MultiMap;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
@@ -147,10 +150,10 @@ impl RouterRequest {
         variables: Arc<Object>,
         extensions: Vec<(&'static str, Value)>,
         context: Context,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Uri,
         method: Method,
-    ) -> RouterRequest {
+    ) -> Result<RouterRequest, BoxError> {
         let object: Object = extensions
             .into_iter()
             .map(|(name, value)| (ByteString::from(name.to_string()), value))
@@ -168,27 +171,28 @@ impl RouterRequest {
             .uri(uri)
             .method(method)
             .body(gql_request)
-            .build()
-            .expect("body is always valid qed");
+            .build()?;
 
-        Self {
+        Ok(Self {
             originating_request,
             context,
-        }
+        })
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" RouterRequest.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterRequest. It's usually enough for testing, when a fully consructed RouterRequest is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// RouterRequest. It's usually enough for testing, when a fully constructed RouterRequest is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
     pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
         variables: Option<Arc<Object>>,
         extensions: Vec<(&'static str, Value)>,
         context: Option<Context>,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
     ) -> RouterRequest {
         RouterRequest::new(
             query,
@@ -200,6 +204,7 @@ impl RouterRequest {
             Uri::from_static("http://default"),
             Method::GET,
         )
+        .expect("not a valid fake RouterRequest")
     }
 }
 
@@ -226,9 +231,9 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Object,
         status_code: Option<StatusCode>,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> RouterResponse {
+    ) -> Result<RouterResponse, BoxError> {
         // Build a response
         let res = Response::builder()
             .label(label)
@@ -239,32 +244,35 @@ impl RouterResponse {
             .build();
 
         // Build an http Response
-        let mut http_response_builder =
-            http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
-        for (k, v) in headers {
-            http_response_builder = http_response_builder.header(k, v);
+        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
         }
 
-        let http_response = http_response_builder
-            .body(ResponseBody::GraphQL(res))
-            .expect("ResponseBody is serializable; qed");
+        let http_response = builder.body(ResponseBody::GraphQL(res))?;
 
         // Create a compatible Response
         let compat_response = http_compat::Response {
             inner: http_response,
         };
 
-        Self {
+        Ok(Self {
             response: compat_response,
             context,
-        }
+        })
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" RouterResponse.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterResponse. It's usually enough for testing, when a fully consructed RouterResponse is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// RouterResponse. It's usually enough for testing, when a fully constructed RouterResponse is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
     pub fn fake_new(
         label: Option<String>,
@@ -273,7 +281,7 @@ impl RouterResponse {
         errors: Vec<crate::Error>,
         extensions: Option<Object>,
         status_code: Option<StatusCode>,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
     ) -> RouterResponse {
         RouterResponse::new(
@@ -286,6 +294,7 @@ impl RouterResponse {
             headers,
             context.unwrap_or_default(),
         )
+        .expect("not a valid fake RouterResponse")
     }
 
     pub fn new_from_response(

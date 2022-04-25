@@ -184,8 +184,7 @@ mod forbid_http_get_mutations_tests {
         let request = http_compat::Request::fake_builder()
             .method(method)
             .body(crate::Request::default())
-            .build()
-            .unwrap();
+            .build();
 
         ExecutionRequest::fake_builder()
             .originating_request(request)

@@ -517,44 +517,24 @@ mod test {
         SubgraphRequest {
             originating_request: Arc::new(
                 http_compat::Request::fake_builder()
-                    .header((
-                        HeaderName::from_static("da"),
-                        HeaderValue::from_static("vda"),
-                    ))
-                    .header((
-                        HeaderName::from_static("db"),
-                        HeaderValue::from_static("vdb"),
-                    ))
-                    .header((
-                        HeaderName::from_static("db"),
-                        HeaderValue::from_static("vdb"),
-                    ))
-                    .header((HOST, HeaderValue::from_static("host")))
-                    .header((CONTENT_LENGTH, HeaderValue::from_static("2")))
-                    .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
                     .body(Request::builder().query(Some("query".to_string())).build())
-                    .build()
-                    .unwrap(),
+                    .build(),
             ),
             subgraph_request: http_compat::Request::fake_builder()
-                .header((
-                    HeaderName::from_static("aa"),
-                    HeaderValue::from_static("vaa"),
-                ))
-                .header((
-                    HeaderName::from_static("ab"),
-                    HeaderValue::from_static("vab"),
-                ))
-                .header((
-                    HeaderName::from_static("ac"),
-                    HeaderValue::from_static("vac"),
-                ))
-                .header((HOST, HeaderValue::from_static("rhost")))
-                .header((CONTENT_LENGTH, HeaderValue::from_static("22")))
-                .header((CONTENT_TYPE, HeaderValue::from_static("graphql")))
+                .header("aa", "vaa")
+                .header("ab", "vab")
+                .header("ac", "vac")
+                .header(HOST, "rhost")
+                .header(CONTENT_LENGTH, "22")
+                .header(CONTENT_TYPE, "graphql")
                 .body(Request::builder().query(Some("query".to_string())).build())
-                .build()
-                .unwrap(),
+                .build(),
             operation_kind: OperationKind::Query,
             context: Context::new(),
         }

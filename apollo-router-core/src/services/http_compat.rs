@@ -2,11 +2,59 @@
 //!
 //! To improve their usability.
 
+use derive_more::From;
+use multimap::MultiMap;
 use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
 };
+
+#[derive(From, Eq, Hash, PartialEq)]
+pub enum IntoHeaderName {
+    String(String),
+    HeaderName(HeaderName),
+}
+
+#[derive(From, Eq, Hash, PartialEq)]
+pub enum IntoHeaderValue {
+    String(String),
+    HeaderValue(HeaderValue),
+}
+
+impl From<&str> for IntoHeaderName {
+    fn from(name: &str) -> Self {
+        IntoHeaderName::String(name.to_string())
+    }
+}
+
+impl From<&str> for IntoHeaderValue {
+    fn from(value: &str) -> Self {
+        IntoHeaderValue::String(value.to_string())
+    }
+}
+
+impl TryFrom<IntoHeaderName> for HeaderName {
+    type Error = http::Error;
+
+    fn try_from(value: IntoHeaderName) -> Result<Self, Self::Error> {
+        Ok(match value {
+            IntoHeaderName::String(name) => HeaderName::try_from(name)?,
+            IntoHeaderName::HeaderName(name) => name,
+        })
+    }
+}
+
+impl TryFrom<IntoHeaderValue> for HeaderValue {
+    type Error = http::Error;
+
+    fn try_from(value: IntoHeaderValue) -> Result<Self, Self::Error> {
+        Ok(match value {
+            IntoHeaderValue::String(value) => HeaderValue::try_from(value)?,
+            IntoHeaderValue::HeaderValue(value) => value,
+        })
+    }
+}
 
 #[cfg(feature = "axum-server")]
 use axum::{body::boxed, response::IntoResponse};
@@ -30,14 +78,18 @@ impl<T> Request<T> {
     ///
     /// Required parameters are required in non-testing code to create a Request.
     pub fn new(
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: http::Uri,
         method: http::Method,
         body: T,
     ) -> http::Result<Request<T>> {
         let mut builder = http::request::Builder::new().method(method).uri(uri);
-        for (key, value) in headers {
-            builder = builder.header(key, value);
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
         }
         let req = builder.body(body)?;
 
@@ -47,23 +99,33 @@ impl<T> Request<T> {
     /// This is the constructor (or builder) to use when constructing a "fake" Request.
     ///
     /// This does not enforce the provision of the uri and method that is required for a fully functional
-    /// Request. It's usually enough for testing, when a fully consructed Request is
+    /// Request. It's usually enough for testing, when a fully constructed Request is
     /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
     pub fn fake_new(
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Option<http::Uri>,
         method: Option<http::Method>,
         body: T,
-    ) -> http::Result<Request<T>> {
+    ) -> Request<T> {
         let mut builder = http::request::Builder::new()
             .method(method.unwrap_or(Method::GET))
             .uri(uri.unwrap_or_else(|| Uri::from_static("http://test")));
-        for (key, value) in headers {
-            builder = builder.header(key, value);
+        for (key, values) in headers {
+            let header_name: HeaderName = key
+                .try_into()
+                .expect("invalid header for fake http::Reqeust");
+            for value in values {
+                let header_value: HeaderValue = value
+                    .try_into()
+                    .expect("invalid header value for fake http::Reqeust");
+                builder = builder.header(header_name.clone(), header_value);
+            }
         }
-        let req = builder.body(body)?;
+        let req = builder.body(body).expect("invalid fake http::Reqeust");
 
-        Ok(Self { inner: req })
+        Self { inner: req }
     }
 
     /// Update the associated URL

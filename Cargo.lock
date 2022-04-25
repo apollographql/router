@@ -197,6 +197,7 @@ dependencies = [
  "bytes",
  "dashmap 5.2.0",
  "derivative",
+ "derive_more",
  "displaydoc",
  "futures",
  "hex",
@@ -213,6 +214,7 @@ dependencies = [
  "miette",
  "mockall",
  "moka",
+ "multimap",
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
@@ -619,9 +621,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.5"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25c66de18be9a43a61276a8eea5f608b9e644daae3f41e062e1eb63162c2aaad"
+checksum = "3f699a1a39f653f04ad0073a8b6006b83058be99de5eef93ee3246fa84eb3858"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -865,6 +867,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "cookies-to-headers"
@@ -1213,8 +1221,10 @@ version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fb810d30a7c1953f91334de7244731fc3f3c10d7fe163338a35b9f640960321"
 dependencies = [
+ "convert_case",
  "proc-macro2",
  "quote",
+ "rustc_version",
  "syn",
 ]
 
@@ -2751,6 +2761,9 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "native-tls"
