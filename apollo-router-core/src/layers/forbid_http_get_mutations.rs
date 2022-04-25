@@ -1,5 +1,9 @@
-use crate::{checkpoint::CheckpointService, plugin_utils, ExecutionRequest, ExecutionResponse};
-use http::{Method, StatusCode};
+//! Prevent mutations if the HTTP method is GET.
+//!
+//! See [`Layer`] and [`Service`] for more details.
+
+use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse};
+use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
@@ -17,21 +21,25 @@ where
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
             |req: ExecutionRequest| {
-                if req.context.request.method() == Method::GET
+                if req.originating_request.method() == Method::GET
                     && req.query_plan.contains_mutations()
                 {
-                    let res = plugin_utils::ExecutionResponse::builder()
-                        .errors(vec![crate::Error {
-                            message: "GET supports only query operation".to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        }])
-                        .status(StatusCode::METHOD_NOT_ALLOWED)
-                        .headers(vec![("Allow".to_string(), "POST".to_string())])
+                    let errors = vec![crate::Error {
+                        message: "GET supports only query operation".to_string(),
+                        locations: Default::default(),
+                        path: Default::default(),
+                        extensions: Default::default(),
+                    }];
+                    let mut res = ExecutionResponse::builder()
+                        .errors(errors)
+                        .extensions(Default::default())
+                        .status_code(StatusCode::METHOD_NOT_ALLOWED)
                         .context(req.context)
-                        .build()
-                        .into();
+                        .build();
+                    res.response.inner.headers_mut().insert(
+                        "Allow".parse::<HeaderName>().unwrap(),
+                        "POST".parse().unwrap(),
+                    );
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
@@ -44,27 +52,24 @@ where
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-    use std::sync::Arc;
 
     use super::*;
-    use crate::http_compat::RequestBuilder;
+    use crate::http_compat;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{
-        plugin_utils::{ExecutionRequest, ExecutionResponse, MockExecutionService},
-        Context, QueryPlan,
-    };
-    use http::{StatusCode, Uri};
+    use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
+    use http::StatusCode;
     use serde_json::json;
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
-        let mut mock_service = plugin_utils::MockExecutionService::new();
+        let mut mock_service = MockExecutionService::new();
 
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(plugin_utils::ExecutionResponse::builder().build().into()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -83,7 +88,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(plugin_utils::ExecutionResponse::builder().build().into()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -102,7 +107,7 @@ mod forbid_http_get_mutations_tests {
         mock_service
             .expect_call()
             .times(1)
-            .returning(move |_| Ok(ExecutionResponse::builder().build().into()));
+            .returning(move |_| Ok(ExecutionResponse::fake_builder().build()));
 
         let mock = mock_service.build();
 
@@ -176,16 +181,15 @@ mod forbid_http_get_mutations_tests {
             .unwrap()
         };
 
-        ExecutionRequest::builder()
-            .query_plan(Arc::new(QueryPlan { root }))
-            .context(
-                Context::new().with_request(Arc::new(
-                    RequestBuilder::new(method, Uri::from_static("http://test"))
-                        .body(crate::Request::default())
-                        .unwrap(),
-                )),
-            )
+        let request = http_compat::Request::fake_builder()
+            .method(method)
+            .body(crate::Request::default())
             .build()
-            .into()
+            .unwrap();
+
+        ExecutionRequest::fake_builder()
+            .originating_request(request)
+            .query_plan(Arc::new(QueryPlan { root }))
+            .build()
     }
 }

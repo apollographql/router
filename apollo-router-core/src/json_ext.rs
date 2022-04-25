@@ -466,7 +466,7 @@ impl Path {
         if self.is_empty() {
             None
         } else {
-            Some(Path(self.iter().cloned().take(self.len() - 1).collect()))
+            Some(Path(self.iter().take(self.len() - 1).cloned().collect()))
         }
     }
 

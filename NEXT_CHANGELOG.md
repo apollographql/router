@@ -22,65 +22,61 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Description! And a link to a [reference](http://url)
 -->
 
-# [v0.1.0-preview.5] - (unreleased)
+# [v0.1.0-preview.7] - (unreleased)
 ## ❗ BREAKING ❗
+### Plugin utilities cleanup ([PR #819](https://github.com/apollographql/router/pull/819))
+Utilities around creating Request and Response structures have been migrated to builders.
+
+Migration:
+* `plugin_utils::RouterRequest::builder()`->`RouterRequest::fake_builder()`
+* `plugin_utils::RouterResponse::builder()`->`RouterResponse::fake_builder()`
+
+In addition, the `plugin_utils` module has been removed. Mock service functionality has been migrated to `plugin::utils::test`.
+### Plugin API changes [PR #855](https://github.com/apollographql/router/pull/855)
+Previously the Plugin trait has three lifecycle hooks: new, startup, and shutdown.
+
+Startup and shutdown are problematic because:
+* Plugin construction happens in new and startup. This means creating in new and populating in startup.
+* Startup and shutdown has to be explained to the user.
+* Startup and shutdown ordering is delicate.
+
+The lifecycle now looks like this:
+1. `new`
+2. `activate`
+3. `drop`
+
+Users can migrate their plugins using the following:
+* `Plugin#startup`->`Plugin#new`
+* `Plugin#shutdown`->`Drop#drop`
+
+In addition, the `activate` lifecycle hook is now not marked as deprecated, and users are free to use it.
+
 ## 🚀 Features
-### Helm chart for the router [PR #861](https://github.com/apollographql/router/pull/861)
 
-  [Helm](https://helm.sh) support provided by @damienpontifex.
-
-### Line precise error reporting [PR #830](https://github.com/apollographql/router/pull/782)
-The router will make a best effort to give line precise error reporting if the configuration was invalid.
-```yaml
-1. /telemetry/tracing/trace_config/sampler
-
+###  Configurable client identification headers [PR #850](https://github.com/apollographql/router/pull/850)
+The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Those headers can now be overriden in the configuration:
+```yaml title="router.yaml"
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router3
-      sampler: "0.3"
-               ^----- "0.3" is not valid under any of the given schemas
+  apollo:
+    # Header identifying the client name. defaults to apollographql-client-name
+    client_name_header: <custom_client_header_name>
+    # Header identifying the client version. defaults to apollographql-client-version
+    client_version_header: <custom_version_header_name>
 ```
-### Install experience [PR #820](https://github.com/apollographql/router/pull/820)
-
-  Added an install script that will automatically download and unzip the router into the local directory.
-  For more info see the quickstart documentation.
 
 ## 🐛 Fixes
-
-### Export the right operation name in Studio [#866](https://github.com/apollographql/router/issues/866)
-Due to the switch to axum, when the query was coming from a POST request, we didn't take the `operation_name` from the body.
-
-### Make sure concurrent query plan are not mixed up [#846](https://github.com/apollographql/router/issues/846)
-The query planner has been reworked to make sure concurrent plan requests will be dispatched to the relevant requester.
-
-### Do not hang when tracing provider was not set as global [#849](https://github.com/apollographql/router/issues/847)
-The telemetry plugin will now Drop cleanly when the Router service stack fails to build.
-
-### Propagate error extensions originating from subgraphs [PR #839](https://github.com/apollographql/router/pull/839)
-Extensions are now propagated following the configuration of the `include_subgraph_error` plugin.
-
-### Telemetry configuration [PR #830](https://github.com/apollographql/router/pull/830)
-Jaeger and Zipkin telemetry config produced JSON schema that was invalid.
-
-### Early return a better error when introspection is disabled [PR #751](https://github.com/apollographql/router/pull/751)
-Instead of returning an error coming from the query planner, we are now returning a proper error explaining that the introspection has been disabled.
-
-### Add operation name to subquery fetches [PR #840](https://github.com/apollographql/router/pull/840)
-If present in the query plan fetch noede, the operation name will be added to sub-fetches.
-
-### Remove trailing slash from Datadog agent endpoint URL [PR #863](https://github.com/apollographql/router/pull/863)
-due to the way the endpoint URL is constructed in opentelemetry-datadog, we
-cannot set the agent endpoint to a URL with a trailing slash
+###  Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
+If a configuration file had errors on reload these were silently swallowed. These are now added to the logs.
 
 ## 🛠 Maintenance
-### Configuration files validated [PR #830](https://github.com/apollographql/router/pull/830)
-Router configuration files within the project are now largely validated via unit test.
+### End to end integration tests for Jaeger [PR #850](https://github.com/apollographql/router/pull/850)
+Jaeger tracing end to end test including client->router->subgraphs
 
-### Switch web server framework from `warp` to `axum` [PR #751](https://github.com/apollographql/router/pull/751)
-The router is now running by default with an [axum](https://github.com/tokio-rs/axum/) web server instead of `warp`.
+### Router tracing span cleanup [PR #850](https://github.com/apollographql/router/pull/850)
+Spans generated by the Router are now aligned with plugin services.
 
-### Improve the way we handle Request with axum [PR #845](https://github.com/apollographql/router/pull/845)
-Take advantages of new extractors given by `axum`
-  
+### Simplified CI for windows [PR #850](https://github.com/apollographql/router/pull/850)
+All windows processes are spawned via xtask rather than a separate CircleCI stage.
 ## 📚 Documentation
+### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
+Many more rust docs have been added.

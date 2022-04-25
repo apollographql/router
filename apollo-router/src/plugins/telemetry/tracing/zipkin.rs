@@ -1,3 +1,4 @@
+//! Configuration for zipkin tracing.
 use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
@@ -65,41 +66,5 @@ impl TracingConfigurator for Config {
                 .init_exporter()?,
         };
         Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::plugins::telemetry::tracing::test::run_query;
-    use opentelemetry::global;
-    use tower::BoxError;
-    use tracing::instrument::WithSubscriber;
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::Registry;
-
-    // This test can be run manually from your IDE to help with testing otel
-    // It is set to ignore by default as zipkin may not be set up
-    #[ignore]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_tracing() -> Result<(), BoxError> {
-        tracing_subscriber::fmt().init();
-
-        global::set_text_map_propagator(opentelemetry_zipkin::Propagator::new());
-        let tracer = opentelemetry_zipkin::new_pipeline()
-            .with_service_name("my_app")
-            .install_batch(opentelemetry::runtime::Tokio)?;
-
-        // Create a tracing layer with the configured tracer
-        let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        // Use the tracing subscriber `Registry`, or any other subscriber
-        // that impls `LookupSpan`
-        let subscriber = Registry::default().with(telemetry);
-
-        // Trace executed code
-        run_query().with_subscriber(subscriber).await;
-        global::shutdown_tracer_provider();
-
-        Ok(())
     }
 }

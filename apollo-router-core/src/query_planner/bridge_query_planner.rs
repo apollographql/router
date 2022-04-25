@@ -43,7 +43,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            let body = req.context.request.body();
+            let body = req.originating_request.body();
             match this
                 .get(
                     body.query.clone().expect(
@@ -54,10 +54,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 )
                 .await
             {
-                Ok(query_plan) => Ok(QueryPlannerResponse {
-                    query_plan,
-                    context: req.context,
-                }),
+                Ok(query_plan) => Ok(QueryPlannerResponse::new(query_plan, req.context)),
                 Err(e) => Err(tower::BoxError::from(e)),
             }
         };
@@ -69,7 +66,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for BridgeQueryPlanner {
-    #[tracing::instrument(skip_all, level = "info", name = "plan")]
     async fn get(
         &self,
         query: String,

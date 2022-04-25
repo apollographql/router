@@ -16,7 +16,7 @@ struct OverrideSubgraphUrl {
 impl Plugin for OverrideSubgraphUrl {
     type Config = HashMap<String, url::Url>;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(OverrideSubgraphUrl {
             urls: configuration
                 .into_iter()
@@ -34,9 +34,7 @@ impl Plugin for OverrideSubgraphUrl {
         service
             .map_request(move |mut req: SubgraphRequest| {
                 if let Some(new_url) = new_url.clone() {
-                    req.http_request
-                        .set_url(new_url)
-                        .expect("url has been checked when we configured the plugin");
+                    *req.subgraph_request.uri_mut() = new_url;
                 }
 
                 req
@@ -49,9 +47,9 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use apollo_router_core::{
-        plugin_utils::{self, MockSubgraphService},
-        Context, DynPlugin, SubgraphRequest,
+        plugin::utils::test::MockSubgraphService, Context, DynPlugin, SubgraphRequest,
     };
     use http::Uri;
     use serde_json::Value;
@@ -64,18 +62,13 @@ mod tests {
         mock_service
             .expect_call()
             .withf(|req| {
-                assert_eq!(
-                    req.http_request.url(),
-                    &Uri::from_str("http://localhost:8001").unwrap()
-                );
-                true
+                req.subgraph_request.uri() == &Uri::from_str("http://localhost:8001").unwrap()
             })
             .times(1)
             .returning(move |req: SubgraphRequest| {
-                Ok(plugin_utils::SubgraphResponse::builder()
+                Ok(SubgraphResponse::fake_builder()
                     .context(req.context)
-                    .build()
-                    .into())
+                    .build())
             });
 
         let mut dyn_plugin: Box<dyn DynPlugin> = apollo_router_core::plugins()
@@ -90,18 +83,19 @@ mod tests {
                 )
                 .unwrap(),
             )
+            .await
             .unwrap();
         let mut subgraph_service =
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
-        let subgraph_req = plugin_utils::SubgraphRequest::builder().context(context);
+        let subgraph_req = SubgraphRequest::fake_builder().context(context);
 
         let _subgraph_resp = subgraph_service
             .ready()
             .await
             .unwrap()
-            .call(subgraph_req.build().into())
+            .call(subgraph_req.build())
             .await
             .unwrap();
     }

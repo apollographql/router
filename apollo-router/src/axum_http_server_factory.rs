@@ -1,3 +1,4 @@
+//! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
@@ -34,7 +35,7 @@ use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 
-/// A basic http server using warp.
+/// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 /// Redirects to studio for GET requests.
 #[derive(Debug)]
@@ -99,15 +100,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         move |host: Host,
                               service: Extension<BufferedService>,
                               http_request: Request<Body>| {
-                            redirect_or_run_graphql_operation(
-                                host,
-                                service,
-                                http_request,
-                                display_landing_page,
-                            )
+                            handle_get(host, service, http_request, display_landing_page)
                         }
                     })
-                    .post(run_graphql_operation),
+                    .post(handle_post),
                 )
                 .route(
                     "/graphql",
@@ -116,19 +112,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         move |host: Host,
                               service: Extension<BufferedService>,
                               http_request: Request<Body>| {
-                            redirect_or_run_graphql_operation(
-                                host,
-                                service,
-                                http_request,
-                                display_landing_page,
-                            )
+                            handle_get(host, service, http_request, display_landing_page)
                         }
                     })
-                    .post(run_graphql_operation),
+                    .post(handle_post),
                 )
-                .route("/.well-known", get(health_check))
-                .route("/apollo", get(health_check))
-                .route("/server-health", get(health_check))
+                .route("/.well-known/apollo/server-health", get(health_check))
                 .layer(
                     TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
                         DefaultMakeSpan::new().level(Level::INFO),
@@ -407,7 +396,7 @@ async fn custom_plugin_handler(
     Ok::<_, String>(res)
 }
 
-async fn redirect_or_run_graphql_operation(
+async fn handle_get(
     Host(host): Host,
     Extension(service): Extension<BufferedService>,
     http_request: Request<Body>,
@@ -439,20 +428,19 @@ async fn redirect_or_run_graphql_operation(
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
-async fn run_graphql_operation(
+async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
     Json(request): Json<graphql::Request>,
     Extension(service): Extension<BufferedService>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
-    let mut http_request = Request::builder()
-        .uri(
-            Uri::from_str(&format!("http://{}{}", host, uri))
-                .expect("the URL is already valid because it comes from axum; qed"),
-        )
-        .body(request)
-        .expect("body has already been parsed; qed");
+    let mut http_request = Request::post(
+        Uri::from_str(&format!("http://{}{}", host, uri))
+            .expect("the URL is already valid because it comes from axum; qed"),
+    )
+    .body(request)
+    .expect("body has already been parsed; qed");
     *http_request.headers_mut() = header_map;
 
     run_graphql_request(service, http_request)
@@ -469,17 +457,6 @@ async fn health_check() -> impl IntoResponse {
     Json(json!({ "status": "pass" }))
 }
 
-// graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
-#[tracing::instrument(skip_all,
-    level = "info"
-    name = "graphql_request",
-    fields(
-        query = %http_request.uri().query().unwrap_or_else(|| http_request.body().query.as_deref().unwrap_or_default()),
-        operation_name = %get_operation_name(&http_request),
-        client_name,
-        client_version
-    )
-)]
 async fn run_graphql_request(
     service: Buffer<
         BoxService<
@@ -491,18 +468,6 @@ async fn run_graphql_request(
     >,
     http_request: Request<graphql::Request>,
 ) -> impl IntoResponse {
-    if let Some(client_name) = http_request.headers().get("apollographql-client-name") {
-        // Record the client name as part of the current span
-        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
-    }
-    if let Some(client_version) = http_request.headers().get("apollographql-client-version") {
-        // Record the client version as part of the current span
-        Span::current().record(
-            "client_version",
-            &client_version.to_str().unwrap_or_default(),
-        );
-    }
-
     match service.ready_oneshot().await {
         Ok(mut service) => {
             let (head, body) = http_request.into_parts();
@@ -531,21 +496,6 @@ async fn run_graphql_request(
                 .into_response()
         }
     }
-}
-
-fn get_operation_name(http_request: &Request<graphql::Request>) -> String {
-    http_request
-        .body()
-        .operation_name
-        .clone()
-        .or_else(|| {
-            http_request
-                .uri()
-                .query()
-                .and_then(|query| graphql::Request::from_urlencoded_query(query.to_string()).ok())
-                .and_then(|q| q.operation_name)
-        })
-        .unwrap_or_default()
 }
 
 fn prefers_html(accept_header: &HeaderValue) -> bool {
@@ -841,6 +791,112 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn it_extracts_query_and_operation_name_on_get_requests(
+    ) -> Result<(), FederatedServerError> {
+        let query = "query";
+        let expected_query = query;
+        let operation_name = "operationName";
+        let expected_operation_name = operation_name;
+
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(move |req| {
+                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
+                assert_eq!(
+                    req.body().operation_name.as_deref().unwrap(),
+                    expected_operation_name
+                );
+                true
+            })
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/graphql", server.listen_address());
+
+        let response = client
+            .get(url.as_str())
+            .query(&[("query", query), ("operationName", operation_name)])
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_extracts_query_and_operation_name_on_post_requests(
+    ) -> Result<(), FederatedServerError> {
+        let query = "query";
+        let expected_query = query;
+        let operation_name = "operationName";
+        let expected_operation_name = operation_name;
+
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(1)
+            .withf(move |req| {
+                assert_eq!(req.body().query.as_deref().unwrap(), expected_query);
+                assert_eq!(
+                    req.body().operation_name.as_deref().unwrap(),
+                    expected_operation_name
+                );
+                true
+            })
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/graphql", server.listen_address());
+
+        let response = client
+            .post(url.as_str())
+            .body(json!({ "query": query, "operationName": operation_name }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
     async fn response_failure() -> Result<(), FederatedServerError> {
         let mut expectations = MockRouterService::new();
         expectations
@@ -1036,5 +1092,18 @@ Content-Type: application/json\r
         let body = stream.buffer().to_vec();
         assert!(header_first_line.contains(" 200 "), "");
         body
+    }
+
+    #[test(tokio::test)]
+    async fn test_health_check() {
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!(
+            "{}/.well-known/apollo/server-health",
+            server.listen_address()
+        );
+
+        let response = client.get(url).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

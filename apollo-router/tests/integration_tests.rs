@@ -1,14 +1,13 @@
 use apollo_router_core::{
-    http_compat, prelude::*, Context, Object, PluggableRouterServiceBuilder, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+    RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
-use http::{Method, Uri};
+use http::Method;
 use maplit::hashmap;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use test_span::prelude::*;
 use tower::util::BoxCloneService;
@@ -18,7 +17,7 @@ use tower::ServiceExt;
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = graphql::Request::builder()
-            .query($query.to_string())
+            .query(Some($query.to_string()))
             .variables(Arc::new(
                 vec![
                     ("topProductsFirst".into(), 2.into()),
@@ -33,15 +32,12 @@ macro_rules! assert_federated_response {
 
         let expected = query_node(&request).await.unwrap();
 
-        let http_request = http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
+        let originating_request = http_compat::Request::fake_builder().method(Method::POST)
             .body(request)
+            .build()
             .unwrap();
 
-        let request = graphql::RouterRequest {
-            context: Context::new().with_request(http_request),
-        };
-
-        let (actual, registry) = query_rust(request).await;
+        let (actual, registry) = query_rust(originating_request.into()).await;
 
 
         tracing::debug!("query:\n{}\n", $query);
@@ -84,27 +80,24 @@ async fn basic_composition() {
 #[tokio::test]
 async fn api_schema_hides_field() {
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { name inStock } }"#)
+        .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
         .variables(Arc::new(
             vec![
-                ("topProductsFirst".into(), 2.into()),
-                ("reviewsForAuthorAuthorId".into(), 1.into()),
+                ("topProductsFirst".into(), 2i32.into()),
+                ("reviewsForAuthorAuthorId".into(), 1i32.into()),
             ]
             .into_iter()
             .collect(),
         ))
         .build();
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
-    };
-
-    let (actual, _) = query_rust(request).await;
+    let (actual, _) = query_rust(originating_request.into()).await;
 
     assert!(actual.errors[0]
         .message
@@ -166,7 +159,10 @@ async fn basic_mutation() {
 #[tokio::test]
 async fn queries_should_work_over_get() {
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
         .variables(Arc::new(
             vec![
                 ("topProductsFirst".into(), 2.into()),
@@ -183,13 +179,49 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
+
+    let (actual, registry) = query_rust(originating_request.into()).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
+async fn queries_should_work_over_post() {
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>2,
+        "reviews".to_string()=>1,
+        "accounts".to_string()=>1,
+    };
+
+    let http_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
+        originating_request: http_request,
+        context: graphql::Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
@@ -206,22 +238,18 @@ async fn service_errors_should_be_propagated() {
     };
 
     let request = graphql::Request::builder()
-        .query(r#"{ topProducts { name } }"#)
+        .query(Some(r#"{ topProducts { name } }"#.to_string()))
         .operation_name(Some("invalidOperationName".to_string()))
         .build();
 
     let expected_service_hits = hashmap! {};
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
-    };
-
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = query_rust(originating_request.into()).await;
 
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), expected_service_hits);
@@ -230,7 +258,7 @@ async fn service_errors_should_be_propagated() {
 #[tokio::test]
 async fn mutation_should_not_work_over_get() {
     let request = graphql::Request::builder()
-        .query(
+        .query(Some(
             r#"mutation {
                 createProduct(upc:"8", name:"Bob") {
                   upc
@@ -243,8 +271,9 @@ async fn mutation_should_not_work_over_get() {
                   id
                   body
                 }
-              }"#,
-        )
+              }"#
+            .to_string(),
+        ))
         .variables(Arc::new(
             vec![
                 ("topProductsFirst".into(), 2.into()),
@@ -258,18 +287,65 @@ async fn mutation_should_not_work_over_get() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .unwrap();
+
+    let (actual, registry) = query_rust(originating_request.into()).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test]
+async fn mutation_should_work_over_post() {
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"mutation {
+                createProduct(upc:"8", name:"Bob") {
+                  upc
+                  name
+                  reviews {
+                    body
+                  }
+                }
+                createReview(upc: "8", id:"100", body: "Bif"){
+                  id
+                  body
+                }
+              }"#
+            .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let expected_service_hits = hashmap! {
+        "products".to_string()=>1,
+        "reviews".to_string()=>2,
+    };
+
+    let http_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
     let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
+        originating_request: http_request,
+        context: graphql::Context::new(),
     };
 
     let (actual, registry) = query_rust(request).await;
 
-    assert_eq!(1, actual.errors.len());
+    assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
@@ -307,16 +383,12 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_only_request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_only_request)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
-    };
-
-    let actual = query_with_router(router.clone(), request).await;
+    let actual = query_with_router(router.clone(), originating_request.into()).await;
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -326,7 +398,7 @@ async fn automated_persisted_queries() {
 
     let apq_request_with_query = request_builder
         .clone()
-        .query("query Query { me { name } }")
+        .query(Some("query Query { me { name } }".to_string()))
         .build();
 
     // Services should have been queried once
@@ -334,16 +406,12 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_request_with_query)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_request_with_query)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
-    };
-
-    let actual = query_with_router(router.clone(), request).await;
+    let actual = query_with_router(router.clone(), originating_request.into()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -356,16 +424,12 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::GET, Uri::from_str("http://test").unwrap())
-            .body(apq_only_request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .body(apq_only_request)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: graphql::Context::new().with_request(http_request),
-    };
-
-    let actual = query_with_router(router, request).await;
+    let actual = query_with_router(router, originating_request.into()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -399,7 +463,7 @@ async fn variables() {
 #[tokio::test]
 async fn missing_variables() {
     let request = graphql::Request::builder()
-        .query(
+        .query(Some(
             r#"
             query ExampleQuery(
                 $missingVariable: Int!,
@@ -415,18 +479,16 @@ async fn missing_variables() {
             }
             "#
             .to_string(),
-        )
+        ))
         .build();
 
-    let http_request =
-        http_compat::RequestBuilder::new(Method::POST, Uri::from_str("http://test").unwrap())
-            .body(request)
-            .unwrap();
+    let originating_request = http_compat::Request::fake_builder()
+        .method(Method::POST)
+        .body(request)
+        .build()
+        .unwrap();
 
-    let request = graphql::RouterRequest {
-        context: Context::new().with_request(http_request),
-    };
-    let (response, _) = query_rust(request).await;
+    let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
         graphql::FetchError::ValidationInvalidTypeVariable {
             name: "yetAnotherMissingVariable".to_string(),

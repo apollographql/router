@@ -1,3 +1,5 @@
+//! Registry of subgraph services.
+
 use crate::{SubgraphRequest, SubgraphResponse};
 use std::collections::HashMap;
 use tower::buffer::Buffer;
@@ -5,6 +7,7 @@ use tower::util::{BoxCloneService, BoxService};
 use tower::BoxError;
 use tower::ServiceExt;
 
+/// Collection of subgraph services.
 pub struct ServiceRegistry {
     services: HashMap<
         String,

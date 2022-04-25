@@ -3,7 +3,7 @@
 // can add logic to modify the processing.
 fn subgraph_service_request(context) {
     // Find our cookies
-    let cookies = context.headers["Cookie"].split(';');
+    let cookies = context.headers["cookie"].split(';');
     for cookie in cookies {
         // Split our cookies into name and value
         let k_v = cookie.split('=', 2);

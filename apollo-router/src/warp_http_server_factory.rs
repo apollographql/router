@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, Cors, ListenAddr};
 use crate::http_server_factory::{HttpServerFactory, HttpServerHandle, Listener, NetworkStream};
 use crate::FederatedServerError;
-use apollo_router_core::http_compat::{self, Request, RequestBuilder, Response};
+use apollo_router_core::http_compat::{self, Request, Response};
 use apollo_router_core::ResponseBody;
 use apollo_router_core::{prelude::*, Handler};
 use bytes::Bytes;
@@ -330,8 +330,7 @@ async fn custom_plugin_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Box<dyn Reply>, Rejection> {
-    let mut req_builder = http_compat::RequestBuilder::new(
-        Method::GET,
+    let mut req_builder = http_compat::Request::builder().method(Method::GET).uri(
         Uri::from_str(&format!(
             "http://{}{}",
             authority.unwrap().as_str(),
@@ -340,12 +339,12 @@ async fn custom_plugin_handler(
         .expect("if the authority is some then the URL is valid; qed"),
     );
     for (header_name, header_value) in headers.iter() {
-        req_builder = req_builder.header(header_name.clone(), header_value.clone());
+        req_builder = req_builder.header((header_name.clone(), header_value.clone()));
     }
 
     let res = handler
-        .oneshot(req_builder.body(body).expect(
-            "we know the body is already well formatted because it's coming from warp; qed",
+        .oneshot(req_builder.body(body).build().expect(
+            "we know the body is already well formatted because it's coming from warp/axum; qed",
         ))
         .await
         .map_err(|err| {
@@ -493,17 +492,6 @@ where
         )
 }
 
-// graphql_request is traced at the info level so that it can be processed normally in apollo telemetry.
-#[tracing::instrument(skip_all,
-    level = "info"
-    name = "graphql_request",
-    fields(
-        query = %request.query.clone().unwrap_or_default(),
-        operation_name = %request.operation_name.clone().unwrap_or_else(|| "".to_string()),
-        client_name,
-        client_version
-    )
-)]
 fn run_graphql_request<RS>(
     service: RS,
     authority: Option<Authority>,
@@ -519,18 +507,6 @@ where
         + 'static,
     <RS as Service<Request<apollo_router_core::Request>>>::Future: std::marker::Send,
 {
-    if let Some(client_name) = header_map.get("apollographql-client-name") {
-        // Record the client name as part of the current span
-        Span::current().record("client_name", &client_name.to_str().unwrap_or_default());
-    }
-    if let Some(client_version) = header_map.get("apollographql-client-version") {
-        // Record the client version as part of the current span
-        Span::current().record(
-            "client_version",
-            &client_version.to_str().unwrap_or_default(),
-        );
-    }
-
     async move {
         match service.ready_oneshot().await {
             Ok(mut service) => {
@@ -542,7 +518,12 @@ where
                     None => Uri::from_str(&format!("http://router{}", path.as_str())).unwrap(),
                 };
 
-                let mut http_request = RequestBuilder::new(method, uri).body(request).unwrap();
+                let mut http_request = http_compat::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(request)
+                    .build()
+                    .expect("body is correct");
                 *http_request.headers_mut() = header_map;
 
                 let response = service
@@ -923,7 +904,7 @@ mod tests {
         expectations
             .expect_service_call()
             .times(1)
-            .withf(|req| req.url().path() == "/graphql")
+            .withf(|req| req.uri().path() == "/graphql")
             .returning(move |_| {
                 Ok(http::Response::builder()
                     .status(200)

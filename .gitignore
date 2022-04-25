@@ -22,9 +22,11 @@ crates/*/Cargo.lock
 # Docs
 /docs/node_modules/
 /docs/.cache/
+/docs/public
 
 # Dynamically retrieve proto file
 apollo-spaceport/proto/reports.proto
 #
 # Prevent accidental commits of router.yaml in the root
 /router.yaml
+/jaeger/
