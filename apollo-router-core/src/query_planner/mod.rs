@@ -11,12 +11,16 @@ use std::collections::HashSet;
 use tracing::Instrument;
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
-pub struct QueryPlanOptions {}
+pub struct QueryPlanOptions {
+    /// Enable the variable deduplication optimization on the QueryPlan
+    enable_variable_deduplication: bool,
+}
 
 /// A plan for a [`crate::Query`]
 #[derive(Debug)]
 pub struct QueryPlan {
     pub(crate) root: PlanNode,
+    options: QueryPlanOptions,
 }
 
 /// This default impl is useful for plugin::utils users
@@ -25,6 +29,7 @@ impl Default for QueryPlan {
     fn default() -> Self {
         Self {
             root: PlanNode::Sequence { nodes: Vec::new() },
+            options: QueryPlanOptions::default(),
         }
     }
 }
@@ -64,6 +69,20 @@ impl PlanNode {
 }
 
 impl QueryPlan {
+    /// Create a new QueryPlan
+    pub(crate) fn new(root: PlanNode) -> Self {
+        Self {
+            root,
+            options: QueryPlanOptions::default(),
+        }
+    }
+
+    /// Pass some options to the QueryPlan
+    pub fn with_options(mut self, options: QueryPlanOptions) -> Self {
+        self.options = options;
+        self
+    }
+
     /// Validate the entire request for variables and services used.
     #[tracing::instrument(skip_all, level = "debug", name = "validate")]
     pub fn validate(&self, service_registry: &ServiceRegistry) -> Result<(), Response> {
@@ -100,6 +119,7 @@ impl QueryPlan {
                 schema,
                 originating_request,
                 &Value::default(),
+                &self.options,
             )
             .await;
 
@@ -112,6 +132,7 @@ impl QueryPlan {
 }
 
 impl PlanNode {
+    #[allow(clippy::too_many_arguments)]
     fn execute_recursively<'a>(
         &'a self,
         current_dir: &'a Path,
@@ -120,6 +141,7 @@ impl PlanNode {
         schema: &'a Schema,
         originating_request: http_compat::Request<Request>,
         parent_value: &'a Value,
+        options: &'a QueryPlanOptions,
     ) -> future::BoxFuture<(Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
@@ -140,6 +162,7 @@ impl PlanNode {
                                 schema,
                                 originating_request.clone(),
                                 &value,
+                                options,
                             )
                             .instrument(span.clone())
                             .in_current_span()
@@ -163,6 +186,7 @@ impl PlanNode {
                                 schema,
                                 originating_request.clone(),
                                 parent_value,
+                                options,
                             )
                             .instrument(span.clone())
                         })
@@ -188,6 +212,7 @@ impl PlanNode {
                             schema,
                             originating_request,
                             parent_value,
+                            options,
                         )
                         .instrument(tracing::trace_span!("flatten"))
                         .await;
@@ -204,6 +229,7 @@ impl PlanNode {
                             service_registry,
                             originating_request,
                             schema,
+                            options,
                         )
                         .instrument(tracing::info_span!("fetch"))
                         .await
@@ -318,6 +344,7 @@ pub(crate) mod fetch {
             current_dir: &Path,
             request: http_compat::Request<crate::Request>,
             schema: &Schema,
+            enable_variable_deduplication: bool,
         ) -> Option<Variables> {
             let body = request.body();
             if !requires.is_empty() {
@@ -329,29 +356,48 @@ pub(crate) mod fetch {
                         .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                 }));
 
-                let mut values: IndexSet<Value> = IndexSet::new();
                 let mut paths: HashMap<Path, usize> = HashMap::new();
-                data.select_values_and_paths(current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            match values.get_index_of(&value) {
-                                Some(index) => {
-                                    paths.insert(path, index);
-                                }
-                                None => {
-                                    paths.insert(path, values.len());
-                                    values.insert(value);
+                let (paths, representations) = if enable_variable_deduplication {
+                    let mut values: Vec<Value> = Vec::new();
+                    data.select_values_and_paths(current_dir, |path, value| {
+                        if let Value::Object(content) = value {
+                            if let Ok(Some(value)) = select_object(content, requires, schema) {
+                                paths.insert(path, values.len());
+                                values.push(value);
+                            }
+                        }
+                    });
+
+                    if values.is_empty() {
+                        return None;
+                    }
+
+                    (paths, Value::Array(Vec::from_iter(values)))
+                } else {
+                    let mut values: IndexSet<Value> = IndexSet::new();
+                    data.select_values_and_paths(current_dir, |path, value| {
+                        if let Value::Object(content) = value {
+                            if let Ok(Some(value)) = select_object(content, requires, schema) {
+                                match values.get_index_of(&value) {
+                                    Some(index) => {
+                                        paths.insert(path, index);
+                                    }
+                                    None => {
+                                        paths.insert(path, values.len());
+                                        values.insert(value);
+                                    }
                                 }
                             }
                         }
+                    });
+
+                    if values.is_empty() {
+                        return None;
                     }
-                });
 
-                if values.is_empty() {
-                    return None;
-                }
-
-                variables.insert("representations", Value::Array(Vec::from_iter(values)));
+                    (paths, Value::Array(Vec::from_iter(values)))
+                };
+                variables.insert("representations", representations);
 
                 Some(Variables { variables, paths })
             } else {
@@ -371,6 +417,7 @@ pub(crate) mod fetch {
     }
 
     impl FetchNode {
+        #[allow(clippy::too_many_arguments)]
         pub(crate) async fn fetch_node<'a>(
             &'a self,
             data: &'a Value,
@@ -379,6 +426,7 @@ pub(crate) mod fetch {
             service_registry: &'a ServiceRegistry,
             originating_request: http_compat::Request<Request>,
             schema: &'a Schema,
+            options: &QueryPlanOptions,
         ) -> Result<(Value, Vec<Error>), FetchError> {
             let FetchNode {
                 operation,
@@ -396,6 +444,7 @@ pub(crate) mod fetch {
                 // Needs the original request here
                 originating_request.clone(),
                 schema,
+                options.enable_variable_deduplication,
             )
             .await
             {
@@ -612,9 +661,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_includes_operation_name() {
-        let query_plan: QueryPlan = QueryPlan {
-            root: serde_json::from_str(test_query_plan!()).unwrap(),
-        };
+        let query_plan: QueryPlan =
+            QueryPlan::new(serde_json::from_str(test_query_plan!()).unwrap());
 
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
@@ -648,9 +696,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_makes_post_requests() {
-        let query_plan: QueryPlan = QueryPlan {
-            root: serde_json::from_str(test_query_plan!()).unwrap(),
-        };
+        let query_plan: QueryPlan =
+            QueryPlan::new(serde_json::from_str(test_query_plan!()).unwrap());
 
         let succeeded: Arc<AtomicBool> = Default::default();
         let inner_succeeded = Arc::clone(&succeeded);
