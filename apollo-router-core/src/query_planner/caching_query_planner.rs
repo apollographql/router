@@ -15,6 +15,7 @@ type PlanResult = Result<Arc<QueryPlan>, QueryPlannerError>;
 pub struct CachingQueryPlanner<T: QueryPlanner> {
     cm: Arc<CachingMap<QueryKey, Arc<QueryPlan>>>,
     phantom: PhantomData<T>,
+    options: QueryPlanOptions,
 }
 
 /// A resolver for cache misses
@@ -30,7 +31,14 @@ impl<T: QueryPlanner + 'static> CachingQueryPlanner<T> {
         Self {
             cm,
             phantom: PhantomData,
+            options: QueryPlanOptions::default(),
         }
+    }
+
+    /// Change options of the QueryPlan
+    pub fn with_options(mut self, options: QueryPlanOptions) -> CachingQueryPlanner<T> {
+        self.options = options;
+        self
     }
 
     pub async fn get_hot_keys(&self) -> Vec<QueryKey> {
@@ -86,7 +94,7 @@ where
                 .clone()
                 .expect("presence of a query has been checked by the RouterService before; qed"),
             body.operation_name.to_owned(),
-            QueryPlanOptions::default(),
+            self.options.clone(),
         );
         let cm = self.cm.clone();
         Box::pin(async move {

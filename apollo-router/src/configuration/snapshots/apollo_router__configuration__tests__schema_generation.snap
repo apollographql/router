@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 567
+assertion_line: 573
 expression: "&schema"
 ---
 {
@@ -325,7 +325,8 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "cors": null,
         "introspection": true,
-        "landing_page": true
+        "landing_page": true,
+        "experimental": null
       },
       "type": "object",
       "properties": {
@@ -384,6 +385,20 @@ expression: "&schema"
               "items": {
                 "type": "string"
               }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "experimental": {
+          "description": "Experimental configuration",
+          "default": null,
+          "type": "object",
+          "properties": {
+            "enable_variable_deduplication": {
+              "description": "Enable variable deduplication optimization (https://github.com/apollographql/router/issues/87)",
+              "default": false,
+              "type": "boolean"
             }
           },
           "additionalProperties": false,

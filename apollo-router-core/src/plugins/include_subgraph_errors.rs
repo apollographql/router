@@ -70,8 +70,8 @@ mod test {
     use super::*;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        DynPlugin, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-        RouterResponse, Schema,
+        DynPlugin, Object, PluggableRouterServiceBuilder, QueryPlanOptions, ResponseBody,
+        RouterRequest, RouterResponse, Schema,
     };
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
@@ -132,6 +132,59 @@ mod test {
 
         let account_mocks = vec![
             (
+                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"},{"name":"Ada Lovelace"}]}}"#
+            )
+        ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+        let account_service = MockSubgraph::new(account_mocks);
+
+        let review_mocks = vec![
+            (
+                r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
+            )
+            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+        let review_service = MockSubgraph::new(review_mocks);
+
+        let product_mocks = vec![
+            (
+                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
+                r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
+            ),
+            (
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
+            )
+            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+
+        let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
+
+        let schema: Arc<Schema> = Arc::new(
+            include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql")
+                .parse()
+                .unwrap(),
+        );
+
+        let builder = PluggableRouterServiceBuilder::new(schema.clone());
+        let builder = builder
+            .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
+            .with_subgraph_service("accounts", account_service.clone())
+            .with_subgraph_service("reviews", review_service.clone())
+            .with_subgraph_service("products", product_service.clone());
+
+        let (router, _) = builder.build().await.expect("should build");
+
+        router
+    }
+
+    async fn build_mock_router_with_variable_dedup_optimization(
+        plugin: Box<dyn DynPlugin>,
+    ) -> BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+        let mut extensions = Object::new();
+        extensions.insert("test", Value::String(ByteString::from("value")));
+
+        let account_mocks = vec![
+            (
                 r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
             )
@@ -171,7 +224,10 @@ mod test {
             .with_dyn_plugin("experimental.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
-            .with_subgraph_service("products", product_service.clone());
+            .with_subgraph_service("products", product_service.clone())
+            .with_query_plan_options(QueryPlanOptions {
+                enable_variable_deduplication: true,
+            });
 
         let (router, _) = builder.build().await.expect("should build");
 
@@ -194,6 +250,9 @@ mod test {
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
+        let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -202,6 +261,15 @@ mod test {
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
+        let router_with_opti = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &*REDACTED_PRODUCT_RESPONSE,
+            router_with_opti,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -210,6 +278,15 @@ mod test {
         let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+
+        let plugin = get_redacting_plugin(&serde_json::json!({})).await;
+        let router_with_opti = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &*REDACTED_PRODUCT_RESPONSE,
+            router_with_opti,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -217,6 +294,9 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
+        let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
@@ -227,6 +307,10 @@ mod test {
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
+        let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -236,6 +320,15 @@ mod test {
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        let plugin =
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
+        let router_with_opti = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &*REDACTED_PRODUCT_RESPONSE,
+            router_with_opti,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -246,6 +339,12 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        let plugin = get_redacting_plugin(
+            &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
+        )
+        .await;
+        let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
@@ -258,6 +357,17 @@ mod test {
         .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        let plugin = get_redacting_plugin(
+            &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
+        )
+        .await;
+        let router_with_opti = build_mock_router_with_variable_dedup_optimization(plugin).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &*REDACTED_PRODUCT_RESPONSE,
+            router_with_opti,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -279,6 +389,12 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
+        let plugin = get_redacting_plugin(
+            &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
+        )
+        .await;
+        let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
     }
 }

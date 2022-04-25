@@ -13,7 +13,7 @@ use tracing::Instrument;
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
-    enable_variable_deduplication: bool,
+    pub enable_variable_deduplication: bool,
 }
 
 /// A plan for a [`crate::Query`]
@@ -358,22 +358,6 @@ pub(crate) mod fetch {
 
                 let mut paths: HashMap<Path, usize> = HashMap::new();
                 let (paths, representations) = if enable_variable_deduplication {
-                    let mut values: Vec<Value> = Vec::new();
-                    data.select_values_and_paths(current_dir, |path, value| {
-                        if let Value::Object(content) = value {
-                            if let Ok(Some(value)) = select_object(content, requires, schema) {
-                                paths.insert(path, values.len());
-                                values.push(value);
-                            }
-                        }
-                    });
-
-                    if values.is_empty() {
-                        return None;
-                    }
-
-                    (paths, Value::Array(Vec::from_iter(values)))
-                } else {
                     let mut values: IndexSet<Value> = IndexSet::new();
                     data.select_values_and_paths(current_dir, |path, value| {
                         if let Value::Object(content) = value {
@@ -387,6 +371,22 @@ pub(crate) mod fetch {
                                         values.insert(value);
                                     }
                                 }
+                            }
+                        }
+                    });
+
+                    if values.is_empty() {
+                        return None;
+                    }
+
+                    (paths, Value::Array(Vec::from_iter(values)))
+                } else {
+                    let mut values: Vec<Value> = Vec::new();
+                    data.select_values_and_paths(current_dir, |path, value| {
+                        if let Value::Object(content) = value {
+                            if let Ok(Some(value)) = select_object(content, requires, schema) {
+                                paths.insert(path, values.len());
+                                values.push(value);
                             }
                         }
                     });
