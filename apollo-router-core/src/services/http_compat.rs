@@ -10,12 +10,16 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Temporary holder of header name while for use while building requests and responses. Required
+/// because header name creation is faillable.
 #[derive(From, Eq, Hash, PartialEq)]
 pub enum IntoHeaderName {
     String(String),
     HeaderName(HeaderName),
 }
 
+/// Temporary holder of header value while for use while building requests and responses. Required
+/// because header value creation is faillable.
 #[derive(From, Eq, Hash, PartialEq)]
 pub enum IntoHeaderValue {
     String(String),
