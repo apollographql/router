@@ -53,6 +53,15 @@ In addition, the `activate` lifecycle hook is now not marked as deprecated, and 
 
 ## 🚀 Features
 
+### Add an experimental optimization to deduplicate variables in query planner [PR #872](https://github.com/apollographql/router/pull/872)
+Get rid of duplicated variables in requests and responses of the query planner. This optimization is disabled by default, if you want to enable it you just need override your configuration:
+
+```yaml title="router.yaml"
+server:
+  experimental:
+    enable_variable_deduplication: true
+```
+
 ###  Configurable client identification headers [PR #850](https://github.com/apollographql/router/pull/850)
 The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Those headers can now be overriden in the configuration:
 ```yaml title="router.yaml"
