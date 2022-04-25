@@ -116,7 +116,6 @@ assert_impl_all!(RouterRequest: Send);
 /// Represents the router processing step of the processing pipeline.
 ///
 /// This consists of the parsed graphql Request, HTTP headers and contextual data for extensions.
-#[derive(Clone)]
 pub struct RouterRequest {
     /// Original request to the Router.
     pub originating_request: http_compat::Request<Request>,

@@ -67,6 +67,7 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.10.0"
+paste = "1.0.7"
 prometheus = "0.13"
 prost-types = "0.9.0"
 regex = "1.5.4"

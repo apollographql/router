@@ -132,6 +132,7 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
+ "paste",
  "prometheus",
  "prost-types",
  "regex",
