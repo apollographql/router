@@ -91,7 +91,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
-axum = { version = "0.5.3", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.124"
 yaml-rust = "0.4.5"
