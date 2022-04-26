@@ -17,7 +17,6 @@ executors:
   rust_macos: &rust_macos_executor
     macos:
       xcode: 11.4
-    resource_class: macos.x86.medium.gen2
   rust_windows: &rust_windows_executor
     machine:
       image: "windows-server-2019-vs2019:stable"

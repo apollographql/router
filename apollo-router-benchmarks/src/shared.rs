@@ -7,7 +7,6 @@ use apollo_router_core::{
 };
 use once_cell::sync::Lazy;
 use serde_json::json;
-use serde_json_bytes::{ByteString, Value};
 use std::sync::Arc;
 use tower::{util::BoxCloneService, BoxError, Service, ServiceExt};
 
@@ -22,12 +21,8 @@ pub async fn basic_composition_benchmark(
 ) {
     let request = RouterRequest::fake_builder()
         .query(QUERY.to_string())
-        .variables(Arc::new(
-            vec![(ByteString::from("first"), Value::Number(2usize.into()))]
-                .into_iter()
-                .collect(),
-        ))
-        .build();
+        .variable("first", 2usize)
+        .build().expect("expecting valid request");
 
     let response = router_service
         .ready()
