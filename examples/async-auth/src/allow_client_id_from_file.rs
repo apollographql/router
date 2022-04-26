@@ -4,6 +4,7 @@ use apollo_router_core::{
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use std::{ops::ControlFlow, path::PathBuf};
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
@@ -63,16 +64,15 @@ impl Plugin for AllowClientIdFromFile {
                 // We are going to check the headers for the presence of the header we're looking for
                 if !req.originating_request.headers().contains_key(&header_key) {
                     // Prepare an HTTP 401 response with a GraphQL error message
-                    let res = RouterResponse::builder()
-                        .data(Default::default())
-                        .errors(vec![apollo_router_core::Error {
+                    let res = RouterResponse::error_builder()
+                        .error(apollo_router_core::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
-                        }])
-                        .extensions(Default::default())
+                        })
                         .status_code(StatusCode::UNAUTHORIZED)
                         .context(req.context)
-                        .build();
+                        .build()
+                        .expect("response is valid");
                     return Box::pin(async { Ok(ControlFlow::Break(res)) });
                 }
 
@@ -90,16 +90,15 @@ impl Plugin for AllowClientIdFromFile {
                     Ok(client_id) => client_id.to_string(),
                     Err(_not_a_string_error) => {
                         // Prepare an HTTP 400 response with a GraphQL error message
-                        let res = RouterResponse::builder()
-                            .data(Default::default())
-                            .errors(vec![apollo_router_core::Error {
+                        let res = RouterResponse::error_builder()
+                            .error(apollo_router_core::Error {
                                 message: format!("'{header_key}' value is not a string"),
                                 ..Default::default()
-                            }])
-                            .extensions(Default::default())
+                            })
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build();
+                            .build()
+                            .expect("response is valid");
                         return Box::pin(async { Ok(ControlFlow::Break(res)) });
                     }
                 };
@@ -127,15 +126,15 @@ impl Plugin for AllowClientIdFromFile {
                     } else {
                         // Prepare an HTTP 403 response with a GraphQL error message
                         let res = RouterResponse::builder()
-                            .data(Default::default())
-                            .errors(vec![apollo_router_core::Error {
+                            .data(Value::default())
+                            .error(apollo_router_core::Error {
                                 message: "client-id is not allowed".to_string(),
                                 ..Default::default()
-                            }])
-                            .extensions(Default::default())
+                            })
                             .status_code(StatusCode::FORBIDDEN)
                             .context(req.context)
-                            .build();
+                            .build()
+                            .expect("response is valid");
                         Ok(ControlFlow::Break(res))
                     }
                 })
@@ -174,7 +173,7 @@ mod tests {
 
     use super::AllowClientIdFromFile;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use http::{header::HeaderName, HeaderValue, StatusCode};
+    use http::StatusCode;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -210,7 +209,9 @@ mod tests {
         .router_service(mock_service.boxed());
 
         // Let's create a request without a client id...
-        let request_without_client_id = RouterRequest::fake_builder().build();
+        let request_without_client_id = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -250,11 +251,9 @@ mod tests {
 
         // Let's create a request with a not allowed client id...
         let request_with_unauthorized_client_id = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("x-client-id"),
-                HeaderValue::from_static("invalid_client_id"),
-            )])
-            .build();
+            .header("x-client-id", "invalid_client_id")
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -301,9 +300,9 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
-                    .build())
+                RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
             });
 
         // The mock has been set up, we can now build a service from it
@@ -320,11 +319,9 @@ mod tests {
 
         // Let's create a request with an valid client id...
         let request_with_valid_client_id = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("x-client-id"),
-                HeaderValue::from_static(valid_client_id),
-            )])
-            .build();
+            .header("x-client-id", valid_client_id)
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack

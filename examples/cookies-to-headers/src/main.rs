@@ -67,7 +67,7 @@ mod tests {
                     "strawberry"
                 );
                 Ok(SubgraphResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
+                    .data(expected_mock_response_data)
                     .build())
             });
 

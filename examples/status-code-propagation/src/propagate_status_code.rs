@@ -210,7 +210,7 @@ mod tests {
                     .insert(&"status_code".to_string(), json!(500))
                     .expect("couldn't insert status_code");
 
-                Ok(RouterResponse::fake_builder().context(context).build())
+                RouterResponse::fake_builder().context(context).build()
             });
 
         let mock_service = mock_service.build();
@@ -223,7 +223,9 @@ mod tests {
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 
-        let router_request = RouterRequest::fake_builder().build();
+        let router_request = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         let service_response = service_stack.oneshot(router_request).await.unwrap();
 
@@ -243,7 +245,7 @@ mod tests {
             .returning(move |router_request: RouterRequest| {
                 let context = router_request.context;
                 // Don't insert any StatusCode
-                Ok(RouterResponse::fake_builder().context(context).build())
+                RouterResponse::fake_builder().context(context).build()
             });
 
         let mock_service = mock_service.build();
@@ -256,7 +258,9 @@ mod tests {
         .expect("couldn't create plugin")
         .router_service(mock_service.boxed());
 
-        let router_request = RouterRequest::fake_builder().build();
+        let router_request = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         let service_response = service_stack.oneshot(router_request).await.unwrap();
 
