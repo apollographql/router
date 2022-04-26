@@ -2,7 +2,6 @@
 //!
 //! To improve their usability.
 
-use derive_more::From;
 use multimap::MultiMap;
 use std::{
     cmp::PartialEq,
@@ -12,7 +11,7 @@ use std::{
 
 /// Temporary holder of header name while for use while building requests and responses. Required
 /// because header name creation is faillable.
-#[derive(From, Eq, Hash, PartialEq)]
+#[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderName {
     String(String),
     HeaderName(HeaderName),
@@ -20,33 +19,26 @@ pub enum IntoHeaderName {
 
 /// Temporary holder of header value while for use while building requests and responses. Required
 /// because header value creation is faillable.
-#[derive(From, Eq, Hash, PartialEq)]
+#[derive(Eq, Hash, PartialEq)]
 pub enum IntoHeaderValue {
     String(String),
     HeaderValue(HeaderValue),
 }
-
-impl From<&str> for IntoHeaderName {
-    fn from(name: &str) -> Self {
+impl<T> From<T> for IntoHeaderName
+where
+    T: std::fmt::Display,
+{
+    fn from(name: T) -> Self {
         IntoHeaderName::String(name.to_string())
     }
 }
 
-impl From<&str> for IntoHeaderValue {
-    fn from(value: &str) -> Self {
-        IntoHeaderValue::String(value.to_string())
-    }
-}
-
-impl From<&String> for IntoHeaderName {
-    fn from(name: &String) -> Self {
-        IntoHeaderName::String(name.to_owned())
-    }
-}
-
-impl From<&String> for IntoHeaderValue {
-    fn from(value: &String) -> Self {
-        IntoHeaderValue::String(value.to_owned())
+impl<T> From<T> for IntoHeaderValue
+where
+    T: std::fmt::Display,
+{
+    fn from(name: T) -> Self {
+        IntoHeaderValue::String(name.to_string())
     }
 }
 
