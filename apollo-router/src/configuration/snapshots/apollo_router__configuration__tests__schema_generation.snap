@@ -430,6 +430,16 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "client_name_header": {
+              "default": "apollographql-client-name",
+              "type": "string",
+              "nullable": true
+            },
+            "client_version_header": {
+              "default": "apollographql-client-version",
+              "type": "string",
+              "nullable": true
+            },
             "endpoint": {
               "type": "string",
               "format": "uri",
@@ -691,6 +701,9 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "scheduled_delay": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
@@ -721,11 +734,20 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "scheduled_delay": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": false
                 }
               ],
+              "properties": {
+                "scheduled_delay": {
+                  "default": null,
+                  "type": "string"
+                }
+              },
               "nullable": true
             },
             "otlp": {

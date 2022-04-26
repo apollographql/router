@@ -1,3 +1,4 @@
+//! A cache for queries.
 use crate::prelude::graphql::*;
 use crate::CacheResolver;
 use std::sync::Arc;
@@ -40,8 +41,7 @@ impl QueryCache {
     }
 
     /// Attempt to parse a string to a [`Query`] using cache if possible.
-    #[tracing::instrument(skip_all, level = "info" name = "get_query")]
-    pub async fn get_query(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
+    pub async fn get(&self, query: impl AsRef<str>) -> Option<Arc<Query>> {
         let key = query.as_ref().to_string();
 
         match self.cm.get(key).await {

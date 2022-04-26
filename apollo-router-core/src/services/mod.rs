@@ -9,10 +9,14 @@ use crate::prelude::graphql::*;
 use futures::future::BoxFuture;
 use http::{header::HeaderName, HeaderValue, StatusCode};
 use http::{method::Method, Uri};
+use http_compat::IntoHeaderName;
+use http_compat::IntoHeaderValue;
 use moka::sync::Cache;
+use multimap::MultiMap;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ops::ControlFlow;
 use std::str::FromStr;
@@ -22,12 +26,14 @@ use tower::buffer::BufferLayer;
 use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
+use tracing::Span;
 
 pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
 mod router_service;
 mod tower_subgraph_service;
+use crate::instrument::InstrumentLayer;
 pub use tower_subgraph_service::TowerSubgraphService;
 
 pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -142,23 +148,28 @@ impl RouterRequest {
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Arc<Object>,
-        extensions: Vec<(&'static str, Value)>,
+        variables: HashMap<String, Value>,
+        extensions: HashMap<String, Value>,
         context: Context,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Uri,
         method: Method,
-    ) -> RouterRequest {
-        let object: Object = extensions
+    ) -> Result<RouterRequest, BoxError> {
+        let extensions: Object = extensions
             .into_iter()
-            .map(|(name, value)| (ByteString::from(name.to_string()), value))
+            .map(|(name, value)| (ByteString::from(name), value))
+            .collect();
+
+        let variables: Object = variables
+            .into_iter()
+            .map(|(name, value)| (ByteString::from(name), value))
             .collect();
 
         let gql_request = Request::builder()
             .query(query)
             .operation_name(operation_name)
             .variables(variables)
-            .extensions(object)
+            .extensions(extensions)
             .build();
 
         let originating_request = http_compat::Request::builder()
@@ -166,32 +177,33 @@ impl RouterRequest {
             .uri(uri)
             .method(method)
             .body(gql_request)
-            .build()
-            .expect("body is always valid qed");
+            .build()?;
 
-        Self {
+        Ok(Self {
             originating_request,
             context,
-        }
+        })
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" RouterRequest.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterRequest. It's usually enough for testing, when a fully consructed RouterRequest is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// RouterRequest. It's usually enough for testing, when a fully constructed RouterRequest is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake requests are expected to be valid, and will panic if given invalid values.
     pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Arc<Object>>,
-        extensions: Vec<(&'static str, Value)>,
+        variables: HashMap<String, Value>,
+        extensions: HashMap<String, Value>,
         context: Option<Context>,
-        headers: Vec<(HeaderName, HeaderValue)>,
-    ) -> RouterRequest {
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+    ) -> Result<RouterRequest, BoxError> {
         RouterRequest::new(
             query,
             operation_name,
-            variables.unwrap_or_else(|| Arc::new(vec![].into_iter().collect())),
+            variables,
             extensions,
             context.unwrap_or_default(),
             headers,
@@ -218,18 +230,20 @@ impl RouterResponse {
     /// Required parameters are required in non-testing code to create a RouterResponse..
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        label: Option<String>,
         data: Value,
         path: Option<Path>,
         errors: Vec<crate::Error>,
-        extensions: Object,
+        extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
-    ) -> RouterResponse {
+    ) -> Result<RouterResponse, BoxError> {
+        let extensions: Object = extensions
+            .into_iter()
+            .map(|(name, value)| (ByteString::from(name), value))
+            .collect();
         // Build a response
         let res = Response::builder()
-            .label(label)
             .data(data)
             .path(path)
             .errors(errors)
@@ -237,52 +251,74 @@ impl RouterResponse {
             .build();
 
         // Build an http Response
-        let mut http_response_builder =
-            http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
-        for (k, v) in headers {
-            http_response_builder = http_response_builder.header(k, v);
+        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
         }
 
-        let http_response = http_response_builder
-            .body(ResponseBody::GraphQL(res))
-            .expect("ResponseBody is serializable; qed");
+        let http_response = builder.body(ResponseBody::GraphQL(res))?;
 
         // Create a compatible Response
         let compat_response = http_compat::Response {
             inner: http_response,
         };
 
-        Self {
+        Ok(Self {
             response: compat_response,
             context,
-        }
+        })
     }
 
     /// This is the constructor (or builder) to use when constructing a "fake" RouterResponse.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// RouterResponse. It's usually enough for testing, when a fully consructed RouterResponse is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// RouterResponse. It's usually enough for testing, when a fully constructed RouterResponse is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
     pub fn fake_new(
-        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<crate::Error>,
-        extensions: Option<Object>,
+        extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
-        headers: Vec<(HeaderName, HeaderValue)>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
-    ) -> RouterResponse {
+    ) -> Result<RouterResponse, BoxError> {
         RouterResponse::new(
-            label,
             data.unwrap_or_default(),
             path,
             errors,
-            extensions.unwrap_or_default(),
+            extensions,
             status_code,
             headers,
             context.unwrap_or_default(),
+        )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
+    /// It has no path and no response data.
+    /// This is useful for things such as authentication errors.
+    #[allow(clippy::too_many_arguments)]
+    pub fn error_new(
+        errors: Vec<crate::Error>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        context: Context,
+    ) -> Result<RouterResponse, BoxError> {
+        RouterResponse::new(
+            Default::default(),
+            None,
+            errors,
+            Default::default(),
+            status_code,
+            headers,
+            context,
         )
     }
 
@@ -686,6 +722,15 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
     fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
+    fn instrument<F, Request>(
+        self,
+        span_fn: F,
+    ) -> ServiceBuilder<Stack<InstrumentLayer<F, Request>, L>>
+    where
+        F: Fn(&Request) -> Span,
+    {
+        self.layer(InstrumentLayer::new(span_fn))
+    }
     fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>>;
 }
 
@@ -697,5 +742,107 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
 
     fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
         self.buffer(DEFAULT_BUFFER_SIZE)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::graphql;
+    use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
+    use http::{HeaderValue, Method, Uri};
+    use serde_json::json;
+
+    #[test]
+    fn router_request_builder() {
+        let request = RouterRequest::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .uri(Uri::from_static("http://example.com"))
+            .method(Method::POST)
+            .query("query { topProducts }")
+            .operation_name("Default")
+            .context(Context::new())
+            // We need to follow up on this. How can users creat this easily?
+            .extension("foo", json!({}))
+            // We need to follow up on this. How can users creat this easily?
+            .variable("bar", json!({}))
+            .build()
+            .unwrap();
+        assert_eq!(
+            request
+                .originating_request
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        assert_eq!(
+            request.originating_request.uri(),
+            &Uri::from_static("http://example.com")
+        );
+        assert_eq!(
+            request.originating_request.body().extensions.get("foo"),
+            Some(&json!({}).into())
+        );
+        assert_eq!(
+            request.originating_request.body().variables.get("bar"),
+            Some(&json!({}).into())
+        );
+        assert_eq!(request.originating_request.method(), Method::POST);
+
+        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let variables = serde_json_bytes::Value::from(json!({"bar":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            request.originating_request.body(),
+            &graphql::Request::builder()
+                .variables(variables)
+                .extensions(extensions)
+                .operation_name(Some("Default".to_string()))
+                .query(Some("query { topProducts }".to_string()))
+                .build()
+        );
+    }
+
+    #[test]
+    fn router_response_builder() {
+        let response = RouterResponse::builder()
+            .header("a", "b")
+            .header("a", "c")
+            .context(Context::new())
+            .extension("foo", json!({}))
+            .data(json!({}))
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            response
+                .response
+                .headers()
+                .get_all("a")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
+        );
+        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            response.response.body(),
+            &ResponseBody::GraphQL(
+                graphql::Response::builder()
+                    .extensions(extensions)
+                    .data(json!({}))
+                    .build()
+            )
+        );
     }
 }

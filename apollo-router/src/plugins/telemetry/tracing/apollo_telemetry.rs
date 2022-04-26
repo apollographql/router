@@ -26,6 +26,7 @@
 //!     shutdown_tracer_provider(); // sending remaining spans
 //! }
 //! ```
+use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use apollo_spaceport::report::{ContextualizedStats, QueryLatencyStats, StatsContext};
 use apollo_spaceport::{Reporter, ReporterGraph};
 use async_trait::async_trait;
@@ -352,7 +353,7 @@ impl SpanExporter for Exporter {
         /*
          * Process the batch
          */
-        for span in batch.iter().filter(|span| span.name == "graphql_request") {
+        for span in batch.iter().filter(|span| span.name == ROUTER_SPAN_NAME) {
             // We can't process a span if we don't have a query
             if let Some(query) = span
                 .attributes

@@ -111,6 +111,7 @@ dependencies = [
  "indexmap",
  "insta",
  "itertools",
+ "jsonpath_lib",
  "jsonschema",
  "libc",
  "maplit",
@@ -153,7 +154,7 @@ dependencies = [
  "tracing-subscriber",
  "typed-builder 0.10.0",
  "url",
- "uuid",
+ "uuid 1.0.0",
  "walkdir",
  "warp",
  "yaml-rust",
@@ -204,6 +205,7 @@ dependencies = [
  "miette",
  "mockall",
  "moka",
+ "multimap",
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
@@ -610,9 +612,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.5"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25c66de18be9a43a61276a8eea5f608b9e644daae3f41e062e1eb63162c2aaad"
+checksum = "37e6f88bd8b7701288c5a10d46e76a1b93dd2953f5972c260f7bfa5f58f6382b"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -2290,6 +2292,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonpath_lib"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa63191d68230cccb81c5aa23abd53ed64d83337cacbb25a7b8c7979523774f"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "jsonschema"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2313,7 +2326,7 @@ dependencies = [
  "serde_json",
  "time",
  "url",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2724,7 +2737,7 @@ dependencies = [
  "tagptr",
  "thiserror",
  "triomphe",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2732,6 +2745,9 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "native-tls"
@@ -3822,7 +3838,7 @@ dependencies = [
  "tower",
  "tower-service",
  "tracing",
- "uuid",
+ "uuid 0.8.2",
  "which",
 ]
 
@@ -5245,6 +5261,16 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom",
+ "serde",
+]
+
+[[package]]
+name = "uuid"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfcd319456c4d6ea10087ed423473267e1a071f3bc0aa89f80d60997843c6f0"
 dependencies = [
  "getrandom",
  "serde",

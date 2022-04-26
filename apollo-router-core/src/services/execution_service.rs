@@ -38,7 +38,6 @@ impl Service<ExecutionRequest> for ExecutionService {
         Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument(skip_all, level = "info", name = "execute")]
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
