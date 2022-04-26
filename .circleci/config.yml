@@ -17,6 +17,7 @@ executors:
   rust_macos: &rust_macos_executor
     macos:
       xcode: 11.4
+    resource_class: macos.x86.medium.gen2
   rust_windows: &rust_windows_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
@@ -208,13 +209,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - restore_cache:
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
       - run: cargo xtask lint
 
   xtask_check_compliance:
@@ -225,29 +221,13 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - restore_cache:
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}
-      - run:
-          name: Install cargo sweep
-          command: |
-            set -e -o pipefail
-            cargo sweep --version || cargo install cargo-sweep
-      - run: cargo sweep -s
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
-      - run: cargo sweep -f
-      - save_cache:
-          key: rust-target-<< pipeline.parameters.cache_version >>-xtask-build-<< parameters.os >>-{{ checksum "xtask/Cargo.toml" }}-{{ checksum "Cargo.lock" }}
-          paths:
-            - target/
 
   build_common_permutations:
     steps:
@@ -270,116 +250,43 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - run:
-          name: Install cargo sweep
-          command: |
-            set -e -o pipefail
-            cargo sweep --version || cargo install cargo-sweep
-
+      - build_all_permutations
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
             - ~/.cargo
 
-      - run: cargo sweep -s
-      - restore_cache:
-          name: Restore target/
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-
-      - build_all_permutations
-      - run: cargo sweep -f
-      
-      - save_cache:
-          name: Save target/
-          key: rust-target-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-          paths:
-            - target/
   windows_build_workspace:
     steps:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-build-windows
-      - run:
-          name: Install cargo sweep
-          command: |
-            cargo sweep --version
-            if(-Not ($?))
-            {
-              cargo install cargo-sweep
-            }
-            exit $LASTEXITCODE
-
+      - build_common_permutations
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
-
-      - run: cargo sweep -s
-      - restore_cache:
-          name: Restore target/
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-build-windows
-
-      - build_common_permutations
-      - run: cargo sweep -f
-      - save_cache:
-          name: Save target/
-          key: rust-target-<< pipeline.parameters.cache_version >>-build-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-          paths:
-            - target/
 
   windows_test_workspace:
     steps:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run:
-          name: Install cargo sweep
-          command: |
-            cargo sweep --version
-            if(-Not ($?))
-            {
-              cargo install cargo-sweep
-            }
-            exit $LASTEXITCODE
-
+      - run: cargo xtask test --with-demo
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
           paths:
             - C:\\Users\\circleci\.cargo
 
-      - run: cargo sweep -s
-      - restore_cache:
-          name: Restore target/
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-            - rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-test-windows
-
-      - run: cargo xtask test --with-demo
-      - run: cargo sweep -f
-      - save_cache:
-          name: Save target/
-          key: rust-target-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-          paths:
-            - target/
   test_workspace:
     parameters:
       os:
@@ -388,39 +295,19 @@ commands:
       - restore_cache:
           name: Restore .cargo and node_modules
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
-      - run:
-          name: Install cargo sweep
-          command: |
-            set -e -o pipefail
-            cargo sweep --version || cargo install cargo-sweep
+
+      - run: cargo xtask test --with-demo
 
       - save_cache:
           name: Save .cargo and node_modules
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
           paths:
             - ~/.cargo
             - dockerfiles/federation-demo/federation-demo/node_modules
-
-      - run: cargo sweep -s
-      - restore_cache:
-          name: Restore target/
-          keys:
-            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}
-            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
-
-      - run: cargo xtask test --with-demo
-      - run: cargo sweep -f
-      - save_cache:
-          name: Save target/
-          key: rust-target-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ .Branch }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package.json" }}-{{ checksum "dockerfiles/federation-demo/federation-demo/package-lock.json" }}
-          paths:
-            - target/
 
 jobs:
   lint:

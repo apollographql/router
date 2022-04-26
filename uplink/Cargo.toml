@@ -8,7 +8,7 @@ build = "build.rs"
 
 [dependencies]
 futures = "0.3.21"
-graphql_client = { version="0.10.0", default-features=false }
+graphql_client = { version="0.10.0" }
 reqwest = { version = "0.11.10", default_features = false, features = [
     "rustls-tls",
     "json",
