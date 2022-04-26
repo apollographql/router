@@ -338,17 +338,24 @@ impl Query {
                         if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
+
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        self.format_value(
-                            field_type,
-                            variables,
-                            input_value,
-                            output_value,
-                            selection_set,
-                            schema,
-                        )?;
+                        if field_name.as_str() == "__typename" {
+                            if input_value.is_string() {
+                                *output_value = input_value.clone();
+                            }
+                        } else {
+                            self.format_value(
+                                field_type,
+                                variables,
+                                input_value,
+                                output_value,
+                                selection_set,
+                                schema,
+                            )?;
+                        }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
