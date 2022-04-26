@@ -341,7 +341,11 @@ fn default_origins() -> Vec<String> {
 }
 
 fn default_cors_headers() -> Vec<String> {
-    vec!["Content-Type".into()]
+    vec![
+        "Content-Type".into(),
+        "apollographql-client-name".into(),
+        "apollographql-client-version".into(),
+    ]
 }
 
 fn default_cors_methods() -> Vec<String> {

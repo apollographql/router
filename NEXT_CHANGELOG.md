@@ -81,6 +81,10 @@ All windows processes are spawned via xtask rather than a separate CircleCI stag
 ### Enable default feature in graphql_client [PR #905](https://github.com/apollographql/router/pull/905)
 removing the default feature can cause build issues in plugins.
 
+## Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
+
+The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of brower based applications. We also document how to override them and update the CORS configuration accordingly.
+
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
