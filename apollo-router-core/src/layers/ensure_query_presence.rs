@@ -5,7 +5,7 @@
 //! If the request does not contain a query, then the request is rejected.
 
 use crate::checkpoint::CheckpointService;
-use crate::{Object, RouterRequest, RouterResponse};
+use crate::{RouterRequest, RouterResponse};
 use http::StatusCode;
 use serde_json_bytes::Value;
 use std::ops::ControlFlow;
@@ -39,7 +39,6 @@ where
                     let res = RouterResponse::builder()
                         .data(Value::default())
                         .errors(errors)
-                        .extensions(Object::default())
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
                         .build()

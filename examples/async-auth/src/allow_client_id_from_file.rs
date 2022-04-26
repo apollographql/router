@@ -1,5 +1,5 @@
 use apollo_router_core::{
-    register_plugin, Object, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -70,7 +70,6 @@ impl Plugin for AllowClientIdFromFile {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         }])
-                        .extensions(Object::default())
                         .status_code(StatusCode::UNAUTHORIZED)
                         .context(req.context)
                         .build()
@@ -98,7 +97,6 @@ impl Plugin for AllowClientIdFromFile {
                                 message: format!("'{header_key}' value is not a string"),
                                 ..Default::default()
                             }])
-                            .extensions(Object::default())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()
@@ -135,7 +133,6 @@ impl Plugin for AllowClientIdFromFile {
                                 message: "client-id is not allowed".to_string(),
                                 ..Default::default()
                             })
-                            .extensions(Object::default())
                             .status_code(StatusCode::FORBIDDEN)
                             .context(req.context)
                             .build()
@@ -306,7 +303,7 @@ mod tests {
                 );
                 // let's return the expected data
                 RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
+                    .data(expected_mock_response_data)
                     .build()
             });
 

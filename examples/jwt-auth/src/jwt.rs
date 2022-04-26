@@ -568,7 +568,7 @@ mod tests {
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
                 Ok(RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
+                    .data(expected_mock_response_data)
                     .build()
                     .expect("expecting valid request"))
             });

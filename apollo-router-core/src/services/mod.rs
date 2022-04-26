@@ -16,6 +16,7 @@ use multimap::MultiMap;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use static_assertions::assert_impl_all;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ops::ControlFlow;
 use std::str::FromStr;
@@ -147,23 +148,28 @@ impl RouterRequest {
     pub fn new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Arc<Object>,
-        extensions: Vec<(&'static str, Value)>,
+        variables: HashMap<String, Value>,
+        extensions: HashMap<String, Value>,
         context: Context,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         uri: Uri,
         method: Method,
     ) -> Result<RouterRequest, BoxError> {
-        let object: Object = extensions
+        let extensions: Object = extensions
             .into_iter()
-            .map(|(name, value)| (ByteString::from(name.to_string()), value))
+            .map(|(name, value)| (ByteString::from(name), value))
+            .collect();
+
+        let variables: Object = variables
+            .into_iter()
+            .map(|(name, value)| (ByteString::from(name), value))
             .collect();
 
         let gql_request = Request::builder()
             .query(query)
             .operation_name(operation_name)
             .variables(variables)
-            .extensions(object)
+            .extensions(extensions)
             .build();
 
         let originating_request = http_compat::Request::builder()
@@ -189,15 +195,15 @@ impl RouterRequest {
     pub fn fake_new(
         query: Option<String>,
         operation_name: Option<String>,
-        variables: Option<Arc<Object>>,
-        extensions: Vec<(&'static str, Value)>,
+        variables: HashMap<String, Value>,
+        extensions: HashMap<String, Value>,
         context: Option<Context>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
     ) -> Result<RouterRequest, BoxError> {
         RouterRequest::new(
             query,
             operation_name,
-            variables.unwrap_or_else(|| Arc::new(vec![].into_iter().collect())),
+            variables,
             extensions,
             context.unwrap_or_default(),
             headers,
@@ -227,11 +233,15 @@ impl RouterResponse {
         data: Value,
         path: Option<Path>,
         errors: Vec<crate::Error>,
-        extensions: Object,
+        extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Context,
     ) -> Result<RouterResponse, BoxError> {
+        let extensions: Object = extensions
+            .into_iter()
+            .map(|(name, value)| (ByteString::from(name), value))
+            .collect();
         // Build a response
         let res = Response::builder()
             .data(data)
@@ -275,7 +285,7 @@ impl RouterResponse {
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<crate::Error>,
-        extensions: Option<Object>,
+        extensions: HashMap<String, Value>,
         status_code: Option<StatusCode>,
         headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
         context: Option<Context>,
@@ -284,7 +294,7 @@ impl RouterResponse {
             data.unwrap_or_default(),
             path,
             errors,
-            extensions.unwrap_or_default(),
+            extensions,
             status_code,
             headers,
             context.unwrap_or_default(),
@@ -741,7 +751,6 @@ mod test {
     use crate::{Context, ResponseBody, RouterRequest, RouterResponse};
     use http::{HeaderValue, Method, Uri};
     use serde_json::json;
-    use std::sync::Arc;
 
     #[test]
     fn router_request_builder() {
@@ -754,9 +763,9 @@ mod test {
             .operation_name("Default")
             .context(Context::new())
             // We need to follow up on this. How can users creat this easily?
-            .extensions(vec![].into_iter().collect())
+            .extension("foo", json!({}))
             // We need to follow up on this. How can users creat this easily?
-            .variables(Arc::new(vec![].into_iter().collect()))
+            .variable("bar", json!({}))
             .build()
             .unwrap();
         assert_eq!(
@@ -772,10 +781,30 @@ mod test {
             request.originating_request.uri(),
             &Uri::from_static("http://example.com")
         );
+        assert_eq!(
+            request.originating_request.body().extensions.get("foo"),
+            Some(&json!({}).into())
+        );
+        assert_eq!(
+            request.originating_request.body().variables.get("bar"),
+            Some(&json!({}).into())
+        );
         assert_eq!(request.originating_request.method(), Method::POST);
+
+        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let variables = serde_json_bytes::Value::from(json!({"bar":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
         assert_eq!(
             request.originating_request.body(),
             &graphql::Request::builder()
+                .variables(variables)
+                .extensions(extensions)
                 .operation_name(Some("Default".to_string()))
                 .query(Some("query { topProducts }".to_string()))
                 .build()
@@ -788,9 +817,8 @@ mod test {
             .header("a", "b")
             .header("a", "c")
             .context(Context::new())
-            // We need to follow up on this. How can users creat this easily?
-            .extensions(vec![].into_iter().collect())
-            .data(json!({}).into())
+            .extension("foo", json!({}))
+            .data(json!({}))
             .build()
             .unwrap();
 
@@ -803,9 +831,18 @@ mod test {
                 .collect::<Vec<_>>(),
             vec![HeaderValue::from_static("b"), HeaderValue::from_static("c")]
         );
+        let extensions = serde_json_bytes::Value::from(json!({"foo":{}}))
+            .as_object()
+            .unwrap()
+            .clone();
         assert_eq!(
             response.response.body(),
-            &ResponseBody::GraphQL(graphql::Response::builder().data(json!({})).build())
+            &ResponseBody::GraphQL(
+                graphql::Response::builder()
+                    .extensions(extensions)
+                    .data(json!({}))
+                    .build()
+            )
         );
     }
 }

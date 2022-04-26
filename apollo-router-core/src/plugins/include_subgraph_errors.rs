@@ -107,11 +107,7 @@ mod test {
     ) {
         let request = RouterRequest::fake_builder()
             .query(query.to_string())
-            .variables(Arc::new(
-                vec![(ByteString::from("first"), Value::Number(2usize.into()))]
-                    .into_iter()
-                    .collect(),
-            ))
+            .variable("first", 2usize)
             .build()
             .expect("expecting valid request");
 

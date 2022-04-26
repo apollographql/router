@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use apollo_router_core::{
-    register_plugin, Object, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use serde_json_bytes::Value;
@@ -60,7 +60,6 @@ impl Plugin for ForbidAnonymousOperations {
                             ..Default::default()
                         }])
                         .status_code(StatusCode::BAD_REQUEST)
-                        .extensions(Object::default())
                         .context(req.context)
                         .build()?;
                     Ok(ControlFlow::Break(res))
@@ -211,7 +210,7 @@ mod tests {
                 );
                 // let's return the expected data
                 RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
+                    .data(expected_mock_response_data)
                     .build()
             });
 
