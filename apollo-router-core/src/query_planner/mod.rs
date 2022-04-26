@@ -595,9 +595,10 @@ mod tests {
     }
 
     /// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
-    /// test, since the tower-http stack catches the panic and transforms it into a 500 error.
+    /// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
+    /// with a closed service.
     ///
-    /// See: https://docs.rs/tower-http/latest/tower_http/catch_panic/index.html
+    /// See: https://github.com/tower-rs/tower/issues/455
     ///
     /// The query planner reports the failed subgraph fetch as an error with a reason of "service
     /// closed", which is what this test expects.
