@@ -3716,4 +3716,48 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn union_with_typename() {
+        let schema = "type Query {
+            get: ProductResult
+        }
+
+        type Product{
+            symbol: String!
+        }
+        type ProductError{
+            reason: String
+        }
+        union ProductResult = Product | ProductError
+        ";
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    __typename
+                    ... on Product {
+                      symbol
+                    }
+                    ... on ProductError {
+                      reason
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
+                },
+            }},
+        );
+    }
 }
