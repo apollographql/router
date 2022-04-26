@@ -237,7 +237,6 @@ mod apq_tests {
     async fn it_doesnt_update_the_cache_if_the_hash_is_not_valid() {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
-        let hash3 = hash.clone();
 
         let expected_apq_miss_error = crate::Error {
             message: "PersistedQueryNotFound".to_string(),
@@ -276,32 +275,9 @@ mod apq_tests {
 
                 Ok(RouterResponse::fake_builder().build())
             });
-        mock_service_builder
-            // the second last one should have the right APQ header and the full query string
-            // even though the query string wasn't provided by the client
-            .expect_call()
-            .times(1)
-            .returning(move |req| {
-                let body = req.originating_request.body();
 
-                let as_json = body.extensions.get("persistedQuery").unwrap();
-
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
-
-                assert_eq!(persisted_query.sha256hash, hash3);
-
-                assert!(body.query.is_some());
-
-                let hash = hex::decode(hash3.as_bytes()).unwrap();
-
-                assert!(!query_matches_hash(
-                    body.query.clone().unwrap_or_default().as_str(),
-                    hash.as_slice()
-                ));
-
-                Ok(RouterResponse::fake_builder().build())
-            });
+        // the last call should be an APQ error.
+        // the provided hash was wrong, so the query wasn't inserted into the cache.
 
         let mock_service = mock_service_builder.build();
 
