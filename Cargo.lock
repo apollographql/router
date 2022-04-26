@@ -621,9 +621,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f699a1a39f653f04ad0073a8b6006b83058be99de5eef93ee3246fa84eb3858"
+checksum = "37e6f88bd8b7701288c5a10d46e76a1b93dd2953f5972c260f7bfa5f58f6382b"
 dependencies = [
  "lazy_static",
  "proc-macro2",

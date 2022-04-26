@@ -2,7 +2,7 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse};
+use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse, Object};
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
@@ -32,7 +32,7 @@ where
                     }];
                     let mut res = ExecutionResponse::builder()
                         .errors(errors)
-                        .extensions(Default::default())
+                        .extensions(Object::default())
                         .status_code(StatusCode::METHOD_NOT_ALLOWED)
                         .context(req.context)
                         .build();

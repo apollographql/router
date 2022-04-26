@@ -1,9 +1,10 @@
 use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Object, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use std::{ops::ControlFlow, path::PathBuf};
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
@@ -64,12 +65,12 @@ impl Plugin for AllowClientIdFromFile {
                 if !req.originating_request.headers().contains_key(&header_key) {
                     // Prepare an HTTP 401 response with a GraphQL error message
                     let res = RouterResponse::builder()
-                        .data(Default::default())
+                        .data(Value::default())
                         .errors(vec![apollo_router_core::Error {
                             message: format!("Missing '{header_key}' header"),
                             ..Default::default()
                         }])
-                        .extensions(Default::default())
+                        .extensions(Object::default())
                         .status_code(StatusCode::UNAUTHORIZED)
                         .context(req.context)
                         .build()
@@ -92,12 +93,12 @@ impl Plugin for AllowClientIdFromFile {
                     Err(_not_a_string_error) => {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         let res = RouterResponse::builder()
-                            .data(Default::default())
+                            .data(Value::default())
                             .errors(vec![apollo_router_core::Error {
                                 message: format!("'{header_key}' value is not a string"),
                                 ..Default::default()
                             }])
-                            .extensions(Default::default())
+                            .extensions(Object::default())
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
                             .build()
@@ -129,12 +130,12 @@ impl Plugin for AllowClientIdFromFile {
                     } else {
                         // Prepare an HTTP 403 response with a GraphQL error message
                         let res = RouterResponse::builder()
-                            .data(Default::default())
+                            .data(Value::default())
                             .errors(vec![apollo_router_core::Error {
                                 message: "client-id is not allowed".to_string(),
                                 ..Default::default()
                             }])
-                            .extensions(Default::default())
+                            .extensions(Object::default())
                             .status_code(StatusCode::FORBIDDEN)
                             .context(req.context)
                             .build()

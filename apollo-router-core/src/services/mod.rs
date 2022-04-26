@@ -224,7 +224,6 @@ impl RouterResponse {
     /// Required parameters are required in non-testing code to create a RouterResponse..
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        label: Option<String>,
         data: Value,
         path: Option<Path>,
         errors: Vec<crate::Error>,
@@ -235,7 +234,6 @@ impl RouterResponse {
     ) -> Result<RouterResponse, BoxError> {
         // Build a response
         let res = Response::builder()
-            .label(label)
             .data(data)
             .path(path)
             .errors(errors)
@@ -274,7 +272,6 @@ impl RouterResponse {
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
     #[allow(clippy::too_many_arguments)]
     pub fn fake_new(
-        label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<crate::Error>,
@@ -284,7 +281,6 @@ impl RouterResponse {
         context: Option<Context>,
     ) -> Result<RouterResponse, BoxError> {
         RouterResponse::new(
-            label,
             data.unwrap_or_default(),
             path,
             errors,
@@ -306,7 +302,6 @@ impl RouterResponse {
         context: Context,
     ) -> Result<RouterResponse, BoxError> {
         RouterResponse::new(
-            None,
             Default::default(),
             None,
             errors,
@@ -755,8 +750,8 @@ mod test {
             .header("a", "c")
             .uri(Uri::from_static("http://example.com"))
             .method(Method::POST)
-            .query("query { topProducts }".to_string())
-            .operation_name("Default".to_string())
+            .query("query { topProducts }")
+            .operation_name("Default")
             .context(Context::new())
             // We need to follow up on this. How can users creat this easily?
             .extensions(vec![].into_iter().collect())

@@ -1,9 +1,10 @@
 use std::ops::ControlFlow;
 
 use apollo_router_core::{
-    register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
+    register_plugin, Object, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
+use serde_json_bytes::Value;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
 #[derive(Default)]
@@ -53,13 +54,13 @@ impl Plugin for ForbidAnonymousOperations {
 
                     // Prepare an HTTP 400 response with a GraphQL error message
                     let res = RouterResponse::builder()
-                        .data(Default::default())
+                        .data(Value::default())
                         .errors(vec![apollo_router_core::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
                         }])
                         .status_code(StatusCode::BAD_REQUEST)
-                        .extensions(Default::default())
+                        .extensions(Object::default())
                         .context(req.context)
                         .build()?;
                     Ok(ControlFlow::Break(res))
@@ -223,7 +224,7 @@ mod tests {
 
         // Let's create a request with an valid operation name...
         let request_with_operation_name = RouterRequest::fake_builder()
-            .operation_name(operation_name.to_string())
+            .operation_name(operation_name)
             .build()
             .expect("expecting valid request");
 

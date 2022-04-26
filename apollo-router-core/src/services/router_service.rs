@@ -6,13 +6,14 @@ use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
-    Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
-    RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt, SubgraphRequest,
-    SubgraphResponse, DEFAULT_BUFFER_SIZE,
+    Introspection, Object, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse,
+    ResponseBody, RouterRequest, RouterResponse, Schema, ServiceBuildError, ServiceBuilderExt,
+    SubgraphRequest, SubgraphResponse, DEFAULT_BUFFER_SIZE,
 };
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
 use indexmap::IndexMap;
+use serde_json_bytes::Value;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -203,9 +204,9 @@ where
                     ..Default::default()
                 }];
                 RouterResponse::builder()
-                    .data(Default::default())
+                    .data(Value::default())
                     .errors(errors)
-                    .extensions(Default::default())
+                    .extensions(Object::default())
                     .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)
                     .build()

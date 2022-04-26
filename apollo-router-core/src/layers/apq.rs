@@ -8,7 +8,7 @@ use std::ops::ControlFlow;
 use crate::{checkpoint::CheckpointService, Object, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
-use serde_json_bytes::json;
+use serde_json_bytes::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::{BoxError, Layer, Service};
 
@@ -98,7 +98,7 @@ where
                                 .unwrap(),
                             }];
                             let res = RouterResponse::builder()
-                                .data(Default::default())
+                                .data(Value::default())
                                 .errors(errors)
                                 .extensions(Object::new())
                                 .context(req.context)
