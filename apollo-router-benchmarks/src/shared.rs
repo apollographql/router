@@ -1,10 +1,9 @@
 // this file is shared between the tests and benchmarks, using
 // include!() instead of as a pub module, so it is only compiled
 // in dev mode
-use apollo_router_core::plugin_utils::mock::subgraph::MockSubgraph;
+use apollo_router_core::plugin::utils::test::mock::subgraph::MockSubgraph;
 use apollo_router_core::{
-    plugin_utils, PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse,
-    Schema,
+    PluggableRouterServiceBuilder, ResponseBody, RouterRequest, RouterResponse, Schema,
 };
 use once_cell::sync::Lazy;
 use serde_json::json;
@@ -21,15 +20,14 @@ static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $fir
 pub async fn basic_composition_benchmark(
     mut router_service: BoxCloneService<RouterRequest, RouterResponse, BoxError>,
 ) {
-    let request = plugin_utils::RouterRequest::builder()
+    let request = RouterRequest::fake_builder()
         .query(QUERY.to_string())
         .variables(Arc::new(
             vec![(ByteString::from("first"), Value::Number(2usize.into()))]
                 .into_iter()
                 .collect(),
         ))
-        .build()
-        .into();
+        .build();
 
     let response = router_service
         .ready()

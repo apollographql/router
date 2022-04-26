@@ -1,5 +1,7 @@
 //! Starts a server that will handle http graphql requests.
 
+extern crate core;
+
 #[cfg(feature = "axum-server")]
 mod axum_http_server_factory;
 pub mod configuration;
@@ -266,7 +268,13 @@ impl ConfigurationKind {
                             if watch {
                                 files::watch(path.to_owned(), delay)
                                     .filter_map(move |_| {
-                                        future::ready(ConfigurationKind::read_config(&path).ok())
+                                        future::ready(match ConfigurationKind::read_config(&path) {
+                                            Ok(config) => Some(config),
+                                            Err(err) => {
+                                                tracing::error!("{}", err);
+                                                None
+                                            }
+                                        })
                                     })
                                     .map(|x| UpdateConfiguration(Box::new(x)))
                                     .boxed()
@@ -702,7 +710,9 @@ mod tests {
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = graphql::Request::builder().query(request).build();
+        let request = graphql::Request::builder()
+            .query(Some(request.to_string()))
+            .build();
         let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();

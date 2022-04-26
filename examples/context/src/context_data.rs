@@ -28,11 +28,12 @@ struct ContextData {}
 // 3. For each subgraph response merge some information into the `Context`. (response_count)
 // 4. Pick up and print it out at router response. (response_count)
 //
+#[async_trait::async_trait]
 impl Plugin for ContextData {
     // Config is a unit, and `ContextData` derives default.
     type Config = ();
 
-    fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 

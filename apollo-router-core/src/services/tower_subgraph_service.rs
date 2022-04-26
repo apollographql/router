@@ -1,3 +1,5 @@
+//! Tower fetcher for subgraphs.
+
 use crate::prelude::*;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
@@ -14,6 +16,7 @@ use tower::{BoxError, ServiceBuilder};
 use tracing::{Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+/// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub struct TowerSubgraphService {
     client: hyper::Client<HttpsConnector<HttpConnector>>,
@@ -48,7 +51,7 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
 
     fn call(&mut self, request: graphql::SubgraphRequest) -> Self::Future {
         let graphql::SubgraphRequest {
-            http_request,
+            subgraph_request,
             context,
             ..
         } = request;
@@ -57,7 +60,7 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, body) = http_request.into_parts();
+            let (parts, body) = subgraph_request.into_parts();
 
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
@@ -104,10 +107,10 @@ impl tower::Service<graphql::SubgraphRequest> for TowerSubgraphService {
                     })
                 })?;
 
-            Ok(graphql::SubgraphResponse {
-                response: http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),
+            Ok(graphql::SubgraphResponse::new_from_response(
+                http::Response::builder().body(graphql).expect("no argument can fail to parse or converted to the internal representation here; qed").into(),
                 context,
-            })
+            ))
         })
     }
 }

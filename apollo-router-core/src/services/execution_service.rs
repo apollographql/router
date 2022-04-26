@@ -1,3 +1,5 @@
+//! Implements the Execution phase of the request lifecycle.
+
 use crate::{ExecutionRequest, ExecutionResponse, SubgraphRequest, SubgraphResponse};
 use crate::{Schema, ServiceRegistry};
 use futures::future::BoxFuture;
@@ -11,6 +13,7 @@ use tower_service::Service;
 use tracing::Instrument;
 use typed_builder::TypedBuilder;
 
+/// [`Service`] for query execution.
 #[derive(TypedBuilder, Clone)]
 pub struct ExecutionService {
     schema: Arc<Schema>,
@@ -35,22 +38,26 @@ impl Service<ExecutionRequest> for ExecutionService {
         Poll::Ready(Ok(()))
     }
 
-    #[tracing::instrument(skip_all, level = "info", name = "execute")]
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
             let context = req.context;
             let response = req
                 .query_plan
-                .execute(&context, &this.subgraph_services, &this.schema)
+                .execute(
+                    &context,
+                    &this.subgraph_services,
+                    req.originating_request.clone(),
+                    &this.schema,
+                )
                 .await;
 
             // Note that request context is not propagated from downstream.
             // Context contains a mutex for state however so in practice
-            Ok(ExecutionResponse {
-                response: http::Response::new(response).into(),
+            Ok(ExecutionResponse::new_from_response(
+                http::Response::new(response).into(),
                 context,
-            })
+            ))
         }
         .in_current_span();
         Box::pin(fut)
