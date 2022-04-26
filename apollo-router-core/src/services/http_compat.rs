@@ -8,12 +8,9 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-#[cfg(feature = "axum-server")]
 use axum::{body::boxed, response::IntoResponse};
-#[cfg(feature = "axum-server")]
 use bytes::Bytes;
 
-#[cfg(feature = "axum-server")]
 use crate::ResponseBody;
 
 use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method, Uri};
@@ -257,7 +254,6 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
@@ -269,7 +265,6 @@ impl IntoResponse for Response<ResponseBody> {
     }
 }
 
-#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<Bytes> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?

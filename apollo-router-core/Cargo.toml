@@ -11,13 +11,12 @@ publish = false
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
-axum-server = ["axum"]
 
 [dependencies]
 apollo-parser = "0.2.5"
 async-trait = "0.1.53"
 atty = "0.2.14"
-axum = { version = "0.5.3", optional = true }
+axum = { version = "0.5.3" }
 buildstructor = "0.1.5"
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }
