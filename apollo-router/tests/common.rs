@@ -1,5 +1,5 @@
 use http::header::CONTENT_TYPE;
-use http::{HeaderValue, Method, Request, Uri};
+use http::{Method, Request, Uri};
 use jsonpath_lib::Selector;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -90,7 +90,7 @@ impl TracingTest {
         for _i in 0..100 {
             let mut request = Request::builder()
                 .method(Method::POST)
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                .header(CONTENT_TYPE, "application/json")
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
                 .uri(Uri::from_static("http://localhost:4000"))
