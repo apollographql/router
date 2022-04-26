@@ -651,7 +651,8 @@ mod tests {
                     == Some("topProducts_product_0".into());
                 inner_succeeded.store(matches, Ordering::SeqCst);
                 matches
-            });
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         query_plan
             .execute(
                 &Context::new(),
@@ -686,7 +687,8 @@ mod tests {
                 let matches = request.subgraph_request.method() == Method::POST;
                 inner_succeeded.store(matches, Ordering::SeqCst);
                 matches
-            });
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         query_plan
             .execute(
                 &Context::new(),
