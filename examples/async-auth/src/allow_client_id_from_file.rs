@@ -131,10 +131,10 @@ impl Plugin for AllowClientIdFromFile {
                         // Prepare an HTTP 403 response with a GraphQL error message
                         let res = RouterResponse::builder()
                             .data(Value::default())
-                            .errors(vec![apollo_router_core::Error {
+                            .error(apollo_router_core::Error {
                                 message: "client-id is not allowed".to_string(),
                                 ..Default::default()
-                            }])
+                            })
                             .extensions(Object::default())
                             .status_code(StatusCode::FORBIDDEN)
                             .context(req.context)
