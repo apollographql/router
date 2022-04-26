@@ -4,7 +4,6 @@ use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
 use http::StatusCode;
-use serde_json_bytes::Value;
 use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
 #[derive(Default)]
@@ -53,12 +52,11 @@ impl Plugin for ForbidAnonymousOperations {
                     tracing::error!("Operation is not allowed!");
 
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    let res = RouterResponse::builder()
-                        .data(Value::default())
-                        .errors(vec![apollo_router_core::Error {
+                    let res = RouterResponse::error_builder()
+                        .error(apollo_router_core::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
-                        }])
+                        })
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
                         .build()?;
