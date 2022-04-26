@@ -9,6 +9,8 @@ use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
 
+const TYPENAME: &str = "__typename";
+
 /// A GraphQL query.
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
@@ -342,7 +344,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == "__typename" {
+                        if field_name.as_str() == TYPENAME {
                             if input_value.is_string() {
                                 *output_value = input_value.clone();
                             }
@@ -398,7 +400,7 @@ impl Query {
                     // __typename field and it does not match, we should not apply
                     // that fragment
                     if input
-                        .get("__typename")
+                        .get(TYPENAME)
                         .map(|val| val.as_str() == Some(type_condition.as_str()))
                         .unwrap_or(*known_type)
                     {
@@ -437,7 +439,7 @@ impl Query {
                         }
 
                         if input
-                            .get("__typename")
+                            .get(TYPENAME)
                             .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
                             .unwrap_or_else(|| {
                                 known_type.as_deref() == Some(fragment.type_condition.as_str())
