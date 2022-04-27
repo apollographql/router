@@ -467,7 +467,7 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            self.response_at_path(current_dir, paths, response.data)
+            self.response_at_path(current_dir, paths, response.data.unwrap_or_default())
                 .map(|value| (value, errors))
         }
 

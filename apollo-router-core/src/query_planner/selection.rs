@@ -140,9 +140,13 @@ mod tests {
         schema: &Schema,
     ) -> Result<Value, FetchError> {
         let mut values = Vec::new();
-        response.data.select_values_and_paths(path, |_path, value| {
-            values.push(value);
-        });
+        response
+            .data
+            .as_ref()
+            .unwrap()
+            .select_values_and_paths(path, |_path, value| {
+                values.push(value);
+            });
 
         Ok(Value::Array(
             values

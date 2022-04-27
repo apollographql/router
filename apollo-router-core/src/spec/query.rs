@@ -39,7 +39,7 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        if let Value::Object(mut input) = data {
+        if let Some(Value::Object(mut input)) = data {
             let operation = match operation_name {
                 Some(name) => self
                     .operations
@@ -64,22 +64,28 @@ impl Query {
                         .collect()
                 };
 
-                response.data = match self.apply_root_selection_set(
-                    operation,
-                    &all_variables,
-                    &mut input,
-                    &mut output,
-                    schema,
-                ) {
-                    Ok(()) => output.into(),
-                    Err(InvalidValue) => Value::Null,
-                }
+                response.data = Some(
+                    match self.apply_root_selection_set(
+                        operation,
+                        &all_variables,
+                        &mut input,
+                        &mut output,
+                        schema,
+                    ) {
+                        Ok(()) => output.into(),
+                        Err(InvalidValue) => Value::Null,
+                    },
+                );
+
+                return;
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
         } else {
             failfast_debug!("invalid type for data in response.");
         }
+
+        response.data = Some(Value::default());
     }
 
     #[tracing::instrument(skip_all, level = "info" name = "parse_query")]
@@ -796,13 +802,14 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
+
             query.format_response(
                 &mut response,
                 $operation,
                 $variables.as_object().unwrap().clone(),
                 &schema,
             );
-            assert_eq_and_ordered!(response.data, $expected);
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
         }};
     }
 
@@ -1077,7 +1084,19 @@ mod tests {
             "other": "2",
         }};
         // an invalid operation name should fail
-        assert_format_response!(schema, query, response, Some("OtherOperation"), Value::Null,);
+        {
+            let schema: Schema = schema.parse().expect("could not parse schema");
+            let query = Query::parse(query, &schema).expect("could not parse query");
+            let mut response = Response::builder().data(response.clone()).build();
+
+            query.format_response(
+                &mut response,
+                Some("OtherOperation"),
+                Object::default(),
+                &schema,
+            );
+            assert!(response.data.is_none());
+        }
         assert_format_response!(
             schema,
             query,
