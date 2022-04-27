@@ -11,6 +11,7 @@ use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 // We don't need any in this example
 struct ForbidAnonymousOperations {}
 
+#[async_trait::async_trait]
 impl Plugin for ForbidAnonymousOperations {
     // We either forbid anonymous operations,
     // Or we don't. This is the reason why we don't need
@@ -19,7 +20,7 @@ impl Plugin for ForbidAnonymousOperations {
     // Config is a unit, and `ForbidAnonymousOperation` derives default.
     type Config = ();
 
-    fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(_configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(Self::default())
     }
 
@@ -51,16 +52,14 @@ impl Plugin for ForbidAnonymousOperations {
                     tracing::error!("Operation is not allowed!");
 
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    let res = RouterResponse::builder()
-                        .data(Default::default())
-                        .errors(vec![apollo_router_core::Error {
+                    let res = RouterResponse::error_builder()
+                        .error(apollo_router_core::Error {
                             message: "Anonymous operations are not allowed".to_string(),
                             ..Default::default()
-                        }])
+                        })
                         .status_code(StatusCode::BAD_REQUEST)
-                        .extensions(Default::default())
                         .context(req.context)
-                        .build();
+                        .build()?;
                     Ok(ControlFlow::Break(res))
                 } else {
                     // we're good to go!
@@ -106,6 +105,7 @@ mod tests {
             .get("example.forbid_anonymous_operations")
             .expect("Plugin not found")
             .create_instance(&Value::Null)
+            .await
             .unwrap();
     }
 
@@ -122,7 +122,9 @@ mod tests {
             ForbidAnonymousOperations::default().router_service(mock_service.boxed());
 
         // Let's create a request without an operation name...
-        let request_without_any_operation_name = RouterRequest::fake_builder().build();
+        let request_without_any_operation_name = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -158,7 +160,8 @@ mod tests {
         // Let's create a request with an empty operation name...
         let request_with_empty_operation_name = RouterRequest::fake_builder()
             .operation_name("".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -204,9 +207,9 @@ mod tests {
                         .unwrap()
                 );
                 // let's return the expected data
-                Ok(RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
-                    .build())
+                RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
+                    .build()
             });
 
         // The mock has been set up, we can now build a service from it
@@ -218,8 +221,9 @@ mod tests {
 
         // Let's create a request with an valid operation name...
         let request_with_operation_name = RouterRequest::fake_builder()
-            .operation_name(operation_name.to_string())
-            .build();
+            .operation_name(operation_name)
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack

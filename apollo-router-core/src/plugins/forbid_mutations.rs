@@ -15,7 +15,7 @@ struct ForbidMutations {
 impl Plugin for ForbidMutations {
     type Config = bool;
 
-    fn new(forbid: Self::Config) -> Result<Self, BoxError> {
+    async fn new(forbid: Self::Config) -> Result<Self, BoxError> {
         Ok(ForbidMutations { forbid })
     }
 
@@ -52,8 +52,6 @@ impl Plugin for ForbidMutations {
     }
 }
 
-register_plugin!("apollo", "forbid_mutations", ForbidMutations);
-
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
     use std::sync::Arc;
@@ -78,6 +76,7 @@ mod forbid_http_get_mutations_tests {
         let mock = mock_service.build();
 
         let service_stack = ForbidMutations::new(true)
+            .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock.boxed());
 
@@ -98,6 +97,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = MockExecutionService::new().build();
         let service_stack = ForbidMutations::new(true)
+            .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock.boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
@@ -120,6 +120,7 @@ mod forbid_http_get_mutations_tests {
         let mock = mock_service.build();
 
         let service_stack = ForbidMutations::new(false)
+            .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock.boxed());
 
@@ -167,10 +168,12 @@ mod forbid_http_get_mutations_tests {
             .method(method)
             .body(crate::Request::default())
             .build()
-            .unwrap();
+            .expect("expecting valid request");
         ExecutionRequest::fake_builder()
             .originating_request(request)
             .query_plan(Arc::new(QueryPlan { root }))
             .build()
     }
 }
+
+register_plugin!("apollo", "forbid_mutations", ForbidMutations);

@@ -9,6 +9,8 @@ use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
 
+const TYPENAME: &str = "__typename";
+
 /// A GraphQL query.
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
@@ -82,7 +84,7 @@ impl Query {
         }
     }
 
-    #[tracing::instrument(skip_all, level = "trace")]
+    #[tracing::instrument(skip_all, level = "info" name = "parse_query")]
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
@@ -338,17 +340,24 @@ impl Query {
                         if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
+
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        self.format_value(
-                            field_type,
-                            variables,
-                            input_value,
-                            output_value,
-                            selection_set,
-                            schema,
-                        )?;
+                        if field_name.as_str() == TYPENAME {
+                            if input_value.is_string() {
+                                *output_value = input_value.clone();
+                            }
+                        } else {
+                            self.format_value(
+                                field_type,
+                                variables,
+                                input_value,
+                                output_value,
+                                selection_set,
+                                schema,
+                            )?;
+                        }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
@@ -391,7 +400,7 @@ impl Query {
                     // __typename field and it does not match, we should not apply
                     // that fragment
                     if input
-                        .get("__typename")
+                        .get(TYPENAME)
                         .map(|val| val.as_str() == Some(type_condition.as_str()))
                         .unwrap_or(*known_type)
                     {
@@ -430,7 +439,7 @@ impl Query {
                         }
 
                         if input
-                            .get("__typename")
+                            .get(TYPENAME)
                             .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
                             .unwrap_or_else(|| {
                                 known_type.as_deref() == Some(fragment.type_condition.as_str())
@@ -3712,6 +3721,50 @@ mod tests {
             json! {{
                 "get": {
                     "a": "a",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn union_with_typename() {
+        let schema = "type Query {
+            get: ProductResult
+        }
+
+        type Product{
+            symbol: String!
+        }
+        type ProductError{
+            reason: String
+        }
+        union ProductResult = Product | ProductError
+        ";
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    __typename
+                    ... on Product {
+                      symbol
+                    }
+                    ... on ProductError {
+                      reason
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
                 },
             }},
         );

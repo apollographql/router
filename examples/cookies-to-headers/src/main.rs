@@ -67,7 +67,7 @@ mod tests {
                     "strawberry"
                 );
                 Ok(SubgraphResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
+                    .data(expected_mock_response_data)
                     .build())
             });
 
@@ -80,7 +80,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut rhai = Rhai::new(conf).expect("valid configuration should succeed");
+        let mut rhai = Rhai::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
 

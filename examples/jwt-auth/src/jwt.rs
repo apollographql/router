@@ -60,6 +60,7 @@
 //!  - Token refresh
 //!  - ...
 
+use apollo_router_core::Context;
 use apollo_router_core::{
     register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt,
 };
@@ -141,28 +142,6 @@ struct JwtAuth {
 impl JwtAuth {
     const DEFAULT_MAX_TOKEN_LIFE: u64 = 900;
 
-    fn new(configuration: Conf) -> Result<Self, BoxError> {
-        // Try to figure out which authentication mechanism to use
-        let key = configuration.key.trim().to_string();
-
-        let time_tolerance = match configuration.time_tolerance {
-            Some(t) => Duration::from_secs(t),
-            None => Duration::from_secs(DEFAULT_TIME_TOLERANCE_SECS),
-        };
-        let max_token_life = match configuration.max_token_life {
-            Some(t) => Duration::from_secs(t),
-            None => Duration::from_secs(JwtAuth::DEFAULT_MAX_TOKEN_LIFE),
-        };
-        let hmac = JwtAuth::try_initialize_hmac(&configuration, key);
-
-        Ok(Self {
-            time_tolerance,
-            max_token_life,
-            configuration,
-            hmac,
-        })
-    }
-
     // HMAC support
     fn try_initialize_hmac(configuration: &Conf, key: String) -> Option<JwtHmac> {
         let mut hmac = None;
@@ -201,12 +180,26 @@ struct Conf {
 impl Plugin for JwtAuth {
     type Config = Conf;
 
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        Ok(())
-    }
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+        // Try to figure out which authentication mechanism to use
+        let key = configuration.key.trim().to_string();
 
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        Ok(())
+        let time_tolerance = match configuration.time_tolerance {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(DEFAULT_TIME_TOLERANCE_SECS),
+        };
+        let max_token_life = match configuration.max_token_life {
+            Some(t) => Duration::from_secs(t),
+            None => Duration::from_secs(JwtAuth::DEFAULT_MAX_TOKEN_LIFE),
+        };
+        let hmac = JwtAuth::try_initialize_hmac(&configuration, key);
+
+        Ok(Self {
+            time_tolerance,
+            max_token_life,
+            configuration,
+            hmac,
+        })
     }
 
     fn router_service(
@@ -234,16 +227,18 @@ impl Plugin for JwtAuth {
                 // We are going to do a lot of similar checking so let's define a local function
                 // to help reduce repetition
                 fn failure_message(
+                    context: Context,
                     msg: String,
                     status: StatusCode,
                 ) -> Result<ControlFlow<RouterResponse, RouterRequest>, BoxError> {
-                    let res = RouterResponse::fake_builder()
+                    let res = RouterResponse::error_builder()
                         .errors(vec![apollo_router_core::Error {
                             message: msg,
                             ..Default::default()
                         }])
                         .status_code(status)
-                        .build();
+                        .context(context)
+                        .build()?;
                     Ok(ControlFlow::Break(res))
                 }
 
@@ -255,7 +250,7 @@ impl Plugin for JwtAuth {
                     Some(value) => value.to_str(),
                     None =>
                         // Prepare an HTTP 401 response with a GraphQL error message
-                        return failure_message(format!("Missing '{}' header", AUTHORIZATION), StatusCode::UNAUTHORIZED),
+                        return failure_message(req.context, format!("Missing '{}' header", AUTHORIZATION), StatusCode::UNAUTHORIZED),
                 };
 
                 // If we find the header, but can't convert it to a string, let the client know
@@ -263,8 +258,8 @@ impl Plugin for JwtAuth {
                     Ok(value) => value,
                     Err(_not_a_string_error) => {
                         // Prepare an HTTP 400 response with a GraphQL error message
-                        return failure_message(
-                            "AUTHORIZATION' header is not convertible to a string".to_string(),
+                        return failure_message(req.context,
+                                               "AUTHORIZATION' header is not convertible to a string".to_string(),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -278,8 +273,8 @@ impl Plugin for JwtAuth {
                 // case variations
                 if !jwt_value.to_uppercase().as_str().starts_with("BEARER ") {
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    return failure_message(
-                        format!("'{jwt_value_untrimmed}' is not correctly formatted"),
+                    return failure_message(req.context,
+                                           format!("'{jwt_value_untrimmed}' is not correctly formatted"),
                         StatusCode::BAD_REQUEST,
                     );
                 }
@@ -289,8 +284,8 @@ impl Plugin for JwtAuth {
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
                     // Prepare an HTTP 400 response with a GraphQL error message
-                    return failure_message(
-                        format!("'{jwt_value}' is not correctly formatted"),
+                    return failure_message(req.context,
+                                           format!("'{jwt_value}' is not correctly formatted"),
                         StatusCode::BAD_REQUEST,
                     );
                 }
@@ -314,16 +309,16 @@ impl Plugin for JwtAuth {
                                         Some(issued) => {
                                             if expires - issued > max_token_life {
                                                 // Prepare an HTTP 403 response with a GraphQL error message
-                                                return failure_message(
-                                                    format!("{jwt} is not authorized: expiry period exceeds policy limit"),
+                                                return failure_message(req.context,
+                                                                       format!("{jwt} is not authorized: expiry period exceeds policy limit"),
                                                     StatusCode::FORBIDDEN,
                                                 );
                                             }
                                         },
                                         None => {
                                             // Prepare an HTTP 403 response with a GraphQL error message
-                                            return failure_message(
-                                                format!("{jwt} is not authorized: no issue time set"),
+                                            return failure_message(req.context,
+                                                                   format!("{jwt} is not authorized: no issue time set"),
                                                 StatusCode::FORBIDDEN,
                                             );
                                         }
@@ -331,8 +326,8 @@ impl Plugin for JwtAuth {
                                 },
                                 None => {
                                     // Prepare an HTTP 403 response with a GraphQL error message
-                                    return failure_message(
-                                        format!("{jwt} is not authorized: no expiry time set"),
+                                    return failure_message(req.context,
+                                                           format!("{jwt} is not authorized: no expiry time set"),
                                         StatusCode::FORBIDDEN,
                                     );
                                 }
@@ -342,8 +337,8 @@ impl Plugin for JwtAuth {
                             match req.context.insert("JWTClaims", claims) {
                                 Ok(_v) => Ok(ControlFlow::Continue(req)),
                                 Err(err) => {
-                                    return failure_message(
-                                        format!("couldn't store JWT claims in context: {}", err),
+                                    return failure_message(req.context,
+                                                           format!("couldn't store JWT claims in context: {}", err),
                                         StatusCode::INTERNAL_SERVER_ERROR,
                                     );
                                 }
@@ -351,8 +346,8 @@ impl Plugin for JwtAuth {
                         },
                         Err(err) => {
                             // Prepare an HTTP 403 response with a GraphQL error message
-                            return failure_message(
-                                format!("{jwt} is not authorized: {}", err),
+                            return failure_message(req.context,
+                                                   format!("{jwt} is not authorized: {}", err),
                                 StatusCode::FORBIDDEN,
                             );
                         }
@@ -362,18 +357,14 @@ impl Plugin for JwtAuth {
                     //  - Either we tried to specify a valid, but unimplemented algorithm.
                     //  - Or we have specified an invalid algorithm (typo?).
                     //  - Or we haven't configured hmac support.
-                    failure_message(
-                        "Only hmac support is implemented. Check configuration for typos".to_string(),
+                    failure_message(req.context,
+                                    "Only hmac support is implemented. Check configuration for typos".to_string(),
                         StatusCode::NOT_IMPLEMENTED,
                     )
                 }
             })
             .service(service)
             .boxed()
-    }
-
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-        JwtAuth::new(configuration)
     }
 }
 
@@ -392,18 +383,18 @@ register_plugin!("example", "jwt", JwtAuth);
 mod tests {
     use super::*;
     use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
-    use http::{header::HeaderName, HeaderValue};
 
     // This test ensures the router will be able to
     // find our `JwtAuth` plugin,
     // and deserialize an hmac configured yml configuration into it
     // see `router.yaml` for more information
-    #[test]
-    fn plugin_registered() {
+    #[tokio::test]
+    async fn plugin_registered() {
         apollo_router_core::plugins()
             .get("example.jwt")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({ "algorithm": "HS256" , "key": "629709bdc3bd794312ccc3a1c47beb03ac7310bc02d32d4587e59b5ad81c99ba"}))
+            .await
             .unwrap();
     }
 
@@ -419,7 +410,9 @@ mod tests {
         let service_stack = JwtAuth::default().router_service(mock_service.boxed());
 
         // Let's create a request without an authorization header
-        let request_without_any_authorization_header = RouterRequest::fake_builder().build();
+        let request_without_any_authorization_header = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -453,11 +446,9 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_no_bearer_in_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("should start with Bearer"),
-            )])
-            .build();
+            .header("authorization", "should start with Bearer")
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -491,11 +482,9 @@ mod tests {
 
         // Let's create a request with a badly formatted authorization header
         let request_with_too_many_spaces_in_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("Bearer  "),
-            )])
-            .build();
+            .header("authorization", "Bearer  ")
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -530,11 +519,9 @@ mod tests {
         // Let's create a request with a properly formatted authorization header
         // Note: (The token isn't valid, but the format is...)
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_static("Bearer atoken"),
-            )])
-            .build();
+            .header("authorization", "Bearer atoken")
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -581,8 +568,9 @@ mod tests {
                 assert_eq!(claims.jwt_id, Some("jwt_id".to_string()));
                 assert_eq!(claims.nonce, Some("nonce".to_string()));
                 Ok(RouterResponse::fake_builder()
-                    .data(expected_mock_response_data.into())
-                    .build())
+                    .data(expected_mock_response_data)
+                    .build()
+                    .expect("expecting valid request"))
             });
 
         // The mock has been set up, we can now build a service from it
@@ -597,7 +585,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -615,11 +605,9 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
-            .build();
+            .header("authorization", &format!("Bearer {token}"))
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -655,7 +643,9 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -666,11 +656,9 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
-            .build();
+            .header("authorization", format!("Bearer {token}"))
+            .build()
+            .expect("expecting valid request");
 
         // ...And call our service stack with it
         let service_response = service_stack
@@ -710,7 +698,9 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut jwt_auth = JwtAuth::new(conf).expect("valid configuration should succeed");
+        let mut jwt_auth = JwtAuth::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = jwt_auth.router_service(mock_service.boxed());
 
@@ -722,11 +712,9 @@ mod tests {
 
         // Let's create a request with a properly formatted authorization header
         let request_with_appropriate_auth = RouterRequest::fake_builder()
-            .headers(vec![(
-                HeaderName::from_static("authorization"),
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            )])
-            .build();
+            .header("authorization", format!("Bearer {token}"))
+            .build()
+            .expect("expecting valid request");
 
         // Let's sleep until our token has expired
         tokio::time::sleep(tokio::time::Duration::from_secs(tolerance + token_life + 1)).await;

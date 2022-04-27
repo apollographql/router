@@ -77,27 +77,15 @@ The trait also provides a default implementations for each hook, which returns t
 impl Plugin for HelloWorld {
     type Config = Conf;
 
-    // This is invoked whenever configuration is changed
-    // during router execution, including at startup
-    async fn startup(&mut self) -> Result<(), BoxError> {
-        // Perform any startup code for your plugin here.
-        // This is called before any requests are served.
-        Ok(())
-    }
-
-    // This is invoked whenever configuration is changed
-    // during router execution, including at shutdown
-    async fn shutdown(&mut self) -> Result<(), BoxError> {
-        // Perform any shutdown code for your plugin here.
-        // No new requests are served after this is called.
-        Ok(())
-    }
-
     // This is invoked once after the router starts and compiled-in
     // plugins are registered
     fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(HelloWorld { configuration })
     }
+
+    /// This is invoked after all plugins have been created and we're ready to go live.
+    /// This method MUST not panic.
+    fn activate(&mut self);
 
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
@@ -240,15 +228,11 @@ When the router starts, all plugins included in the executable are registered. A
 
 There is no sequencing for plugin registration, and registrations might even execute in parallel. A plugin should _never_ rely on the existence of _another_ plugin during initialization.
 
-### Startup
+### Activate
 
-When the router is ready to start serving requests, it calls each plugin's `startup` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#configuration-file).
+When the router is ready to start serving requests, it calls each plugin's `activate` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#configuration-file).
 
 Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
-
-### Shutdown
-
-When the router is ready to stop serving requests, it calls each plugin's `shutdown` method. Plugins are stopped in the opposite of the order in which they were started. During shutdown, plugin errors are logged and do not affect router execution.
 
 ### Lifecycle notes
 

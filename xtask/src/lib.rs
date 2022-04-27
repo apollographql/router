@@ -1,10 +1,12 @@
 mod federation_demo;
+mod jaeger;
 
 pub use anyhow;
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use cargo_metadata::MetadataCommand;
 pub use federation_demo::*;
+pub use jaeger::*;
 use once_cell::sync::Lazy;
 use std::process::{Child, Command};
 use std::{convert::TryFrom, env, str};

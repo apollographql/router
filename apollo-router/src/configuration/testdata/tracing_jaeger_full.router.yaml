@@ -1,0 +1,9 @@
+server:
+  listen: 1.2.3.4:5
+telemetry:
+  tracing:
+    jaeger:
+      collector:
+        endpoint: "http://foo"
+        password: ""
+        username: ""

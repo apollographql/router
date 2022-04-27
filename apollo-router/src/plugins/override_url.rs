@@ -16,7 +16,7 @@ struct OverrideSubgraphUrl {
 impl Plugin for OverrideSubgraphUrl {
     type Config = HashMap<String, url::Url>;
 
-    fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
         Ok(OverrideSubgraphUrl {
             urls: configuration
                 .into_iter()
@@ -83,6 +83,7 @@ mod tests {
                 )
                 .unwrap(),
             )
+            .await
             .unwrap();
         let mut subgraph_service =
             dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
