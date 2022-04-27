@@ -82,6 +82,9 @@ All windows processes are spawned via xtask rather than a separate CircleCI stag
 ### Enable default feature in graphql_client [PR #905](https://github.com/apollographql/router/pull/905)
 removing the default feature can cause build issues in plugins.
 
+### Follow the GraphQL spec about Response format [PR #926](https://github.com/apollographql/router/pull/926)
+The response's `data` field can be null or absent depending on conventions that are now followed by the router.
+
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
