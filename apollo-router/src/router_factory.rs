@@ -294,7 +294,7 @@ mod test {
         assert!(service.is_err())
     }
 
-    // This test must use the mult_thread tokio executor or the opentelemetry hang bug will
+    // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
     // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
     #[tokio::test(flavor = "multi_thread")]
     async fn test_telemetry_doesnt_hang_with_invalid_schema() {
