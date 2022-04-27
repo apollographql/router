@@ -536,9 +536,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::{ApolloPlugins, Cors};
+    use crate::configuration::Cors;
     use apollo_router_core::http_compat::Request;
-    use apollo_router_core::{register_plugin, Plugin};
     use http::header::CONTENT_TYPE;
     use mockall::mock;
     use reqwest::header::{
@@ -548,9 +547,7 @@ mod tests {
     };
     use reqwest::redirect::Policy;
     use reqwest::{Client, Method, StatusCode};
-    use schemars::JsonSchema;
-    use serde::Deserialize;
-    use serde_json::{json, Map};
+    use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
     use test_log::test;
