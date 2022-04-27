@@ -5,6 +5,7 @@
 use crate::{fetch::OperationKind, prelude::graphql::*};
 use apollo_parser::ast;
 use derivative::Derivative;
+use opentelemetry::trace::SpanKind;
 use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
@@ -84,7 +85,7 @@ impl Query {
         }
     }
 
-    #[tracing::instrument(skip_all, level = "info" name = "parse_query")]
+    #[tracing::instrument(skip_all, level = "info" name = "parse_query", fields(otel.kind=%SpanKind::Internal) )]
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 

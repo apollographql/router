@@ -21,7 +21,7 @@ use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
 };
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{Tracer, TracerProvider};
+use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
@@ -265,7 +265,7 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("query_planning"))
+            .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .boxed()
     }
@@ -275,7 +275,7 @@ impl Plugin for Telemetry {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("execution"))
+            .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .boxed()
     }
@@ -289,7 +289,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("subgraph", name = name.as_str()))
+            .instrument(move |_| info_span!("subgraph", name = name.as_str(), "otel.kind" = %SpanKind::Client))
             .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
@@ -464,7 +464,8 @@ impl Telemetry {
                 query = query.as_str(),
                 operation_name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default()
+                client_version = client_version.to_str().unwrap_or_default(),
+                "otel.kind" = %SpanKind::Internal
             );
             span
         }

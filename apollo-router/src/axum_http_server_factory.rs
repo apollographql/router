@@ -16,7 +16,7 @@ use http::{HeaderValue, Request, Uri};
 use hyper::server::conn::Http;
 use hyper::Body;
 use opentelemetry::global;
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::{SpanKind, TraceContextExt};
 use serde_json::json;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -31,7 +31,7 @@ use tower::buffer::Buffer;
 use tower::util::BoxService;
 use tower::MakeService;
 use tower::{BoxError, ServiceExt};
-use tower_http::trace::{DefaultMakeSpan, MakeSpan, TraceLayer};
+use tower_http::trace::{MakeSpan, TraceLayer};
 use tower_service::Service;
 use tracing::{Level, Span};
 
@@ -119,9 +119,21 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 )
                 .route("/.well-known/apollo/server-health", get(health_check))
                 .layer(
-                    TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan(
-                        DefaultMakeSpan::new().level(Level::INFO),
-                    )),
+                    TraceLayer::new_for_http()
+                        .make_span_with(PropagatingMakeSpan::new(Level::INFO))
+                        .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
+                            if resp.status() >= StatusCode::BAD_REQUEST {
+                                span.record(
+                                    "otel.status_code",
+                                    &opentelemetry::trace::StatusCode::Error.as_str(),
+                                );
+                            } else {
+                                span.record(
+                                    "otel.status_code",
+                                    &opentelemetry::trace::StatusCode::Ok.as_str(),
+                                );
+                            }
+                        }),
                 )
                 .layer(Extension(boxed_service))
                 .layer(cors);
@@ -511,10 +523,88 @@ fn prefers_html(accept_header: &HeaderValue) -> bool {
 }
 
 #[derive(Clone)]
-struct PropagatingMakeSpan(DefaultMakeSpan);
+struct PropagatingMakeSpan {
+    level: Level,
+}
+
+impl PropagatingMakeSpan {
+    fn new(level: Level) -> Self {
+        Self { level }
+    }
+}
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
+        macro_rules! make_span {
+            ($level:expr) => {
+                make_span!($level,)
+            };
+            ($level:expr, $($fields:tt)*) => {
+                match $level {
+                    Level::ERROR => {
+                        tracing::span!(
+                            Level::ERROR,
+                            "request",
+                            method = %request.method(),
+                            uri = %request.uri(),
+                            version = ?request.version(),
+                            "otel.kind" = %SpanKind::Server,
+                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                            $($fields)*
+                        )
+                    }
+                    Level::WARN => {
+                        tracing::span!(
+                            Level::WARN,
+                            "request",
+                            method = %request.method(),
+                            uri = %request.uri(),
+                            version = ?request.version(),
+                            "otel.kind" = %SpanKind::Server,
+                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                            $($fields)*
+                        )
+                    }
+                    Level::INFO => {
+                        tracing::span!(
+                            Level::INFO,
+                            "request",
+                            method = %request.method(),
+                            uri = %request.uri(),
+                            version = ?request.version(),
+                            "otel.kind" = %SpanKind::Server,
+                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                            $($fields)*
+                        )
+                    }
+                    Level::DEBUG => {
+                        tracing::span!(
+                            Level::DEBUG,
+                            "request",
+                            method = %request.method(),
+                            uri = %request.uri(),
+                            version = ?request.version(),
+                            "otel.kind" = %SpanKind::Server,
+                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                            $($fields)*
+                        )
+                    }
+                    Level::TRACE => {
+                        tracing::span!(
+                            Level::TRACE,
+                            "request",
+                            method = %request.method(),
+                            uri = %request.uri(),
+                            version = ?request.version(),
+                            "otel.kind" = %SpanKind::Server,
+                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
+                            $($fields)*
+                        )
+                    }
+                }
+            };
+        }
+
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
@@ -525,10 +615,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         if context.span().span_context().is_valid() {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            self.0.make_span(request)
+            make_span!(self.level)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            self.0.make_span(request)
+            make_span!(self.level)
         }
     }
 }
