@@ -294,7 +294,9 @@ mod test {
         assert!(service.is_err())
     }
 
-    #[tokio::test]
+    // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
+    // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_telemetry_doesnt_hang_with_invalid_schema() {
         use crate::subscriber::{set_global_subscriber, RouterSubscriber};
         use tracing_subscriber::EnvFilter;
