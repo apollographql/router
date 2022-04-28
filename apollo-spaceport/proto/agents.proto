@@ -22,10 +22,12 @@ message ReporterStats {
     ReporterGraph graph = 1;
     string key = 2;
     Report.ContextualizedStats stats = 3;
+    map<string, Report.ReferencedFieldsForType> fields = 4;
 }
 
 message ReporterTrace {
     ReporterGraph graph = 1;
     string key = 2;
     Report.Trace trace = 3;
+    map<string, Report.ReferencedFieldsForType> fields = 4;
 }

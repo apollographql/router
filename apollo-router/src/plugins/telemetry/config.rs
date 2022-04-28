@@ -1,7 +1,6 @@
 //! Configuration for the telemetry plugin.
 use super::*;
 use crate::plugins::telemetry::metrics;
-use crate::plugins::telemetry::tracing::apollo_telemetry::default_collector;
 use opentelemetry::sdk::Resource;
 use opentelemetry::{Array, KeyValue, Value};
 use schemars::JsonSchema;
@@ -41,8 +40,6 @@ pub struct Conf {
     pub metrics: Option<Metrics>,
     pub tracing: Option<Tracing>,
     pub apollo: Option<apollo::Config>,
-    #[serde(default = "default_collector")]
-    pub collector: String,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

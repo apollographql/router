@@ -13,6 +13,7 @@ use agent::reporter_client::ReporterClient;
 pub use agent::ReporterGraph;
 use agent::{ReporterResponse, ReporterStats, ReporterTrace};
 pub use report::*;
+use std::collections::HashMap;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use sys_info::hostname;
@@ -198,12 +199,14 @@ impl Reporter {
         graph: ReporterGraph,
         key: String,
         stats: ContextualizedStats,
+        fields: HashMap<String, ReferencedFieldsForType>,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_stats(Request::new(ReporterStats {
                 graph: Some(graph),
                 key,
                 stats: Some(stats),
+                fields,
             }))
             .await
     }
@@ -216,12 +219,14 @@ impl Reporter {
         graph: ReporterGraph,
         key: String,
         trace: Trace,
+        fields: HashMap<String, ReferencedFieldsForType>,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_trace(Request::new(ReporterTrace {
                 graph: Some(graph),
                 key,
                 trace: Some(trace),
+                fields: fields,
             }))
             .await
     }

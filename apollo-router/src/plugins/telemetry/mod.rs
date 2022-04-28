@@ -46,7 +46,7 @@ static EXTENSION_KEY: &str = "telemetry";
 
 #[derive(Deserialize, Serialize, Debug)]
 
-struct PartialQueryStats {
+pub(crate) struct PartialQueryStats {
     client_name: String,
     client_version: String,
     elapsed: Option<Duration>,
@@ -92,7 +92,7 @@ impl TryFrom<PartialQueryStats> for QueryStats {
     }
 }
 
-pub struct Telemetry {
+pub(crate) struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
@@ -102,6 +102,7 @@ pub struct Telemetry {
     meter_provider: AggregateMeterProvider,
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
+    apollo_metrics_sender: metrics::apollo::Sender,
 }
 
 #[derive(Debug)]
@@ -250,11 +251,11 @@ impl Plugin for Telemetry {
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
+            apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
         });
 
         // We're safe now for shutdown.
-
         // Start spaceport
         if let Some(spaceport) = spaceport {
             tokio::spawn(async move {
@@ -278,6 +279,10 @@ impl Plugin for Telemetry {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        let metrics = metrics::apollo::Metrics::default();
+        // TODO
+
+        self.apollo_metrics_sender.send(metrics);
         let metrics = BasicMetrics::new(&self.meter_provider);
         ServiceBuilder::new()
             .instrument(Self::router_service_span(
@@ -517,7 +522,9 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        // TODO Apollo tracing at some point in the future.
+        // This is the shell of what was previously used to transmit metrics, but will in future be useful for sending traces.
+        // builder = setup_tracing(builder, &config.apollo, trace_config)?;
         let tracer_provider = builder.build();
         Ok(tracer_provider)
     }
@@ -526,6 +533,7 @@ impl Telemetry {
         let metrics_config = config.metrics.clone().unwrap_or_default();
         let metrics_common_config = &metrics_config.common.unwrap_or_default();
         let mut builder = MetricsBuilder::default();
+        builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
         builder =
             setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
