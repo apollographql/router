@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 567
 expression: "&schema"
 ---
 {
@@ -448,10 +447,6 @@ expression: "&schema"
           },
           "additionalProperties": false,
           "nullable": true
-        },
-        "collector": {
-          "default": "https://127.0.0.1:50051",
-          "type": "string"
         },
         "metrics": {
           "type": "object",
