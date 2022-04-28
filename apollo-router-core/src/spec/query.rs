@@ -1079,44 +1079,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reformat_matching_operation() {
-        let schema = "
-        type Query {
-            foo: String
-            other: String
-        }
-        ";
-        let query = "query MyOperation { foo }";
-        let response = json! {{
-            "foo": "1",
-            "other": "2",
-        }};
-        // an invalid operation name should fail
-        {
-            let schema: Schema = schema.parse().expect("could not parse schema");
-            let query = Query::parse(query, &schema).expect("could not parse query");
-            let mut response = Response::builder().data(response.clone()).build();
-
-            query.format_response(
-                &mut response,
-                Some("OtherOperation"),
-                Object::default(),
-                &schema,
-            );
-            assert!(response.data.is_none());
-        }
-        assert_format_response!(
-            schema,
-            query,
-            response,
-            Some("MyOperation"),
-            json! {{
-                "foo": "1",
-            }},
-        );
-    }
-
     macro_rules! run_validation {
         ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
             let variables = match $variables {
