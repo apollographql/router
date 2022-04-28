@@ -70,9 +70,10 @@ mod test {
     use super::*;
     use crate::plugin::utils::test::mock::subgraph::MockSubgraph;
     use crate::{
-        DynPlugin, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
+        DynPlugin, Object, PluggableRouterServiceBuilder, Response, ResponseBody, RouterRequest,
         RouterResponse, Schema,
     };
+    use bytes::Bytes;
     use serde_json::Value as jValue;
     use serde_json_bytes::{ByteString, Value};
     use std::sync::Arc;
@@ -87,7 +88,12 @@ mod test {
     });
 
     static REDACTED_ACCOUNT_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {
-        ResponseBody::GraphQL(serde_json::from_str(r#"{"data": null , "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#).unwrap())
+        ResponseBody::GraphQL(
+            Response::from_bytes("account", Bytes::from_static(r#"{
+                "data": null,
+                "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#.as_bytes())
+    ).unwrap()
+    )
     });
 
     static EXPECTED_RESPONSE: Lazy<ResponseBody> = Lazy::new(|| {

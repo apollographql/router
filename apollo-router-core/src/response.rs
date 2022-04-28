@@ -57,7 +57,7 @@ impl Response {
                 reason: error.to_string(),
             })?;
 
-        let data = extract_key_value_from_object!(object, "data");
+        let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
