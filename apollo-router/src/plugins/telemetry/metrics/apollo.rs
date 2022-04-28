@@ -333,14 +333,16 @@ fn consolidate(
             .add(metric);
     }
 
-    let result = aggregated_metrics
+    aggregated_metrics
         .into_iter()
         .map(|((client_name, client_version, key), aggregated_metric)| {
-            let mut contextualized_stats = ContextualizedStats::default();
-            contextualized_stats.context = Some(StatsContext {
-                client_name,
-                client_version,
-            });
+            let mut contextualized_stats = ContextualizedStats {
+                context: Some(StatsContext {
+                    client_name,
+                    client_version,
+                }),
+                ..Default::default()
+            };
             contextualized_stats.query_latency_stats =
                 Some(aggregated_metric.query_latency_stats.into());
 
@@ -350,9 +352,7 @@ fn consolidate(
                 aggregated_metric.referenced_fields_by_type,
             )
         })
-        .collect();
-
-    result
+        .collect()
 }
 
 impl From<AggregatedQueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
@@ -399,7 +399,8 @@ impl managed::Manager for ReporterManager {
     type Error = ReporterError;
 
     async fn create(&self) -> Result<Reporter, Self::Error> {
-        Ok(Reporter::try_new(self.endpoint.to_string()).await?)
+        let url = self.endpoint.to_string();
+        Ok(Reporter::try_new(url).await?)
     }
 
     async fn recycle(&self, _r: &mut Reporter) -> managed::RecycleResult<Self::Error> {
@@ -407,10 +408,15 @@ impl managed::Manager for ReporterManager {
     }
 }
 
-#[derive(Default)]
 struct DurationHistogram {
     buckets: Vec<i64>,
     entries: u64,
+}
+
+impl Default for DurationHistogram {
+    fn default() -> Self {
+        DurationHistogram::new(None)
+    }
 }
 
 // The TS implementation of DurationHistogram does Run Length Encoding (RLE)

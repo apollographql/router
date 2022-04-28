@@ -226,7 +226,7 @@ impl Reporter {
                 graph: Some(graph),
                 key,
                 trace: Some(trace),
-                fields: fields,
+                fields,
             }))
             .await
     }
