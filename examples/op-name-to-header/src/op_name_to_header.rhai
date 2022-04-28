@@ -10,12 +10,37 @@ fn router_service(service) {
 }
 
 fn process_request(request) {
-    print("in process_request");
+    print("in process_request: " + request);
+
+    print("*** Let's test out some header manipulation stuff ***");
+    print("*** Grab the headers from our request ***");
+    let original_headers = request.headers;
+    print("*** Print the headers ***");
+    print("original headers: \n" + original_headers);
+    print("*** Loop over our headers and Print pairs and also print each name and value as fields ***");
+    for pair in original_headers {
+        print("\tpair: " + pair);
+        print("\tname: " + pair.name + " value: " + pair.value);
+    }
+
+    print("*** Add a header called 'my_header' with value 'something' ***");
+    original_headers.insert("my_header", "something");
+
+    print("*** Print our modified headers (still local to this script) ***");
+    print("modified headers: \n" + original_headers);
+
+    print("*** Now update our request headers with our modified set ***");
+    request.headers = original_headers;
+
+    print("*** We've updated our request. Every time we get headers, we'll have our new header in there ***");
+    print("final headers: \n" + request.headers);
+
     /*
     if request.operation_name != 0 {
         request.headers["X-operation-name"] = request.operation_name;
     }
     */
+    print("*** MORE TESTING OF STUFF, operation names, context, ... ***");
     print("operation name: " + request.operation_name);
     request.insert_context("this", "that");
     let value = request.get_context("this");

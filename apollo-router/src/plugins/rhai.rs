@@ -1,41 +1,136 @@
 //! Customization via Rhai.
 
-use std::sync::Mutex;
-use std::{path::PathBuf, str::FromStr, sync::Arc};
-
-use apollo_router_core::{register_plugin, Object, Plugin, RouterRequest, RouterResponse, Value};
 use apollo_router_core::{
-    Context, Entries, ExecutionRequest, ExecutionResponse, QueryPlannerRequest,
-    QueryPlannerResponse, SubgraphRequest, SubgraphResponse,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
+    QueryPlannerRequest, QueryPlannerResponse, Request, RouterRequest, RouterResponse,
+    SubgraphRequest, SubgraphResponse,
 };
+use http::header::{HeaderName, HeaderValue};
 use http::HeaderMap;
-use http::{header::HeaderName, HeaderValue};
-use rhai::serde::{from_dynamic, to_dynamic};
-use rhai::{Dynamic, Engine, EvalAltResult, Scope, Shared, AST};
+use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::ByteString;
+use std::str::FromStr;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tower::{util::BoxService, BoxError, ServiceExt};
 
-use rhai::plugin::*; // a "prelude" import for macros
+pub trait Accessor<Access>: Send {
+    fn accessor(&self) -> &Access;
 
-use rhai::{FnPtr, NativeCallContext};
+    fn accessor_mut(&mut self) -> &mut Access;
+}
 
 #[export_module]
 mod rhai_plugin_mod {
+    macro_rules! gen_rhai_interface {
+        ($ ($base: ident), +) => {
+            #[export_module]
+            pub(crate) mod rhai_generated_mod {
+                $(
+            paste::paste! {
+                pub fn [<get_context_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    key: &str,
+                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let request_opt = guard.take();
+                    match request_opt {
+                        Some(mut request) => {
+                            let result = get_context(&mut request, key);
+                            guard.replace(request);
+                            result
+                        }
+                        None => panic!("surely there is a request here..."),
+                    }
+                }
 
-    // This is a setter for 'RouterRequest::context'.
-    #[rhai_fn(set = "context")]
-    pub fn set_context(obj: &mut SharedRouterRequest, value: Context) {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(mut request) => {
-                request.context = value;
-                guard.replace(request);
+                pub fn [<get_context_ $base _response>](
+                    obj: &mut [<Shared $base:camel Response>],
+                    key: &str,
+                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let response_opt = guard.take();
+                    match response_opt {
+                        Some(mut response) => {
+                            let result = get_context(&mut response, key);
+                            guard.replace(response);
+                            result
+                        }
+                        None => panic!("surely there is a response here..."),
+                    }
+                }
+
+                pub fn [<insert_context_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    key: &str,
+                    value: Dynamic,
+                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let request_opt = guard.take();
+                    match request_opt {
+                        Some(mut request) => {
+                            let result = insert_context(&mut request, key, value);
+                            guard.replace(request);
+                            result
+                        }
+                        None => panic!("surely there is a request here..."),
+                    }
+                }
+
+                pub fn [<insert_context_ $base _response>](
+                    obj: &mut [<Shared $base:camel Response>],
+                    key: &str,
+                    value: Dynamic,
+                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let response_opt = guard.take();
+                    match response_opt {
+                        Some(mut response) => {
+                            let result = insert_context(&mut response, key, value);
+                            guard.replace(response);
+                            result
+                        }
+                        None => panic!("surely there is a response here..."),
+                    }
+                }
+
+                pub fn [<get_originating_headers_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                ) -> Result<HeaderMap, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let request_opt = guard.take();
+                    match request_opt {
+                        Some(mut request) => {
+                            let result = get_originating_headers(&mut request);
+                            guard.replace(request);
+                            result
+                        }
+                        None => panic!("surely there is a request here..."),
+                    }
+                }
+
+                pub fn [<set_originating_headers_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    headers: HeaderMap
+                ) -> Result<(), Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let request_opt = guard.take();
+                    match request_opt {
+                        Some(mut request) => {
+                            let result = set_originating_headers(&mut request, headers);
+                            guard.replace(request);
+                            result
+                        }
+                        None => panic!("surely there is a request here..."),
+                    }
+                }
             }
-            None => panic!("surely there is a request here..."),
-        }
+                )*
+            }
+        };
     }
 
     // This is a getter for 'RouterRequest::operation_name'.
@@ -58,49 +153,58 @@ mod rhai_plugin_mod {
         }
     }
 
-    // This is part of our 'RouterRequest::context'.
-    #[rhai_fn(return_raw)]
-    pub fn get_context(
-        obj: &mut SharedRouterRequest,
+    fn get_context<T: Accessor<Context>>(
+        obj: &mut T,
         key: &str,
     ) -> Result<Dynamic, Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(request) => {
-                let result = request
-                    .context
-                    .get(key)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
-                    .map_err(|e: BoxError| e.to_string().into());
-                guard.replace(request);
-                result
-            }
-            None => panic!("surely there is a request here..."),
-        }
+        obj.accessor()
+            .get(key)
+            .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+            .map_err(|e: BoxError| e.to_string().into())
     }
 
-    // This is part of our 'RouterRequest::context'.
-    #[rhai_fn(return_raw)]
-    pub fn insert_context(
-        obj: &mut SharedRouterRequest,
+    fn insert_context<T: Accessor<Context>>(
+        obj: &mut T,
         key: &str,
         value: Dynamic,
     ) -> Result<Dynamic, Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(request) => {
-                let result = request
-                    .context
-                    .insert(key, value)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
-                    .map_err(|e: BoxError| e.to_string().into());
-                guard.replace(request);
-                result
-            }
-            None => panic!("surely there is a request here..."),
-        }
+        obj.accessor_mut()
+            .insert(key, value)
+            .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+            .map_err(|e: BoxError| e.to_string().into())
+    }
+
+    fn get_originating_headers<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.accessor().headers().clone())
+    }
+
+    fn set_originating_headers<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().headers_mut() = headers;
+        Ok(())
+        /*
+        Ok(obj
+            .accessor()
+            .headers()
+            .iter()
+            .map(|(name, _value)| {
+                // vec![
+                Dynamic::from(name.to_string()) /*
+                                                name.to_string(),
+                                                value
+                                                    .to_str()
+                                                    .expect("XXX HEADER VALUES SHOULD BE STRINGS")
+                                                    .to_string(),
+                                                    */
+                // ]
+            })
+            // .map_err(|e: BoxError| e.to_string().into())
+            .collect::<Vec<Dynamic>>())
+                */
     }
 
     pub(crate) fn map_request(rhai_service: &mut RhaiService, callback: FnPtr) {
@@ -118,6 +222,8 @@ mod rhai_plugin_mod {
             callback,
         )
     }
+
+    gen_rhai_interface!(router, query_planner, execution, subgraph);
 }
 
 #[derive(Default, Clone)]
@@ -130,44 +236,6 @@ pub struct Rhai {
 #[serde(deny_unknown_fields)]
 pub struct Conf {
     filename: PathBuf,
-}
-
-trait RhaiObjectSetterGetter {
-    fn set(&mut self, key: String, value: Value);
-    fn get_cloned(&mut self, key: String) -> Value;
-}
-
-impl RhaiObjectSetterGetter for Object {
-    fn set(&mut self, key: String, value: Value) {
-        self.insert(ByteString::from(key), value);
-    }
-    fn get_cloned(&mut self, key: String) -> Value {
-        self.get(&ByteString::from(key))
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Headers(HeaderMap);
-impl Headers {
-    fn set_header(&mut self, name: String, value: String) -> Result<(), Box<EvalAltResult>> {
-        self.0.insert(
-            HeaderName::from_str(&name)
-                .map_err(|err| format!("invalid header name '{name}': {err}"))?,
-            HeaderValue::from_str(&value)
-                .map_err(|err| format!("invalid header value '{value}': {err}"))?,
-        );
-
-        Ok(())
-    }
-    fn get_header(&mut self, name: String) -> String {
-        self.0
-            .get(&name)
-            .cloned()
-            .and_then(|h| Some(h.to_str().ok()?.to_string()))
-            .unwrap_or_default()
-    }
 }
 
 #[async_trait::async_trait]
@@ -186,7 +254,6 @@ impl Plugin for Rhai {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        let step = ServiceStep::Router(shared_service.clone());
         if self
             .ast
             .iter_fn_def()
@@ -201,7 +268,7 @@ impl Plugin for Rhai {
             )
             .expect("XXX FIX THIS");
         }
-        service = step.extract_router_service();
+        service = shared_service.lock().unwrap().take().unwrap();
 
         service
     }
@@ -212,7 +279,6 @@ impl Plugin for Rhai {
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        let step = ServiceStep::QueryPlanner(shared_service.clone());
         if self
             .ast
             .iter_fn_def()
@@ -227,7 +293,7 @@ impl Plugin for Rhai {
             )
             .expect("XXX FIX THIS");
         }
-        service = step.extract_query_planner_service();
+        service = shared_service.lock().unwrap().take().unwrap();
 
         service
     }
@@ -238,7 +304,6 @@ impl Plugin for Rhai {
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        let step = ServiceStep::Execution(shared_service.clone());
         if self
             .ast
             .iter_fn_def()
@@ -253,7 +318,7 @@ impl Plugin for Rhai {
             )
             .expect("XXX FIX THIS");
         }
-        service = step.extract_execution_service();
+        service = shared_service.lock().unwrap().take().unwrap();
 
         service
     }
@@ -265,7 +330,6 @@ impl Plugin for Rhai {
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        let step = ServiceStep::Subgraph(shared_service.clone());
         if self
             .ast
             .iter_fn_def()
@@ -280,18 +344,9 @@ impl Plugin for Rhai {
             )
             .expect("XXX FIX THIS");
         }
-        service = step.extract_subgraph_service();
+        service = shared_service.lock().unwrap().take().unwrap();
 
         service
-    }
-}
-
-impl RhaiObjectSetterGetter for Entries {
-    fn set(&mut self, key: String, value: Value) {
-        self.insert(key, value);
-    }
-    fn get_cloned(&mut self, key: String) -> Value {
-        self.get(&key).map(|v| v.clone()).unwrap_or_default()
     }
 }
 
@@ -304,7 +359,52 @@ pub(crate) enum ServiceStep {
 }
 
 macro_rules! gen_shared_types {
-    ($base: ident) => {
+    (subgraph) => {
+            #[allow(dead_code)]
+            type SharedSubgraphService = Arc<Mutex<Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>>>>;
+
+            #[allow(dead_code)]
+            type SharedSubgraphRequest = Arc<Mutex<Option<SubgraphRequest>>>;
+
+            #[allow(dead_code)]
+            type SharedSubgraphResponse = Arc<Mutex<Option<SubgraphResponse>>>;
+
+            impl Accessor<Context> for SubgraphRequest {
+
+                fn accessor(&self) -> &Context {
+                    &self.context
+                }
+
+                fn accessor_mut(&mut self) -> &mut Context {
+                    &mut self.context
+                }
+            }
+
+            impl Accessor<Context> for SubgraphResponse {
+
+                fn accessor(&self) -> &Context {
+                    &self.context
+                }
+
+                fn accessor_mut(&mut self) -> &mut Context {
+                    &mut self.context
+                }
+            }
+
+            impl Accessor<http_compat::Request<Request>> for SubgraphRequest {
+
+                fn accessor(&self) -> &http_compat::Request<Request> {
+                    &self.originating_request
+                }
+
+                // XXX CAN'T DO THIS FOR SUBGRAPH
+                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+                    panic!("Can't do this for subgraph");
+                }
+            }
+    };
+    ($($base: ident), +) => {
+        $(
         paste::paste! {
             #[allow(dead_code)]
             type [<Shared $base:camel Service>] = Arc<Mutex<Option<BoxService<[<$base:camel Request>], [<$base:camel Response>], BoxError>>>>;
@@ -314,41 +414,56 @@ macro_rules! gen_shared_types {
 
             #[allow(dead_code)]
             type [<Shared $base:camel Response>] = Arc<Mutex<Option<[<$base:camel Response>]>>>;
-        }
-    };
-}
 
-macro_rules! gen_service_step {
-    ($base: ident) => {
-        paste::paste! {
-            fn [<extract_ $base _service>](self) -> BoxService<[<$base:camel Request>], [<$base:camel Response>], BoxError> {
-                match self {
-                    ServiceStep::[<$base:camel>](v) => v.lock().unwrap().take().unwrap(),
-                    _ => panic!("XXX Figure this out at some point"),
+            impl Accessor<Context> for [<$base:camel Request >] {
+
+                fn accessor(&self) -> &Context {
+                    &self.context
+                }
+
+                fn accessor_mut(&mut self) -> &mut Context {
+                    &mut self.context
                 }
             }
 
-            fn [<borrow_ $base _service>](&mut self) -> [<Shared $base:camel Service>] {
-                match self {
-                    ServiceStep::[<$base:camel>](v) => v.clone(),
-                    _ => panic!("XXX Figure this out at some point"),
+            impl Accessor<Context> for [<$base:camel Response >] {
+
+                fn accessor(&self) -> &Context {
+                    &self.context
+                }
+
+                fn accessor_mut(&mut self) -> &mut Context {
+                    &mut self.context
+                }
+            }
+
+            impl Accessor<http_compat::Request<Request>> for [<$base:camel Request >] {
+
+                fn accessor(&self) -> &http_compat::Request<Request> {
+                    &self.originating_request
+                }
+
+                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+                    &mut self.originating_request
                 }
             }
         }
+        )*
     };
 }
 
 macro_rules! gen_map_request {
-    ($base: ident, $this: ident, $engine: ident, $ast: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
         paste::paste! {
-            let borrow = $this.[<borrow_ $base _service>]();
-            let mut guard = borrow.lock().unwrap();
+            let mut guard = $borrow.lock().unwrap();
             let service_opt = guard.take();
             match service_opt {
                 Some(service) => {
                     let new_service = service
                         .map_request(move |request: [<$base:camel Request>]| {
                             let shared_request = Shared::new(Mutex::new(Some(request)));
+                            // let boxed_request = Box::new(request) as Box<dyn ContextAccessor<Accessor = Context>>;
+                            // let shared_request = Shared::new(Mutex::new(Some(boxed_request)));
                             let result: Result<Dynamic, String> = $callback
                                 .call(&$engine, &$ast, (shared_request.clone(),))
                                 .map_err(|err| err.to_string());
@@ -369,10 +484,9 @@ macro_rules! gen_map_request {
 }
 
 macro_rules! gen_map_response {
-    ($base: ident, $this: ident, $engine: ident, $ast: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
         paste::paste! {
-            let borrow = $this.[<borrow_ $base _service>]();
-            let mut guard = borrow.lock().unwrap();
+            let mut guard = $borrow.lock().unwrap();
             let service_opt = guard.take();
             match service_opt {
                 Some(service) => {
@@ -398,47 +512,80 @@ macro_rules! gen_map_response {
     };
 }
 
-gen_shared_types!(router);
-gen_shared_types!(query_planner);
-gen_shared_types!(execution);
+// Special case for subgraph, so invoke separately
+gen_shared_types!(router, query_planner, execution);
 gen_shared_types!(subgraph);
 
-impl ServiceStep {
-    gen_service_step!(router);
-    gen_service_step!(query_planner);
-    gen_service_step!(execution);
-    gen_service_step!(subgraph);
+macro_rules! register_rhai_interface {
+    ($engine: ident, $($base: ident), *) => {
+        $(
+            paste::paste! {
+            // Context stuff
+            $engine.register_result_fn(
+                "get_context",
+                rhai_plugin_mod::rhai_generated_mod::[<get_context_ $base _request>],
+            )
+            .register_result_fn(
+                "get_context",
+                rhai_plugin_mod::rhai_generated_mod::[<get_context_ $base _response>],
+            );
+            $engine.register_result_fn(
+                "insert_context",
+                rhai_plugin_mod::rhai_generated_mod::[<insert_context_ $base _request>],
+            )
+            .register_result_fn(
+                "insert_context",
+                rhai_plugin_mod::rhai_generated_mod::[<insert_context_ $base _response>],
+            );
 
+            // Originating Request
+            $engine.register_get_result(
+                "headers",
+                rhai_plugin_mod::rhai_generated_mod::[<get_originating_headers_ $base _request>],
+            );
+
+            $engine.register_set_result(
+                "headers",
+                rhai_plugin_mod::rhai_generated_mod::[<set_originating_headers_ $base _request>],
+            );
+
+            }
+
+        )*
+    };
+}
+
+impl ServiceStep {
     fn map_request(&mut self, engine: Arc<Engine>, ast: AST, callback: FnPtr) {
         match self {
-            ServiceStep::Router(_) => {
-                gen_map_request!(router, self, engine, ast, callback);
+            ServiceStep::Router(service) => {
+                gen_map_request!(router, service, engine, ast, callback);
             }
-            ServiceStep::QueryPlanner(_) => {
-                gen_map_request!(query_planner, self, engine, ast, callback);
+            ServiceStep::QueryPlanner(service) => {
+                gen_map_request!(query_planner, service, engine, ast, callback);
             }
-            ServiceStep::Execution(_) => {
-                gen_map_request!(execution, self, engine, ast, callback);
+            ServiceStep::Execution(service) => {
+                gen_map_request!(execution, service, engine, ast, callback);
             }
-            ServiceStep::Subgraph(_) => {
-                gen_map_request!(subgraph, self, engine, ast, callback);
+            ServiceStep::Subgraph(service) => {
+                gen_map_request!(subgraph, service, engine, ast, callback);
             }
         }
     }
 
     fn map_response(&mut self, engine: Arc<Engine>, ast: AST, callback: FnPtr) {
         match self {
-            ServiceStep::Router(_) => {
-                gen_map_response!(router, self, engine, ast, callback);
+            ServiceStep::Router(service) => {
+                gen_map_response!(router, service, engine, ast, callback);
             }
-            ServiceStep::QueryPlanner(_) => {
-                gen_map_response!(query_planner, self, engine, ast, callback);
+            ServiceStep::QueryPlanner(service) => {
+                gen_map_response!(query_planner, service, engine, ast, callback);
             }
-            ServiceStep::Execution(_) => {
-                gen_map_response!(execution, self, engine, ast, callback);
+            ServiceStep::Execution(service) => {
+                gen_map_response!(execution, service, engine, ast, callback);
             }
-            ServiceStep::Subgraph(_) => {
-                gen_map_response!(subgraph, self, engine, ast, callback);
+            ServiceStep::Subgraph(service) => {
+                gen_map_response!(subgraph, service, engine, ast, callback);
             }
         }
     }
@@ -449,27 +596,6 @@ pub(crate) struct RhaiService {
     service: ServiceStep,
     engine: Arc<Engine>,
     ast: AST,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct RhaiContext {
-    headers: HeaderMap,
-    context: Context,
-}
-
-impl RhaiContext {
-    fn get_headers(&mut self) -> Headers {
-        Headers(self.headers.clone())
-    }
-    fn set_headers(&mut self, headers: Headers) {
-        self.headers = headers.0;
-    }
-    fn get_entries(&mut self) -> Dynamic {
-        to_dynamic(self.context.entries.clone()).unwrap()
-    }
-    fn set_entries(&mut self, entries: Dynamic) {
-        self.context.entries = from_dynamic(&entries).unwrap();
-    }
 }
 
 impl Rhai {
@@ -499,29 +625,80 @@ impl Rhai {
         let module = exported_module!(rhai_plugin_mod);
 
         // A module can simply be registered into the global namespace.
-        engine.register_global_module(module.into());
-
         engine
-            .set_max_expr_depths(0, 0)
+            .register_global_module(module.into())
             .register_type::<SharedRouterRequest>()
-            .register_type::<RhaiContext>()
-            .register_type::<Context>()
-            .register_indexer_set_result(Headers::set_header)
-            .register_indexer_get(Headers::get_header)
-            .register_indexer_set(Object::set)
-            .register_indexer_get(Object::get_cloned)
-            .register_indexer_set(Entries::set)
-            .register_indexer_get(Entries::get_cloned)
-            .register_get_set(
-                "headers",
-                RhaiContext::get_headers,
-                RhaiContext::set_headers,
+            .register_fn("to_string", |x: &mut SharedRouterRequest| -> String {
+                format!(
+                    "{:?}",
+                    x.lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .originating_request
+                        .body()
+                        .operation_name
+                )
+            })
+            .register_type::<HeaderMap>()
+            .register_fn("insert", |x: &mut HeaderMap, name: &str, value: &str| {
+                x.insert(
+                    HeaderName::from_str(name).unwrap(),
+                    HeaderValue::from_str(value).unwrap(),
+                );
+            })
+            .register_type::<Option<HeaderName>>()
+            .register_type::<HeaderName>()
+            .register_type::<HeaderValue>()
+            .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
+                x.0.clone()
+            })
+            .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
+                x.1.clone()
+            })
+            .register_fn("to_string", |x: &mut Option<HeaderName>| -> String {
+                match x {
+                    Some(v) => v.to_string(),
+                    None => "None".to_string(),
+                }
+            })
+            .register_fn("to_string", |x: &mut HeaderName| -> String {
+                x.to_string()
+            })
+            .register_fn("to_string", |x: &mut HeaderValue| -> String {
+                x.to_str().expect("XXX").to_string()
+            })
+            .register_iterator::<HeaderMap>()
+            .register_fn("to_string", |x: &mut HeaderMap| -> String {
+                let mut msg = String::new();
+                for pair in x.iter() {
+                    let line = format!(
+                        "{}: {}",
+                        pair.0.to_string(),
+                        pair.1.to_str().expect("XXX").to_string()
+                    );
+                    msg.push_str(line.as_ref());
+                    msg.push_str("\n");
+                }
+                msg
+            })
+            .register_fn(
+                "to_string",
+                |x: &mut (Option<HeaderName>, HeaderValue)| -> String {
+                    format!(
+                        "{}: {}",
+                        match &x.0 {
+                            Some(v) => v.to_string(),
+                            None => "None".to_string(),
+                        },
+                        x.1.to_str().expect("XXX").to_string()
+                    )
+                },
             )
-            .register_get_set(
-                "entries",
-                RhaiContext::get_entries,
-                RhaiContext::set_entries,
-            );
+            .register_type::<(Option<HeaderName>, HeaderValue)>();
+
+        engine.set_max_expr_depths(0, 0);
+        register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
         engine
     }

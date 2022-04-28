@@ -99,7 +99,7 @@ axum = { version = "0.5.3", features = ["headers", "json", "original-uri"], opti
 warp = { version = "0.3.2", default-features = false, features = [
     "compression",
 ], optional = true }
-rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.6.1", features = ["sync", "serde", "internals"] }
 libc = "0.2.124"
 yaml-rust = "0.4.5"
 
