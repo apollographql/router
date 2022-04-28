@@ -623,7 +623,7 @@ mod tests {
             service_response.response.into_body().try_into().unwrap();
 
         assert!(graphql_response.errors.is_empty());
-        assert_eq!(expected_mock_response_data, graphql_response.data)
+        assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())
     }
 
     #[tokio::test]
