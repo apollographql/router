@@ -84,8 +84,6 @@ impl Query {
             failfast_debug!("invalid type for data in response.");
         }
     }
-
-    #[tracing::instrument(skip_all, level = "info" name = "parse_query", fields(otel.kind=%SpanKind::Internal) )]
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
