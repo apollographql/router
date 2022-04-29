@@ -2,10 +2,10 @@
 
 use apollo_router_core::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, Request, RouterRequest, RouterResponse,
-    SubgraphRequest, SubgraphResponse,
+    QueryPlannerRequest, QueryPlannerResponse, Request, ResponseBody, RouterRequest,
+    RouterResponse, SubgraphRequest, SubgraphResponse,
 };
-use http::header::{HeaderName, HeaderValue};
+use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::HeaderMap;
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Scope, Shared, AST};
 use schemars::JsonSchema;
@@ -24,22 +24,21 @@ pub trait Accessor<Access>: Send {
 }
 
 #[export_module]
-mod rhai_plugin_mod {
+mod router_plugin_mod {
     macro_rules! gen_rhai_interface {
         ($ ($base: ident), +) => {
             #[export_module]
-            pub(crate) mod rhai_generated_mod {
+            pub(crate) mod router_generated_mod {
                 $(
             paste::paste! {
                 pub fn [<get_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
-                    key: &str,
-                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                ) -> Result<Context, Box<EvalAltResult>> {
                     let mut guard = obj.lock().unwrap();
                     let request_opt = guard.take();
                     match request_opt {
                         Some(mut request) => {
-                            let result = get_context(&mut request, key);
+                            let result = get_context(&mut request);
                             guard.replace(request);
                             result
                         }
@@ -49,13 +48,12 @@ mod rhai_plugin_mod {
 
                 pub fn [<get_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
-                    key: &str,
-                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                ) -> Result<Context, Box<EvalAltResult>> {
                     let mut guard = obj.lock().unwrap();
                     let response_opt = guard.take();
                     match response_opt {
                         Some(mut response) => {
-                            let result = get_context(&mut response, key);
+                            let result = get_context(&mut response);
                             guard.replace(response);
                             result
                         }
@@ -65,14 +63,13 @@ mod rhai_plugin_mod {
 
                 pub fn [<insert_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
-                    key: &str,
-                    value: Dynamic,
-                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    context: Context
+                ) -> Result<(), Box<EvalAltResult>> {
                     let mut guard = obj.lock().unwrap();
                     let request_opt = guard.take();
                     match request_opt {
                         Some(mut request) => {
-                            let result = insert_context(&mut request, key, value);
+                            let result = insert_context(&mut request, context);
                             guard.replace(request);
                             result
                         }
@@ -82,14 +79,13 @@ mod rhai_plugin_mod {
 
                 pub fn [<insert_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
-                    key: &str,
-                    value: Dynamic,
-                ) -> Result<Dynamic, Box<EvalAltResult>> {
+                    context: Context
+                ) -> Result<(), Box<EvalAltResult>> {
                     let mut guard = obj.lock().unwrap();
                     let response_opt = guard.take();
                     match response_opt {
                         Some(mut response) => {
-                            let result = insert_context(&mut response, key, value);
+                            let result = insert_context(&mut response, context);
                             guard.replace(response);
                             result
                         }
@@ -112,6 +108,24 @@ mod rhai_plugin_mod {
                     }
                 }
 
+                /* XXX ONLY VALID FOR CERTAIN TYPES
+                 *
+                pub fn [<get_originating_headers_ $base _response>](
+                    obj: &mut [<Shared $base:camel Response>],
+                ) -> Result<HeaderMap, Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let response_opt = guard.take();
+                    match response_opt {
+                        Some(mut response) => {
+                            let result = get_originating_headers(&mut response);
+                            guard.replace(response);
+                            result
+                        }
+                        None => panic!("surely there is a response here..."),
+                    }
+                }
+                */
+
                 pub fn [<set_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     headers: HeaderMap
@@ -127,10 +141,61 @@ mod rhai_plugin_mod {
                         None => panic!("surely there is a request here..."),
                     }
                 }
+
+                /* XXX ONLY VALID FOR CERTAIN TYPES
+                pub fn [<set_originating_headers_ $base _response>](
+                    obj: &mut [<Shared $base:camel Response>],
+                    headers: HeaderMap
+                ) -> Result<(), Box<EvalAltResult>> {
+                    let mut guard = obj.lock().unwrap();
+                    let response_opt = guard.take();
+                    match response_opt {
+                        Some(mut response) => {
+                            let result = set_originating_headers(&mut response, headers);
+                            guard.replace(response);
+                            result
+                        }
+                        None => panic!("surely there is a response here..."),
+                    }
+                }
+                */
             }
                 )*
             }
         };
+    }
+
+    #[rhai_fn(get = "headers", return_raw)]
+    pub fn get_originating_headers_router_response(
+        obj: &mut SharedRouterResponse,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        let mut guard = obj.lock().unwrap();
+        let response_opt = guard.take();
+        match response_opt {
+            Some(mut response) => {
+                let result = get_originating_headers_response_response_body(&mut response);
+                guard.replace(response);
+                result
+            }
+            None => panic!("surely there is a response here..."),
+        }
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub fn set_originating_headers_router_response(
+        obj: &mut SharedRouterResponse,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let mut guard = obj.lock().unwrap();
+        let response_opt = guard.take();
+        match response_opt {
+            Some(mut response) => {
+                let result = set_originating_headers_response_response_body(&mut response, headers);
+                guard.replace(response);
+                result
+            }
+            None => panic!("surely there is a response here..."),
+        }
     }
 
     // This is a getter for 'RouterRequest::operation_name'.
@@ -153,28 +218,27 @@ mod rhai_plugin_mod {
         }
     }
 
-    fn get_context<T: Accessor<Context>>(
-        obj: &mut T,
-        key: &str,
-    ) -> Result<Dynamic, Box<EvalAltResult>> {
-        obj.accessor()
-            .get(key)
-            .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
-            .map_err(|e: BoxError| e.to_string().into())
+    fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.accessor().clone())
     }
 
     fn insert_context<T: Accessor<Context>>(
         obj: &mut T,
-        key: &str,
-        value: Dynamic,
-    ) -> Result<Dynamic, Box<EvalAltResult>> {
-        obj.accessor_mut()
-            .insert(key, value)
-            .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
-            .map_err(|e: BoxError| e.to_string().into())
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut() = context;
+        Ok(())
     }
 
     fn get_originating_headers<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.accessor().headers().clone())
+    }
+
+    fn get_originating_headers_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.accessor().headers().clone())
@@ -186,25 +250,16 @@ mod rhai_plugin_mod {
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().headers_mut() = headers;
         Ok(())
-        /*
-        Ok(obj
-            .accessor()
-            .headers()
-            .iter()
-            .map(|(name, _value)| {
-                // vec![
-                Dynamic::from(name.to_string()) /*
-                                                name.to_string(),
-                                                value
-                                                    .to_str()
-                                                    .expect("XXX HEADER VALUES SHOULD BE STRINGS")
-                                                    .to_string(),
-                                                    */
-                // ]
-            })
-            // .map_err(|e: BoxError| e.to_string().into())
-            .collect::<Vec<Dynamic>>())
-                */
+    }
+
+    fn set_originating_headers_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
+        obj: &mut T,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().headers_mut() = headers;
+        Ok(())
     }
 
     pub(crate) fn map_request(rhai_service: &mut RhaiService, callback: FnPtr) {
@@ -462,13 +517,12 @@ macro_rules! gen_map_request {
                     let new_service = service
                         .map_request(move |request: [<$base:camel Request>]| {
                             let shared_request = Shared::new(Mutex::new(Some(request)));
-                            // let boxed_request = Box::new(request) as Box<dyn ContextAccessor<Accessor = Context>>;
-                            // let shared_request = Shared::new(Mutex::new(Some(boxed_request)));
                             let result: Result<Dynamic, String> = $callback
                                 .call(&$engine, &$ast, (shared_request.clone(),))
                                 .map_err(|err| err.to_string());
                             if let Err(error) = result {
                                 tracing::error!("map_request callback failed: {error}");
+                                eprintln!("map_request callback failed: {error}");
                             }
                             let mut guard = shared_request.lock().unwrap();
                             let request_opt = guard.take();
@@ -498,6 +552,7 @@ macro_rules! gen_map_response {
                                 .map_err(|err| err.to_string());
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
+                                eprintln!("map_response callback failed: {error}");
                             }
                             let mut guard = shared_response.lock().unwrap();
                             let response_opt = guard.take();
@@ -516,37 +571,48 @@ macro_rules! gen_map_response {
 gen_shared_types!(router, query_planner, execution);
 gen_shared_types!(subgraph);
 
+impl Accessor<http_compat::Response<ResponseBody>> for RouterResponse {
+    fn accessor(&self) -> &http_compat::Response<ResponseBody> {
+        &self.response
+    }
+
+    fn accessor_mut(&mut self) -> &mut http_compat::Response<ResponseBody> {
+        &mut self.response
+    }
+}
+
 macro_rules! register_rhai_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
             paste::paste! {
             // Context stuff
-            $engine.register_result_fn(
-                "get_context",
-                rhai_plugin_mod::rhai_generated_mod::[<get_context_ $base _request>],
+            $engine.register_get_result(
+                "context",
+                router_plugin_mod::router_generated_mod::[<get_context_ $base _request>],
             )
-            .register_result_fn(
-                "get_context",
-                rhai_plugin_mod::rhai_generated_mod::[<get_context_ $base _response>],
+            .register_get_result(
+                "context",
+                router_plugin_mod::router_generated_mod::[<get_context_ $base _response>],
             );
-            $engine.register_result_fn(
-                "insert_context",
-                rhai_plugin_mod::rhai_generated_mod::[<insert_context_ $base _request>],
+
+            $engine.register_set_result(
+                "context",
+                router_plugin_mod::router_generated_mod::[<insert_context_ $base _request>],
             )
-            .register_result_fn(
-                "insert_context",
-                rhai_plugin_mod::rhai_generated_mod::[<insert_context_ $base _response>],
+            .register_set_result(
+                "context",
+                router_plugin_mod::router_generated_mod::[<insert_context_ $base _response>],
             );
 
             // Originating Request
             $engine.register_get_result(
                 "headers",
-                rhai_plugin_mod::rhai_generated_mod::[<get_originating_headers_ $base _request>],
+                router_plugin_mod::router_generated_mod::[<get_originating_headers_ $base _request>],
             );
 
             $engine.register_set_result(
                 "headers",
-                rhai_plugin_mod::rhai_generated_mod::[<set_originating_headers_ $base _request>],
+                router_plugin_mod::router_generated_mod::[<set_originating_headers_ $base _request>],
             );
 
             }
@@ -622,40 +688,63 @@ impl Rhai {
         let mut engine = Engine::new();
 
         // The macro call creates a Rhai module from the plugin module.
-        let module = exported_module!(rhai_plugin_mod);
+        let module = exported_module!(router_plugin_mod);
 
-        // A module can simply be registered into the global namespace.
+        // Configure our engine for execution
         engine
+            .set_max_expr_depths(0, 0)
+            .on_print(move |rhai_log| {
+                tracing::info!("{}", rhai_log);
+            })
+            // Register our plugin module
             .register_global_module(module.into())
-            .register_type::<SharedRouterRequest>()
-            .register_fn("to_string", |x: &mut SharedRouterRequest| -> String {
-                format!(
-                    "{:?}",
-                    x.lock()
-                        .unwrap()
-                        .as_ref()
-                        .unwrap()
-                        .originating_request
-                        .body()
-                        .operation_name
-                )
-            })
+            // Register types accessible in plugin scripts
+            .register_type::<Context>()
             .register_type::<HeaderMap>()
-            .register_fn("insert", |x: &mut HeaderMap, name: &str, value: &str| {
-                x.insert(
-                    HeaderName::from_str(name).unwrap(),
-                    HeaderValue::from_str(value).unwrap(),
-                );
-            })
             .register_type::<Option<HeaderName>>()
             .register_type::<HeaderName>()
             .register_type::<HeaderValue>()
+            .register_type::<(Option<HeaderName>, HeaderValue)>()
+            // Register HeaderMap as an iterator so we can loop over contents
+            .register_iterator::<HeaderMap>()
+            // Register a HeaderMap indexer so we can get/set headers
+            .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
+                let search_name =
+                    HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                Ok(x.get(search_name)
+                    .ok_or("")?
+                    .to_str()
+                    .map_err(|e| e.to_string())?
+                    .to_string())
+            })
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
+                x.insert(
+                    HeaderName::from_str(key).unwrap(),
+                    HeaderValue::from_str(value).unwrap(),
+                );
+            })
+            // Register a Context indexer so we can get/set context
+            .register_indexer_get_result(|x: &mut Context, key: &str| {
+                x.get(key)
+                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map_err(|e: BoxError| e.to_string().into())
+            })
+            .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
+                x.insert(key, value)
+                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map_err(|e: BoxError| e.to_string())?;
+                Ok(())
+            })
+            // Register get for Header Name/Value from a tuple pair
             .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.0.clone()
             })
             .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.1.clone()
             })
+            // Default representation in rhai is the "type", so
+            // we need to register a to_string function for all our registered
+            // types so we can interact meaningfully with them.
             .register_fn("to_string", |x: &mut Option<HeaderName>| -> String {
                 match x {
                     Some(v) => v.to_string(),
@@ -666,19 +755,18 @@ impl Rhai {
                 x.to_string()
             })
             .register_fn("to_string", |x: &mut HeaderValue| -> String {
-                x.to_str().expect("XXX").to_string()
+                x.to_str().map_or("".to_string(), |v| v.to_string())
             })
-            .register_iterator::<HeaderMap>()
             .register_fn("to_string", |x: &mut HeaderMap| -> String {
                 let mut msg = String::new();
                 for pair in x.iter() {
                     let line = format!(
                         "{}: {}",
-                        pair.0.to_string(),
-                        pair.1.to_str().expect("XXX").to_string()
+                        pair.0,
+                        pair.1.to_str().map_or("".to_string(), |v| v.to_string())
                     );
                     msg.push_str(line.as_ref());
-                    msg.push_str("\n");
+                    msg.push('\n');
                 }
                 msg
             })
@@ -691,13 +779,11 @@ impl Rhai {
                             Some(v) => v.to_string(),
                             None => "None".to_string(),
                         },
-                        x.1.to_str().expect("XXX").to_string()
+                        x.1.to_str().map_or("".to_string(), |v| v.to_string())
                     )
                 },
-            )
-            .register_type::<(Option<HeaderName>, HeaderValue)>();
+            );
 
-        engine.set_max_expr_depths(0, 0);
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
         engine
@@ -769,6 +855,7 @@ mod tests {
             }
         }
 
+        eprintln!("AT THE TEST END, HEADRS ARE : {:?}", headers);
         assert_eq!(headers.get("coucou").unwrap(), &"hello");
         assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
         assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
@@ -823,9 +910,12 @@ mod tests {
             .call(exec_req)
             .await
             .unwrap();
+        eprintln!("AT THE TEST END, CONTEXT ARE : {:?}", exec_resp.context);
         assert_eq!(exec_resp.response.status(), 200);
+        /* XXX NO WAY TO PROPAGATE ERRORS YET
         // Check if it fails
         let body = exec_resp.response.into_body();
+        eprintln!("BODY: {:?}", body);
         if body.errors.is_empty() {
             panic!(
                 "Must contain errors : {}",
@@ -841,6 +931,7 @@ mod tests {
             body.errors.get(0).unwrap().message.as_str(),
             "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function execution_service_request"
         );
+        */
         Ok(())
     }
 }

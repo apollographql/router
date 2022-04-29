@@ -13,7 +13,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::plugins::rhai::{Conf, Rhai};
-    use apollo_router_core::{plugin::utils, Plugin, RouterRequest};
+    use apollo_router_core::{plugin::utils, Plugin, RouterRequest, RouterResponse};
     use http::StatusCode;
     use tower::util::ServiceExt;
 
@@ -31,17 +31,15 @@ mod tests {
             .returning(move |req: RouterRequest| {
                 // Let's make sure our request contains our new header
                 assert_eq!(
-                    req.context
-                        .request
+                    req.originating_request
                         .headers()
                         .get("X-operation-name")
                         .expect("X-operation-name is present"),
                     "me"
                 );
-                Ok(utils::RouterResponse::builder()
-                    .data(expected_mock_response_data.into())
+                RouterResponse::fake_builder()
+                    .data(expected_mock_response_data)
                     .build()
-                    .into())
             });
 
         // The mock has been set up, we can now build a service from it
@@ -53,15 +51,17 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let mut rhai = Rhai::new(conf).expect("valid configuration should succeed");
+        let mut rhai = Rhai::new(conf)
+            .await
+            .expect("valid configuration should succeed");
 
         let service_stack = rhai.router_service(mock_service.boxed());
 
         // Let's create a request with our operation name
-        let request_with_appropriate_name = utils::RouterRequest::builder()
+        let request_with_appropriate_name = RouterRequest::fake_builder()
             .operation_name("me".to_string())
             .build()
-            .into();
+            .unwrap();
 
         // ...And call our service stack with it
         let service_response = service_stack

@@ -304,7 +304,6 @@ impl RouterResponse {
     /// This is the constructor (or builder) to use when constructing a RouterResponse that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.
-    #[allow(clippy::too_many_arguments)]
     pub fn error_new(
         errors: Vec<crate::Error>,
         status_code: Option<StatusCode>,
