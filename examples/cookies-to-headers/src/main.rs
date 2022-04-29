@@ -115,6 +115,6 @@ mod tests {
         let graphql_response: apollo_router_core::Response = service_response.response.into_body();
 
         assert!(graphql_response.errors.is_empty());
-        assert_eq!(expected_mock_response_data, graphql_response.data)
+        assert_eq!(expected_mock_response_data, graphql_response.data.unwrap())
     }
 }

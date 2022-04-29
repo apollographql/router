@@ -85,6 +85,9 @@ Removing the default feature can cause build issues in plugins.
 ### Do not remove __typename from the aggregated response [PR #919](https://github.com/apollographql/router/pull/919)
 If the client was explicitely requesting the `__typename` field, it was removed from the aggregated subgraph data, and so was not usable by fragment to check the type.
 
- ## 📚 Documentation
+### Follow the GraphQL spec about Response format [PR #926](https://github.com/apollographql/router/pull/926)
+The response's `data` field can be null or absent depending on conventions that are now followed by the router.
+
+## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
