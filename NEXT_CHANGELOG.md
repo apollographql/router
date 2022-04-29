@@ -95,3 +95,5 @@ The client awareness headers are now added by default to the list of CORS allowe
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
+### Federation version support page [PR #896](https://github.com/apollographql/router/pull/896)
+Add Federation version support doc page detailing which versions of federation are compiled against versions of the router. 

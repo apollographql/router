@@ -7,6 +7,7 @@
     "Introduction": "/",
     "Quickstart": "/quickstart",
     "Migrating from @apollo/gateway": "/migrating-from-gateway",
+    "Federation version support": "/federation-version-support",
     "Configuration": {
       "Overview": "/configuration/overview",
       "Health check": "/configuration/health-checks",
