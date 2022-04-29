@@ -88,6 +88,10 @@ If the client was explicitely requesting the `__typename` field, it was removed 
 ### Follow the GraphQL spec about Response format [PR #926](https://github.com/apollographql/router/pull/926)
 The response's `data` field can be null or absent depending on conventions that are now followed by the router.
 
+## Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
+
+The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of brower based applications. We also document how to override them and update the CORS configuration accordingly.
+
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
