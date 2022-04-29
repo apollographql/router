@@ -4,3 +4,4 @@ pub mod deduplication;
 pub mod ensure_query_presence;
 pub mod forbid_http_get_mutations;
 pub mod instrument;
+pub mod map_future_with_context;

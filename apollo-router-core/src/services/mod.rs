@@ -34,6 +34,7 @@ pub mod http_compat;
 mod router_service;
 mod tower_subgraph_service;
 use crate::instrument::InstrumentLayer;
+use crate::map_future_with_context::{MapFutureWithContextLayer, MapFutureWithContextService};
 pub use tower_subgraph_service::TowerSubgraphService;
 
 pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
@@ -722,6 +723,15 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(AsyncCheckpointLayer::new(async_checkpoint_fn))
     }
     fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>>;
+
+    fn map_future_with_context<C, F>(
+        self,
+        ctx_fn: C,
+        map_fn: F,
+    ) -> ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>> {
+        self.layer(MapFutureWithContextLayer::new(ctx_fn, map_fn))
+    }
+
     fn instrument<F, Request>(
         self,
         span_fn: F,
@@ -736,14 +746,30 @@ pub trait ServiceBuilderExt<L>: Sized {
 
 #[allow(clippy::type_complexity)]
 impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
-    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
-        ServiceBuilder::layer(self, layer)
-    }
-
     fn buffered<Request>(self) -> ServiceBuilder<Stack<BufferLayer<Request>, L>> {
         self.buffer(DEFAULT_BUFFER_SIZE)
     }
+
+    fn layer<T>(self, layer: T) -> ServiceBuilder<Stack<T, L>> {
+        ServiceBuilder::layer(self, layer)
+    }
 }
+
+pub trait ServiceExt<Request>: Service<Request> {
+    fn map_future_with_context<C, F>(
+        self,
+        cxt_fn: C,
+        map_fn: F,
+    ) -> MapFutureWithContextService<Self, C, F>
+    where
+        Self: Sized,
+        C: Clone,
+        F: Clone,
+    {
+        MapFutureWithContextService::new(self, cxt_fn, map_fn)
+    }
+}
+impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
 
 #[cfg(test)]
 mod test {

@@ -11,7 +11,7 @@ use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
     http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
+    ServiceBuilderExt as ServiceBuilderExt2, SubgraphRequest, SubgraphResponse,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
@@ -279,16 +279,21 @@ impl Plugin for Telemetry {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        let metrics = metrics::apollo::Metrics::default();
-        // TODO
-
-        self.apollo_metrics_sender.send(metrics);
+        let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         ServiceBuilder::new()
             .instrument(Self::router_service_span(
                 self.config.apollo.clone().unwrap_or_default(),
             ))
+            .map_future_with_context(|req: &RouterRequest|req.context.clone(),|ctx, fut|
+                fut.then(|result|{
+                    let metrics = metrics::apollo::Metrics::default();
+
+                    result
+                })
+            )
             .service(service)
+
             .map_request(|req: RouterRequest| {
                 let client_name = req
                     .originating_request
@@ -378,6 +383,12 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new().instrument(move |_| info_span!("query_planning")).service(service)
+            .map_result(|r| {
+                if let Ok(res) = &r {
+                    res.context.insert("usage_reporting", res.query_plan.usage_reporting.clone())?;
+                }
+                r
+            })
             .map_response(|res: QueryPlannerResponse| {
                 if let Err(e)=res.context
                     .upsert(

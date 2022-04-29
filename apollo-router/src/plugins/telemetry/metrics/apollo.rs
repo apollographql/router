@@ -18,6 +18,7 @@ use url::Url;
 const DEFAULT_BATCH_SIZE: usize = 65_536;
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 
+#[derive(Clone)]
 pub(crate) enum Sender {
     Noop,
     Spaceport(mpsc::Sender<Metrics>),
@@ -49,7 +50,7 @@ impl Default for Sender {
 pub(crate) struct Metrics {
     client_name: String,
     client_version: String,
-    key: String,
+    stats_report_key: String,
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
     referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
@@ -64,6 +65,8 @@ pub(crate) struct QueryLatencyStats {
     persisted_query_hits: u64,
     persisted_query_misses: u64,
     cache_latency_count: Duration,
+    stats_report_key: String,
+
     root_error_stats: PathErrorStats,
     requests_with_errors_count: u64,
     public_cache_ttl_count: Duration,
@@ -117,8 +120,9 @@ impl AggregatedMetrics {
             self.per_type_stat.entry(k).or_default().add(v);
         }
         for (k, v) in metrics.referenced_fields_by_type {
-            //TODO Confirm no merging?
-            self.referenced_fields_by_type.insert(k, v);
+            // Merging is not required because metrics are always groupd by schema and query.
+            // The tuple (client_name, client_version, stats_report_key, referenced_fields_by_type) is always unique.
+            self.referenced_fields_by_type.entry(k).or_insert(v);
         }
     }
 }
@@ -325,7 +329,7 @@ fn consolidate(
                 (
                     metric.client_name.clone(),
                     metric.client_version.clone(),
-                    metric.key.clone(),
+                    metric.stats_report_key.clone(),
                 )
                     .clone(),
             )
