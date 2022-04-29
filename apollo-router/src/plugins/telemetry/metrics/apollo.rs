@@ -65,8 +65,6 @@ pub(crate) struct QueryLatencyStats {
     persisted_query_hits: u64,
     persisted_query_misses: u64,
     cache_latency_count: Duration,
-    stats_report_key: String,
-
     root_error_stats: PathErrorStats,
     requests_with_errors_count: u64,
     public_cache_ttl_count: Duration,
