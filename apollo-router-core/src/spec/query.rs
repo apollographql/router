@@ -486,7 +486,7 @@ impl Query {
                         .should_skip(variables)
                         // validate_variables should have already checked that
                         // the variable is present and it is of the correct type
-                        .unwrap_or(false)
+                        .unwrap_or_default()
                     {
                         continue;
                     }
