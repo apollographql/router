@@ -13,7 +13,6 @@ use crate::{
 use futures::{future::BoxFuture, TryFutureExt};
 use http::StatusCode;
 use indexmap::IndexMap;
-use serde_json_bytes::Value;
 use std::sync::Arc;
 use std::task::Poll;
 use tower::buffer::Buffer;
@@ -204,7 +203,6 @@ where
                     ..Default::default()
                 }];
                 RouterResponse::builder()
-                    .data(Value::default())
                     .errors(errors)
                     .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)

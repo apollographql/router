@@ -29,6 +29,17 @@ parameters:
     # increment that one to invalidate all the caches
     default: v6.{{ checksum "rust-toolchain.toml" }}
 
+# These are common environment variables that we want to set on on all jobs.
+# While these could conceivably be set on the CircleCI project settings'
+# as "Secrets", these are not really secrets, and its convenient to keep them in
+# code.  Also, most of our secrets are not necessary for _most_ of our jobs, so this enables
+# forks of the project to run their own tests on their own CircleCI deployments with no
+# additional configuration.
+common_job_environment: &common_job_environment
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  NODE_VERSION: 14.17.5
+  NPM_VERSION: 7.10.0
+
 commands:
   initialize_submodules:
     steps:
@@ -311,8 +322,7 @@ commands:
 jobs:
   lint:
     environment:
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
+      <<: *common_job_environment
     parameters:
       platform:
         type: executor
@@ -329,6 +339,8 @@ jobs:
             - xtask_lint:
                 os: linux
   check_compliance:
+    environment:
+      <<: *common_job_environment
     parameters:
       platform:
         type: executor
@@ -345,8 +357,7 @@ jobs:
                 os: linux
   build:
     environment:
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
+      <<: *common_job_environment
     parameters:
       platform:
         type: executor
@@ -381,8 +392,7 @@ jobs:
                 os: macos
   test:
     environment:
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
+      <<: *common_job_environment
     parameters:
       platform:
         type: executor
@@ -423,8 +433,7 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     environment:
-      NODE_VERSION: 14.17.5
-      NPM_VERSION: 7.10.0
+      <<: *common_job_environment
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
@@ -587,6 +596,7 @@ jobs:
       - image: cimg/base:stable
     resource_class: small
     environment:
+      <<: *common_job_environment
       VERSION: << pipeline.git.tag >>
     steps:
       - checkout
