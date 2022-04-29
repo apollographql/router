@@ -10,7 +10,7 @@ pub fn generate_valid_operation(input: &[u8]) -> Result<String> {
     drop(env_logger::try_init());
 
     let parser =
-        Parser::new(&fs::read_to_string("fuzz/supergraph.graphql").expect("cannot read file"));
+        Parser::new(&fs::read_to_string("fuzz/supergraph-fed2.graphql").expect("cannot read file"));
 
     let tree = parser.parse();
     if tree.errors().len() > 0 {

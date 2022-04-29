@@ -485,9 +485,27 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip: _,
-                    include: _,
+                    skip,
+                    include,
                 } => {
+                    if skip
+                        .should_skip(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or_default()
+                    {
+                        continue;
+                    }
+
+                    if !include
+                        .should_include(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
+
                     let field_name = alias.as_ref().unwrap_or(name);
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
@@ -3655,6 +3673,7 @@ mod tests {
         type Product {
             id: String!
             name: String
+            bar: String
         }";
 
         // combine skip and include
@@ -3696,6 +3715,32 @@ mod tests {
             json! {{
                 "get": {
                     "a": "a",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get @skip(if: false) @include(if: false) {
+                    a:name
+                    bar
+                }
+                get @skip(if: false) {
+                    a:name
+                    a:name
+                }
+            }",
+            json! {{
+                "get": {
+                    "a": "a",
+                    "bar": "foo",
                 },
             }},
             None,
