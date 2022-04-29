@@ -34,7 +34,7 @@ type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsageMap>>>;
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
-static TRIGGER_BATCH_LIMIT: u32 = 50;
+static TRIGGER_BATCH_LIMIT: u32 = 50; // TODO: arbitrary but it seems to work :D
 
 /// Allows common transfer code to be more easily represented
 #[allow(clippy::large_enum_variant)]
@@ -298,6 +298,7 @@ impl ReportSpaceport {
         // that we are adding a lot of data for transfer. It is derived
         // empirically from load testing.
         let total = self.total.fetch_add(1, Ordering::SeqCst);
+        // TODO: check tick ?
         if total > TRIGGER_BATCH_LIMIT {
             match self.tx.send(()).await {
                 Ok(_v) => {
