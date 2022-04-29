@@ -66,7 +66,7 @@ telemetry:
 ```
 
 ## 🐛 Fixes
-### Fields in the root selection set of a query is now correctly skipped and included [PR #931](https://github.com/apollographql/router/pull/931)
+### Fields in the root selection set of a query are now correctly skipped and included [PR #931](https://github.com/apollographql/router/pull/931)
 The `@skip` and `@include` directives are now executed for the fields in the root selection set.
 
 ###  Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
