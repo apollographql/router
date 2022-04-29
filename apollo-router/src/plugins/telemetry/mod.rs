@@ -285,13 +285,15 @@ impl Plugin for Telemetry {
             .instrument(Self::router_service_span(
                 self.config.apollo.clone().unwrap_or_default(),
             ))
-            .map_future_with_context(|req: &RouterRequest|req.context.clone(),move |ctx, fut|
+            .map_future_with_context(|req: &RouterRequest|req.context.clone(),move |ctx, fut| {
+                let sender = metrics_sender.clone();
                 async move {
                     let result = fut.await?;
                     let metrics = metrics::apollo::Metrics::default();
-                    metrics_sender.send(metrics);
+                    sender.send(metrics);
                     Ok(result)
                 }
+            }
             )
             .service(service)
 
