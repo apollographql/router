@@ -1,10 +1,6 @@
-//! Instrumentation layer that allows services to be wrapped in a span.
+//! Extension of map_future layer. Allows mapping of the future using some information obtained from the request.
 //!
 //! See [`Layer`] and [`Service`] for more details.
-//!
-//! Using ServiceBuilderExt:
-//!
-//! Now calls to the wrapped service will be wrapped in a span. You can attach attributes to the span from the request.
 //!
 
 use std::future::Future;
