@@ -470,7 +470,7 @@ pub(crate) mod fetch {
                 })
                 .collect();
 
-            self.response_at_path(current_dir, paths, response.data)
+            self.response_at_path(current_dir, paths, response.data.unwrap_or_default())
                 .map(|value| (value, errors))
         }
 
@@ -597,6 +597,47 @@ mod tests {
         );
     }
 
+    /// This test panics in the product subgraph. HOWEVER, this does not result in a panic in the
+    /// test, since the buffer() functionality in the tower stack "loses" the panic and we end up
+    /// with a closed service.
+    ///
+    /// See: https://github.com/tower-rs/tower/issues/455
+    ///
+    /// The query planner reports the failed subgraph fetch as an error with a reason of "service
+    /// closed", which is what this test expects.
+    #[tokio::test]
+    async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
+        let query_plan: QueryPlan = QueryPlan {
+            root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: None,
+        };
+
+        let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
+        mock_products_service.expect_call().times(1).withf(|_| {
+            panic!("this panic should be propagated to the test harness");
+        });
+
+        let result = query_plan
+            .execute(
+                &Context::new(),
+                &ServiceRegistry::new(HashMap::from([(
+                    "product".into(),
+                    ServiceBuilder::new()
+                        .buffer(1)
+                        .service(mock_products_service.build().boxed()),
+                )])),
+                http_compat::Request::mock(),
+                &Schema::from_str(test_schema!()).unwrap(),
+            )
+            .await;
+        assert_eq!(result.errors.len(), 1);
+        let reason: String = serde_json_bytes::from_value(
+            result.errors[0].extensions.get("reason").unwrap().clone(),
+        )
+        .unwrap();
+        assert_eq!(reason, "service closed".to_string());
+    }
+
     #[tokio::test]
     async fn fetch_includes_operation_name() {
         let query_plan: QueryPlan = QueryPlan {
@@ -616,7 +657,8 @@ mod tests {
                     == Some("topProducts_product_0".into());
                 inner_succeeded.store(matches, Ordering::SeqCst);
                 matches
-            });
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         query_plan
             .execute(
                 &Context::new(),
@@ -652,7 +694,8 @@ mod tests {
                 let matches = request.subgraph_request.method() == Method::POST;
                 inner_succeeded.store(matches, Ordering::SeqCst);
                 matches
-            });
+            })
+            .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         query_plan
             .execute(
                 &Context::new(),

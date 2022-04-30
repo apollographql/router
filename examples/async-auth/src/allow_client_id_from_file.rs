@@ -338,7 +338,7 @@ mod tests {
 
         assert_eq!(
             // we're allowed to unwrap() here because we know the json is a str()
-            graphql_response.data.as_str().unwrap(),
+            graphql_response.data.unwrap().as_str().unwrap(),
             expected_mock_response_data
         )
     }

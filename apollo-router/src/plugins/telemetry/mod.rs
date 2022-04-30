@@ -152,14 +152,13 @@ impl Drop for Telemetry {
             // Tracer providers must be flushed. This may happen as part of otel if the provider was set
             // as the global, but may also happen in the case of an failed config reload.
             // If the tracer prover is present then it was not handed over so we must flush it.
-            // The magic incantation seems to be that the flush MUST happen in a separate thread.
+            // We must make the call to force_flush() from spawn_blocking() (or spawn a thread) to
+            // ensure that the call to force_flush() is made from a separate thread.
             ::tracing::debug!("flushing telemetry");
-            std::thread::spawn(|| async {
-                let jh = tokio::task::spawn_blocking(move || {
-                    opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
-                });
-                futures::executor::block_on(jh).expect("failed to flush tracer provider");
+            let jh = tokio::task::spawn_blocking(move || {
+                opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
             });
+            futures::executor::block_on(jh).expect("failed to flush tracer provider");
         }
 
         if let Some(sender) = self.spaceport_shutdown.take() {
@@ -285,7 +284,7 @@ impl Plugin for Telemetry {
             .instrument(Self::router_service_span(
                 self.config.apollo.clone().unwrap_or_default(),
             ))
-            .map_future_with_context(|req: &RouterRequest|req.context.clone(),move |ctx, fut| {
+            .map_future_with_context(|req: &RouterRequest|req.context.clone(),move |_ctx, fut| {
                 let sender = metrics_sender.clone();
                 async move {
                     let result = fut.await?;

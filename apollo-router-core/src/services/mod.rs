@@ -231,7 +231,7 @@ impl RouterResponse {
     /// Required parameters are required in non-testing code to create a RouterResponse..
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        data: Value,
+        data: Option<Value>,
         path: Option<Path>,
         errors: Vec<crate::Error>,
         extensions: HashMap<String, Value>,
@@ -244,12 +244,14 @@ impl RouterResponse {
             .map(|(name, value)| (ByteString::from(name), value))
             .collect();
         // Build a response
-        let res = Response::builder()
-            .data(data)
+        let b = Response::builder()
             .path(path)
             .errors(errors)
-            .extensions(extensions)
-            .build();
+            .extensions(extensions);
+        let res = match data {
+            Some(data) => b.data(data).build(),
+            None => b.build(),
+        };
 
         // Build an http Response
         let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
@@ -292,7 +294,7 @@ impl RouterResponse {
         context: Option<Context>,
     ) -> Result<RouterResponse, BoxError> {
         RouterResponse::new(
-            data.unwrap_or_default(),
+            data,
             path,
             errors,
             extensions,

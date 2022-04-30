@@ -42,18 +42,20 @@ macro_rules! assert_federated_response {
         tracing::debug!("query:\n{}\n", $query);
 
         assert!(
-            expected.data.is_object(),
+            expected.data.as_ref().unwrap().is_object(),
             "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
+        let expected = expected.data.as_ref().expect("expected data should not be none");
+        let actual = actual.data.as_ref().expect("received data should not be none");
         assert!(
-            expected.data.eq_and_ordered(&actual.data),
+            expected.eq_and_ordered(actual),
             "the gateway and the router didn't return the same data:\ngateway:\n{}\nrouter\n{}",
-            expected.data,
-            actual.data
+            expected,
+            actual
         );
         assert_eq!(registry.totals(), $service_requests);
     };

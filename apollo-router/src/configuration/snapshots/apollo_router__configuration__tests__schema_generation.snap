@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 562
 expression: "&schema"
 ---
 {
@@ -348,7 +349,9 @@ expression: "&schema"
             "allow_headers": {
               "description": "The headers to allow. Defaults to the required request header for Apollo Studio",
               "default": [
-                "Content-Type"
+                "Content-Type",
+                "apollographql-client-name",
+                "apollographql-client-version"
               ],
               "type": "array",
               "items": {
