@@ -69,8 +69,11 @@ telemetry:
 ### Fields in the root selection set of a query are now correctly skipped and included [PR #931](https://github.com/apollographql/router/pull/931)
 The `@skip` and `@include` directives are now executed for the fields in the root selection set.
 
-###  Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
+### Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
 If a configuration file had errors on reload these were silently swallowed. These are now added to the logs.
+
+### Telemetry spans are no longer created for healthcheck requests [PR #938](https://github.com/apollographql/router/pull/938)
+Telemetry spans where previously being created for the healthcheck requests which was creating noisy telemetry for users.
 
 ## 🛠 Maintenance
 ### End to end integration tests for Jaeger [PR #850](https://github.com/apollographql/router/pull/850)

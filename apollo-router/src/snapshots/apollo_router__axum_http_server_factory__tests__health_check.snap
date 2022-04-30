@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/axum_http_server_factory.rs
+assertion_line: 1123
+expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_span::Filter::new(Level::INFO))"
+---
+{
+  "name": "apollo_router::axum_http_server_factory::tests::root",
+  "record": {
+    "entries": [],
+    "metadata": {
+      "name": "root",
+      "target": "apollo_router::axum_http_server_factory::tests",
+      "level": "INFO",
+      "module_path": "apollo_router::axum_http_server_factory::tests",
+      "fields": {
+        "names": []
+      }
+    }
+  },
+  "children": {}
+}
