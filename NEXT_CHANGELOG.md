@@ -96,7 +96,12 @@ The response's `data` field can be null or absent depending on conventions that 
 
 ## Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
 
-The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of brower based applications. We also document how to override them and update the CORS configuration accordingly.
+The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of browser based applications. We also document how to override them and update the CORS configuration accordingly.
+
+## Remove unnecessary box in instrumentation layer [PR #940](https://github.com/apollographql/router/pull/940)
+
+Minor simplification of code to remove boxing during instrumentation.
+
 
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
