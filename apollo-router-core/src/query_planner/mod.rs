@@ -6,6 +6,7 @@ pub use bridge_query_planner::*;
 pub use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;
+use opentelemetry::trace::SpanKind;
 use serde::Deserialize;
 use std::collections::HashSet;
 use tracing::Instrument;
@@ -205,7 +206,10 @@ impl PlanNode {
                             originating_request,
                             schema,
                         )
-                        .instrument(tracing::info_span!("fetch"))
+                        .instrument(tracing::info_span!(
+                            "fetch",
+                            "otel.kind" = %SpanKind::Internal
+                        ))
                         .await
                     {
                         Ok((v, e)) => {

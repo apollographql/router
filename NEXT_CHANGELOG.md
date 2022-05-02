@@ -54,6 +54,9 @@ In addition, the `activate` lifecycle hook is now not marked as deprecated, and 
 
 ## 🚀 Features
 
+### Add SpanKind and SpanStatusCode to follow the opentelemetry spec [PR #925](https://github.com/apollographql/router/pull/925)
+Spans now contains [`otel.kind`](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#spankind) and [`otel.status_code`](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status) attributes when needed to follow the opentelemtry spec .
+
 ###  Configurable client identification headers [PR #850](https://github.com/apollographql/router/pull/850)
 The router uses the HTTP headers `apollographql-client-name` and `apollographql-client-version` to identify clients in Studio telemetry. Those headers can now be overriden in the configuration:
 ```yaml title="router.yaml"

@@ -89,8 +89,6 @@ impl Query {
 
         response.data = Some(Value::default());
     }
-
-    #[tracing::instrument(skip_all, level = "info" name = "parse_query")]
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
