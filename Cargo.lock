@@ -60,6 +60,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2ae23d8a1f5cc1a4e33ec9b1f0d4d626f9e4736619b4c1a4f1482a594ac2e13"
 
 [[package]]
+name = "apollo-encoder"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
+
+[[package]]
 name = "apollo-parser"
 version = "0.2.4"
 source = "git+https://github.com/apollographql/apollo-rs.git?rev=e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac#e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac"
@@ -231,11 +237,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58098d74c9866cbb71781eeb9b9c001c6334868fe45269ef42e700f2b5c9a7c"
+checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.3.1",
  "apollo-parser 0.2.5",
  "arbitrary",
  "once_cell",
@@ -2362,7 +2368,7 @@ name = "launchpad"
 version = "0.1.0"
 source = "git+https://github.com/apollographql/rover.git?rev=94141242ba34cf00cde9630fc4a6dcd05d4fa5da#94141242ba34cf00cde9630fc4a6dcd05d4fa5da"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.2.3",
  "backoff",
  "graphql_client",
  "humantime",

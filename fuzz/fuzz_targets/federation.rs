@@ -10,7 +10,7 @@ const GATEWAY_FED1_URL: &str = "http://localhost:4100/graphql";
 const GATEWAY_FED2_URL: &str = "http://localhost:4200/graphql";
 
 fuzz_target!(|data: &[u8]| {
-    let generated_operation = match generate_valid_operation(data) {
+    let generated_operation = match generate_valid_operation(data, "fuzz/supergraph.graphql") {
         Ok(d) => d,
         Err(_err) => {
             return;
@@ -77,7 +77,7 @@ fuzz_target!(|data: &[u8]| {
         file.write_all(errors.as_bytes()).unwrap();
         file.flush().unwrap();
 
-        panic!()
+        // panic!()
     } else if gateway_fed1_response.is_ok() {
         let gateway_fed2_errors_detected = gateway_fed2_response
             .as_ref()
@@ -131,7 +131,7 @@ fuzz_target!(|data: &[u8]| {
             file.write_all(errors.as_bytes()).unwrap();
             file.flush().unwrap();
 
-            panic!();
+            // panic!();
         }
     }
     debug!("========================");
