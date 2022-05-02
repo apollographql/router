@@ -79,6 +79,9 @@ If a configuration file had errors on reload these were silently swallowed. Thes
 Telemetry spans where previously being created for the healthcheck requests which was creating noisy telemetry for users.
 
 ## 🛠 Maintenance
+### Upgrade `test-span` to display more children spans in our snapshots [PR #942](https://github.com/apollographql/router/pull/942)
+Previously in test-span before the fix [introduced here](https://github.com/apollographql/test-span/pull/13) we were filtering too aggressively. So if we wanted to snapshot all `DEBUG` level if we encountered a `TRACE` span which had `DEBUG` children then these children were not snapshotted. It's now fixed and it's more consistent with what we could have/see in jaeger.
+
 ### Finalize migration from Warp to Axum [PR #920](https://github.com/apollographql/router/pull/920)
 Adding more tests to be more confident to definitely delete the `warp-server` feature and get rid of `warp`
 
