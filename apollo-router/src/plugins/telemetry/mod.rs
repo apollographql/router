@@ -33,7 +33,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 mod apollo;
-mod config;
+pub mod config;
 mod metrics;
 mod otlp;
 mod tracing;
