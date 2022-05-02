@@ -1,6 +1,5 @@
 //! Implementation of the various steps in the router's processing pipeline.
 
-pub use self::checkpoint::{AsyncCheckpointLayer, CheckpointLayer};
 pub use self::execution_service::*;
 pub use self::router_service::*;
 use crate::fetch::OperationKind;
@@ -28,12 +27,13 @@ use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
 use tracing::Span;
 
-pub mod checkpoint;
 mod execution_service;
 pub mod http_compat;
 mod router_service;
 mod tower_subgraph_service;
+use crate::async_checkpoint::AsyncCheckpointLayer;
 use crate::instrument::InstrumentLayer;
+use crate::sync_checkpoint::CheckpointLayer;
 pub use tower_subgraph_service::TowerSubgraphService;
 
 pub const DEFAULT_BUFFER_SIZE: usize = 20_000;
