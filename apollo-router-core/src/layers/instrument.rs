@@ -17,8 +17,6 @@
 //! Now calls to the wrapped service will be wrapped in a span. You can attach attributes to the span from the request.
 //!
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use std::marker::PhantomData;
 use std::task::{Context, Poll};
 use tower::Layer;
@@ -81,7 +79,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = tracing::instrument::Instrumented<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -89,6 +87,6 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let span = (self.span_fn)(&req);
-        self.inner.call(req).instrument(span).boxed()
+        self.inner.call(req).instrument(span)
     }
 }

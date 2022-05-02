@@ -6,7 +6,8 @@
 
 use crate::checkpoint::CheckpointService;
 use crate::{RouterRequest, RouterResponse};
-use http::{HeaderMap, StatusCode};
+use http::StatusCode;
+use serde_json_bytes::Value;
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
@@ -23,7 +24,7 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
-            |mut req: RouterRequest| {
+            |req: RouterRequest| {
                 // A query must be available at this point
                 let query = req.originating_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
@@ -33,19 +34,15 @@ where
                         path: Default::default(),
                         extensions: Default::default(),
                     }];
-                    let headers =
-                        std::mem::replace(req.originating_request.headers_mut(), HeaderMap::new())
-                            .into_iter()
-                            .filter_map(|(k, v)| k.map(|k| (k, v)))
-                            .collect();
+
+                    //We do not copy headers from the request to the response as this may lead to leakable of sensitive data
                     let res = RouterResponse::builder()
-                        .data(Default::default())
+                        .data(Value::default())
                         .errors(errors)
-                        .extensions(Default::default())
                         .status_code(StatusCode::BAD_REQUEST)
                         .context(req.context)
-                        .headers(headers)
-                        .build();
+                        .build()
+                        .expect("response is valid");
                     Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
@@ -66,17 +63,19 @@ mod ensure_query_presence_tests {
     #[tokio::test]
     async fn it_works_with_query() {
         let mut mock_service = MockRouterService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| Ok(RouterResponse::fake_builder().build()));
+        mock_service.expect_call().times(1).returning(move |_req| {
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request"))
+        });
 
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
         let request: crate::RouterRequest = RouterRequest::fake_builder()
             .query("{__typename}".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let _ = service_stack.oneshot(request).await.unwrap();
     }
@@ -90,8 +89,10 @@ mod ensure_query_presence_tests {
 
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest =
-            RouterRequest::fake_builder().query("".to_string()).build();
+        let request: crate::RouterRequest = RouterRequest::fake_builder()
+            .query("".to_string())
+            .build()
+            .expect("expecting valid request");
 
         let response = service_stack
             .oneshot(request)
@@ -116,7 +117,9 @@ mod ensure_query_presence_tests {
         let mock = mock_service.build();
         let service_stack = EnsureQueryPresence::default().layer(mock);
 
-        let request: crate::RouterRequest = RouterRequest::fake_builder().build();
+        let request: crate::RouterRequest = RouterRequest::fake_builder()
+            .build()
+            .expect("expecting valid request");
 
         let response = service_stack
             .oneshot(request)

@@ -5,10 +5,10 @@
 
 use std::ops::ControlFlow;
 
-use crate::{checkpoint::CheckpointService, Object, RouterRequest, RouterResponse};
+use crate::{checkpoint::CheckpointService, RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
-use serde_json_bytes::json;
+use serde_json_bytes::{json, Value};
 use sha2::{Digest, Sha256};
 use tower::{BoxError, Layer, Service};
 
@@ -98,11 +98,11 @@ where
                                 .unwrap(),
                             }];
                             let res = RouterResponse::builder()
-                                .data(Default::default())
+                                .data(Value::default())
                                 .errors(errors)
-                                .extensions(Object::new())
                                 .context(req.context)
-                                .build();
+                                .build()
+                                .expect("response is valid");
 
                             Ok(ControlFlow::Break(res))
                         }
@@ -126,7 +126,7 @@ mod apq_tests {
     use crate::{plugin::utils::test::MockRouterService, Context, ResponseBody};
     use serde_json_bytes::json;
     use std::borrow::Cow;
-    use std::sync::Arc;
+    use std::collections::HashMap;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -168,7 +168,9 @@ mod apq_tests {
 
             assert!(body.query.is_some());
 
-            Ok(RouterResponse::fake_builder().build())
+            Ok(RouterResponse::fake_builder()
+                .build()
+                .expect("expecting valid request"))
         });
         mock_service
             // the last one should have the right APQ header and the full query string
@@ -193,33 +195,38 @@ mod apq_tests {
                     hash.as_slice()
                 ));
 
-                Ok(RouterResponse::fake_builder().build())
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request"))
             });
 
         let mock = mock_service.build();
 
         let mut service_stack = APQLayer::default().layer(mock);
 
-        let extensions = vec![(
-            "persistedQuery",
+        let extensions = HashMap::from([(
+            "persistedQuery".to_string(),
             json!({
                 "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
             }),
-        )];
+        )]);
 
         let hash_only = RouterRequest::fake_builder()
             .extensions(extensions.clone())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let second_hash_only = RouterRequest::fake_builder()
             .extensions(extensions.clone())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let with_query = RouterRequest::fake_builder()
             .extensions(extensions)
             .query("{__typename}".to_string())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let services = service_stack.ready().await.unwrap();
         let apq_error = services.call(hash_only).await.unwrap();
@@ -237,7 +244,6 @@ mod apq_tests {
     async fn it_doesnt_update_the_cache_if_the_hash_is_not_valid() {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36");
         let hash2 = hash.clone();
-        let hash3 = hash.clone();
 
         let expected_apq_miss_error = crate::Error {
             message: "PersistedQueryNotFound".to_string(),
@@ -274,68 +280,47 @@ mod apq_tests {
 
                 assert!(body.query.is_some());
 
-                Ok(RouterResponse::fake_builder().build())
+                Ok(RouterResponse::fake_builder()
+                    .build()
+                    .expect("expecting valid request"))
             });
-        mock_service_builder
-            // the second last one should have the right APQ header and the full query string
-            // even though the query string wasn't provided by the client
-            .expect_call()
-            .times(1)
-            .returning(move |req| {
-                let body = req.originating_request.body();
 
-                let as_json = body.extensions.get("persistedQuery").unwrap();
-
-                let persisted_query: PersistedQuery =
-                    serde_json_bytes::from_value(as_json.clone()).unwrap();
-
-                assert_eq!(persisted_query.sha256hash, hash3);
-
-                assert!(body.query.is_some());
-
-                let hash = hex::decode(hash3.as_bytes()).unwrap();
-
-                assert!(!query_matches_hash(
-                    body.query.clone().unwrap_or_default().as_str(),
-                    hash.as_slice()
-                ));
-
-                Ok(RouterResponse::fake_builder().build())
-            });
+        // the last call should be an APQ error.
+        // the provided hash was wrong, so the query wasn't inserted into the cache.
 
         let mock_service = mock_service_builder.build();
 
         let mut service_stack = APQLayer::default().layer(mock_service);
 
-        let extensions = vec![(
-            "persistedQuery",
+        let extensions = HashMap::from([(
+            "persistedQuery".to_string(),
             json!({
                 "version" : 1,
                 "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
             }),
-        )];
+        )]);
 
         let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
 
         let hash_only = request_builder
-            .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let request_builder = RouterRequest::fake_builder().extensions(extensions.clone());
 
         let second_hash_only = request_builder
-            .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let request_builder = RouterRequest::fake_builder().extensions(extensions);
 
         let with_query = request_builder
             .query("{__typename}".to_string())
-            .variables(Arc::new(vec![].into_iter().collect()))
             .context(Context::new())
-            .build();
+            .build()
+            .expect("expecting valid request");
 
         let services = service_stack.ready().await.unwrap();
         // This apq call will miss the APQ cache

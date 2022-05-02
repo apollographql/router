@@ -1,6 +1,8 @@
+use apollo_router::plugins::telemetry::config::Tracing;
+use apollo_router::plugins::telemetry::{self, Telemetry};
 use apollo_router_core::{
-    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-    RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -34,8 +36,7 @@ macro_rules! assert_federated_response {
 
         let originating_request = http_compat::Request::fake_builder().method(Method::POST)
             .body(request)
-            .build()
-            .unwrap();
+            .build().expect("expecting valid originating request");
 
         let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -43,14 +44,15 @@ macro_rules! assert_federated_response {
         tracing::debug!("query:\n{}\n", $query);
 
         assert!(
-            expected.data.is_object(),
+            expected.data.as_ref().unwrap().is_object(),
             "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
-        assert!(expected.data.eq_and_ordered(&actual.data));
+        assert!(expected.data.as_ref().expect("expected data should not be none")
+        .eq_and_ordered(&actual.data.as_ref().expect("received data should not be none")));
         assert_eq!(registry.totals(), $service_requests);
     };
 }
@@ -95,7 +97,7 @@ async fn api_schema_hides_field() {
         .method(Method::POST)
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let (actual, _) = query_rust(originating_request.into()).await;
 
@@ -182,7 +184,7 @@ async fn queries_should_work_over_get() {
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -217,7 +219,7 @@ async fn queries_should_work_over_post() {
         .method(Method::POST)
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let request = graphql::RouterRequest {
         originating_request: http_request,
@@ -247,7 +249,7 @@ async fn service_errors_should_be_propagated() {
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -290,7 +292,7 @@ async fn mutation_should_not_work_over_get() {
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let (actual, registry) = query_rust(originating_request.into()).await;
 
@@ -336,7 +338,7 @@ async fn mutation_should_work_over_post() {
         .method(Method::POST)
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let request = graphql::RouterRequest {
         originating_request: http_request,
@@ -386,7 +388,7 @@ async fn automated_persisted_queries() {
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let actual = query_with_router(router.clone(), originating_request.into()).await;
 
@@ -409,7 +411,7 @@ async fn automated_persisted_queries() {
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_request_with_query)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let actual = query_with_router(router.clone(), originating_request.into()).await;
 
@@ -427,7 +429,7 @@ async fn automated_persisted_queries() {
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let actual = query_with_router(router, originating_request.into()).await;
 
@@ -486,7 +488,7 @@ async fn missing_variables() {
         .method(Method::POST)
         .body(request)
         .build()
-        .unwrap();
+        .expect("expecting valid request");
 
     let (response, _) = query_rust(originating_request.into()).await;
     let expected = vec![
@@ -534,6 +536,14 @@ async fn setup_router_and_registry() -> (
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+    let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
+        metrics: Option::default(),
+        tracing: Some(Tracing::default()),
+        apollo: Option::default(),
+    })
+    .await
+    .unwrap();
+    builder = builder.with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin));
     for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

@@ -202,13 +202,11 @@ where
                     message: error.to_string(),
                     ..Default::default()
                 }];
-                Ok(RouterResponse::builder()
-                    .data(Default::default())
+                RouterResponse::builder()
                     .errors(errors)
-                    .extensions(Default::default())
                     .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)
-                    .build())
+                    .build()
             });
 
         Box::pin(fut)

@@ -1,0 +1,71 @@
+---
+title: Federation version support in the Apollo Router
+---
+
+import { Link } from 'gatsby';
+
+The Apollo Router uses Federation 2.x. However, Federation 2.x
+is [backward compatible with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/)
+.
+
+As long as your graph is valid then your Federation 1 graph will work.
+
+Apollo Federation is an evolving project, and it will receive new features and bug fixes over time. If you need to run a
+particular version of Federation then the following table shows the version that the Router releases are compiled
+against.
+
+<table>
+    <thead>
+    <tr>
+        <th>Router version</th>
+        <th>Federation version</th>
+        <th>Release date</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td>v0.1.0-preview.6
+        </td>
+        <td>
+            2.0.1
+        </td>
+        <td>
+            2022-04-21
+        </td>
+    </tr>
+    <tr>
+        <td>v0.1.0-preview.5
+        </td>
+        <td>
+            2.0.1
+        </td>
+        <td>
+            2022-04-20
+        </td>
+    </tr>
+    <tr>
+        <td>v0.1.0-preview.4
+        </td>
+        <td>
+            2.0.0
+        </td>
+        <td>
+            2022-04-11
+        </td>
+    </tr>
+    <tr>
+        <td>v0.1.0-preview.3
+        </td>
+        <td>
+            2.0.0-preview.7
+        </td>
+        <td>
+            2022-04-08
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+If your Federation 1.x graph is not working with the Router, then please check
+the [backward compatibility with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/)
+notes to see if there is an issue with your graph.

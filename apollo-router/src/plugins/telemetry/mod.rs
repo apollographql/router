@@ -21,7 +21,7 @@ use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
 };
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{Tracer, TracerProvider};
+use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
@@ -33,7 +33,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 mod apollo;
-mod config;
+pub mod config;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -100,14 +100,13 @@ impl Drop for Telemetry {
             // Tracer providers must be flushed. This may happen as part of otel if the provider was set
             // as the global, but may also happen in the case of an failed config reload.
             // If the tracer prover is present then it was not handed over so we must flush it.
-            // The magic incantation seems to be that the flush MUST happen in a separate thread.
+            // We must make the call to force_flush() from spawn_blocking() (or spawn a thread) to
+            // ensure that the call to force_flush() is made from a separate thread.
             ::tracing::debug!("flushing telemetry");
-            std::thread::spawn(|| async {
-                let jh = tokio::task::spawn_blocking(move || {
-                    opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
-                });
-                futures::executor::block_on(jh).expect("failed to flush tracer provider");
+            let jh = tokio::task::spawn_blocking(move || {
+                opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
             });
+            futures::executor::block_on(jh).expect("failed to flush tracer provider");
         }
 
         if let Some(sender) = self.spaceport_shutdown.take() {
@@ -266,7 +265,7 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("query_planning"))
+            .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .boxed()
     }
@@ -276,7 +275,7 @@ impl Plugin for Telemetry {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("execution"))
+            .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .boxed()
     }
@@ -290,7 +289,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("subgraph", name = name.as_str()))
+            .instrument(move |_| info_span!("subgraph", name = name.as_str(), "otel.kind" = %SpanKind::Client))
             .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
@@ -465,7 +464,8 @@ impl Telemetry {
                 query = query.as_str(),
                 operation_name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default()
+                client_version = client_version.to_str().unwrap_or_default(),
+                "otel.kind" = %SpanKind::Internal
             );
             span
         }

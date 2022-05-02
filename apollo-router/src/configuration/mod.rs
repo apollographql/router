@@ -356,7 +356,11 @@ fn default_origins() -> Vec<String> {
 }
 
 fn default_cors_headers() -> Vec<String> {
-    vec!["Content-Type".into()]
+    vec![
+        "Content-Type".into(),
+        "apollographql-client-name".into(),
+        "apollographql-client-version".into(),
+    ]
 }
 
 fn default_cors_methods() -> Vec<String> {
@@ -378,21 +382,6 @@ impl Default for Server {
 }
 
 impl Cors {
-    #[cfg(feature = "warp-server")]
-    pub fn into_warp_middleware(&self) -> warp::cors::Builder {
-        let cors = warp::cors()
-            .allow_credentials(self.allow_credentials.unwrap_or_default())
-            .allow_headers(self.allow_headers.iter().map(std::string::String::as_str))
-            .expose_headers(self.allow_headers.iter().map(std::string::String::as_str))
-            .allow_methods(self.methods.iter().map(std::string::String::as_str));
-
-        if self.allow_any_origin.unwrap_or_default() {
-            cors.allow_any_origin()
-        } else {
-            cors.allow_origins(self.origins.iter().map(std::string::String::as_str))
-        }
-    }
-
     pub fn into_layer(self) -> CorsLayer {
         let cors =
             CorsLayer::new()

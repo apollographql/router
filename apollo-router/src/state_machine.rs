@@ -273,7 +273,6 @@ where
                     tracing::error!("cannot create the router: {}", err);
                     Errored(FederatedServerError::ServiceCreationError(err))
                 })?;
-
             let plugin_handlers: HashMap<String, Handler> = plugins
                 .iter()
                 .filter_map(|(plugin_name, plugin)| {

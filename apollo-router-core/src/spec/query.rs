@@ -9,6 +9,8 @@ use serde_json_bytes::ByteString;
 use std::collections::{HashMap, HashSet};
 use tracing::level_filters::LevelFilter;
 
+const TYPENAME: &str = "__typename";
+
 /// A GraphQL query.
 #[derive(Debug, Derivative)]
 #[derivative(PartialEq, Hash, Eq)]
@@ -39,7 +41,7 @@ impl Query {
         schema: &Schema,
     ) {
         let data = std::mem::take(&mut response.data);
-        if let Value::Object(mut input) = data {
+        if let Some(Value::Object(mut input)) = data {
             let operation = match operation_name {
                 Some(name) => self
                     .operations
@@ -64,25 +66,29 @@ impl Query {
                         .collect()
                 };
 
-                response.data = match self.apply_root_selection_set(
-                    operation,
-                    &all_variables,
-                    &mut input,
-                    &mut output,
-                    schema,
-                ) {
-                    Ok(()) => output.into(),
-                    Err(InvalidValue) => Value::Null,
-                }
+                response.data = Some(
+                    match self.apply_root_selection_set(
+                        operation,
+                        &all_variables,
+                        &mut input,
+                        &mut output,
+                        schema,
+                    ) {
+                        Ok(()) => output.into(),
+                        Err(InvalidValue) => Value::Null,
+                    },
+                );
+
+                return;
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
         } else {
             failfast_debug!("invalid type for data in response.");
         }
-    }
 
-    #[tracing::instrument(skip_all, level = "info" name = "parse_query")]
+        response.data = Some(Value::default());
+    }
     pub fn parse(query: impl Into<String>, schema: &Schema) -> Option<Self> {
         let string = query.into();
 
@@ -338,17 +344,24 @@ impl Query {
                         if input_value.is_null() && output.contains_key(field_name.as_str()) {
                             continue;
                         }
+
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        self.format_value(
-                            field_type,
-                            variables,
-                            input_value,
-                            output_value,
-                            selection_set,
-                            schema,
-                        )?;
+                        if field_name.as_str() == TYPENAME {
+                            if input_value.is_string() {
+                                *output_value = input_value.clone();
+                            }
+                        } else {
+                            self.format_value(
+                                field_type,
+                                variables,
+                                input_value,
+                                output_value,
+                                selection_set,
+                                schema,
+                            )?;
+                        }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);
@@ -391,7 +404,7 @@ impl Query {
                     // __typename field and it does not match, we should not apply
                     // that fragment
                     if input
-                        .get("__typename")
+                        .get(TYPENAME)
                         .map(|val| val.as_str() == Some(type_condition.as_str()))
                         .unwrap_or(*known_type)
                     {
@@ -430,7 +443,7 @@ impl Query {
                         }
 
                         if input
-                            .get("__typename")
+                            .get(TYPENAME)
                             .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
                             .unwrap_or_else(|| {
                                 known_type.as_deref() == Some(fragment.type_condition.as_str())
@@ -470,9 +483,27 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip: _,
-                    include: _,
+                    skip,
+                    include,
                 } => {
+                    if skip
+                        .should_skip(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or_default()
+                    {
+                        continue;
+                    }
+
+                    if !include
+                        .should_include(variables)
+                        // validate_variables should have already checked that
+                        // the variable is present and it is of the correct type
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
+
                     let field_name = alias.as_ref().unwrap_or(name);
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
@@ -796,13 +827,14 @@ mod tests {
             let schema: Schema = $schema.parse().expect("could not parse schema");
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
+
             query.format_response(
                 &mut response,
                 $operation,
                 $variables.as_object().unwrap().clone(),
                 &schema,
             );
-            assert_eq_and_ordered!(response.data, $expected);
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
         }};
     }
 
@@ -1059,32 +1091,6 @@ mod tests {
                     ],
                     "other": null,
                 },
-            }},
-        );
-    }
-
-    #[test]
-    fn reformat_matching_operation() {
-        let schema = "
-        type Query {
-            foo: String
-            other: String
-        }
-        ";
-        let query = "query MyOperation { foo }";
-        let response = json! {{
-            "foo": "1",
-            "other": "2",
-        }};
-        // an invalid operation name should fail
-        assert_format_response!(schema, query, response, Some("OtherOperation"), Value::Null,);
-        assert_format_response!(
-            schema,
-            query,
-            response,
-            Some("MyOperation"),
-            json! {{
-                "foo": "1",
             }},
         );
     }
@@ -3665,6 +3671,7 @@ mod tests {
         type Product {
             id: String!
             name: String
+            bar: String
         }";
 
         // combine skip and include
@@ -3712,6 +3719,76 @@ mod tests {
             json! {{
                 "get": {
                     "a": "a",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get @skip(if: false) @include(if: false) {
+                    a:name
+                    bar
+                }
+                get @skip(if: false) {
+                    a:name
+                    a:name
+                }
+            }",
+            json! {{
+                "get": {
+                    "a": "a",
+                    "bar": "foo",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "a": "a",
+                },
+            }},
+        );
+    }
+
+    #[test]
+    fn union_with_typename() {
+        let schema = "type Query {
+            get: ProductResult
+        }
+
+        type Product{
+            symbol: String!
+        }
+        type ProductError{
+            reason: String
+        }
+        union ProductResult = Product | ProductError
+        ";
+
+        assert_format_response!(
+            schema,
+            "query  {
+                get {
+                    __typename
+                    ... on Product {
+                      symbol
+                    }
+                    ... on ProductError {
+                      reason
+                    }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Product",
+                    "symbol": "1"
                 },
             }},
         );
