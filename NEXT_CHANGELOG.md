@@ -78,6 +78,9 @@ If a configuration file had errors on reload these were silently swallowed. Thes
 ### Telemetry spans are no longer created for healthcheck requests [PR #938](https://github.com/apollographql/router/pull/938)
 Telemetry spans where previously being created for the healthcheck requests which was creating noisy telemetry for users.
 
+### Dockerfile now allows overriding of `CONFIGURATION_PATH` [PR #948](https://github.com/apollographql/router/pull/948)
+Previously `CONFIGURATION_PATH` could not be used to override the config location as it was being passed by command line arg. 
+
 ## 🛠 Maintenance
 ### Upgrade `test-span` to display more children spans in our snapshots [PR #942](https://github.com/apollographql/router/pull/942)
 Previously in test-span before the fix [introduced here](https://github.com/apollographql/test-span/pull/13) we were filtering too aggressively. So if we wanted to snapshot all `DEBUG` level if we encountered a `TRACE` span which had `DEBUG` children then these children were not snapshotted. It's now fixed and it's more consistent with what we could have/see in jaeger.
@@ -110,7 +113,6 @@ The client awareness headers are now added by default to the list of CORS allowe
 ## Remove unnecessary box in instrumentation layer [PR #940](https://github.com/apollographql/router/pull/940)
 
 Minor simplification of code to remove boxing during instrumentation.
-
 
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))

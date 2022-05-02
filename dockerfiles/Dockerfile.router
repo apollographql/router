@@ -28,7 +28,7 @@ COPY --from=build --chown=root:root /dist /dist
 
 WORKDIR /dist
 
+ENV CONFIGURATION_PATH="/dist/config/router.yaml"
+
 # Default executable is the router
 ENTRYPOINT ["./router"]
-
-CMD ["--config", "./config/router.yaml"]
