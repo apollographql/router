@@ -120,7 +120,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .route("/.well-known/apollo/server-health", get(health_check))
                 .layer(
                     TraceLayer::new_for_http()
-                        .make_span_with(PropagatingMakeSpan::new(Level::INFO))
+                        .make_span_with(PropagatingMakeSpan::new())
                         .on_response(|resp: &Response<_>, _duration: Duration, span: &Span| {
                             if resp.status() >= StatusCode::BAD_REQUEST {
                                 span.record(
@@ -528,8 +528,8 @@ struct PropagatingMakeSpan {
 }
 
 impl PropagatingMakeSpan {
-    fn new(level: Level) -> Self {
-        Self { level }
+    fn new() -> Self {
+        Self { level: Level::INFO }
     }
 }
 

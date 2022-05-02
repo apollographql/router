@@ -146,14 +146,21 @@ expression: get_spans()
                 "apollo_router_core::query_planner::fetch": {
                   "name": "apollo_router_core::query_planner::fetch",
                   "record": {
-                    "entries": [],
+                    "entries": [
+                      [
+                        "otel.kind",
+                        "internal"
+                      ]
+                    ],
                     "metadata": {
                       "name": "fetch",
                       "target": "apollo_router_core::query_planner",
                       "level": "INFO",
                       "module_path": "apollo_router_core::query_planner",
                       "fields": {
-                        "names": []
+                        "names": [
+                          "otel.kind"
+                        ]
                       }
                     }
                   },
