@@ -66,8 +66,14 @@ telemetry:
 ```
 
 ## 🐛 Fixes
-###  Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
+### Fields in the root selection set of a query are now correctly skipped and included [PR #931](https://github.com/apollographql/router/pull/931)
+The `@skip` and `@include` directives are now executed for the fields in the root selection set.
+
+### Configuration errors on hot-reload are output [PR #850](https://github.com/apollographql/router/pull/850)
 If a configuration file had errors on reload these were silently swallowed. These are now added to the logs.
+
+### Telemetry spans are no longer created for healthcheck requests [PR #938](https://github.com/apollographql/router/pull/938)
+Telemetry spans where previously being created for the healthcheck requests which was creating noisy telemetry for users.
 
 ## 🛠 Maintenance
 ### Finalize migration from Warp to Axum [PR #920](https://github.com/apollographql/router/pull/920)
@@ -93,8 +99,15 @@ The response's `data` field can be null or absent depending on conventions that 
 
 ## Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
 
-The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of brower based applications. We also document how to override them and update the CORS configuration accordingly.
+The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of browser based applications. We also document how to override them and update the CORS configuration accordingly.
+
+## Remove unnecessary box in instrumentation layer [PR #940](https://github.com/apollographql/router/pull/940)
+
+Minor simplification of code to remove boxing during instrumentation.
+
 
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
 Many more rust docs have been added.
+### Federation version support page [PR #896](https://github.com/apollographql/router/pull/896)
+Add Federation version support doc page detailing which versions of federation are compiled against versions of the router. 
