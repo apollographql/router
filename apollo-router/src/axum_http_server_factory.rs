@@ -523,88 +523,16 @@ fn prefers_html(accept_header: &HeaderValue) -> bool {
 }
 
 #[derive(Clone)]
-struct PropagatingMakeSpan {
-    level: Level,
-}
+struct PropagatingMakeSpan;
 
 impl PropagatingMakeSpan {
     fn new() -> Self {
-        Self { level: Level::INFO }
+        Self {}
     }
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
-        macro_rules! make_span {
-            ($level:expr) => {
-                make_span!($level,)
-            };
-            ($level:expr, $($fields:tt)*) => {
-                match $level {
-                    Level::ERROR => {
-                        tracing::span!(
-                            Level::ERROR,
-                            "request",
-                            method = %request.method(),
-                            uri = %request.uri(),
-                            version = ?request.version(),
-                            "otel.kind" = %SpanKind::Server,
-                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                            $($fields)*
-                        )
-                    }
-                    Level::WARN => {
-                        tracing::span!(
-                            Level::WARN,
-                            "request",
-                            method = %request.method(),
-                            uri = %request.uri(),
-                            version = ?request.version(),
-                            "otel.kind" = %SpanKind::Server,
-                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                            $($fields)*
-                        )
-                    }
-                    Level::INFO => {
-                        tracing::span!(
-                            Level::INFO,
-                            "request",
-                            method = %request.method(),
-                            uri = %request.uri(),
-                            version = ?request.version(),
-                            "otel.kind" = %SpanKind::Server,
-                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                            $($fields)*
-                        )
-                    }
-                    Level::DEBUG => {
-                        tracing::span!(
-                            Level::DEBUG,
-                            "request",
-                            method = %request.method(),
-                            uri = %request.uri(),
-                            version = ?request.version(),
-                            "otel.kind" = %SpanKind::Server,
-                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                            $($fields)*
-                        )
-                    }
-                    Level::TRACE => {
-                        tracing::span!(
-                            Level::TRACE,
-                            "request",
-                            method = %request.method(),
-                            uri = %request.uri(),
-                            version = ?request.version(),
-                            "otel.kind" = %SpanKind::Server,
-                            "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str(),
-                            $($fields)*
-                        )
-                    }
-                }
-            };
-        }
-
         // Before we make the span we need to attach span info that may have come in from the request.
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
@@ -615,10 +543,26 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         if context.span().span_context().is_valid() {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            make_span!(self.level)
+            tracing::span!(
+                Level::INFO,
+                "request",
+                method = %request.method(),
+                uri = %request.uri(),
+                version = ?request.version(),
+                "otel.kind" = %SpanKind::Server,
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+            )
         } else {
             // No remote span, we can go ahead and create the span without context.
-            make_span!(self.level)
+            tracing::span!(
+                Level::INFO,
+                "request",
+                method = %request.method(),
+                uri = %request.uri(),
+                version = ?request.version(),
+                "otel.kind" = %SpanKind::Server,
+                "otel.status_code" = %opentelemetry::trace::StatusCode::Unset.as_str()
+            )
         }
     }
 }
