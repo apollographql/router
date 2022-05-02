@@ -104,7 +104,7 @@ tempfile = "3.3.0"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.3"
+test-span = "0.4"
 tower-test = "0.4.0"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
