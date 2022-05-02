@@ -2,7 +2,7 @@
 
 :exclamation: Here be dragons! :exclamation: 
 
-It is possible to run the router outside the default bundled web server (Hyper). 
+It is possible to run the router outside the default bundled web server (Axum). 
 
 ## Reasons to avoid this
 
