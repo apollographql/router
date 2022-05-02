@@ -1,3 +1,17 @@
+//! Traffic shaping plugin
+//!
+//! Currently includes:
+//! * Query deduplication
+//!
+//! Future functionality:
+//! * APQ (already written, but config needs to be moved here)
+//! * Caching
+//! * Rate limiting
+//!
+
+pub(crate) mod apq;
+mod deduplication;
+
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
@@ -5,8 +19,8 @@ use serde::Deserialize;
 use tower::util::BoxService;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 
-use crate::deduplication::QueryDeduplicationLayer;
 use crate::plugin::Plugin;
+use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
 use crate::{register_plugin, ServiceBuilderExt, SubgraphRequest, SubgraphResponse};
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]

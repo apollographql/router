@@ -1,9 +1,9 @@
 //! Implements the router phase of the request lifecycle.
 
-use crate::apq::APQLayer;
 use crate::ensure_query_presence::EnsureQueryPresence;
 use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
+use crate::traffic_shaping::apq::APQLayer;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
