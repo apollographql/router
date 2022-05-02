@@ -11,6 +11,7 @@ use deadpool::managed;
 use futures::channel::mpsc;
 use futures_batch::ChunksTimeoutStreamExt;
 use std::collections::HashMap;
+use std::ops::AddAssign;
 use std::time::Duration;
 use tower::BoxError;
 use url::Url;
@@ -46,7 +47,7 @@ impl Default for Sender {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Metrics {
     client_name: String,
     client_version: String,
@@ -56,7 +57,7 @@ pub(crate) struct Metrics {
     referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct QueryLatencyStats {
     latency_count: Duration,
     request_count: u64,
@@ -73,29 +74,19 @@ pub(crate) struct QueryLatencyStats {
     forbidden_operation_count: u64,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct PathErrorStats {
     children: HashMap<String, PathErrorStats>,
     errors_count: u64,
     requests_with_errors_count: u64,
 }
 
-impl AggregatedPathErrorStats {
-    pub(crate) fn add(&mut self, stats: PathErrorStats) {
-        for (k, v) in stats.children.into_iter() {
-            self.children.entry(k).or_default().add(v)
-        }
-        self.errors_count += stats.errors_count;
-        self.requests_with_errors_count += stats.requests_with_errors_count;
-    }
-}
-
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct TypeStat {
     per_field_stat: HashMap<String, FieldStat>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 pub(crate) struct FieldStat {
     errors_count: u64,
     observed_execution_count: u64,
@@ -111,11 +102,11 @@ struct AggregatedMetrics {
     referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl AggregatedMetrics {
-    pub(crate) fn add(&mut self, metrics: Metrics) {
-        self.query_latency_stats.add(metrics.query_latency_stats);
+impl AddAssign<Metrics> for AggregatedMetrics {
+    fn add_assign(&mut self, metrics: Metrics) {
+        self.query_latency_stats += metrics.query_latency_stats;
         for (k, v) in metrics.per_type_stat {
-            self.per_type_stat.entry(k).or_default().add(v);
+            *self.per_type_stat.entry(k).or_default() += v;
         }
         for (k, v) in metrics.referenced_fields_by_type {
             // Merging is not required because metrics are always groupd by schema and query.
@@ -142,8 +133,8 @@ struct AggregatedQueryLatencyStats {
     forbidden_operation_count: u64,
 }
 
-impl AggregatedQueryLatencyStats {
-    pub(crate) fn add(&mut self, stats: QueryLatencyStats) {
+impl AddAssign<QueryLatencyStats> for AggregatedQueryLatencyStats {
+    fn add_assign(&mut self, stats: QueryLatencyStats) {
         self.latency_count
             .increment_duration(stats.latency_count, 1);
         self.request_count += stats.request_count;
@@ -153,7 +144,7 @@ impl AggregatedQueryLatencyStats {
         self.persisted_query_misses += stats.persisted_query_misses;
         self.cache_latency_count
             .increment_duration(stats.cache_latency_count, 1);
-        self.root_error_stats.add(stats.root_error_stats);
+        self.root_error_stats += stats.root_error_stats;
         self.requests_with_errors_count += stats.requests_with_errors_count;
         self.public_cache_ttl_count
             .increment_duration(stats.public_cache_ttl_count, 1);
@@ -171,13 +162,23 @@ struct AggregatedPathErrorStats {
     requests_with_errors_count: u64,
 }
 
+impl AddAssign<PathErrorStats> for AggregatedPathErrorStats {
+    fn add_assign(&mut self, stats: PathErrorStats) {
+        for (k, v) in stats.children.into_iter() {
+            *self.children.entry(k).or_default() += v;
+        }
+        self.errors_count += stats.errors_count;
+        self.requests_with_errors_count += stats.requests_with_errors_count;
+    }
+}
+
 #[derive(Default)]
 struct AggregatedTypeStat {
     per_field_stat: HashMap<String, AggregatedFieldStat>,
 }
 
-impl AggregatedTypeStat {
-    pub(crate) fn add(&mut self, stat: TypeStat) {
+impl AddAssign<TypeStat> for AggregatedTypeStat {
+    fn add_assign(&mut self, stat: TypeStat) {
         for (k, v) in stat.per_field_stat.into_iter() {
             self.per_field_stat.entry(k).or_default().add(v);
         }
@@ -322,7 +323,7 @@ fn consolidate(
     let mut aggregated_metrics = HashMap::<_, AggregatedMetrics>::new();
 
     for metric in metrics {
-        aggregated_metrics
+        *aggregated_metrics
             .entry(
                 (
                     metric.client_name.clone(),
@@ -331,8 +332,7 @@ fn consolidate(
                 )
                     .clone(),
             )
-            .or_default()
-            .add(metric);
+            .or_default() += metric;
     }
 
     aggregated_metrics
@@ -472,6 +472,7 @@ impl DurationHistogram {
 
 #[cfg(test)]
 mod test {
+
     use super::*;
 
     // DurationHistogram Tests
