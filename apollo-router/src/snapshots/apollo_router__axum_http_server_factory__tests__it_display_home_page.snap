@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/axum_http_server_factory.rs
-assertion_line: 756
+assertion_line: 790
 expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_span::Filter::new(Level::INFO))"
 ---
 {
@@ -18,8 +18,8 @@ expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_
     }
   },
   "children": {
-    "tower_http::trace::make_span::request": {
-      "name": "tower_http::trace::make_span::request",
+    "apollo_router::axum_http_server_factory::request": {
+      "name": "apollo_router::axum_http_server_factory::request",
       "record": {
         "entries": [
           [
@@ -33,26 +33,40 @@ expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_
           [
             "version",
             "HTTP/1.1"
+          ],
+          [
+            "otel.kind",
+            "server"
+          ],
+          [
+            "otel.status_code",
+            ""
+          ],
+          [
+            "otel.status_code",
+            "OK"
           ]
         ],
         "metadata": {
           "name": "request",
-          "target": "tower_http::trace::make_span",
+          "target": "apollo_router::axum_http_server_factory",
           "level": "INFO",
-          "module_path": "tower_http::trace::make_span",
+          "module_path": "apollo_router::axum_http_server_factory",
           "fields": {
             "names": [
               "method",
               "uri",
-              "version"
+              "version",
+              "otel.kind",
+              "otel.status_code"
             ]
           }
         }
       },
       "children": {}
     },
-    "tower_http::trace::make_span::request": {
-      "name": "tower_http::trace::make_span::request",
+    "apollo_router::axum_http_server_factory::request": {
+      "name": "apollo_router::axum_http_server_factory::request",
       "record": {
         "entries": [
           [
@@ -66,18 +80,32 @@ expression: "test_span::get_spans_for_root(&root_span.id().unwrap(),\n    &test_
           [
             "version",
             "HTTP/1.1"
+          ],
+          [
+            "otel.kind",
+            "server"
+          ],
+          [
+            "otel.status_code",
+            ""
+          ],
+          [
+            "otel.status_code",
+            "OK"
           ]
         ],
         "metadata": {
           "name": "request",
-          "target": "tower_http::trace::make_span",
+          "target": "apollo_router::axum_http_server_factory",
           "level": "INFO",
-          "module_path": "tower_http::trace::make_span",
+          "module_path": "apollo_router::axum_http_server_factory",
           "fields": {
             "names": [
               "method",
               "uri",
-              "version"
+              "version",
+              "otel.kind",
+              "otel.status_code"
             ]
           }
         }
