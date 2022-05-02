@@ -10,11 +10,6 @@ publish = false
 name = "router"
 path = "src/main.rs"
 
-[features]
-default = ["axum-server"]
-axum-server = ["axum", "apollo-router-core/axum-server"]
-warp-server = ["warp"]
-
 [dependencies]
 anyhow = "1.0.55"
 apollo-parser = { git = "https://github.com/apollographql/apollo-rs.git", rev = "e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac" }
@@ -94,10 +89,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
-axum = { version = "0.5.3", features = ["headers", "json", "original-uri"], optional = true }
-warp = { version = "0.3.2", default-features = false, features = [
-    "compression",
-], optional = true }
+axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.124"
 yaml-rust = "0.4.5"

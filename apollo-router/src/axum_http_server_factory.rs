@@ -550,6 +550,8 @@ mod tests {
     use serde_json::json;
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use test_log::test;
+    use tower::service_fn;
     use tracing::info_span;
 
     macro_rules! assert_header {
@@ -645,6 +647,39 @@ mod tests {
         (server, client)
     }
 
+    async fn init_with_config(
+        mut mock: MockRouterService,
+        conf: Configuration,
+        plugin_handlers: HashMap<String, Handler>,
+    ) -> (HttpServerHandle, Client) {
+        let server_factory = AxumHttpServerFactory::new();
+        let (service, mut handle) = tower_test::mock::spawn();
+
+        tokio::spawn(async move {
+            loop {
+                while let Some((request, responder)) = handle.next_request().await {
+                    match mock.service_call(request) {
+                        Ok(response) => responder.send_response(response),
+                        Err(err) => responder.send_error(err),
+                    }
+                }
+            }
+        });
+        let server = server_factory
+            .create(service.into_inner(), Arc::new(conf), None, plugin_handlers)
+            .await
+            .expect("Failed to create server factory");
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let client = reqwest::Client::builder()
+            .default_headers(default_headers)
+            .redirect(Policy::none())
+            .build()
+            .unwrap();
+        (server, client)
+    }
+
     #[cfg(unix)]
     async fn init_unix(
         mut mock: MockRouterService,
@@ -690,7 +725,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn display_home_page() -> Result<(), FederatedServerError> {
+    async fn it_display_home_page() -> Result<(), FederatedServerError> {
         test_span::init();
         let root_span = info_span!("root");
         {
@@ -715,14 +750,8 @@ mod tests {
                     "{}",
                     response.text().await.unwrap()
                 );
-                assert!(response
-                    .text()
-                    .await
-                    .unwrap()
-                    .starts_with("<!DOCTYPE html>"))
+                assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
             }
-
-            server.shutdown().await?;
         }
         insta::assert_json_snapshot!(test_span::get_spans_for_root(
             &root_span.id().unwrap(),
@@ -1144,5 +1173,207 @@ Content-Type: application/json\r
             &root_span.id().unwrap(),
             &test_span::Filter::new(Level::INFO)
         ));
+    }
+
+    #[test(tokio::test)]
+    async fn it_send_bad_content_type() -> Result<(), FederatedServerError> {
+        let query = "query";
+        let operation_name = "operationName";
+
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/graphql", server.listen_address());
+        let response = client
+            .post(url.as_str())
+            .header(CONTENT_TYPE, "application/yaml")
+            .body(json!({ "query": query, "operationName": operation_name }).to_string())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE,);
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_doesnt_display_disabled_home_page() -> Result<(), FederatedServerError> {
+        let expectations = MockRouterService::new();
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Some(
+                        Cors::builder()
+                            .origins(vec!["http://studio".to_string()])
+                            .build(),
+                    ))
+                    .landing_page(false)
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        for url in vec![
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
+        ] {
+            let response = client
+                .get(url.as_str())
+                .header(ACCEPT, "text/html")
+                .send()
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_answers_to_custom_endpoint() -> Result<(), FederatedServerError> {
+        let expectations = MockRouterService::new();
+        let plugin_handler = Handler::new(
+            service_fn(|req: http_compat::Request<Bytes>| async move {
+                Ok::<_, BoxError>(http_compat::Response {
+                    inner: http::Response::builder()
+                        .status(StatusCode::OK)
+                        .body(ResponseBody::Text(format!(
+                            "{} + {}",
+                            req.method(),
+                            req.uri().path()
+                        )))
+                        .unwrap(),
+                })
+            })
+            .boxed(),
+        );
+        let mut plugin_handlers = HashMap::new();
+        plugin_handlers.insert(
+            "apollo.test.custom_plugin_with_endpoint".to_string(),
+            plugin_handler,
+        );
+
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Some(
+                        Cors::builder()
+                            .origins(vec!["http://studio".to_string()])
+                            .build(),
+                    ))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, plugin_handlers).await;
+
+        for path in &["/", "/test"] {
+            let response = client
+                .get(&format!(
+                    "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    server.listen_address(),
+                    path
+                ))
+                .send()
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.text().await.unwrap(),
+                format!(
+                    "GET + /plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    path
+                )
+            );
+        }
+
+        for path in &["/", "/test"] {
+            let response = client
+                .post(&format!(
+                    "{}/plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    server.listen_address(),
+                    path
+                ))
+                .send()
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.text().await.unwrap(),
+                format!(
+                    "POST + /plugins/apollo.test.custom_plugin_with_endpoint{}",
+                    path
+                )
+            );
+        }
+        server.shutdown().await
+    }
+
+    #[test(tokio::test)]
+    async fn it_checks_the_shape_of_router_request() -> Result<(), FederatedServerError> {
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(4)
+            .returning(move |req| {
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::Text(format!(
+                        "{} + {} + {:?}",
+                        req.method(),
+                        req.uri(),
+                        serde_json::to_string(req.body()).unwrap()
+                    )))
+                    .unwrap()
+                    .into())
+            });
+        let (server, client) = init(expectations).await;
+        let query = json!(
+        {
+          "query": "query",
+        });
+        for url in vec![
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
+        ] {
+            let response = client.get(&url).query(&query).send().await.unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.text().await.unwrap(),
+                serde_json::to_string(&format!(
+                    "GET + {}?query=query + {:?}",
+                    url,
+                    serde_json::to_string(&query).unwrap()
+                ))
+                .unwrap()
+            );
+        }
+        for url in vec![
+            format!("{}/", server.listen_address()),
+            format!("{}/graphql", server.listen_address()),
+        ] {
+            let response = client
+                .post(&url)
+                .body(query.to_string())
+                .send()
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.text().await.unwrap(),
+                serde_json::to_string(&format!(
+                    "POST + {} + {:?}",
+                    url,
+                    serde_json::to_string(&query).unwrap()
+                ))
+                .unwrap()
+            );
+        }
+        server.shutdown().await
     }
 }

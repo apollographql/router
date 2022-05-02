@@ -76,6 +76,9 @@ If a configuration file had errors on reload these were silently swallowed. Thes
 Telemetry spans where previously being created for the healthcheck requests which was creating noisy telemetry for users.
 
 ## 🛠 Maintenance
+### Finalize migration from Warp to Axum [PR #920](https://github.com/apollographql/router/pull/920)
+Adding more tests to be more confident to definitely delete the `warp-server` feature and get rid of `warp`
+
 ### End to end integration tests for Jaeger [PR #850](https://github.com/apollographql/router/pull/850)
 Jaeger tracing end to end test including client->router->subgraphs
 
