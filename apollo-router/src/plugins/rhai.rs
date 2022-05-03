@@ -707,6 +707,10 @@ impl Rhai {
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
+            // Register a contains function for HeaderMap so that "in" works
+            .register_fn("contains", |x: &mut HeaderMap, key: &str| -> bool {
+                x.contains_key(HeaderName::from_str(key).unwrap())
+            })
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
                 let search_name =
