@@ -48,7 +48,6 @@ pub use introspection::*;
 pub use json_ext::*;
 pub use layers::*;
 pub use plugin::*;
-pub use plugins::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;

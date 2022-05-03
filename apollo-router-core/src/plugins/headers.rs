@@ -1,4 +1,4 @@
-use super::serde_utils::{
+use crate::plugin::utils::serde::{
     deserialize_header_name, deserialize_header_value, deserialize_option_header_name,
     deserialize_option_header_value, deserialize_regex,
 };
