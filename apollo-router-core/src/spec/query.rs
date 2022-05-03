@@ -399,8 +399,9 @@ impl Query {
                         continue;
                     }
 
-
-                    let is_apply = if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str()) {
+                    let is_apply = if let Some(input_type) =
+                        input.get(TYPENAME).and_then(|val| val.as_str())
+                    {
                         //First determine if fragment is for interface
                         //Otherwise we assume concrete type is expected
                         if let Some(interface) = schema.interfaces.get(type_condition) {
@@ -452,10 +453,15 @@ impl Query {
                             continue;
                         }
 
-                        let is_apply = if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str()) {
+                        let is_apply = if let Some(input_type) =
+                            input.get(TYPENAME).and_then(|val| val.as_str())
+                        {
                             //First determine if fragment is for interface
                             //Otherwise we assume concrete type is expected
-                            if let Some(interface) = known_type.as_deref().and_then(|known_type| schema.interfaces.get(known_type)) {
+                            if let Some(interface) = known_type
+                                .as_deref()
+                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            {
                                 //Check if input implements interface
                                 schema.is_subtype(interface.name.as_str(), input_type)
                             } else {
