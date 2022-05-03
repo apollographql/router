@@ -3281,6 +3281,85 @@ mod tests {
     }
 
     #[test]
+    fn check_fragment_on_interface() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        interface Product {
+            id: String!
+            name: String
+        }
+
+        type Vodka {
+            id: String!
+            name: String
+        }
+
+        type Beer implements Product {
+            id: String!
+            name: String
+        }";
+
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        // Make sure we do not return data for type that doesn't implement interface
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
+            }},
+        );
+    }
+
+    #[test]
     fn include() {
         let schema = "type Query {
             get: Product
