@@ -399,15 +399,25 @@ impl Query {
                         continue;
                     }
 
-                    // known_type = true means that from the query's shape, we know
-                    // we should get the right type here. But in the case we get a
-                    // __typename field and it does not match, we should not apply
-                    // that fragment
-                    if input
-                        .get(TYPENAME)
-                        .map(|val| val.as_str() == Some(type_condition.as_str()))
-                        .unwrap_or(*known_type)
-                    {
+
+                    let is_apply = if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str()) {
+                        //First determine if fragment is for interface
+                        //Otherwise we assume concrete type is expected
+                        if let Some(interface) = schema.interfaces.get(type_condition) {
+                            //Check if input implements interface
+                            schema.is_subtype(interface.name.as_str(), input_type)
+                        } else {
+                            input_type == type_condition.as_str()
+                        }
+                    } else {
+                        // known_type = true means that from the query's shape, we know
+                        // we should get the right type here. But in the case we get a
+                        // __typename field and it does not match, we should not apply
+                        // that fragment
+                        *known_type
+                    };
+
+                    if is_apply {
                         self.apply_selection_set(selection_set, variables, input, output, schema)?;
                     }
                 }
@@ -3331,6 +3341,88 @@ mod tests {
             }},
         );
 
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
         // Make sure we do not return data for type that doesn't implement interface
         assert_format_response!(
             schema,
@@ -3343,6 +3435,31 @@ mod tests {
             query  {
                 get {
                   ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
                 }
             }",
             json! {{

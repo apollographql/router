@@ -106,13 +106,18 @@ If the client was explicitely requesting the `__typename` field, it was removed 
 ### Follow the GraphQL spec about Response format [PR #926](https://github.com/apollographql/router/pull/926)
 The response's `data` field can be null or absent depending on conventions that are now followed by the router.
 
-## Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
+### Add client awareness headers to CORS allowed headers [PR #917](https://github.com/apollographql/router/pull/917)
 
 The client awareness headers are now added by default to the list of CORS allowed headers, for easier integration of browser based applications. We also document how to override them and update the CORS configuration accordingly.
 
-## Remove unnecessary box in instrumentation layer [PR #940](https://github.com/apollographql/router/pull/940)
+### Remove unnecessary box in instrumentation layer [PR #940](https://github.com/apollographql/router/pull/940)
 
 Minor simplification of code to remove boxing during instrumentation.
+
+### Fix incorrectly omitting content of interface's fragment [PR #949](https://github.com/apollographql/router/pull/949)
+
+Router now distinguish between fragment on concrete type and interface.
+If interface is encountered and  `__typename` is queried, additionally checks that returned type implements interface.
 
 ## 📚 Documentation
 ### Enhanced rust docs ([PR #819](https://github.com/apollographql/router/pull/819))
