@@ -2252,12 +2252,13 @@ dependencies = [
 [[package]]
 name = "launchpad"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/rover.git?rev=94141242ba34cf00cde9630fc4a6dcd05d4fa5da#94141242ba34cf00cde9630fc4a6dcd05d4fa5da"
+source = "git+https://github.com/apollographql/rover.git?rev=c52bd32f1493e63844fd74e1a1d32f18e5c88394#c52bd32f1493e63844fd74e1a1d32f18e5c88394"
 dependencies = [
  "apollo-encoder",
  "backoff",
  "graphql_client",
  "humantime",
+ "hyper",
  "reqwest",
  "semver",
  "serde",
