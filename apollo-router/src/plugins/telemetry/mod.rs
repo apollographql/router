@@ -1,4 +1,5 @@
 //! Telemetry customization.
+use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::plugins::telemetry::metrics::{
@@ -8,8 +9,9 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
+use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
-    http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
     ServiceBuilderExt as ServiceBuilderExt2, SubgraphRequest, SubgraphResponse,
 };
@@ -40,6 +42,11 @@ mod otlp;
 mod tracing;
 
 pub static ROUTER_SPAN_NAME: &str = "router";
+static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
+static CLIENT_NAME: &str = "apollo_telemetry::client_name";
+static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+static OPERATION_NAME: &str = "apollo_telemetry::operation_name";
+static QUERY: &str = "apollo_telemetry::query";
 
 pub(crate) struct Telemetry {
     config: config::Conf,
@@ -229,18 +236,17 @@ impl Plugin for Telemetry {
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
+        let config = self.config.apollo.clone().unwrap_or_default();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(
-                self.config.apollo.clone().unwrap_or_default(),
-            ))
+            .instrument(Self::router_service_span(config.clone()))
             .map_future_with_context(
-                |req: &RouterRequest| req.context.clone(),
-                move |_ctx, fut| {
+                move |req: &RouterRequest| Self::populate_context(&config, req),
+                move |ctx, fut| {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     async move {
                         let result: Result<RouterResponse, BoxError> = fut.await;
-                        Self::update_apollo_metrics(sender, &result);
+                        Self::update_apollo_metrics(ctx, sender, &result);
                         Self::update_metrics(metrics, &result);
                         result
                     }
@@ -259,8 +265,10 @@ impl Plugin for Telemetry {
             .service(service)
             .map_result(|r| {
                 if let Ok(res) = &r {
-                    res.context
-                        .insert("usage_reporting", res.query_plan.usage_reporting.clone())?;
+                    if let Some(usage_reporting) = res.query_plan.usage_reporting.as_ref().cloned()
+                    {
+                        res.context.insert(USAGE_REPORTING, usage_reporting)?;
+                    }
                 }
                 r
             })
@@ -470,10 +478,35 @@ impl Telemetry {
         }
     }
 
-    fn update_apollo_metrics(sender: Sender, result: &Result<RouterResponse, BoxError>) {
-        let apollo_metrics = metrics::apollo::Metrics::default();
-
-        sender.send(apollo_metrics);
+    fn update_apollo_metrics(
+        context: Context,
+        sender: Sender,
+        result: &Result<RouterResponse, BoxError>,
+    ) {
+        if let Some(usage_reporting) = context
+            .get::<_, UsageReporting>(USAGE_REPORTING)
+            .unwrap_or_default()
+        {
+            let apollo_metrics = metrics::apollo::Metrics {
+                client_name: context
+                    .get(CLIENT_NAME)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                client_version: context
+                    .get(CLIENT_NAME)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                stats_report_key: usage_reporting.stats_report_key.to_string(),
+                query_latency_stats: Default::default(),
+                per_type_stat: Default::default(),
+                referenced_fields_by_type: usage_reporting
+                    .referenced_fields_by_type
+                    .into_iter()
+                    .map(|(k, v)| (k, convert(v)))
+                    .collect(), // TODO Can be removed once UsageReporting switches to HashMap.
+            };
+            sender.send(apollo_metrics);
+        };
     }
 
     fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
@@ -496,6 +529,61 @@ impl Telemetry {
         metrics
             .http_requests_duration
             .record(now.elapsed().as_secs_f64(), &[]);
+    }
+
+    fn populate_context(config: &Config, req: &RouterRequest) -> Context {
+        let context = req.context.clone();
+        let http_request = &req.originating_request;
+        let headers = http_request.headers();
+        let client_name_header = &config.client_name_header;
+        let client_version_header = &config.client_version_header;
+        let _ = context.insert(
+            QUERY,
+            http_request
+                .body()
+                .query
+                .as_ref()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        let _ = context.insert(
+            OPERATION_NAME,
+            http_request
+                .body()
+                .operation_name
+                .clone()
+                .unwrap_or_default(),
+        );
+        let _ = context.insert(
+            CLIENT_NAME,
+            headers
+                .get(client_name_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        let _ = context.insert(
+            CLIENT_VERSION,
+            headers
+                .get(client_version_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        context
+    }
+}
+
+fn convert(
+    referenced_fields: apollo_router_core::reexports::router_bridge::planner::ReferencedFieldsForType,
+) -> apollo_spaceport::ReferencedFieldsForType {
+    apollo_spaceport::ReferencedFieldsForType {
+        field_names: referenced_fields.field_names.unwrap_or_default(),
+        is_interface: referenced_fields.is_interface.unwrap_or_default(),
     }
 }
 

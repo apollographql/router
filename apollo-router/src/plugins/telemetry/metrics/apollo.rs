@@ -49,51 +49,51 @@ impl Default for Sender {
 
 #[derive(Default, Debug)]
 pub(crate) struct Metrics {
-    client_name: String,
-    client_version: String,
-    stats_report_key: String,
-    query_latency_stats: QueryLatencyStats,
-    per_type_stat: HashMap<String, TypeStat>,
-    referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub(crate) client_name: String,
+    pub(crate) client_version: String,
+    pub(crate) stats_report_key: String,
+    pub(crate) query_latency_stats: QueryLatencyStats,
+    pub(crate) per_type_stat: HashMap<String, TypeStat>,
+    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct QueryLatencyStats {
-    latency_count: Duration,
-    request_count: u64,
-    cache_hits: u64,
-    persisted_query_hits: u64,
-    persisted_query_misses: u64,
-    cache_latency_count: Duration,
-    root_error_stats: PathErrorStats,
-    requests_with_errors_count: u64,
-    public_cache_ttl_count: Duration,
-    private_cache_ttl_count: Duration,
-    registered_operation_count: u64,
-    forbidden_operation_count: u64,
-    requests_without_field_instrumentation: u64,
+    pub(crate) latency_count: Duration,
+    pub(crate) request_count: u64,
+    pub(crate) cache_hits: u64,
+    pub(crate) persisted_query_hits: u64,
+    pub(crate) persisted_query_misses: u64,
+    pub(crate) cache_latency_count: Duration,
+    pub(crate) root_error_stats: PathErrorStats,
+    pub(crate) requests_with_errors_count: u64,
+    pub(crate) public_cache_ttl_count: Duration,
+    pub(crate) private_cache_ttl_count: Duration,
+    pub(crate) registered_operation_count: u64,
+    pub(crate) forbidden_operation_count: u64,
+    pub(crate) requests_without_field_instrumentation: u64,
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct PathErrorStats {
-    children: HashMap<String, PathErrorStats>,
-    errors_count: u64,
-    requests_with_errors_count: u64,
+    pub(crate) children: HashMap<String, PathErrorStats>,
+    pub(crate) errors_count: u64,
+    pub(crate) requests_with_errors_count: u64,
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct TypeStat {
-    per_field_stat: HashMap<String, FieldStat>,
+    pub(crate) per_field_stat: HashMap<String, FieldStat>,
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct FieldStat {
-    return_type: String,
-    errors_count: u64,
-    observed_execution_count: u64,
-    estimated_execution_count: f64,
-    requests_with_errors_count: u64,
-    latency_count: Duration,
+    pub(crate) return_type: String,
+    pub(crate) errors_count: u64,
+    pub(crate) observed_execution_count: u64,
+    pub(crate) estimated_execution_count: f64,
+    pub(crate) requests_with_errors_count: u64,
+    pub(crate) latency_count: Duration,
 }
 
 #[derive(Default)]
