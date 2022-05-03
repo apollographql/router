@@ -77,7 +77,7 @@ mod tests {
             service_response.response.body()
         {
             assert!(response.errors.is_empty());
-            assert_eq!(expected_mock_response_data, response.data);
+            assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
         } else {
             panic!("unexpected response");
         }
