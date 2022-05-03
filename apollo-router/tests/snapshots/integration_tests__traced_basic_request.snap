@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 119
+assertion_line: 120
 expression: get_spans()
 ---
 {
@@ -165,6 +165,67 @@ expression: get_spans()
                     }
                   },
                   "children": {}
+                },
+                "apollo_router::plugins::telemetry::subgraph": {
+                  "name": "apollo_router::plugins::telemetry::subgraph",
+                  "record": {
+                    "entries": [
+                      [
+                        "name",
+                        "products"
+                      ],
+                      [
+                        "otel.kind",
+                        "client"
+                      ]
+                    ],
+                    "metadata": {
+                      "name": "subgraph",
+                      "target": "apollo_router::plugins::telemetry",
+                      "level": "INFO",
+                      "module_path": "apollo_router::plugins::telemetry",
+                      "fields": {
+                        "names": [
+                          "name",
+                          "otel.kind"
+                        ]
+                      }
+                    }
+                  },
+                  "children": {
+                    "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
+                      "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "aggregate_response_data",
+                          "target": "apollo_router_core::services::tower_subgraph_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router_core::services::tower_subgraph_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
+                    },
+                    "apollo_router_core::services::tower_subgraph_service::parse_subgraph_response": {
+                      "name": "apollo_router_core::services::tower_subgraph_service::parse_subgraph_response",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "parse_subgraph_response",
+                          "target": "apollo_router_core::services::tower_subgraph_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router_core::services::tower_subgraph_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
+                    }
+                  }
                 },
                 "apollo_router_core::query_planner::fetch::response_insert": {
                   "name": "apollo_router_core::query_planner::fetch::response_insert",
