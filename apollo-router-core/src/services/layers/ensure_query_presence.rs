@@ -4,7 +4,7 @@
 //!
 //! If the request does not contain a query, then the request is rejected.
 
-use crate::checkpoint::CheckpointService;
+use crate::sync_checkpoint::CheckpointService;
 use crate::{RouterRequest, RouterResponse};
 use http::StatusCode;
 use serde_json_bytes::Value;

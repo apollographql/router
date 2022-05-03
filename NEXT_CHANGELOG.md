@@ -25,7 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.7] - (unreleased)
 ## ❗ BREAKING ❗
 
-### Plugin utilities cleanup ([PR #819](https://github.com/apollographql/router/pull/819)) ([PR #908](https://github.com/apollographql/router/pull/908))
+### Plugin utilities cleanup [PR #819](https://github.com/apollographql/router/pull/819) [PR #908](https://github.com/apollographql/router/pull/908)
 Utilities around creating Request and Response structures have been migrated to builders.
 
 Migration:
@@ -33,6 +33,12 @@ Migration:
 * `plugin_utils::RouterResponse::builder()`->`RouterResponse::fake_builder()`
 
 In addition, the `plugin_utils` module has been removed. Mock service functionality has been migrated to `plugin::utils::test`.
+
+### Layer cleanup [PR #950](https://github.com/apollographql/router/pull/950)
+Reusable layers have all been moved to `apollo_router_core::layers`. In particular the `checkpoint_*` layers have been moved from the `plugins` module.
+`async_checkpoint` has been renamed to `checkpoint_async` for consistency with Tower.
+Layers that were internal to our execution pipeline have been moved and made private to the crate.
+
 ### Plugin API changes [PR #855](https://github.com/apollographql/router/pull/855)
 Previously the Plugin trait has three lifecycle hooks: new, startup, and shutdown.
 
@@ -123,3 +129,6 @@ Add Federation version support doc page detailing which versions of federation a
 
 ### Improve readme for embedded Router [PR #936](https://github.com/apollographql/router/pull/936)
 Add more details about pros and cons so that users know what they're letting themselves in for.  
+
+### Document layers [PR #950](https://github.com/apollographql/router/pull/950)
+Document the notable existing layers and add rust docs for custom layers including basic use cases.
