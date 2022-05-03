@@ -127,10 +127,13 @@ impl Plugin for HelloWorld {
 
 To define custom logic for a service hook, you can use [`ServiceBuilder`](https://docs.rs/tower/0.3.1/tower/builder/struct.ServiceBuilder.html).
 
-`ServiceBuilder` provides common building blocks that remove much of the complexity of writing a plugin. These building blocks are called layers:
+`ServiceBuilder` provides common building blocks that remove much of the complexity of writing a plugin. These building blocks are called layers.
 
 ```rust title="hello_world.rs"
 // Replaces the default definition in the example above
+use tower::ServiceBuilderExt;
+use apollo_router_core::ServiceBuilderExt as ApolloServiceBuilderExt;
+ 
 fn router_service(
     &mut self,
     service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -150,6 +153,14 @@ fn router_service(
 ```
 
 The [tower-rs](https://github.com/tower-rs) library (which the Apollo Router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
+
+Some notable layers are:
+* **buffered** - Make a service `Clone`. Typically requred for any `async` layers.
+* **checkpoint** - Perform a sync call to decide if a request should proceed or not. Useful for validation.
+* **checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Requires `buffered`.
+* **instrument** - Add a tracing span around a service.
+* **map_reqeust** - Transform the request before proceeding. e.g. for header manipulation.
+* **map_response** - Transform the response before proceeding. e.g. for header manipulation.
 
 Before implementing a layer yourself, always check whether an existing layer implementation might fit your needs. Reusing layers is significantly faster than implementing layers from scratch.
 

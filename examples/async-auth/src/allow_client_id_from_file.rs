@@ -59,7 +59,7 @@ impl Plugin for AllowClientIdFromFile {
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
         // or ControlFlow::Return(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .async_checkpoint(move |req: RouterRequest| {
+            .checkpoint_async(move |req: RouterRequest| {
                 // The http_request is stored in a `RouterRequest` context.
                 // We are going to check the headers for the presence of the header we're looking for
                 if !req.originating_request.headers().contains_key(&header_key) {
