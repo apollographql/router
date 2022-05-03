@@ -1,6 +1,8 @@
+use apollo_router::plugins::telemetry::config::Tracing;
+use apollo_router::plugins::telemetry::{self, Telemetry};
 use apollo_router_core::{
-    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, ResponseBody, RouterRequest,
-    RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
+    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -42,14 +44,15 @@ macro_rules! assert_federated_response {
         tracing::debug!("query:\n{}\n", $query);
 
         assert!(
-            expected.data.is_object(),
+            expected.data.as_ref().unwrap().is_object(),
             "nodejs: no response's data: please check that the gateway and the subgraphs are running",
         );
 
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
-        assert!(expected.data.eq_and_ordered(&actual.data));
+        assert!(expected.data.as_ref().expect("expected data should not be none")
+        .eq_and_ordered(&actual.data.as_ref().expect("received data should not be none")));
         assert_eq!(registry.totals(), $service_requests);
     };
 }
@@ -533,6 +536,14 @@ async fn setup_router_and_registry() -> (
     let counting_registry = CountingServiceRegistry::new();
     let subgraphs = schema.subgraphs();
     let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
+    let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
+        metrics: Option::default(),
+        tracing: Some(Tracing::default()),
+        apollo: Option::default(),
+    })
+    .await
+    .unwrap();
+    builder = builder.with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin));
     for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

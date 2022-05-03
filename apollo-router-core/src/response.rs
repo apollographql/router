@@ -15,9 +15,9 @@ pub struct Response {
     pub label: Option<String>,
 
     /// The response data.
-    #[serde(skip_serializing_if = "skip_data_if", default)]
-    #[builder(default = Value::Object(Default::default()))]
-    pub data: Value,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[builder(default, setter(strip_option))]
+    pub data: Option<Value>,
 
     /// The path that the data should be merged at.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -33,14 +33,6 @@ pub struct Response {
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     #[builder(default)]
     pub extensions: Object,
-}
-
-fn skip_data_if(value: &Value) -> bool {
-    match value {
-        Value::Object(o) => o.is_empty(),
-        Value::Null => true,
-        _ => false,
-    }
 }
 
 impl Response {
@@ -65,7 +57,7 @@ impl Response {
                 reason: error.to_string(),
             })?;
 
-        let data = extract_key_value_from_object!(object, "data").unwrap_or_default();
+        let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),

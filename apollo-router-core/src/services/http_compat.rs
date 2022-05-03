@@ -2,12 +2,17 @@
 //!
 //! To improve their usability.
 
+use axum::{body::boxed, response::IntoResponse};
+use bytes::Bytes;
+use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method};
 use multimap::MultiMap;
 use std::{
     cmp::PartialEq,
     hash::Hash,
     ops::{Deref, DerefMut},
 };
+
+use crate::ResponseBody;
 
 /// Temporary holder of header name while for use while building requests and responses. Required
 /// because header name creation is faillable.
@@ -63,16 +68,6 @@ impl TryFrom<IntoHeaderValue> for HeaderValue {
         })
     }
 }
-
-#[cfg(feature = "axum-server")]
-use axum::{body::boxed, response::IntoResponse};
-#[cfg(feature = "axum-server")]
-use bytes::Bytes;
-
-#[cfg(feature = "axum-server")]
-use crate::ResponseBody;
-
-use http::{header::HeaderName, request::Parts, uri::InvalidUri, HeaderValue, Method};
 
 #[derive(Debug)]
 pub struct Request<T> {
@@ -316,7 +311,6 @@ impl<T: Clone> Clone for Response<T> {
     }
 }
 
-#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<ResponseBody> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?
@@ -328,7 +322,6 @@ impl IntoResponse for Response<ResponseBody> {
     }
 }
 
-#[cfg(feature = "axum-server")]
 impl IntoResponse for Response<Bytes> {
     fn into_response(self) -> axum::response::Response {
         // todo: chunks?

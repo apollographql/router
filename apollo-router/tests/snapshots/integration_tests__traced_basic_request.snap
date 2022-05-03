@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 125
+assertion_line: 120
 expression: get_spans()
 ---
 {
@@ -18,46 +18,244 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router_core::query_planner::fetch": {
-      "name": "apollo_router_core::query_planner::fetch",
+    "apollo_router::plugins::telemetry::router": {
+      "name": "apollo_router::plugins::telemetry::router",
       "record": {
-        "entries": [],
+        "entries": [
+          [
+            "query",
+            "{ topProducts { name name2:name } }"
+          ],
+          [
+            "operation_name",
+            ""
+          ],
+          [
+            "client_name",
+            ""
+          ],
+          [
+            "client_version",
+            ""
+          ],
+          [
+            "otel.kind",
+            "internal"
+          ]
+        ],
         "metadata": {
-          "name": "fetch",
-          "target": "apollo_router_core::query_planner",
+          "name": "router",
+          "target": "apollo_router::plugins::telemetry",
           "level": "INFO",
-          "module_path": "apollo_router_core::query_planner",
+          "module_path": "apollo_router::plugins::telemetry",
           "fields": {
-            "names": []
+            "names": [
+              "query",
+              "operation_name",
+              "client_name",
+              "client_version",
+              "otel.kind"
+            ]
           }
         }
       },
       "children": {
-        "apollo_router_core::query_planner::fetch::make_variables": {
-          "name": "apollo_router_core::query_planner::fetch::make_variables",
+        "apollo_router_core::query_cache::parse_query": {
+          "name": "apollo_router_core::query_cache::parse_query",
           "record": {
-            "entries": [],
+            "entries": [
+              [
+                "otel.kind",
+                "internal"
+              ]
+            ],
             "metadata": {
-              "name": "make_variables",
-              "target": "apollo_router_core::query_planner::fetch",
-              "level": "DEBUG",
-              "module_path": "apollo_router_core::query_planner::fetch",
+              "name": "parse_query",
+              "target": "apollo_router_core::query_cache",
+              "level": "INFO",
+              "module_path": "apollo_router_core::query_cache",
               "fields": {
-                "names": []
+                "names": [
+                  "otel.kind"
+                ]
               }
             }
           },
           "children": {}
         },
-        "apollo_router_core::query_planner::fetch::response_insert": {
-          "name": "apollo_router_core::query_planner::fetch::response_insert",
+        "apollo_router::plugins::telemetry::query_planning": {
+          "name": "apollo_router::plugins::telemetry::query_planning",
+          "record": {
+            "entries": [
+              [
+                "otel.kind",
+                "internal"
+              ]
+            ],
+            "metadata": {
+              "name": "query_planning",
+              "target": "apollo_router::plugins::telemetry",
+              "level": "INFO",
+              "module_path": "apollo_router::plugins::telemetry",
+              "fields": {
+                "names": [
+                  "otel.kind"
+                ]
+              }
+            }
+          },
+          "children": {}
+        },
+        "apollo_router::plugins::telemetry::execution": {
+          "name": "apollo_router::plugins::telemetry::execution",
+          "record": {
+            "entries": [
+              [
+                "otel.kind",
+                "internal"
+              ]
+            ],
+            "metadata": {
+              "name": "execution",
+              "target": "apollo_router::plugins::telemetry",
+              "level": "INFO",
+              "module_path": "apollo_router::plugins::telemetry",
+              "fields": {
+                "names": [
+                  "otel.kind"
+                ]
+              }
+            }
+          },
+          "children": {
+            "apollo_router_core::query_planner::fetch": {
+              "name": "apollo_router_core::query_planner::fetch",
+              "record": {
+                "entries": [
+                  [
+                    "otel.kind",
+                    "internal"
+                  ]
+                ],
+                "metadata": {
+                  "name": "fetch",
+                  "target": "apollo_router_core::query_planner",
+                  "level": "INFO",
+                  "module_path": "apollo_router_core::query_planner",
+                  "fields": {
+                    "names": [
+                      "otel.kind"
+                    ]
+                  }
+                }
+              },
+              "children": {
+                "apollo_router_core::query_planner::fetch::make_variables": {
+                  "name": "apollo_router_core::query_planner::fetch::make_variables",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "make_variables",
+                      "target": "apollo_router_core::query_planner::fetch",
+                      "level": "DEBUG",
+                      "module_path": "apollo_router_core::query_planner::fetch",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {}
+                },
+                "apollo_router::plugins::telemetry::subgraph": {
+                  "name": "apollo_router::plugins::telemetry::subgraph",
+                  "record": {
+                    "entries": [
+                      [
+                        "name",
+                        "products"
+                      ],
+                      [
+                        "otel.kind",
+                        "client"
+                      ]
+                    ],
+                    "metadata": {
+                      "name": "subgraph",
+                      "target": "apollo_router::plugins::telemetry",
+                      "level": "INFO",
+                      "module_path": "apollo_router::plugins::telemetry",
+                      "fields": {
+                        "names": [
+                          "name",
+                          "otel.kind"
+                        ]
+                      }
+                    }
+                  },
+                  "children": {
+                    "apollo_router_core::services::tower_subgraph_service::aggregate_response_data": {
+                      "name": "apollo_router_core::services::tower_subgraph_service::aggregate_response_data",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "aggregate_response_data",
+                          "target": "apollo_router_core::services::tower_subgraph_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router_core::services::tower_subgraph_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
+                    },
+                    "apollo_router_core::services::tower_subgraph_service::parse_subgraph_response": {
+                      "name": "apollo_router_core::services::tower_subgraph_service::parse_subgraph_response",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "parse_subgraph_response",
+                          "target": "apollo_router_core::services::tower_subgraph_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router_core::services::tower_subgraph_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
+                    }
+                  }
+                },
+                "apollo_router_core::query_planner::fetch::response_insert": {
+                  "name": "apollo_router_core::query_planner::fetch::response_insert",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "response_insert",
+                      "target": "apollo_router_core::query_planner::fetch",
+                      "level": "DEBUG",
+                      "module_path": "apollo_router_core::query_planner::fetch",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {}
+                }
+              }
+            }
+          }
+        },
+        "apollo_router_core::services::router_service::format_response": {
+          "name": "apollo_router_core::services::router_service::format_response",
           "record": {
             "entries": [],
             "metadata": {
-              "name": "response_insert",
-              "target": "apollo_router_core::query_planner::fetch",
+              "name": "format_response",
+              "target": "apollo_router_core::services::router_service",
               "level": "DEBUG",
-              "module_path": "apollo_router_core::query_planner::fetch",
+              "module_path": "apollo_router_core::services::router_service",
               "fields": {
                 "names": []
               }
@@ -66,22 +264,6 @@ expression: get_spans()
           "children": {}
         }
       }
-    },
-    "apollo_router_core::services::router_service::format_response": {
-      "name": "apollo_router_core::services::router_service::format_response",
-      "record": {
-        "entries": [],
-        "metadata": {
-          "name": "format_response",
-          "target": "apollo_router_core::services::router_service",
-          "level": "DEBUG",
-          "module_path": "apollo_router_core::services::router_service",
-          "fields": {
-            "names": []
-          }
-        }
-      },
-      "children": {}
     }
   }
 }
