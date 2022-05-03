@@ -29,7 +29,7 @@ mod context;
 mod error;
 mod introspection;
 mod json_ext;
-mod layers;
+pub mod layers;
 pub mod plugin;
 pub mod plugins;
 mod query_cache;

@@ -29,8 +29,10 @@ use tracing::Span;
 
 mod execution_service;
 pub mod http_compat;
+pub(crate) mod layers;
 mod router_service;
 mod tower_subgraph_service;
+
 use crate::async_checkpoint::AsyncCheckpointLayer;
 use crate::instrument::InstrumentLayer;
 use crate::sync_checkpoint::CheckpointLayer;

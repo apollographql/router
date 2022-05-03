@@ -9,7 +9,6 @@
 //! * Rate limiting
 //!
 
-pub(crate) mod apq;
 mod deduplication;
 
 use std::collections::HashMap;
