@@ -442,13 +442,20 @@ impl Query {
                             continue;
                         }
 
-                        if input
-                            .get(TYPENAME)
-                            .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
-                            .unwrap_or_else(|| {
-                                known_type.as_deref() == Some(fragment.type_condition.as_str())
-                            })
-                        {
+                        let is_apply = if let Some(input_type) = input.get(TYPENAME).and_then(|val| val.as_str()) {
+                            //First determine if fragment is for interface
+                            //Otherwise we assume concrete type is expected
+                            if let Some(interface) = known_type.as_deref().and_then(|known_type| schema.interfaces.get(known_type)) {
+                                //Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), input_type)
+                            } else {
+                                input_type == fragment.type_condition.as_str()
+                            }
+                        } else {
+                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                        };
+
+                        if is_apply {
                             self.apply_selection_set(
                                 &fragment.selection_set,
                                 variables,
