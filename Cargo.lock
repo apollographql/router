@@ -120,7 +120,6 @@ dependencies = [
  "opentelemetry-zipkin",
  "paste",
  "prometheus",
- "prost-types",
  "regex",
  "reqwest",
  "rhai",
@@ -129,8 +128,6 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "serde_yaml",
- "startup",
- "static_assertions",
  "tempfile",
  "test-log",
  "test-span",
@@ -214,19 +211,16 @@ dependencies = [
  "sha2 0.10.2",
  "startup",
  "static_assertions",
- "task-local-extensions",
  "test-log",
  "thiserror",
  "tokio",
  "tower",
- "tower-http 0.2.5",
  "tower-service",
  "tower-test",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "typed-builder 0.10.0",
- "url",
  "urlencoding",
 ]
 
@@ -252,8 +246,6 @@ dependencies = [
  "prost",
  "prost-types",
  "reqwest",
- "serde",
- "serde_json",
  "sys-info",
  "tokio",
  "tokio-stream",
@@ -295,39 +287,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eab1c04a571841102f5345a8fc0f6bb3d31c315dec879b5c6e42e40ce7ffa34e"
 
 [[package]]
-name = "assert_fs"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf09bb72e00da477c2596865e8873227e2196d263cca35414048875dbbeea1be"
-dependencies = [
- "doc-comment",
- "globwalk",
- "predicates",
- "predicates-core",
- "predicates-tree",
- "tempfile",
-]
-
-[[package]]
 name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "futures",
  "http",
  "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -748,17 +721,11 @@ name = "compose-your-graphql-router"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
- "futures",
- "serde",
  "serde_json",
- "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -801,20 +768,12 @@ name = "context-data"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "futures",
  "http",
- "serde",
- "serde_json",
- "serde_json_bytes",
- "tokio",
- "tokio-util 0.7.1",
  "tower",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1226,12 +1185,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doc-comment"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
-
-[[package]]
 name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1450,20 +1403,14 @@ name = "forbid-anonymous-operations"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "futures",
  "http",
- "serde",
  "serde_json",
- "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1700,30 +1647,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
-name = "globset"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10463d9ff00a2a068db14231982f5132edebad0d7660cd956a1c30292dbcbfbd"
-dependencies = [
- "aho-corasick",
- "bstr",
- "fnv",
- "log",
- "regex",
-]
-
-[[package]]
-name = "globwalk"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93e3af942408868f6934a7b85134a3230832b9977cf66125df2f9edcfce4ddcc"
-dependencies = [
- "bitflags",
- "ignore",
- "walkdir",
-]
-
-[[package]]
 name = "graphql-introspection-query"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1885,21 +1808,14 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "futures",
- "http",
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2093,24 +2009,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ignore"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "713f1b139373f96a2e0ce3ac931cd01ee973c3c5dd7c40c0c2efe96ad2b6751d"
-dependencies = [
- "crossbeam-utils 0.8.8",
- "globset",
- "lazy_static",
- "log",
- "memchr",
- "regex",
- "same-file",
- "thread_local",
- "walkdir",
- "winapi-util",
-]
-
-[[package]]
 name = "include_dir"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2291,25 +2189,19 @@ name = "jwt-auth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "futures",
  "hex",
  "http",
  "jwt-simple",
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes",
  "strum",
  "strum_macros",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2361,12 +2253,13 @@ dependencies = [
 [[package]]
 name = "launchpad"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/rover.git?rev=94141242ba34cf00cde9630fc4a6dcd05d4fa5da#94141242ba34cf00cde9630fc4a6dcd05d4fa5da"
+source = "git+https://github.com/apollographql/rover.git?rev=c52bd32f1493e63844fd74e1a1d32f18e5c88394#c52bd32f1493e63844fd74e1a1d32f18e5c88394"
 dependencies = [
  "apollo-encoder",
  "backoff",
  "graphql_client",
  "humantime",
+ "hyper",
  "reqwest",
  "semver",
  "serde",
@@ -3444,22 +3337,15 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.2.5",
  "apollo-router",
  "apollo-router-core",
  "async-trait",
- "dashmap 5.2.0",
- "futures",
  "http",
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes",
  "tokio",
- "tokio-util 0.7.1",
  "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4493,15 +4379,6 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
-]
-
-[[package]]
-name = "task-local-extensions"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36794203e10c86e5998179e260869d156e0674f02d5451b4a3fb9fd86d02aaab"
-dependencies = [
- "tokio",
 ]
 
 [[package]]
@@ -5568,7 +5445,6 @@ version = "0.1.0-preview.6"
 dependencies = [
  "ansi_term",
  "anyhow",
- "assert_fs",
  "base64",
  "camino",
  "cargo_metadata",
@@ -5576,16 +5452,13 @@ dependencies = [
  "libc",
  "once_cell",
  "platforms",
- "regex",
  "reqwest",
- "semver",
  "serde_json",
  "serde_json_traversal",
  "sha2 0.10.2",
  "structopt",
  "tar",
  "tempfile",
- "walkdir",
  "which",
  "zip",
 ]
