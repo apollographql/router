@@ -1,5 +1,6 @@
 //! Telemetry customization.
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
+use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -7,7 +8,6 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
-use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
     http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
@@ -24,11 +24,10 @@ use opentelemetry::sdk::propagation::{
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::{Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tower::steer::Steer;
 use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
@@ -41,56 +40,6 @@ mod otlp;
 mod tracing;
 
 pub static ROUTER_SPAN_NAME: &str = "router";
-
-static EXTENSION_KEY: &str = "telemetry";
-
-#[derive(Deserialize, Serialize, Debug)]
-
-pub(crate) struct PartialQueryStats {
-    client_name: String,
-    client_version: String,
-    elapsed: Option<Duration>,
-    usage_reporting: Option<UsageReporting>,
-}
-
-impl PartialQueryStats {
-    pub fn new(client_name: String, client_version: String) -> Self {
-        Self {
-            client_name,
-            client_version,
-            elapsed: Default::default(),
-            usage_reporting: Default::default(),
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct QueryStats {
-    client_name: String,
-    client_version: String,
-    elapsed: Duration,
-    usage_reporting: UsageReporting,
-}
-
-impl TryFrom<PartialQueryStats> for QueryStats {
-    type Error = &'static str;
-
-    fn try_from(value: PartialQueryStats) -> Result<Self, Self::Error> {
-        if value.elapsed.is_none() {
-            return Err("elapsed is not set");
-        }
-        if value.usage_reporting.is_none() {
-            return Err("usage reporting is not set");
-        }
-
-        Ok(Self {
-            client_name: value.client_name,
-            client_version: value.client_version,
-            elapsed: value.elapsed.expect("checked above;qed"),
-            usage_reporting: value.usage_reporting.expect("checked above;qed"),
-        })
-    }
-}
 
 pub(crate) struct Telemetry {
     config: config::Conf,
@@ -284,99 +233,20 @@ impl Plugin for Telemetry {
             .instrument(Self::router_service_span(
                 self.config.apollo.clone().unwrap_or_default(),
             ))
-            .map_future_with_context(|req: &RouterRequest|req.context.clone(),move |_ctx, fut| {
-                let sender = metrics_sender.clone();
-                async move {
-                    let result = fut.await?;
-                    let metrics = metrics::apollo::Metrics::default();
-                    sender.send(metrics);
-                    Ok(result)
-                }
-            }
+            .map_future_with_context(
+                |req: &RouterRequest| req.context.clone(),
+                move |_ctx, fut| {
+                    let metrics = metrics.clone();
+                    let sender = metrics_sender.clone();
+                    async move {
+                        let result: Result<RouterResponse, BoxError> = fut.await;
+                        Self::update_apollo_metrics(sender, &result);
+                        Self::update_metrics(metrics, &result);
+                        result
+                    }
+                },
             )
             .service(service)
-
-            .map_request(|req: RouterRequest| {
-                let client_name = req
-                    .originating_request
-                    .headers()
-                    .get("apollographql-client-name")
-                    .map(HeaderValue::to_str)
-                    .unwrap_or(Ok(""))
-                    .unwrap_or_default();
-
-                let client_version = req
-                    .originating_request
-                    .headers()
-                    .get("apollographql-client-version")
-                    .map(HeaderValue::to_str)
-                    .unwrap_or(Ok(""))
-                    .unwrap_or("");
-
-                if let Err(e) = req.context.insert(
-                    EXTENSION_KEY,
-                    PartialQueryStats::new(client_name.to_string(), client_version.to_string()),
-                ) {
-                    ::tracing::warn!("telemetry: couldn't insert client id and version to the context : {e}");
-                }
-                req
-            })
-            .map_future(move |f| {
-                let metrics = metrics.clone();
-                // Using Instant because it is guaranteed to be monotonically increasing.
-                let now = Instant::now();
-                f.map(move |r: Result<RouterResponse, BoxError>| {
-
-                    match &r {
-                        Ok(response) => {
-                            if let Err(e)=response.context.upsert(
-                                EXTENSION_KEY,
-                                |mut partial_query_stats: PartialQueryStats| {
-                                    partial_query_stats.elapsed = Some(now.elapsed());
-                                    partial_query_stats
-                                },
-                                || panic!("no {EXTENSION_KEY} in context. This cannot happen;qed"),
-                            ) {
-                                ::tracing::warn!("telemetry: couldn't insert query elapsed time to the context : {e}");
-                            }
-
-                            metrics.http_requests_total.add(
-                                1,
-                                &[KeyValue::new(
-                                    "status",
-                                    response.response.status().as_u16().to_string(),
-                                )],
-                            );
-                        }
-                        Err(_) => {
-                            metrics.http_requests_error_total.add(1, &[]);
-                        }
-                    }
-                    metrics
-                        .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[]);
-                    r
-                })
-            })
-            // TODO: map an error as well, to try to extract usage reporting
-            .map_response(|res: RouterResponse| {
-                let partial_query_stats: PartialQueryStats = res
-                    .context
-                    .get(EXTENSION_KEY)
-                    .expect("no {EXTENSION_KEY} in context. This cannot happen;qed")
-                    .expect("{EXTENSION_KEY} in context is empty. This cannot happen;qed");
-
-                match QueryStats::try_from(partial_query_stats) {
-                    Ok(query_stats) => {
-                        // TODO: push things to uplink \o/
-                        ::tracing::debug!("full query stats received: {:?}",&query_stats);
-                    }
-                    Err(e) => {
-                        ::tracing::debug!("telemetry: couldn't gather query stats : {e}");
-                    }
-                }
-                res
-            })
             .boxed()
     }
 
@@ -384,28 +254,15 @@ impl Plugin for Telemetry {
         &mut self,
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
-        ServiceBuilder::new().instrument(move |_| info_span!("query_planning")).service(service)
+        ServiceBuilder::new()
+            .instrument(move |_| info_span!("query_planning"))
+            .service(service)
             .map_result(|r| {
                 if let Ok(res) = &r {
-                    res.context.insert("usage_reporting", res.query_plan.usage_reporting.clone())?;
+                    res.context
+                        .insert("usage_reporting", res.query_plan.usage_reporting.clone())?;
                 }
                 r
-            })
-            .map_response(|res: QueryPlannerResponse| {
-                if let Err(e)=res.context
-                    .upsert(
-                        EXTENSION_KEY,
-                        |mut partial_query_stats: PartialQueryStats| {
-                            partial_query_stats.usage_reporting =
-                                res.query_plan.usage_reporting.clone();
-                            partial_query_stats
-                        },
-                        || panic!("no {EXTENSION_KEY} in context. This cannot happen;qed"),
-                    ) {
-                        ::tracing::warn!("telemetry: couldn't insert usage reporting to the telemetry extension : {e}");
-                    }
-
-                res
             })
             .boxed()
     }
@@ -611,6 +468,34 @@ impl Telemetry {
             );
             span
         }
+    }
+
+    fn update_apollo_metrics(sender: Sender, result: &Result<RouterResponse, BoxError>) {
+        let apollo_metrics = metrics::apollo::Metrics::default();
+
+        sender.send(apollo_metrics);
+    }
+
+    fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
+        // Using Instant because it is guaranteed to be monotonically increasing.
+        let now = Instant::now();
+        match &result {
+            Ok(response) => {
+                metrics.http_requests_total.add(
+                    1,
+                    &[KeyValue::new(
+                        "status",
+                        response.response.status().as_u16().to_string(),
+                    )],
+                );
+            }
+            Err(_) => {
+                metrics.http_requests_error_total.add(1, &[]);
+            }
+        }
+        metrics
+            .http_requests_duration
+            .record(now.elapsed().as_secs_f64(), &[]);
     }
 }
 
