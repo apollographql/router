@@ -11,13 +11,12 @@ publish = false
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
-axum-server = ["axum"]
 
 [dependencies]
 apollo-parser = "0.2.5"
 async-trait = "0.1.53"
 atty = "0.2.14"
-axum = { version = "0.5.3", optional = true }
+axum = { version = "0.5.4" }
 buildstructor = "0.1.9"
 bytes = "1.1.0"
 dashmap = { version = "5.1.0", features = ["serde"] }
@@ -28,7 +27,7 @@ hex = "0.4.3"
 http = "0.2.6"
 http-body = "0.4.4"
 hyper = { version = "0.14.18", features = ["client"] }
-hyper-rustls = "0.23.0"
+hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
 include_dir = "0.7.2"
 indexmap = "1.8.1"
 itertools = "0.10.3"
@@ -52,17 +51,14 @@ serde_urlencoded = "0.7.1"
 sha2 = "0.10.2"
 startup = "0.1.1"
 static_assertions = "1.1.0"
-task-local-extensions = "0.1.1"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["rt", "sync"] }
 tower = { version = "0.4.12", features = ["full"] }
-tower-http = "0.2.5"
 tower-service = "0.3.1"
 tower-test = "0.4.0"
 tracing = "0.1.34"
 tracing-opentelemetry = "0.17.2"
 typed-builder = "0.10.0"
-url = "2.2.2"
 urlencoding = "2.1.0"
 
 [dev-dependencies]

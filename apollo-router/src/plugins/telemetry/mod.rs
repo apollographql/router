@@ -24,7 +24,7 @@ use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
 };
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::{Tracer, TracerProvider};
+use opentelemetry::trace::{SpanKind, Tracer, TracerProvider};
 use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
@@ -36,7 +36,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 mod apollo;
-mod config;
+pub mod config;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -48,7 +48,7 @@ static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 static OPERATION_NAME: &str = "apollo_telemetry::operation_name";
 static QUERY: &str = "apollo_telemetry::query";
 
-pub(crate) struct Telemetry {
+pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
@@ -261,7 +261,7 @@ impl Plugin for Telemetry {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("query_planning"))
+            .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .map_result(|r| {
                 if let Ok(res) = &r {
@@ -280,7 +280,7 @@ impl Plugin for Telemetry {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("execution"))
+            .instrument(move |_| info_span!("execution", "otel.kind" = %SpanKind::Internal))
             .service(service)
             .boxed()
     }
@@ -294,7 +294,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let name = name.to_owned();
         ServiceBuilder::new()
-            .instrument(move |_| info_span!("subgraph", name = name.as_str()))
+            .instrument(move |_| info_span!("subgraph", name = name.as_str(), "otel.kind" = %SpanKind::Client))
             .service(service)
             .map_future(move |f| {
                 let metrics = metrics.clone();
@@ -472,7 +472,8 @@ impl Telemetry {
                 query = query.as_str(),
                 operation_name = operation_name.as_str(),
                 client_name = client_name.to_str().unwrap_or_default(),
-                client_version = client_version.to_str().unwrap_or_default()
+                client_version = client_version.to_str().unwrap_or_default(),
+                "otel.kind" = %SpanKind::Internal
             );
             span
         }

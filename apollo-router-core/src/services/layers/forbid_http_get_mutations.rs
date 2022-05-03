@@ -2,7 +2,8 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use crate::{checkpoint::CheckpointService, ExecutionRequest, ExecutionResponse, Object};
+use crate::sync_checkpoint::CheckpointService;
+use crate::{ExecutionRequest, ExecutionResponse, Object};
 use http::{header::HeaderName, Method, StatusCode};
 use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};

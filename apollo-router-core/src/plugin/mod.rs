@@ -16,7 +16,7 @@
 
 pub mod utils;
 
-use crate::services::ServiceBuilderExt;
+use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,
@@ -270,7 +270,7 @@ macro_rules! register_plugin {
             };
 
             $crate::register_plugin(qualified_name, $crate::PluginFactory::new(|configuration| Box::pin(async move {
-                let configuration = serde_json::from_value(configuration.clone())?;
+                let configuration = $crate::reexports::serde_json::from_value(configuration.clone())?;
                 let plugin = $value::new(configuration).await?;
                 Ok(Box::new(plugin) as Box<dyn $crate::DynPlugin>)
             }), |gen| gen.subschema_for::<<$value as $crate::Plugin>::Config>()));

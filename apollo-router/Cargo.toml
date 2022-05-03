@@ -10,11 +10,6 @@ publish = false
 name = "router"
 path = "src/main.rs"
 
-[features]
-default = ["axum-server"]
-axum-server = ["axum", "apollo-router-core/axum-server"]
-warp-server = ["warp"]
-
 [dependencies]
 anyhow = "1.0.55"
 apollo-parser = "0.2.5"
@@ -68,7 +63,6 @@ opentelemetry-zipkin = { version = "0.15.0", default-features = false, features 
 ] }
 opentelemetry-prometheus = "0.10.0"
 prometheus = "0.13"
-prost-types = "0.9.0"
 regex = "1.5.4"
 reqwest = { version = "0.11.10", default-features = false, features = [
     "rustls-tls",
@@ -80,8 +74,6 @@ serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_yaml = "0.8.23"
-startup = "0.1.1"
-static_assertions = "1.1.0"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.1", features = ["net", "codec"] }
@@ -96,10 +88,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
-axum = { version = "0.5.3", features = ["headers", "json", "original-uri"], optional = true }
-warp = { version = "0.3.2", default-features = false, features = [
-    "compression",
-], optional = true }
+axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 rhai = { version = "1.5.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.124"
 yaml-rust = "0.4.5"
@@ -117,7 +106,7 @@ tempfile = "3.3.0"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.3"
+test-span = "0.4"
 tower-test = "0.4.0"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
