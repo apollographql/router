@@ -61,6 +61,7 @@ mod forbid_http_get_mutations_tests {
     use crate::query_planner::fetch::OperationKind;
     use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
     use http::{Method, StatusCode};
+    use router_bridge::planner::UsageReporting;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -173,7 +174,10 @@ mod forbid_http_get_mutations_tests {
             .originating_request(request)
             .query_plan(Arc::new(QueryPlan {
                 root,
-                usage_reporting: None,
+                usage_reporting: UsageReporting {
+                    stats_report_key: "this is a test report key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                },
             }))
             .build()
     }

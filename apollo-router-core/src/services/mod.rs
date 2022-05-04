@@ -547,7 +547,7 @@ impl ExecutionRequest {
     ) -> ExecutionRequest {
         ExecutionRequest::new(
             originating_request.unwrap_or_else(http_compat::Request::mock),
-            query_plan.unwrap_or_default(),
+            query_plan.unwrap_or_else(|| Arc::new(QueryPlan::for_tests())),
             context.unwrap_or_default(),
         )
     }

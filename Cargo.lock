@@ -2128,7 +2128,6 @@ checksum = "0f647032dfaa1f8b6dc29bd3edb7bbef4861b8b8007ebb118d6db284fd59f6ee"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown",
- "serde",
 ]
 
 [[package]]
@@ -3875,12 +3874,11 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.0"
-source = "git+https://github.com/apollographql/federation-rs.git?rev=e9d416843f1fa9ee330650b91d7c117225bc6253#e9d416843f1fa9ee330650b91d7c117225bc6253"
+source = "git+https://github.com/apollographql/federation-rs.git?rev=9b246c3ab1df86d83498a1393b2a0fe3d738ea7d#9b246c3ab1df86d83498a1393b2a0fe3d738ea7d"
 dependencies = [
  "anyhow",
  "async-channel",
  "deno_core",
- "indexmap",
  "serde",
  "serde_json",
  "thiserror",

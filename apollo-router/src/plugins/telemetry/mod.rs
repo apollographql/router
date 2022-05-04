@@ -265,10 +265,8 @@ impl Plugin for Telemetry {
             .service(service)
             .map_result(|r| {
                 if let Ok(res) = &r {
-                    if let Some(usage_reporting) = res.query_plan.usage_reporting.as_ref().cloned()
-                    {
-                        res.context.insert(USAGE_REPORTING, usage_reporting)?;
-                    }
+                    res.context
+                        .insert(USAGE_REPORTING, res.query_plan.usage_reporting.clone())?;
                 }
                 r
             })
@@ -482,7 +480,7 @@ impl Telemetry {
     fn update_apollo_metrics(
         context: Context,
         sender: Sender,
-        result: &Result<RouterResponse, BoxError>,
+        _result: &Result<RouterResponse, BoxError>,
     ) {
         if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
@@ -583,8 +581,8 @@ fn convert(
     referenced_fields: apollo_router_core::reexports::router_bridge::planner::ReferencedFieldsForType,
 ) -> apollo_spaceport::ReferencedFieldsForType {
     apollo_spaceport::ReferencedFieldsForType {
-        field_names: referenced_fields.field_names.unwrap_or_default(),
-        is_interface: referenced_fields.is_interface.unwrap_or_default(),
+        field_names: referenced_fields.field_names,
+        is_interface: referenced_fields.is_interface,
     }
 }
 

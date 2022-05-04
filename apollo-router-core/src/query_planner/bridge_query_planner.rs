@@ -127,7 +127,10 @@ mod tests {
             )
             .await
             .unwrap();
-        insta::assert_debug_snapshot!("plan", result);
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!("plan_usage_reporting", result.usage_reporting);
+        });
+        insta::assert_debug_snapshot!("plan_root", result.root);
     }
 
     #[test(tokio::test)]
@@ -135,7 +138,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(Arc::new(example_schema()))
             .await
             .unwrap();
-        let result = planner
+        let err = planner
             .get(
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 None,
@@ -143,7 +146,18 @@ mod tests {
             )
             .await
             .unwrap_err();
-        insta::assert_debug_snapshot!("plan_invalid_query", result);
+
+        match err {
+            QueryPlannerError::PlanningErrors(plan_errors) => {
+                insta::with_settings!({sort_maps => true}, {
+                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", plan_errors.usage_reporting);
+                });
+                insta::assert_debug_snapshot!("plan_invalid_query_errors", plan_errors.errors);
+            }
+            _ => {
+                panic!("invalid query planning should have failed");
+            }
+        }
     }
 
     fn example_schema() -> Schema {
@@ -160,19 +174,27 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        insta::assert_debug_snapshot!(
-            "empty_query_plan_should_be_a_planner_error",
-            BridgeQueryPlanner::new(Arc::new(example_schema()))
-                .await
-                .unwrap()
-                .get(
-                    include_str!("testdata/unknown_introspection_query.graphql").into(),
-                    None,
-                    Default::default(),
-                )
-                .await
-                .unwrap_err()
-        )
+        let err = BridgeQueryPlanner::new(Arc::new(example_schema()))
+            .await
+            .unwrap()
+            .get(
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
+                None,
+                Default::default(),
+            )
+            .await
+            .unwrap_err();
+
+        match err {
+            QueryPlannerError::EmptyPlan(usage_reporting) => {
+                insta::with_settings!({sort_maps => true}, {
+                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", usage_reporting);
+                });
+            }
+            _ => {
+                panic!("empty plan should have returned an EmptyPlanError");
+            }
+        }
     }
 
     #[test(tokio::test)]

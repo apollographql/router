@@ -102,7 +102,7 @@ where
 mod tests {
     use super::*;
     use mockall::{mock, predicate::*};
-    use router_bridge::planner::PlanErrors;
+    use router_bridge::planner::{PlanErrors, UsageReporting};
     use test_log::test;
 
     mock! {
@@ -137,7 +137,10 @@ mod tests {
             .times(2)
             .return_const(Err(QueryPlannerError::from(PlanErrors {
                 errors: Default::default(),
-                usage_reporting: Default::default(),
+                usage_reporting: UsageReporting {
+                    stats_report_key: "this is a test key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                },
             })));
 
         let planner = CachingQueryPlanner::new(delegate, 10);

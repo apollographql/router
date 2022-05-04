@@ -242,7 +242,7 @@ pub enum QueryPlannerError {
     CacheResolverError(Arc<CacheResolverError>),
 
     /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
-    EmptyPlan(Option<UsageReporting>), // usage_reporting_signature
+    EmptyPlan(UsageReporting), // usage_reporting_signature
 
     /// unhandled planner result
     UnhandledPlannerResult,
