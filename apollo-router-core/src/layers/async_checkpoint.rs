@@ -184,7 +184,7 @@ mod async_checkpoint_tests {
         let service = execution_service.build();
 
         let service_stack = ServiceBuilder::new()
-            .async_checkpoint(|req: crate::ExecutionRequest| {
+            .checkpoint_async(|req: crate::ExecutionRequest| {
                 Box::pin(async { Ok(ControlFlow::Continue(req)) })
             })
             .service(service);

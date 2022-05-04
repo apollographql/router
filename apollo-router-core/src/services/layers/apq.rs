@@ -5,7 +5,8 @@
 
 use std::ops::ControlFlow;
 
-use crate::{checkpoint::CheckpointService, RouterRequest, RouterResponse};
+use crate::sync_checkpoint::CheckpointService;
+use crate::{RouterRequest, RouterResponse};
 use moka::sync::Cache;
 use serde::Deserialize;
 use serde_json_bytes::{json, Value};
