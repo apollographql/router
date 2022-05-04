@@ -363,6 +363,23 @@ impl QueryPlannerResponse {
             context,
         }
     }
+
+    /// This is the constructor (or builder) to use when constructing a QueryPlannerResponse that represents a global error.
+    /// It has no path and no response data.
+    /// This is useful for things such as authentication errors.
+    #[allow(unused_variables)]
+    pub fn error_new(
+        errors: Vec<crate::Error>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        context: Context,
+    ) -> Result<QueryPlannerResponse, BoxError> {
+        tracing::warn!("no way to propagate error response from QueryPlanner");
+        Ok(QueryPlannerResponse::new(
+            Arc::new(Default::default()),
+            context,
+        ))
+    }
 }
 
 assert_impl_all!(SubgraphRequest: Send);
@@ -504,6 +521,27 @@ impl SubgraphResponse {
             context.unwrap_or_default(),
         )
     }
+
+    /// This is the constructor (or builder) to use when constructing a SubgraphResponse that represents a global error.
+    /// It has no path and no response data.
+    /// This is useful for things such as authentication errors.
+    #[allow(unused_variables)]
+    pub fn error_new(
+        errors: Vec<crate::Error>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        context: Context,
+    ) -> Result<SubgraphResponse, BoxError> {
+        Ok(SubgraphResponse::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            errors,
+            Default::default(),
+            status_code,
+            context,
+        ))
+    }
 }
 
 assert_impl_all!(ExecutionRequest: Send);
@@ -638,6 +676,27 @@ impl ExecutionResponse {
             status_code,
             context.unwrap_or_default(),
         )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a ExecutionResponse that represents a global error.
+    /// It has no path and no response data.
+    /// This is useful for things such as authentication errors.
+    #[allow(unused_variables)]
+    pub fn error_new(
+        errors: Vec<crate::Error>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<IntoHeaderName, IntoHeaderValue>,
+        context: Context,
+    ) -> Result<ExecutionResponse, BoxError> {
+        Ok(ExecutionResponse::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            errors,
+            Default::default(),
+            status_code,
+            context,
+        ))
     }
 }
 

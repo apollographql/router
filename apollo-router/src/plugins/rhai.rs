@@ -3,19 +3,20 @@
 use apollo_router_core::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, Request, ResponseBody, RouterRequest,
-    RouterResponse, SubgraphRequest, SubgraphResponse,
+    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
-use http::HeaderMap;
+use http::{HeaderMap, StatusCode};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::str::FromStr;
 use std::{
+    ops::ControlFlow,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use tower::{util::BoxService, BoxError, ServiceExt};
+use tower::{util::BoxService, BoxError, ServiceBuilder, ServiceExt};
 
 pub trait Accessor<Access>: Send {
     fn accessor(&self) -> &Access;
@@ -314,14 +315,14 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
         {
-            let this = self.clone();
             tracing::debug!("router_service function found");
 
-            this.run_rhai_service(
+            if let Err(error) = self.run_rhai_service(
                 FUNCTION_NAME_SERVICE,
                 ServiceStep::Router(shared_service.clone()),
-            )
-            .expect("XXX FIX THIS");
+            ) {
+                tracing::error!("service callback failed: {error}");
+            }
         }
         service = shared_service.lock().unwrap().take().unwrap();
 
@@ -339,14 +340,14 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
         {
-            let this = self.clone();
             tracing::debug!("query_planner_service function found");
 
-            this.run_rhai_service(
+            if let Err(error) = self.run_rhai_service(
                 FUNCTION_NAME_SERVICE,
                 ServiceStep::QueryPlanner(shared_service.clone()),
-            )
-            .expect("XXX FIX THIS");
+            ) {
+                tracing::error!("service callback failed: {error}");
+            }
         }
         service = shared_service.lock().unwrap().take().unwrap();
 
@@ -364,14 +365,14 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
         {
-            let this = self.clone();
             tracing::debug!("execution_service function found");
 
-            this.run_rhai_service(
+            if let Err(error) = self.run_rhai_service(
                 FUNCTION_NAME_SERVICE,
                 ServiceStep::Execution(shared_service.clone()),
-            )
-            .expect("XXX FIX THIS");
+            ) {
+                tracing::error!("service callback failed: {error}");
+            }
         }
         service = shared_service.lock().unwrap().take().unwrap();
 
@@ -390,14 +391,14 @@ impl Plugin for Rhai {
             .iter_fn_def()
             .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
         {
-            let this = self.clone();
             tracing::debug!("subgraph_service function found");
 
-            this.run_rhai_service(
+            if let Err(error) = self.run_rhai_service(
                 FUNCTION_NAME_SERVICE,
                 ServiceStep::Subgraph(shared_service.clone()),
-            )
-            .expect("XXX FIX THIS");
+            ) {
+                tracing::error!("service callback failed: {error}");
+            }
         }
         service = shared_service.lock().unwrap().take().unwrap();
 
@@ -507,6 +508,7 @@ macro_rules! gen_shared_types {
     };
 }
 
+// Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_request {
     ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
         paste::paste! {
@@ -514,20 +516,39 @@ macro_rules! gen_map_request {
             let service_opt = guard.take();
             match service_opt {
                 Some(service) => {
-                    let new_service = service
-                        .map_request(move |request: [<$base:camel Request>]| {
+                    let new_service = ServiceBuilder::new()
+                        .checkpoint(move |request: [<$base:camel Request>]| {
+                            // Let's define a local function to build an error response
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
+                                let res = [<$base:camel Response>]::error_builder()
+                                    .errors(vec![apollo_router_core::Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()?;
+                                Ok(ControlFlow::Break(res))
+                            }
                             let shared_request = Shared::new(Mutex::new(Some(request)));
                             let result: Result<Dynamic, String> = $callback
                                 .call(&$engine, &$ast, (shared_request.clone(),))
                                 .map_err(|err| err.to_string());
                             if let Err(error) = result {
                                 tracing::error!("map_request callback failed: {error}");
-                                eprintln!("map_request callback failed: {error}");
+                                let mut guard = shared_request.lock().unwrap();
+                                let request_opt = guard.take();
+                                return failure_message(request_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
                             }
                             let mut guard = shared_request.lock().unwrap();
                             let request_opt = guard.take();
-                            request_opt.unwrap()
+                            Ok(ControlFlow::Continue(request_opt.unwrap()))
                         })
+                        .service(service)
                         .boxed();
                     guard.replace(new_service);
                 }
@@ -546,6 +567,28 @@ macro_rules! gen_map_response {
                 Some(service) => {
                     let new_service = service
                         .map_response(move |response: [<$base:camel Response>]| {
+                            // Let's define a local function to build an error response
+                            // XXX: This isn't ideal. We already have a response, so ideally we'd
+                            // like to append this error into the existing response. However,
+                            // the significantly different treatment of errors in different
+                            // response types makes this extremely painful. This needs to be
+                            // re-visited at some point post GA.
+                            fn failure_message(
+                                context: Context,
+                                msg: String,
+                                status: StatusCode,
+                            ) -> [<$base:camel Response>] {
+                                let res = [<$base:camel Response>]::error_builder()
+                                    .errors(vec![apollo_router_core::Error {
+                                        message: msg,
+                                        ..Default::default()
+                                    }])
+                                    .status_code(status)
+                                    .context(context)
+                                    .build()
+                                    .expect("can't fail to build our error message");
+                                res
+                            }
                             let shared_response = Shared::new(Mutex::new(Some(response)));
                             let result: Result<Dynamic, String> = $callback
                                 .call(&$engine, &$ast, (shared_response.clone(),))
@@ -553,6 +596,9 @@ macro_rules! gen_map_response {
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
                                 eprintln!("map_response callback failed: {error}");
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                return failure_message(response_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
                             }
                             let mut guard = shared_response.lock().unwrap();
                             let response_opt = guard.take();
