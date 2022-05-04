@@ -3,7 +3,6 @@
 fn router_service(service) {
     let response = Fn("router_response");
     service.map_response(response);
-    "ok?"
 }
 
 fn router_response(response) {
@@ -19,7 +18,6 @@ fn router_response(response) {
 fn execution_service(service) {
     let request = Fn("execution_request");
     service.map_request(request);
-    "ok?"
 }
 
 fn execution_request(request) {

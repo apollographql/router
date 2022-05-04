@@ -7,7 +7,6 @@ fn router_service(service) {
     let response_callback = Fn("process_response");
     let result = map_request(service, request_callback);
     let result = map_response(service, response_callback);
-    "ok?"
 }
 
 fn process_request(request) {

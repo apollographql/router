@@ -665,23 +665,18 @@ pub(crate) struct RhaiService {
 }
 
 impl Rhai {
-    fn run_rhai_service(
-        &self,
-        function_name: &str,
-        service: ServiceStep,
-    ) -> Result<String, String> {
+    fn run_rhai_service(&self, function_name: &str, service: ServiceStep) -> Result<(), String> {
         let mut scope = Scope::new();
         let rhai_service = RhaiService {
             service,
             engine: self.engine.clone(),
             ast: self.ast.clone(),
         };
-        let response: String = self
-            .engine
+        self.engine
             .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
             .map_err(|err| err.to_string())?;
 
-        Ok(response)
+        Ok(())
     }
 
     fn new_rhai_engine() -> Engine {
@@ -859,7 +854,6 @@ mod tests {
             }
         }
 
-        eprintln!("AT THE TEST END, HEADRS ARE : {:?}", headers);
         assert_eq!(headers.get("coucou").unwrap(), &"hello");
         assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
         assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
@@ -914,7 +908,6 @@ mod tests {
             .call(exec_req)
             .await
             .unwrap();
-        eprintln!("AT THE TEST END, CONTEXT ARE : {:?}", exec_resp.context);
         assert_eq!(exec_resp.response.status(), 200);
         /* XXX NO WAY TO PROPAGATE ERRORS YET
         // Check if it fails
