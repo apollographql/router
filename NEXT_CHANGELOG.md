@@ -26,9 +26,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features ( :rocket: )
 ## 🐛 Fixes ( :bug: )
+
 ### Fix incorrectly omitting content of interface's fragment [PR #949](https://github.com/apollographql/router/pull/949)
 
 Router now distinguish between fragment on concrete type and interface.
 If interface is encountered and  `__typename` is queried, additionally checks that returned type implements interface.
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
