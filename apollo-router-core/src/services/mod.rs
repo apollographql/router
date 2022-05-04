@@ -204,7 +204,7 @@ assert_impl_all!(RouterResponse: Send);
 /// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
     pub context: Context,

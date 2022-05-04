@@ -8,7 +8,7 @@ use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
 /// A GraphQL schema.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
@@ -408,20 +408,6 @@ impl Schema {
         match &self.api_schema {
             Some(schema) => schema,
             None => self,
-        }
-    }
-
-    pub fn empty() -> Schema {
-        Schema {
-            string: "".to_string(),
-            subtype_map: Default::default(),
-            subgraphs: Default::default(),
-            object_types: Default::default(),
-            interfaces: Default::default(),
-            input_types: Default::default(),
-            custom_scalars: Default::default(),
-            enums: Default::default(),
-            api_schema: None,
         }
     }
 

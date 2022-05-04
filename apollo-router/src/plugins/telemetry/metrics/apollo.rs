@@ -7,9 +7,10 @@ use apollo_spaceport::{
     StatsContext,
 };
 use async_trait::async_trait;
-use deadpool::managed;
+use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
 use futures_batch::ChunksTimeoutStreamExt;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
@@ -47,7 +48,7 @@ impl Default for Sender {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct Metrics {
     pub(crate) client_name: String,
     pub(crate) client_version: String,
@@ -57,7 +58,7 @@ pub(crate) struct Metrics {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct QueryLatencyStats {
     pub(crate) latency_count: Duration,
     pub(crate) request_count: u64,
@@ -74,19 +75,19 @@ pub(crate) struct QueryLatencyStats {
     pub(crate) requests_without_field_instrumentation: u64,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct PathErrorStats {
     pub(crate) children: HashMap<String, PathErrorStats>,
     pub(crate) errors_count: u64,
     pub(crate) requests_with_errors_count: u64,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct TypeStat {
     pub(crate) per_field_stat: HashMap<String, FieldStat>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct FieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
@@ -263,6 +264,7 @@ impl ApolloMetricsExporter {
         })
         .create_timeout(Some(Duration::from_secs(5)))
         .wait_timeout(Some(Duration::from_secs(5)))
+        .runtime(Runtime::Tokio1)
         .build()
         .unwrap();
 
@@ -504,8 +506,15 @@ impl DurationHistogram {
 
 #[cfg(test)]
 mod test {
-
+    use super::super::super::config;
     use super::*;
+    use crate::plugins::telemetry::{apollo, Telemetry};
+    use apollo_router_core::utils::test::IntoSchema::Canned;
+    use apollo_router_core::utils::test::PluginTestHarness;
+    use apollo_router_core::Plugin;
+    use apollo_router_core::RouterRequest;
+    use http::header::HeaderName;
+    use std::future::Future;
 
     // DurationHistogram Tests
     impl DurationHistogram {
@@ -749,5 +758,73 @@ mod test {
             self.count += 1;
             self.count as f64
         }
+    }
+
+    #[tokio::test]
+    async fn apollo_metrics_disabled() -> Result<(), BoxError> {
+        let plugin = create_plugin_with_apollo_copnfig(super::super::apollo::Config {
+            endpoint: None,
+            apollo_key: None,
+            apollo_graph_ref: None,
+            client_name_header: HeaderName::from_static("name_header"),
+            client_version_header: HeaderName::from_static("version_header"),
+        })
+        .await?;
+        assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_enabled() -> Result<(), BoxError> {
+        let plugin = create_plugin().await?;
+        assert!(matches!(plugin.apollo_metrics_sender, Sender::Spaceport(_)));
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_test() -> Result<(), BoxError> {
+        let _ = tracing_subscriber::fmt::try_init();
+        let mut plugin = create_plugin().await?;
+        // Replace the apollo metrics sender so we can test metrics collection.
+        let (tx, rx) = futures::channel::mpsc::channel(100);
+        plugin.apollo_metrics_sender = Sender::Spaceport(tx);
+        let mut test_harness = PluginTestHarness::builder()
+            .plugin(plugin)
+            .schema(Canned)
+            .build()
+            .await?;
+        let _ = test_harness
+            .call(
+                RouterRequest::fake_builder()
+                    .query("query{topProducts{name}}")
+                    .build()?,
+            )
+            .await;
+
+        drop(test_harness);
+        let results = rx.collect::<Vec<_>>().await;
+        insta::assert_json_snapshot!(results);
+        Ok(())
+    }
+
+    fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
+        create_plugin_with_apollo_copnfig(apollo::Config {
+            endpoint: None,
+            apollo_key: Some("key".to_string()),
+            apollo_graph_ref: Some("ref".to_string()),
+            client_name_header: HeaderName::from_static("name_header"),
+            client_version_header: HeaderName::from_static("version_header"),
+        })
+    }
+
+    async fn create_plugin_with_apollo_copnfig(
+        apollo_config: apollo::Config,
+    ) -> Result<Telemetry, BoxError> {
+        Telemetry::new(config::Conf {
+            metrics: None,
+            tracing: None,
+            apollo: Some(apollo_config),
+        })
+        .await
     }
 }

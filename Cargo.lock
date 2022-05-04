@@ -80,6 +80,7 @@ dependencies = [
  "async-trait",
  "atty",
  "axum",
+ "buildstructor",
  "bytes",
  "clap 3.1.9",
  "deadpool",
@@ -538,9 +539,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37e6f88bd8b7701288c5a10d46e76a1b93dd2953f5972c260f7bfa5f58f6382b"
+checksum = "97ed69f2eb291a69847758bf93c5e2231e7b3e04a6a7dccddb1b5b84f6053151"
 dependencies = [
  "lazy_static",
  "proc-macro2",
