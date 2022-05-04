@@ -25,14 +25,15 @@ pub struct TowerSubgraphService {
 
 impl TowerSubgraphService {
     pub fn new(service: impl Into<String>) -> Self {
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
             .enable_http1()
+            .enable_http2()
             .build();
 
         Self {
-            client: ServiceBuilder::new().service(hyper::Client::builder().build(https)),
+            client: ServiceBuilder::new().service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
         }
     }

@@ -60,6 +60,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2ae23d8a1f5cc1a4e33ec9b1f0d4d626f9e4736619b4c1a4f1482a594ac2e13"
 
 [[package]]
+name = "apollo-encoder"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cde958e05663a85c6e22a18f4e758fda923526908e3e5b8ba89a00828eb8c71"
+
+[[package]]
 name = "apollo-parser"
 version = "0.2.4"
 source = "git+https://github.com/apollographql/apollo-rs.git?rev=e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac#e707e0f78f41ace1c3ecfe69bc10f4144ffbf7ac"
@@ -78,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "anyhow",
  "apollo-parser 0.2.4",
@@ -151,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -168,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "apollo-parser 0.2.5",
  "async-trait",
@@ -225,11 +231,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58098d74c9866cbb71781eeb9b9c001c6334868fe45269ef42e700f2b5c9a7c"
+checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.3.1",
  "apollo-parser 0.2.5",
  "arbitrary",
  "once_cell",
@@ -237,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "bytes",
  "clap 3.1.9",
@@ -257,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "futures",
  "graphql_client",
@@ -2254,7 +2260,7 @@ name = "launchpad"
 version = "0.1.0"
 source = "git+https://github.com/apollographql/rover.git?rev=c52bd32f1493e63844fd74e1a1d32f18e5c88394#c52bd32f1493e63844fd74e1a1d32f18e5c88394"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.2.3",
  "backoff",
  "graphql_client",
  "humantime",
@@ -4419,9 +4425,9 @@ dependencies = [
 
 [[package]]
 name = "test-span"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9212327b97823ef8b5ed882b8b28f2b83d7199c7fe5fc607c2e8e88bfe3a2fd"
+checksum = "de9b8e79555e91884f1919beda7252c37374afc85d3b3dbd3a0f7f3e5aeeee81"
 dependencies = [
  "daggy",
  "derivative",
@@ -4440,9 +4446,9 @@ dependencies = [
 
 [[package]]
 name = "test-span-macro"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f4a59cfac686d226a4dffce6613f0aa7ab73f6aea348f8cb48cb4891afc29c"
+checksum = "ee4839346cfd23cadb66d6237ca1769edcc6c2bea70059f8f99bc6536d102dcc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5427,7 +5433,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 dependencies = [
  "ansi_term",
  "anyhow",

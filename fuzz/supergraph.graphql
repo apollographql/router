@@ -26,17 +26,18 @@ directive @deprecated(
   reason: String = "No longer supported"
 ) on FIELD_DEFINITION | ENUM_VALUE
 
-directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+# Uncomment if you want to reproduce the bug with the order of skip/include directives
+# directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+# directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 
 scalar join__FieldSet
 
 enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
+  ACCOUNTS @join__graph(name: "accounts", url: "http://subgraphs:4001/graphql")
   INVENTORY
-    @join__graph(name: "inventory", url: "http://localhost:4004/graphql")
-  PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
-  REVIEWS @join__graph(name: "reviews", url: "http://localhost:4002/graphql")
+    @join__graph(name: "inventory", url: "http://subgraphs:4004/graphql")
+  PRODUCTS @join__graph(name: "products", url: "http://subgraphs:4003/graphql")
+  REVIEWS @join__graph(name: "reviews", url: "http://subgraphs:4002/graphql")
 }
 
 type Mutation {

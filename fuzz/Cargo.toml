@@ -24,3 +24,9 @@ name = "router"
 path = "fuzz_targets/router.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "federation"
+path = "fuzz_targets/federation.rs"
+test = false
+doc = false
