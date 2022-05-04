@@ -970,7 +970,10 @@ mod tests {
             .call(exec_req)
             .await
             .unwrap();
-        assert_eq!(exec_resp.response.status(), 200);
+        assert_eq!(
+            exec_resp.response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR
+        );
         /* XXX NO WAY TO PROPAGATE ERRORS YET
         // Check if it fails
         let body = exec_resp.response.into_body();
