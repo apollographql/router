@@ -16,7 +16,7 @@
 
 pub mod utils;
 
-use crate::services::ServiceBuilderExt;
+use crate::layers::ServiceBuilderExt;
 use crate::{
     http_compat, ExecutionRequest, ExecutionResponse, QueryPlannerRequest, QueryPlannerResponse,
     ResponseBody, RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse,

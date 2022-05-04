@@ -27,7 +27,7 @@ hex = "0.4.3"
 http = "0.2.6"
 http-body = "0.4.4"
 hyper = { version = "0.14.18", features = ["client"] }
-hyper-rustls = "0.23.0"
+hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
 include_dir = "0.7.2"
 indexmap = "1.8.1"
 itertools = "0.10.3"
