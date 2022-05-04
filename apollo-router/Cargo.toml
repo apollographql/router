@@ -111,6 +111,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }
+tracing-test = "0.2.1"
 uuid = { version = "1.0.0", features = ["serde", "v4"] }
 url = "2.2.2"
 walkdir = "2.3.2"

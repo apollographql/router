@@ -2,6 +2,7 @@
 // of the function to callback
 fn router_service(service) {
     print("This is a message");
+    log_trace("This is a number: " + 42);
     print("in router_service: " + service);
     let request_callback = Fn("process_request");
     let response_callback = Fn("process_response");
