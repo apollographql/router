@@ -17,7 +17,6 @@ use serde_json::Map;
 use serde_json::Value;
 use std::fmt;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer, Origin};
@@ -258,7 +257,7 @@ pub enum ListenAddr {
     SocketAddr(SocketAddr),
     /// Unix socket.
     #[cfg(unix)]
-    UnixSocket(PathBuf),
+    UnixSocket(std::path::PathBuf),
 }
 
 impl From<SocketAddr> for ListenAddr {
