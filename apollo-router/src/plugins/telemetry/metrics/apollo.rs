@@ -785,7 +785,9 @@ mod test {
     async fn apollo_metrics_pass() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query).await?;
-        insta::assert_json_snapshot!(results);
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 
@@ -793,7 +795,9 @@ mod test {
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
         let results = get_metrics_for_request(query).await?;
-        insta::assert_json_snapshot!(results);
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 
@@ -801,7 +805,9 @@ mod test {
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
         let query = "query UNKNOWN {topProducts{name}}";
         let results = get_metrics_for_request(query).await?;
-        insta::assert_json_snapshot!(results);
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 
@@ -809,7 +815,10 @@ mod test {
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
         let query = "query UNKNOWN {topProducts{unknown}}";
         let results = get_metrics_for_request(query).await?;
-        insta::assert_json_snapshot!(results);
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
+
         Ok(())
     }
 
@@ -825,7 +834,13 @@ mod test {
             .build()
             .await?;
         let _ = test_harness
-            .call(RouterRequest::fake_builder().query(query).build()?)
+            .call(
+                RouterRequest::fake_builder()
+                    .header("name_header", "test_client")
+                    .header("version_header", "1.0-test")
+                    .query(query)
+                    .build()?,
+            )
             .await;
 
         drop(test_harness);

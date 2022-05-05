@@ -4,8 +4,8 @@ expression: results
 ---
 [
   {
-    "client_name": "",
-    "client_version": "",
+    "client_name": "test_client",
+    "client_version": "test_client",
     "stats_report_key": "# -\n{topProducts{name}}",
     "query_latency_stats": {
       "latency_count": {

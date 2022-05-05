@@ -1,12 +1,11 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 804
 expression: results
 ---
 [
   {
-    "client_name": "",
-    "client_version": "",
+    "client_name": "test_client",
+    "client_version": "test_client",
     "stats_report_key": "# UNKNOWN\nquery UNKNOWN{topProducts{name}}",
     "query_latency_stats": {
       "latency_count": {
