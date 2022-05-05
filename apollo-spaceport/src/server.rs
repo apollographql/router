@@ -292,7 +292,7 @@ impl ReportSpaceport {
         let mut graph_usage = self.graph_usage.lock().await;
         let mut query_usage = graph_usage
             .entry(record.graph().unwrap())
-            .or_insert_with(|| Default::default());
+            .or_insert_with(Default::default);
         let entry = query_usage
             .traces_and_stats_for_key
             .entry(record.key())

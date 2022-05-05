@@ -31,14 +31,26 @@ pub struct PluginTestHarness {
 }
 pub enum IntoSchema {
     String(String),
-    Schema(Schema),
+    Schema(Box<Schema>),
     Canned,
 }
+
+impl From<Schema> for IntoSchema {
+    fn from(schema: Schema) -> Self {
+        IntoSchema::Schema(Box::new(schema))
+    }
+}
+impl From<String> for IntoSchema {
+    fn from(schema: String) -> Self {
+        IntoSchema::String(schema)
+    }
+}
+
 impl From<IntoSchema> for Schema {
     fn from(s: IntoSchema) -> Self {
         match s {
             IntoSchema::String(s) => Schema::from_str(&s).expect("test schema must be valid"),
-            IntoSchema::Schema(s) => s,
+            IntoSchema::Schema(s) => *s,
             IntoSchema::Canned => Schema::from_str(include_str!(
                 "../../../../../examples/graphql/local.graphql"
             ))
