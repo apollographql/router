@@ -32,5 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Router now distinguish between fragment on concrete type and interface.
 If interface is encountered and  `__typename` is queried, additionally checks that returned type implements interface.
 
+### Set the service name if not specified in config or environment [PR #960](https://github.com/apollographql/router/pull/960)
+The router now sets "router" as default service name in Opentelemetry traces, that can be replaced using the configuration file or environment variables. It also sets the key "process.executable_name".
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
