@@ -41,15 +41,15 @@ expression: results
     },
     "per_type_stat": {},
     "referenced_fields_by_type": {
-      "Product": {
-        "field_names": [
-          "name"
-        ],
-        "is_interface": false
-      },
       "Query": {
         "field_names": [
           "topProducts"
+        ],
+        "is_interface": false
+      },
+      "Product": {
+        "field_names": [
+          "name"
         ],
         "is_interface": false
       }
