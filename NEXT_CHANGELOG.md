@@ -87,6 +87,9 @@ Telemetry spans where previously being created for the healthcheck requests whic
 ### Dockerfile now allows overriding of `CONFIGURATION_PATH` [PR #948](https://github.com/apollographql/router/pull/948)
 Previously `CONFIGURATION_PATH` could not be used to override the config location as it was being passed by command line arg. 
 
+### Set the service name if not specified in config or environment [PR #960](https://github.com/apollographql/router/pull/960)
+The router now sets "router" as default service name in Opentelemetry traces, that can be replaced using the configuration file or environment variables. It also sets the key "process.executable_name".
+
 ## 🛠 Maintenance
 ### Upgrade `test-span` to display more children spans in our snapshots [PR #942](https://github.com/apollographql/router/pull/942)
 Previously in test-span before the fix [introduced here](https://github.com/apollographql/test-span/pull/13) we were filtering too aggressively. So if we wanted to snapshot all `DEBUG` level if we encountered a `TRACE` span which had `DEBUG` children then these children were not snapshotted. It's now fixed and it's more consistent with what we could have/see in jaeger.
