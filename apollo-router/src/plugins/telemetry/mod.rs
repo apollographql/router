@@ -92,14 +92,6 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
     Ok(builder)
 }
 
-fn apollo_key() -> Option<String> {
-    std::env::var("APOLLO_KEY").ok()
-}
-
-fn apollo_graph_reference() -> Option<String> {
-    std::env::var("APOLLO_GRAPH_REF").ok()
-}
-
 impl Drop for Telemetry {
     fn drop(&mut self) {
         if let Some(tracer_provider) = self.tracer_provider.take() {
@@ -152,13 +144,9 @@ impl Plugin for Telemetry {
 
     async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = config.apollo.get_or_insert_with(Default::default);
-        if apollo.apollo_key.is_none() {
-            apollo.apollo_key = apollo_key()
-        }
-        if apollo.apollo_graph_ref.is_none() {
-            apollo.apollo_graph_ref = apollo_graph_reference()
-        }
+        let apollo = config.apollo.get_or_insert_with(|| {
+            serde_json::from_str("{}").expect("could not create default telemetry apollo config")
+        });
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let (spaceport, shutdown_tx) = match apollo {

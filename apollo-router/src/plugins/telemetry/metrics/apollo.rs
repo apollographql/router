@@ -772,7 +772,7 @@ mod test {
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
-        let plugin = create_plugin_with_apollo_copnfig(super::super::apollo::Config {
+        let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
             endpoint: None,
             apollo_key: None,
             apollo_graph_ref: None,
@@ -899,7 +899,7 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
-        create_plugin_with_apollo_copnfig(apollo::Config {
+        create_plugin_with_apollo_config(apollo::Config {
             endpoint: None,
             apollo_key: Some("key".to_string()),
             apollo_graph_ref: Some("ref".to_string()),
@@ -908,7 +908,7 @@ mod test {
         })
     }
 
-    async fn create_plugin_with_apollo_copnfig(
+    async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(config::Conf {
