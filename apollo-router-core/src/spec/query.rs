@@ -824,7 +824,9 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let schema: Schema = with_supergraph_boilerplate($schema)
+                .parse()
+                .expect("could not parse schema");
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
@@ -836,6 +838,26 @@ mod tests {
             );
             assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
         }};
+    }
+
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
     }
 
     #[test]
@@ -1120,14 +1142,14 @@ mod tests {
 
     macro_rules! assert_validation {
         ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-            let res = run_validation!($schema, $query, $variables);
+            let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
             assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
         }};
     }
 
     macro_rules! assert_validation_error {
         ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-            let res = run_validation!($schema, $query, $variables);
+            let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
             assert!(res.is_err(), "validation should have failed");
         }};
     }

@@ -227,8 +227,10 @@ mod tests {
     fn test_selection_subtype() {
         assert_eq!(
             select!(
-                "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
-                union User = Author | Reviewer",
+                with_supergraph_boilerplate(
+                    "type Query { me: String } type Author { name: String } type Reviewer { name: String } \
+                    union User = Author | Reviewer"
+                ),
                 bjson!({"__typename": "Author", "id":2, "name":"Bob", "job":{"name":"astronaut"}}),
             )
             .unwrap(),
@@ -256,11 +258,13 @@ mod tests {
 
     #[test]
     fn test_array() {
-        let schema: Schema = "type Query { me: String }
-        type MainObject { mainObjectList: [SubObject] }
-        type SubObject { key: String name: String }"
-            .parse()
-            .unwrap();
+        let schema: Schema = with_supergraph_boilerplate(
+            "type Query { me: String }
+            type MainObject { mainObjectList: [SubObject] }
+            type SubObject { key: String name: String }",
+        )
+        .parse()
+        .unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",
@@ -322,5 +326,25 @@ mod tests {
                 ]
             })
         );
+    }
+
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
     }
 }
