@@ -1,7 +1,7 @@
 //! Telemetry customization.
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::{QueryLatencyStats, Sender};
+use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -44,8 +44,7 @@ mod tracing;
 pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
-static OPERATION_NAME: &str = "apollo_telemetry::operation_name";
-static QUERY: &str = "apollo_telemetry::query";
+pub(crate) static EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
     config: config::Conf,
@@ -478,8 +477,11 @@ impl Telemetry {
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
         {
+            let exclude: Option<bool> = context.get(EXCLUDE).unwrap_or_default();
             let operation_count = operation_count(&usage_reporting.stats_report_key);
-            let apollo_metrics = metrics::apollo::Metrics {
+
+            //The basic metrics only has operation count
+            let mut apollo_metrics = metrics::apollo::Metrics {
                 operation_count,
                 client_name: context
                     .get(CLIENT_NAME)
@@ -490,16 +492,14 @@ impl Telemetry {
                     .unwrap_or_default()
                     .unwrap_or_default(),
                 stats_report_key: usage_reporting.stats_report_key.to_string(),
-                query_latency_stats: QueryLatencyStats {
-                    request_count: 1,
-                    ..Default::default()
-                },
-                per_type_stat: Default::default(),
-                referenced_fields_by_type: usage_reporting
+                ..Default::default()
+            };
+            if !exclude.unwrap_or_default() {
+                apollo_metrics.referenced_fields_by_type = usage_reporting
                     .referenced_fields_by_type
                     .into_iter()
                     .map(|(k, v)| (k, convert(v)))
-                    .collect(),
+                    .collect();
             };
             sender.send(apollo_metrics);
         };
@@ -533,23 +533,6 @@ impl Telemetry {
         let headers = http_request.headers();
         let client_name_header = &config.client_name_header;
         let client_version_header = &config.client_version_header;
-        let _ = context.insert(
-            QUERY,
-            http_request
-                .body()
-                .query
-                .as_ref()
-                .cloned()
-                .unwrap_or_default(),
-        );
-        let _ = context.insert(
-            OPERATION_NAME,
-            http_request
-                .body()
-                .operation_name
-                .clone()
-                .unwrap_or_default(),
-        );
         let _ = context.insert(
             CLIENT_NAME,
             headers

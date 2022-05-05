@@ -517,11 +517,11 @@ impl DurationHistogram {
 mod test {
     use super::super::super::config;
     use super::*;
-    use crate::plugins::telemetry::{apollo, Telemetry};
+    use crate::plugins::telemetry::{apollo, Telemetry, EXCLUDE};
     use apollo_router_core::utils::test::IntoSchema::Canned;
     use apollo_router_core::utils::test::PluginTestHarness;
-    use apollo_router_core::Plugin;
     use apollo_router_core::RouterRequest;
+    use apollo_router_core::{Context, Plugin};
     use http::header::HeaderName;
     use std::future::Future;
 
@@ -794,7 +794,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None).await?;
+        let results = get_metrics_for_request(query, None, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -804,7 +804,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
         let query = "query {topProducts{name}} query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None).await?;
+        let results = get_metrics_for_request(query, None, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -814,7 +814,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
-        let results = get_metrics_for_request(query, None).await?;
+        let results = get_metrics_for_request(query, None, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -824,7 +824,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, Some("UNKNOWN")).await?;
+        let results = get_metrics_for_request(query, Some("UNKNOWN"), None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -834,7 +834,20 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
         let query = "query {topProducts{unknown}}";
-        let results = get_metrics_for_request(query, None).await?;
+        let results = get_metrics_for_request(query, None, None).await?;
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_exclude() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let context = Context::new();
+        context.insert(EXCLUDE, true)?;
+        let results = get_metrics_for_request(query, None, Some(context)).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -845,6 +858,7 @@ mod test {
     async fn get_metrics_for_request(
         query: &str,
         operation_name: Option<&str>,
+        context: Option<Context>,
     ) -> Result<Vec<Metrics>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
@@ -863,6 +877,7 @@ mod test {
                     .header("version_header", "1.0-test")
                     .query(query)
                     .and_operation_name(operation_name)
+                    .and_context(context)
                     .build()?,
             )
             .await;

@@ -6,7 +6,7 @@ expression: results
   {
     "client_name": "test_client",
     "client_version": "test_client",
-    "stats_report_key": "## GraphQLParseFailure\n",
+    "stats_report_key": "# -\n{topProducts{name}}",
     "query_latency_stats": {
       "latency_count": {
         "secs": 0,
@@ -40,6 +40,6 @@ expression: results
     },
     "per_type_stat": {},
     "referenced_fields_by_type": {},
-    "operation_count": 0
+    "operation_count": 1
   }
 ]
