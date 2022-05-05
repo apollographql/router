@@ -345,51 +345,21 @@ pub(crate) enum ServiceStep {
     Subgraph(SharedSubgraphService),
 }
 
-macro_rules! gen_shared_types {
+macro_rules! accessor_mut_for_shared_types {
     (subgraph) => {
-            #[allow(dead_code)]
-            type SharedSubgraphService = Arc<Mutex<Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>>>>;
-
-            #[allow(dead_code)]
-            type SharedSubgraphRequest = Arc<Mutex<Option<SubgraphRequest>>>;
-
-            #[allow(dead_code)]
-            type SharedSubgraphResponse = Arc<Mutex<Option<SubgraphResponse>>>;
-
-            impl Accessor<Context> for SubgraphRequest {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<Context> for SubgraphResponse {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<http_compat::Request<Request>> for SubgraphRequest {
-
-                fn accessor(&self) -> &http_compat::Request<Request> {
-                    &self.originating_request
-                }
-
-                // XXX CAN'T DO THIS FOR SUBGRAPH
-                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
-                    panic!("cannot mutate originating request on a subgraph");
-                }
-            }
+        // XXX CAN'T DO THIS FOR SUBGRAPH
+        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+            panic!("cannot mutate originating request on a subgraph");
+        }
     };
+    ($_base: ident) => {
+        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+            &mut self.originating_request
+        }
+    };
+}
+
+macro_rules! gen_shared_types {
     ($($base: ident), +) => {
         $(
         paste::paste! {
@@ -430,9 +400,7 @@ macro_rules! gen_shared_types {
                     &self.originating_request
                 }
 
-                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
-                    &mut self.originating_request
-                }
+                accessor_mut_for_shared_types!($base);
             }
         }
         )*
