@@ -11,6 +11,8 @@ use std::sync::Arc;
 use tower::BoxError;
 use tower::Service;
 
+pub static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
+
 #[derive(Debug, Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///

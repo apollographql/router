@@ -13,7 +13,7 @@ use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt as ServiceBuilderExt2, SubgraphRequest, SubgraphResponse,
+    ServiceBuilderExt as ServiceBuilderExt2, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
@@ -42,7 +42,6 @@ mod otlp;
 mod tracing;
 
 pub static ROUTER_SPAN_NAME: &str = "router";
-static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 static OPERATION_NAME: &str = "apollo_telemetry::operation_name";
@@ -263,13 +262,6 @@ impl Plugin for Telemetry {
         ServiceBuilder::new()
             .instrument(move |_| info_span!("query_planning", "otel.kind" = %SpanKind::Internal))
             .service(service)
-            .map_result(|r| {
-                if let Ok(res) = &r {
-                    res.context
-                        .insert(USAGE_REPORTING, res.query_plan.usage_reporting.clone())?;
-                }
-                r
-            })
             .boxed()
     }
 
@@ -502,7 +494,7 @@ impl Telemetry {
                     .referenced_fields_by_type
                     .into_iter()
                     .map(|(k, v)| (k, convert(v)))
-                    .collect(), // TODO Can be removed once UsageReporting switches to HashMap.
+                    .collect(),
             };
             sender.send(apollo_metrics);
         };

@@ -3,6 +3,7 @@ use crate::CacheResolver;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -92,7 +93,32 @@ where
         Box::pin(async move {
             cm.get(key)
                 .await
-                .map_err(|err| err.into())
+                .map(|query_plan| {
+                    if let Err(e) = request
+                        .context
+                        .insert(USAGE_REPORTING, query_plan.usage_reporting.clone())
+                    {
+                        tracing::error!("usage reporting was not serializable to context, {}", e);
+                    }
+                    query_plan
+                })
+                .map_err(|e| {
+                    if let CacheResolverError::RetrievalError(e) = &e {
+                        if let QueryPlannerError::PlanningErrors(e) = e.deref() {
+                            if let Err(e) = request
+                                .context
+                                .insert(USAGE_REPORTING, e.usage_reporting.clone())
+                            {
+                                tracing::error!(
+                                    "usage reporting was not serializable to context, {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+
+                    e.into()
+                })
                 .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
         })
     }
