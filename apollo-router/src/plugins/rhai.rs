@@ -32,6 +32,22 @@ mod router_plugin_mod {
             pub(crate) mod router_generated_mod {
                 $(
             paste::paste! {
+
+                pub fn [<get_operation_name_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                ) -> Dynamic {
+                    let mut guard = obj.lock().unwrap();
+                    let request_opt = guard.take();
+                    match request_opt {
+                        Some(mut request) => {
+                            let result = get_operation_name(&mut request);
+                            guard.replace(request);
+                            result
+                        }
+                        None => panic!("surely there is a request here..."),
+                    }
+                }
+
                 pub fn [<get_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Context, Box<EvalAltResult>> {
@@ -166,6 +182,39 @@ mod router_plugin_mod {
         };
     }
 
+    #[rhai_fn(get = "sub_headers", return_raw)]
+    pub fn get_subgraph_headers(
+        obj: &mut SharedSubgraphRequest,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        let mut guard = obj.lock().unwrap();
+        let request_opt = guard.take();
+        match request_opt {
+            Some(request) => {
+                let result = Ok(request.subgraph_request.headers().clone());
+                guard.replace(request);
+                result
+            }
+            None => panic!("surely there is a request here..."),
+        }
+    }
+
+    #[rhai_fn(set = "sub_headers", return_raw)]
+    pub fn set_subgraph_headers(
+        obj: &mut SharedSubgraphRequest,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let mut guard = obj.lock().unwrap();
+        let request_opt = guard.take();
+        match request_opt {
+            Some(mut request) => {
+                *request.subgraph_request.headers_mut() = headers;
+                guard.replace(request);
+                Ok(())
+            }
+            None => panic!("surely there is a request here..."),
+        }
+    }
+
     #[rhai_fn(get = "headers", return_raw)]
     pub fn get_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
@@ -200,23 +249,12 @@ mod router_plugin_mod {
     }
 
     // This is a getter for 'RouterRequest::operation_name'.
-    #[rhai_fn(get = "operation_name")]
-    pub fn get_operation_name(obj: &mut SharedRouterRequest) -> Dynamic {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(request) => {
-                let result = request
-                    .originating_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .map_or(Dynamic::from(()), Dynamic::from);
-                guard.replace(request);
-                result
-            }
-            None => panic!("surely there is a request here..."),
-        }
+    fn get_operation_name<T: Accessor<http_compat::Request<Request>>>(obj: &mut T) -> Dynamic {
+        obj.accessor()
+            .body()
+            .operation_name
+            .clone()
+            .map_or(Dynamic::from(()), Dynamic::from)
     }
 
     fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
@@ -455,7 +493,7 @@ macro_rules! gen_shared_types {
 
                 // XXX CAN'T DO THIS FOR SUBGRAPH
                 fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
-                    panic!("Can't do this for subgraph");
+                    panic!("cannot mutate originating request on a subgraph");
                 }
             }
     };
@@ -595,7 +633,6 @@ macro_rules! gen_map_response {
                                 .map_err(|err| err.to_string());
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
-                                eprintln!("map_response callback failed: {error}");
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
                                 return failure_message(response_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
@@ -631,6 +668,12 @@ macro_rules! register_rhai_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
             paste::paste! {
+            // Operation name
+            $engine.register_get(
+                "operation_name",
+                router_plugin_mod::router_generated_mod::[<get_operation_name_ $base _request>],
+            );
+
             // Context stuff
             $engine.register_get_result(
                 "context",
@@ -974,10 +1017,8 @@ mod tests {
             exec_resp.response.status(),
             http::StatusCode::INTERNAL_SERVER_ERROR
         );
-        /* XXX NO WAY TO PROPAGATE ERRORS YET
         // Check if it fails
         let body = exec_resp.response.into_body();
-        eprintln!("BODY: {:?}", body);
         if body.errors.is_empty() {
             panic!(
                 "Must contain errors : {}",
@@ -991,9 +1032,8 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "RHAI plugin error: Runtime error: An error occured (line 25, position 5) in call to function execution_service_request"
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5) in call to function execution_request'"
         );
-        */
         Ok(())
     }
 

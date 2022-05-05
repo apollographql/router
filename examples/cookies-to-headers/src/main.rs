@@ -87,6 +87,7 @@ mod tests {
         let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
 
         let mut sub_request = http_compat::Request::mock();
+        let mut originating_request = http_compat::Request::mock();
 
         let headers = vec![(
             HeaderName::from_static("cookie"),
@@ -94,11 +95,15 @@ mod tests {
         )];
 
         for (name, value) in headers {
-            sub_request.headers_mut().insert(name, value);
+            sub_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+            originating_request.headers_mut().insert(name, value);
         }
 
         // Let's create a request with our cookies
         let request_with_appropriate_cookies = SubgraphRequest::fake_builder()
+            .originating_request(std::sync::Arc::new(originating_request))
             .subgraph_request(sub_request)
             .build();
 
@@ -108,6 +113,7 @@ mod tests {
             .await
             .unwrap();
 
+        eprintln!("response: {:?}", service_response);
         // Rhai should return a 200...
         assert_eq!(StatusCode::OK, service_response.response.status());
 
