@@ -782,8 +782,18 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn apollo_metrics_pass() -> Result<(), BoxError> {
+    async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
+        let results = get_metrics_for_request(query).await?;
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!(results);
+        });
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}} query {topProducts{name}}";
         let results = get_metrics_for_request(query).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);

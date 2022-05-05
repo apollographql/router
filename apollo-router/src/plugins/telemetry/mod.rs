@@ -1,7 +1,7 @@
 //! Telemetry customization.
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::plugins::telemetry::metrics::apollo::{QueryLatencyStats, Sender};
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -488,7 +488,10 @@ impl Telemetry {
                     .unwrap_or_default()
                     .unwrap_or_default(),
                 stats_report_key: usage_reporting.stats_report_key.to_string(),
-                query_latency_stats: Default::default(),
+                query_latency_stats: QueryLatencyStats {
+                    request_count: 1,
+                    ..Default::default()
+                },
                 per_type_stat: Default::default(),
                 referenced_fields_by_type: usage_reporting
                     .referenced_fields_by_type
