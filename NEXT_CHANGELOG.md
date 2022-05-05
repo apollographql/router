@@ -25,6 +25,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.8] - (unreleased)
 ## ❗ BREAKING ❗
 ## 🚀 Features ( :rocket: )
+
+### Apollo studio Usage Reporting [PR #898](https://github.com/apollographql/router/pull/898)
+If you have [enabled telemetry](https://www.apollographql.com/docs/router/configuration/apollo-telemetry#enabling-usage-reporting), you can now see field usage reporting for your queries by heading to the Apollo studio fields section.
+Here is more information on how to [set up telemetry](https://www.apollographql.com/docs/studio/metrics/usage-reporting#pushing-metrics-from-apollo-server) and [Field Usage](https://www.apollographql.com/docs/studio/metrics/field-usage)
+
 ## 🐛 Fixes ( :bug: )
 
 ### Improve the configuration error report [PR #963](https://github.com/apollographql/router/pull/963)
