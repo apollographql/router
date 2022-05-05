@@ -52,6 +52,7 @@ expression: results
         ],
         "is_interface": false
       }
-    }
+    },
+    "operation_count": 1
   }
 ]

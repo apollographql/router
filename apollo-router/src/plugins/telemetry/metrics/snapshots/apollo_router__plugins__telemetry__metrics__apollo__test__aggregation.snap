@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 635
 expression: aggregated_metrics
 ---
 [
@@ -1269,6 +1268,7 @@ expression: aggregated_metrics
         ],
         "is_interface": false
       }
-    }
+    },
+    62
   ]
 ]

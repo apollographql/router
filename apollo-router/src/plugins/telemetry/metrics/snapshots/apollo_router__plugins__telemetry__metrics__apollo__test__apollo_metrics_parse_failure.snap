@@ -39,6 +39,7 @@ expression: results
       "requests_without_field_instrumentation": 0
     },
     "per_type_stat": {},
-    "referenced_fields_by_type": {}
+    "referenced_fields_by_type": {},
+    "operation_count": 0
   }
 ]
