@@ -264,20 +264,16 @@ impl Plugin for Rhai {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("router_service function found");
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("router_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Router(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Router(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
     }
@@ -287,20 +283,16 @@ impl Plugin for Rhai {
         service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("query_planner_service function found");
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("query_planner_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::QueryPlanner(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::QueryPlanner(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
     }
@@ -310,20 +302,16 @@ impl Plugin for Rhai {
         service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("execution_service function found");
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("execution_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Execution(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Execution(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
     }
@@ -334,20 +322,16 @@ impl Plugin for Rhai {
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("subgraph_service function found");
         let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("subgraph_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Subgraph(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Subgraph(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
     }
@@ -788,6 +772,10 @@ impl Rhai {
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
         engine
+    }
+
+    fn ast_has_function(&self, name: &str) -> bool {
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }
 
