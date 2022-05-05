@@ -1,9 +1,10 @@
 ---
 source: apollo-router/src/configuration/yaml.rs
-assertion_line: 178
+assertion_line: 214
 expression: "format!(\"{:#?}\", root)"
 ---
 Mapping(
+    None,
     {
         Label {
             name: "test",
@@ -15,6 +16,18 @@ Mapping(
                 },
             ),
         }: Mapping(
+            Some(
+                Label {
+                    name: "test",
+                    marker: Some(
+                        Marker {
+                            index: 0,
+                            line: 1,
+                            col: 0,
+                        },
+                    ),
+                },
+            ),
             {
                 Label {
                     name: "a",
@@ -78,6 +91,7 @@ Mapping(
                             },
                         ),
                         Mapping(
+                            None,
                             {
                                 Label {
                                     name: "f",
@@ -99,6 +113,7 @@ Mapping(
                                             },
                                         ),
                                         Mapping(
+                                            None,
                                             {
                                                 Label {
                                                     name: "h",
@@ -110,6 +125,18 @@ Mapping(
                                                         },
                                                     ),
                                                 }: Mapping(
+                                                    Some(
+                                                        Label {
+                                                            name: "h",
+                                                            marker: Some(
+                                                                Marker {
+                                                                    index: 74,
+                                                                    line: 9,
+                                                                    col: 7,
+                                                                },
+                                                            ),
+                                                        },
+                                                    ),
                                                     {
                                                         Label {
                                                             name: "i",
@@ -191,6 +218,7 @@ Mapping(
                             },
                         ),
                         Mapping(
+                            None,
                             {
                                 Label {
                                     name: "f",
@@ -212,6 +240,7 @@ Mapping(
                                             },
                                         ),
                                         Mapping(
+                                            None,
                                             {
                                                 Label {
                                                     name: "h",
@@ -223,6 +252,18 @@ Mapping(
                                                         },
                                                     ),
                                                 }: Mapping(
+                                                    Some(
+                                                        Label {
+                                                            name: "h",
+                                                            marker: Some(
+                                                                Marker {
+                                                                    index: 74,
+                                                                    line: 9,
+                                                                    col: 7,
+                                                                },
+                                                            ),
+                                                        },
+                                                    ),
                                                     {
                                                         Label {
                                                             name: "i",

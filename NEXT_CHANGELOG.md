@@ -27,8 +27,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features ( :rocket: )
 ## 🐛 Fixes ( :bug: )
 
-### Fix incorrectly omitting content of interface's fragment [PR #949](https://github.com/apollographql/router/pull/949)
+### Improve the configuration error report [PR #963](https://github.com/apollographql/router/pull/963)
+In case you have unknown properties on your configuration it will highlight the entity with unknown properties. Before we always pointed on the first field of this entity even if it wasn't the bad one, it's now fixed.
 
+### Fix incorrectly omitting content of interface's fragment [PR #949](https://github.com/apollographql/router/pull/949)
 Router now distinguish between fragment on concrete type and interface.
 If interface is encountered and  `__typename` is queried, additionally checks that returned type implements interface.
 
