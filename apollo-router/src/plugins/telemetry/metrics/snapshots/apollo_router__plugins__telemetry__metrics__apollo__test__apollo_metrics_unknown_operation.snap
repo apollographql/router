@@ -1,13 +1,13 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 806
+assertion_line: 804
 expression: results
 ---
 [
   {
     "client_name": "",
     "client_version": "",
-    "stats_report_key": "# -\n{topProducts{name}}",
+    "stats_report_key": "# UNKNOWN\nquery UNKNOWN{topProducts{name}}",
     "query_latency_stats": {
       "latency_count": {
         "secs": 0,
@@ -41,15 +41,15 @@ expression: results
     },
     "per_type_stat": {},
     "referenced_fields_by_type": {
-      "Query": {
-        "field_names": [
-          "topProducts"
-        ],
-        "is_interface": false
-      },
       "Product": {
         "field_names": [
           "name"
+        ],
+        "is_interface": false
+      },
+      "Query": {
+        "field_names": [
+          "topProducts"
         ],
         "is_interface": false
       }

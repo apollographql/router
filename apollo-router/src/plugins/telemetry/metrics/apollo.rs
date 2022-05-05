@@ -782,7 +782,38 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn apollo_metrics_test() -> Result<(), BoxError> {
+    async fn apollo_metrics_pass() -> Result<(), BoxError> {
+        let query = "query {topProducts{name}}";
+        let results = get_metrics_for_request(query).await?;
+        insta::assert_json_snapshot!(results);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
+        let query = "garbage";
+        let results = get_metrics_for_request(query).await?;
+        insta::assert_json_snapshot!(results);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
+        let query = "query UNKNOWN {topProducts{name}}";
+        let results = get_metrics_for_request(query).await?;
+        insta::assert_json_snapshot!(results);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
+        let query = "query UNKNOWN {topProducts{unknown}}";
+        let results = get_metrics_for_request(query).await?;
+        insta::assert_json_snapshot!(results);
+        Ok(())
+    }
+
+    async fn get_metrics_for_request(query: &str) -> Result<Vec<Metrics>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
@@ -794,17 +825,12 @@ mod test {
             .build()
             .await?;
         let _ = test_harness
-            .call(
-                RouterRequest::fake_builder()
-                    .query("query{topProducts{name}}")
-                    .build()?,
-            )
+            .call(RouterRequest::fake_builder().query(query).build()?)
             .await;
 
         drop(test_harness);
         let results = rx.collect::<Vec<_>>().await;
-        insta::assert_json_snapshot!(results);
-        Ok(())
+        Ok(results)
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
