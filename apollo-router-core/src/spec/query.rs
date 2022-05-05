@@ -399,15 +399,26 @@ impl Query {
                         continue;
                     }
 
-                    // known_type = true means that from the query's shape, we know
-                    // we should get the right type here. But in the case we get a
-                    // __typename field and it does not match, we should not apply
-                    // that fragment
-                    if input
-                        .get(TYPENAME)
-                        .map(|val| val.as_str() == Some(type_condition.as_str()))
-                        .unwrap_or(*known_type)
+                    let is_apply = if let Some(input_type) =
+                        input.get(TYPENAME).and_then(|val| val.as_str())
                     {
+                        //First determine if fragment is for interface
+                        //Otherwise we assume concrete type is expected
+                        if let Some(interface) = schema.interfaces.get(type_condition) {
+                            //Check if input implements interface
+                            schema.is_subtype(interface.name.as_str(), input_type)
+                        } else {
+                            input_type == type_condition.as_str()
+                        }
+                    } else {
+                        // known_type = true means that from the query's shape, we know
+                        // we should get the right type here. But in the case we get a
+                        // __typename field and it does not match, we should not apply
+                        // that fragment
+                        *known_type
+                    };
+
+                    if is_apply {
                         self.apply_selection_set(selection_set, variables, input, output, schema)?;
                     }
                 }
@@ -442,13 +453,25 @@ impl Query {
                             continue;
                         }
 
-                        if input
-                            .get(TYPENAME)
-                            .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
-                            .unwrap_or_else(|| {
-                                known_type.as_deref() == Some(fragment.type_condition.as_str())
-                            })
+                        let is_apply = if let Some(input_type) =
+                            input.get(TYPENAME).and_then(|val| val.as_str())
                         {
+                            //First determine if fragment is for interface
+                            //Otherwise we assume concrete type is expected
+                            if let Some(interface) = known_type
+                                .as_deref()
+                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            {
+                                //Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), input_type)
+                            } else {
+                                input_type == fragment.type_condition.as_str()
+                            }
+                        } else {
+                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                        };
+
+                        if is_apply {
                             self.apply_selection_set(
                                 &fragment.selection_set,
                                 variables,
@@ -3291,6 +3314,192 @@ mod tests {
                     "id": "a",
                     "name": "Chair",
                 },
+            }},
+        );
+    }
+
+    #[test]
+    fn check_fragment_on_interface() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        interface Product {
+            id: String!
+            name: String
+        }
+
+        type Vodka {
+            id: String!
+            name: String
+        }
+
+        type Beer implements Product {
+            id: String!
+            name: String
+        }";
+
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        // Make sure we do not return data for type that doesn't implement interface
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
             }},
         );
     }

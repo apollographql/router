@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "0.1.0-preview.6"
+version = "0.1.0-preview.7"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license-file = "./LICENSE"
@@ -107,7 +107,7 @@ tempfile = "3.3.0"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
 ] }
-test-span = "0.4"
+test-span = "0.6"
 tower-test = "0.4.0"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",

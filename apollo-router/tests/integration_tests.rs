@@ -123,7 +123,7 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!("traced_basic_request", get_spans());
+    insta::assert_json_snapshot!(get_spans());
 }
 
 #[test_span(tokio::test)]
@@ -138,7 +138,7 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!("traced_basic_composition", get_spans());
+    insta::assert_json_snapshot!(get_spans());
 }
 
 #[tokio::test]

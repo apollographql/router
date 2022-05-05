@@ -31,15 +31,18 @@ pub(crate) enum Value {
     // Number(Number, Marker),
     String(String, Marker),
     Sequence(Vec<Value>, Marker),
-    Mapping(IndexMap<Label, Value>, Marker),
+    Mapping(Option<Label>, IndexMap<Label, Value>, Marker),
 }
 
 impl Value {
-    pub(crate) fn marker(&self) -> &Marker {
+    pub(crate) fn end_marker(&self) -> &Marker {
         match self {
             Value::String(_, m) => m,
-            Value::Sequence(_, m) => m,
-            Value::Mapping(_, m) => m,
+            Value::Sequence(v, m) => v.last().map(|l| l.end_marker()).unwrap_or_else(|| m),
+            Value::Mapping(_, v, m) => v
+                .last()
+                .map(|(_, val)| val.end_marker())
+                .unwrap_or_else(|| m),
         }
     }
 }
@@ -51,7 +54,7 @@ impl Value {
 /// The output from json schema validation is a set of errors with json paths.
 /// The json path doesn't contain line number info, so we reparse so that we can convert the
 /// paths into nice error messages.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct MarkedYaml {
     anchors: HashMap<usize, Value>,
     current_label: Option<Label>,
@@ -64,7 +67,7 @@ impl MarkedYaml {
         let mut current = self.root();
         for item in pointer.iter() {
             current = match (current, item) {
-                (Some(Value::Mapping(mapping, _)), PathChunk::Property(value)) => {
+                (Some(Value::Mapping(_current_label, mapping, _)), PathChunk::Property(value)) => {
                     mapping.get(&Label::from(value.to_string()))
                 }
                 (Some(Value::Sequence(sequence, _)), PathChunk::Index(idx)) => sequence.get(*idx),
@@ -82,7 +85,7 @@ impl MarkedYaml {
         let (label, v, id) = self.object_stack.pop().expect("imbalanced parse events");
         self.anchors.insert(id, v.clone());
         match (label, self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
                 mapping.insert(label, v);
                 None
             }
@@ -96,7 +99,7 @@ impl MarkedYaml {
 
     fn add_value(&mut self, marker: Marker, v: String, id: usize) {
         match (self.current_label.take(), self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
                 let v = Value::String(v, marker);
                 self.anchors.insert(id, v.clone());
                 mapping.insert(label, v);
@@ -118,7 +121,7 @@ impl MarkedYaml {
 
     fn add_alias_value(&mut self, v: Value) {
         match (self.current_label.take(), self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
                 mapping.insert(label, v);
             }
             (None, Some((_, Value::Sequence(sequence, _), _))) => {
@@ -160,9 +163,10 @@ impl MarkedEventReceiver for MarkedYaml {
                 self.root = self.end_container();
             }
             Event::MappingStart(id) => {
+                let current_label = self.current_label.take();
                 self.object_stack.push((
-                    self.current_label.take(),
-                    Value::Mapping(IndexMap::new(), marker),
+                    current_label.clone(),
+                    Value::Mapping(current_label, IndexMap::new(), marker),
                     id,
                 ));
             }

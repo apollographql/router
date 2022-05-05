@@ -117,9 +117,9 @@ impl Report {
 #[cfg(target_os = "windows")]
 fn get_uname() -> Result<String, std::io::Error> {
     // Best we can do on windows right now
-    let sysname = sys_info::os_type().unwrap_or("Windows".to_string());
-    let nodename = sys_info::hostname().unwrap_or("unknown".to_string());
-    let release = sys_info::os_release().unwrap_or("unknown".to_string());
+    let sysname = sys_info::os_type().unwrap_or_else(|_| "Windows".to_owned());
+    let nodename = sys_info::hostname().unwrap_or_else(|_| "unknown".to_owned());
+    let release = sys_info::os_release().unwrap_or_else(|_| "unknown".to_owned());
     let version = "unknown";
     let machine = "unknown";
     Ok(format!(

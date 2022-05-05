@@ -213,6 +213,11 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 service_name.clone(),
             ));
+        } else if std::env::var("OTEL_SERVICE_NAME").is_err() {
+            resource_defaults.push(KeyValue::new(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                "router".to_string(),
+            ));
         }
         if let Some(service_namespace) = &config.service_namespace {
             resource_defaults.push(KeyValue::new(
@@ -220,6 +225,17 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
                 service_namespace.clone(),
             ));
         }
+
+        if let Some(executable_name) = std::env::current_exe().ok().and_then(|path| {
+            path.file_name()
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+        }) {
+            resource_defaults.push(KeyValue::new(
+                opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME,
+                executable_name,
+            ));
+        }
+
         let resource = Resource::new(resource_defaults).merge(&mut Resource::new(
             config
                 .attributes
