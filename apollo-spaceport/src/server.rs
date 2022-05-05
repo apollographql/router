@@ -40,7 +40,7 @@ struct QueryUsage {
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
-static TRIGGER_BATCH_LIMIT: u32 = 1; // TODO: arbitrary but it seems to work :D
+static TRIGGER_BATCH_LIMIT: u32 = 50; // TODO: arbitrary but it seems to work :D
 
 /// Allows common transfer code to be more easily represented
 #[allow(clippy::large_enum_variant)]
