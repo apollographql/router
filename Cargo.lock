@@ -4425,9 +4425,9 @@ dependencies = [
 
 [[package]]
 name = "test-span"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de9b8e79555e91884f1919beda7252c37374afc85d3b3dbd3a0f7f3e5aeeee81"
+checksum = "93924e1fa984429f7b8a1b4fc9652a8ceac21fcd4aefcf7f881e247f4118b180"
 dependencies = [
  "daggy",
  "derivative",
@@ -4446,9 +4446,9 @@ dependencies = [
 
 [[package]]
 name = "test-span-macro"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee4839346cfd23cadb66d6237ca1769edcc6c2bea70059f8f99bc6536d102dcc"
+checksum = "2529044a35c9d1000884dc46ea88e50410f33871149b0f649a648a91728dc841"
 dependencies = [
  "proc-macro2",
  "quote",
