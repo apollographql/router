@@ -113,7 +113,6 @@ mod tests {
             .await
             .unwrap();
 
-        eprintln!("response: {:?}", service_response);
         // Rhai should return a 200...
         assert_eq!(StatusCode::OK, service_response.response.status());
 
