@@ -490,7 +490,7 @@ impl Telemetry {
                     .unwrap_or_default()
                     .unwrap_or_default(),
                 client_version: context
-                    .get(CLIENT_NAME)
+                    .get(CLIENT_VERSION)
                     .unwrap_or_default()
                     .unwrap_or_default(),
                 stats_report_key: usage_reporting.stats_report_key.to_string(),

@@ -5,7 +5,7 @@ expression: results
 [
   {
     "client_name": "test_client",
-    "client_version": "test_client",
+    "client_version": "1.0-test",
     "stats_report_key": "## GraphQLValidationFailure\n",
     "query_latency_stats": {
       "latency_count": {

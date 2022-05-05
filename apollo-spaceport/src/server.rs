@@ -40,7 +40,7 @@ struct QueryUsage {
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
-static TRIGGER_BATCH_LIMIT: u32 = 50; // TODO: arbitrary but it seems to work :D
+static TRIGGER_BATCH_LIMIT: u32 = 1; // TODO: arbitrary but it seems to work :D
 
 /// Allows common transfer code to be more easily represented
 #[allow(clippy::large_enum_variant)]
@@ -52,8 +52,9 @@ enum StatsOrTrace {
 impl StatsOrTrace {
     fn get_traces_and_stats(&self) -> TracesAndStats {
         match self {
-            StatsOrTrace::Stats(_) => TracesAndStats {
+            StatsOrTrace::Stats(s) => TracesAndStats {
                 stats_with_context: vec![],
+                referenced_fields_by_type: s.fields.clone(),
                 ..Default::default()
             },
             StatsOrTrace::Trace(_) => TracesAndStats {
@@ -296,7 +297,6 @@ impl ReportSpaceport {
             .traces_and_stats_for_key
             .entry(record.key())
             .or_insert_with(|| record.get_traces_and_stats());
-
         query_usage.operation_count += record.operation_count();
 
         match record {
