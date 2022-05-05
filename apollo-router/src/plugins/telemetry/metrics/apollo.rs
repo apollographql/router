@@ -56,6 +56,7 @@ pub(crate) struct Metrics {
     pub(crate) query_latency_stats: QueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, TypeStat>,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub(crate) operation_count: u64,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -102,6 +103,7 @@ struct AggregatedMetrics {
     query_latency_stats: AggregatedQueryLatencyStats,
     per_type_stat: HashMap<String, AggregatedTypeStat>,
     referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    operation_count: u64,
 }
 
 impl AddAssign<Metrics> for AggregatedMetrics {
@@ -115,6 +117,8 @@ impl AddAssign<Metrics> for AggregatedMetrics {
             // The tuple (client_name, client_version, stats_report_key, referenced_fields_by_type) is always unique.
             self.referenced_fields_by_type.entry(k).or_insert(v);
         }
+
+        self.operation_count += metrics.operation_count;
     }
 }
 
@@ -279,13 +283,16 @@ impl ApolloMetricsExporter {
 
                     match pool.get().await {
                         Ok(mut reporter) => {
-                            for (key, contextualized_stats, field_usage) in stats.into_iter() {
+                            for (key, contextualized_stats, field_usage, operation_count) in
+                                stats.into_iter()
+                            {
                                 match reporter
                                     .submit_stats(
                                         reporter_graph.clone(),
                                         key,
                                         contextualized_stats,
                                         field_usage,
+                                        operation_count,
                                     )
                                     .await
                                 {
@@ -323,6 +330,7 @@ fn aggregate(
     String,
     ContextualizedStats,
     HashMap<String, ReferencedFieldsForType>,
+    u64,
 )> {
     let mut aggregated_metrics = HashMap::<_, AggregatedMetrics>::new();
 
@@ -361,6 +369,7 @@ fn aggregate(
                 key,
                 contextualized_stats,
                 aggregated_metric.referenced_fields_by_type,
+                aggregated_metric.operation_count,
             )
         })
         .collect()
@@ -731,6 +740,7 @@ mod test {
                     is_interface: false,
                 },
             )]),
+            operation_count: count.inc_u64(),
         }
     }
 

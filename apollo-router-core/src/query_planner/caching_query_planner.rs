@@ -103,17 +103,16 @@ where
                     query_plan
                 })
                 .map_err(|e| {
-                    if let CacheResolverError::RetrievalError(e) = &e {
-                        if let QueryPlannerError::PlanningErrors(e) = e.deref() {
-                            if let Err(e) = request
-                                .context
-                                .insert(USAGE_REPORTING, e.usage_reporting.clone())
-                            {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    e
-                                );
-                            }
+                    let CacheResolverError::RetrievalError(re) = &e;
+                    if let QueryPlannerError::PlanningErrors(pe) = re.deref() {
+                        if let Err(inner_e) = request
+                            .context
+                            .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                        {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                inner_e
+                            );
                         }
                     }
 

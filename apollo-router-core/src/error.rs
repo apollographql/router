@@ -1,7 +1,7 @@
 use crate::prelude::graphql::*;
 use displaydoc::Display;
 use miette::{Diagnostic, NamedSource, Report, SourceSpan};
-pub use router_bridge::planner::{PlanError, PlannerSetupError};
+pub use router_bridge::planner::{PlanError, PlannerError};
 use router_bridge::planner::{PlanErrors, UsageReporting};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -230,7 +230,7 @@ pub enum ServiceBuildError {
 #[derive(Error, Debug, Display, Clone)]
 pub enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
-    SchemaValidationErrors(PlannerSetupErrors),
+    SchemaValidationErrors(PlannerErrors),
 
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
@@ -253,27 +253,24 @@ pub enum QueryPlannerError {
 
 #[derive(Clone, Debug, Error)]
 /// Container for planner setup errors
-pub struct PlannerSetupErrors(Arc<Vec<PlannerSetupError>>);
+pub struct PlannerErrors(Arc<Vec<PlannerError>>);
 
-impl std::fmt::Display for PlannerSetupErrors {
+impl std::fmt::Display for PlannerErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "schema validation errors: {}",
             self.0
                 .iter()
-                .map(|e| e
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<String>>()
                 .join(", ")
         ))
     }
 }
 
-impl From<Vec<PlannerSetupError>> for QueryPlannerError {
-    fn from(errors: Vec<PlannerSetupError>) -> Self {
-        QueryPlannerError::SchemaValidationErrors(PlannerSetupErrors(Arc::new(errors)))
+impl From<Vec<PlannerError>> for QueryPlannerError {
+    fn from(errors: Vec<PlannerError>) -> Self {
+        QueryPlannerError::SchemaValidationErrors(PlannerErrors(Arc::new(errors)))
     }
 }
 

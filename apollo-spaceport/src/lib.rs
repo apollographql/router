@@ -200,6 +200,7 @@ impl Reporter {
         key: String,
         stats: ContextualizedStats,
         fields: HashMap<String, ReferencedFieldsForType>,
+        operation_count: u64,
     ) -> Result<Response<ReporterResponse>, Status> {
         self.client
             .add_stats(Request::new(ReporterStats {
@@ -207,6 +208,7 @@ impl Reporter {
                 key,
                 stats: Some(stats),
                 fields,
+                operation_count,
             }))
             .await
     }

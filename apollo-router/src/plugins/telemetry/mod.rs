@@ -478,7 +478,9 @@ impl Telemetry {
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
         {
+            let operation_count = operation_count(usage_reporting.stats_report_key.as_str());
             let apollo_metrics = metrics::apollo::Metrics {
+                operation_count,
                 client_name: context
                     .get(CLIENT_NAME)
                     .unwrap_or_default()
@@ -569,6 +571,16 @@ impl Telemetry {
                 .to_string(),
         );
         context
+    }
+}
+
+// Planner errors return stats report key that start with `## `
+// while successful planning stats report key start with `# `
+fn operation_count(stats_report_key: &str) -> u64 {
+    if stats_report_key.starts_with("## ") {
+        0
+    } else {
+        1
     }
 }
 

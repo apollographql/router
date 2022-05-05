@@ -28,8 +28,14 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
 
-type QueryUsageMap = HashMap<String, TracesAndStats>;
-type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsageMap>>>;
+type StatsReportKey = String;
+type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsage>>>;
+
+#[derive(Debug, Default)]
+struct QueryUsage {
+    traces_and_stats_for_key: HashMap<StatsReportKey, TracesAndStats>,
+    operation_count: u64,
+}
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
@@ -68,6 +74,13 @@ impl StatsOrTrace {
         match self {
             StatsOrTrace::Stats(s) => s.key.clone(),
             StatsOrTrace::Trace(t) => t.key.clone(),
+        }
+    }
+
+    fn operation_count(&self) -> u64 {
+        match self {
+            StatsOrTrace::Stats(s) => s.operation_count,
+            StatsOrTrace::Trace(_) => 0, // For now :)
         }
     }
 }
@@ -276,12 +289,16 @@ impl ReportSpaceport {
         record: StatsOrTrace,
     ) -> Result<Response<ReporterResponse>, Status> {
         let mut graph_usage = self.graph_usage.lock().await;
-        let graph_map = graph_usage
+        let mut query_usage = graph_usage
             .entry(record.graph().unwrap())
-            .or_insert_with(HashMap::new);
-        let entry = graph_map
+            .or_insert_with(|| Default::default());
+        let entry = query_usage
+            .traces_and_stats_for_key
             .entry(record.key())
             .or_insert_with(|| record.get_traces_and_stats());
+
+        query_usage.operation_count += record.operation_count();
+
         match record {
             StatsOrTrace::Stats(mut s) => entry.stats_with_context.push(s.stats.take().unwrap()),
             StatsOrTrace::Trace(mut t) => entry.trace.push(t.trace.take().unwrap()),
@@ -337,17 +354,16 @@ async fn extract_graph_usage(
     let mut all_entries = task_graph_usage.lock().await;
     let drained = all_entries
         .drain()
-        .filter(|(_graph, graph_usage)| !graph_usage.is_empty())
-        .collect::<Vec<(ReporterGraph, QueryUsageMap)>>();
+        .collect::<Vec<(ReporterGraph, QueryUsage)>>();
     // Release the lock ASAP so that clients can continue to add data
     drop(all_entries);
     let mut results = Vec::with_capacity(drained.len());
-    for (graph, graph_usage) in drained {
-        tracing::info!("submitting: {} records", graph_usage.len());
-        tracing::debug!("containing: {:?}", graph_usage);
+    for (graph, query_usage) in drained {
+        tracing::info!("submitting: {} operations", query_usage.operation_count);
+        tracing::debug!("containing: {:?}", query_usage);
         match crate::Report::try_new(&graph.reference) {
             Ok(mut report) => {
-                report.traces_per_query = graph_usage;
+                report.traces_per_query = query_usage.traces_and_stats_for_key;
                 let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
                     Ok(t) => t,
                     Err(e) => {
@@ -355,6 +371,7 @@ async fn extract_graph_usage(
                         continue;
                     }
                 };
+                report.operation_count = query_usage.operation_count;
                 let seconds = time.as_secs();
                 let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
                 let ts_end = Timestamp {
