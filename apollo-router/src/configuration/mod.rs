@@ -461,6 +461,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                     .enumerate()
                     .filter_map(|(idx, e)| {
                         if let Some(element) = yaml.get_element(&e.instance_path) {
+                            const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: isize = 5;
                             match element {
                                 yaml::Value::String(value, marker) => {
                                     // Dirty hack.
@@ -476,8 +477,12 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                                         return None;
                                     }
 
-                                    let lines = yaml_split_by_lines
-                                        [0.max(marker.line() as isize - 5) as usize..marker.line()]
+                                    let lines = yaml_split_by_lines[0.max(
+                                        marker.line() as isize
+                                            - NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                    )
+                                        as usize
+                                        ..marker.line()]
                                         .iter()
                                         .join("\n");
 
@@ -493,7 +498,10 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                                 seq_element @ yaml::Value::Sequence(_, m) => {
                                     let (start_marker, end_marker) = (m, seq_element.end_marker());
 
-                                    let offset = 0.max(start_marker.line() as isize - 5) as usize;
+                                    let offset = 0.max(
+                                        start_marker.line() as isize
+                                            - NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                    ) as usize;
                                     let lines = yaml_split_by_lines[offset..end_marker.line()]
                                         .iter()
                                         .enumerate()
@@ -520,7 +528,10 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                                         current_label.as_ref()?.marker.as_ref()?,
                                         map_value.end_marker(),
                                     );
-                                    let offset = 0.max(start_marker.line() as isize - 5) as usize;
+                                    let offset = 0.max(
+                                        start_marker.line() as isize
+                                            - NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                    ) as usize;
                                     let lines = yaml_split_by_lines[offset..end_marker.line()]
                                         .iter()
                                         .enumerate()
