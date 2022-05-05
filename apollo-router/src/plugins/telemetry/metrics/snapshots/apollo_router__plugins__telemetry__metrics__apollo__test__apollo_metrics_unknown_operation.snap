@@ -6,7 +6,7 @@ expression: results
   {
     "client_name": "test_client",
     "client_version": "test_client",
-    "stats_report_key": "# UNKNOWN\nquery UNKNOWN{topProducts{name}}",
+    "stats_report_key": "## GraphQLUnknownOperationName\n",
     "query_latency_stats": {
       "latency_count": {
         "secs": 0,
@@ -39,20 +39,7 @@ expression: results
       "requests_without_field_instrumentation": 0
     },
     "per_type_stat": {},
-    "referenced_fields_by_type": {
-      "Product": {
-        "field_names": [
-          "name"
-        ],
-        "is_interface": false
-      },
-      "Query": {
-        "field_names": [
-          "topProducts"
-        ],
-        "is_interface": false
-      }
-    },
+    "referenced_fields_by_type": {},
     "operation_count": 0
   }
 ]

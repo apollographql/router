@@ -574,10 +574,10 @@ impl Telemetry {
     }
 }
 
-// Planner errors return stats report key that start with `## ` or "# UNKNOWN"
+// Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
 fn operation_count(stats_report_key: &str) -> u64 {
-    if stats_report_key.starts_with("## ") || stats_report_key.starts_with("# UNKNOWN") {
+    if stats_report_key.starts_with("## ") {
         0
     } else {
         1

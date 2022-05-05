@@ -794,7 +794,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query).await?;
+        let results = get_metrics_for_request(query, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -804,7 +804,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
         let query = "query {topProducts{name}} query {topProducts{name}}";
-        let results = get_metrics_for_request(query).await?;
+        let results = get_metrics_for_request(query, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -814,7 +814,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
-        let results = get_metrics_for_request(query).await?;
+        let results = get_metrics_for_request(query, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -823,8 +823,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
-        let query = "query UNKNOWN {topProducts{name}}";
-        let results = get_metrics_for_request(query).await?;
+        let query = "query {topProducts{name}}";
+        let results = get_metrics_for_request(query, Some("UNKNOWN")).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -833,8 +833,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
-        let query = "query UNKNOWN {topProducts{unknown}}";
-        let results = get_metrics_for_request(query).await?;
+        let query = "query {topProducts{unknown}}";
+        let results = get_metrics_for_request(query, None).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
         });
@@ -842,7 +842,10 @@ mod test {
         Ok(())
     }
 
-    async fn get_metrics_for_request(query: &str) -> Result<Vec<Metrics>, BoxError> {
+    async fn get_metrics_for_request(
+        query: &str,
+        operation_name: Option<&str>,
+    ) -> Result<Vec<Metrics>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
@@ -859,6 +862,7 @@ mod test {
                     .header("name_header", "test_client")
                     .header("version_header", "1.0-test")
                     .query(query)
+                    .and_operation_name(operation_name)
                     .build()?,
             )
             .await;
