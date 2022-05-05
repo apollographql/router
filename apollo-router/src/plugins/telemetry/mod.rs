@@ -29,7 +29,7 @@ use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tower::steer::Steer;
 use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
@@ -242,9 +242,10 @@ impl Plugin for Telemetry {
                 move |ctx, fut| {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
+                    let start = Instant::now();
                     async move {
                         let result: Result<RouterResponse, BoxError> = fut.await;
-                        Self::update_apollo_metrics(ctx, sender, &result);
+                        Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
                         Self::update_metrics(metrics, &result);
                         result
                     }
@@ -472,6 +473,7 @@ impl Telemetry {
         context: Context,
         sender: Sender,
         _result: &Result<RouterResponse, BoxError>,
+        duration: Duration,
     ) {
         if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
@@ -500,6 +502,8 @@ impl Telemetry {
                     .into_iter()
                     .map(|(k, v)| (k, convert(v)))
                     .collect();
+                apollo_metrics.query_latency_stats.latency_count = duration;
+                apollo_metrics.query_latency_stats.request_count = 1;
             };
             sender.send(apollo_metrics);
         };

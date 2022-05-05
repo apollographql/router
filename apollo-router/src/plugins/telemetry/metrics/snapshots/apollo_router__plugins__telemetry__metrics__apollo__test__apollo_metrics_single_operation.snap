@@ -10,9 +10,9 @@ expression: results
     "query_latency_stats": {
       "latency_count": {
         "secs": 0,
-        "nanos": 0
+        "nanos": 100000000
       },
-      "request_count": 0,
+      "request_count": 1,
       "cache_hits": 0,
       "persisted_query_hits": 0,
       "persisted_query_misses": 0,

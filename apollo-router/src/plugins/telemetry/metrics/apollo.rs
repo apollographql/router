@@ -883,7 +883,18 @@ mod test {
             .await;
 
         drop(test_harness);
-        let results = rx.collect::<Vec<_>>().await;
+        let results = rx
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .map(|mut m| {
+                // Fix the latency counts to a known quantity so that insta tests don't fail.
+                if m.query_latency_stats.latency_count != Duration::default() {
+                    m.query_latency_stats.latency_count = Duration::from_millis(100);
+                }
+                m
+            })
+            .collect();
         Ok(results)
     }
 
