@@ -26,7 +26,7 @@ in lieu of an official changelog.
 4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
     `CHANGELOG.md`. Use the structure of previous entries.
 5. Update `docker.mdx` with the release version.
-6. Update `compatibility.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+6. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
 
 ### Start a release PR
 
