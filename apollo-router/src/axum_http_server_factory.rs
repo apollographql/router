@@ -108,8 +108,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             handle_get(host, service, http_request, display_landing_page)
                         }
                     })
-                    .post(handle_post)
-                    .head(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+                    .post(handle_post),
                 )
                 .layer(
                     TraceLayer::new_for_http()
@@ -899,29 +898,6 @@ mod tests {
 
         assert!(err.is_status());
         assert_eq!(err.status(), Some(StatusCode::NOT_FOUND));
-
-        server.shutdown().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn bad_response_with_head() -> Result<(), FederatedServerError> {
-        let expectations = MockRouterService::new();
-        let (server, client) = init(expectations).await;
-        let url = format!("{}/", server.listen_address());
-
-        // Post query
-        let err = client
-            .head(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .expect_err("should be not found");
-
-        assert!(err.is_status());
-        assert_eq!(err.status(), Some(StatusCode::METHOD_NOT_ALLOWED));
 
         server.shutdown().await?;
         Ok(())
