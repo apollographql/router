@@ -227,7 +227,10 @@ impl Plugin for Telemetry {
         ServiceBuilder::new()
             .instrument(Self::router_service_span(config.clone()))
             .map_future_with_context(
-                move |req: &RouterRequest| Self::populate_context(&config, req),
+                move |req: &RouterRequest| {
+                    Self::populate_context(&config, req);
+                    req.context.clone()
+                },
                 move |ctx, fut| {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
@@ -522,7 +525,7 @@ impl Telemetry {
             .record(now.elapsed().as_secs_f64(), &[]);
     }
 
-    fn populate_context(config: &Config, req: &RouterRequest) -> Context {
+    fn populate_context(config: &Config, req: &RouterRequest) {
         let context = req.context.clone();
         let http_request = &req.originating_request;
         let headers = http_request.headers();
@@ -548,7 +551,6 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
-        context
     }
 }
 
