@@ -24,6 +24,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [v0.1.0-preview.8] - (unreleased)
 ## ❗ BREAKING ❗
+
+### rhai scripts should be able to do more things (like rust plugins) [PR #971](https://github.com/apollographql/router/pull/971)
+This is a re-working of our rhai scripting support. The intent is to make writing a rhai plugin more like writing a rust plugin, with full participation in the service plugin lifecycle. The work is still some way from complete, but does provide new capabilities (such as logging from rhai) and provides a more solid basis on which we can evolve our implementation. The examples and documentation should make clear how to modify any existing scripts to accomodate the changes.
+
 ## 🚀 Features ( :rocket: )
 ## 🐛 Fixes ( :bug: )
 

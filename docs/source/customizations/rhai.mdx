@@ -15,11 +15,12 @@ Like the rest of the Apollo Router, Rhai support is in active development. Durin
 
 **What you can do:**
 * Manipulate request HTTP headers
+* Perform `checkpoint`-style short circuiting of requests
+* Modify the status codes of requests/responses
 
 **What you can't do (yet):**
 * Execute calls to external services
-* Modify the body or status codes of requests/responses
-* Perform `checkpoint`-style short circuiting of requests
+* Modify the body of requests/responses
 
 > ⚠️ As Rhai script is experimental, we may introduce breaking changes to Rhai script functionality after the general availability (GA) release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
 
@@ -35,61 +36,106 @@ plugins:
 
 ## Service hooks
 
-Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. _Unlike_ native Rust plugins, Rhai scripts use two different hooks for each service, one for handling request data and one for handling response data:
+Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like  native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
 
-  - `router_service_request`
-  - `router_service_response`
-  - `query_planning_service_request`
-  - `query_planning_service_response`
-  - `execution_service_request`
-  - `execution_service_response`
-  - `subgraph_service_request`
-  - `subgraph_service_response`
+  - `router_service`
+  - `query_planner_service`
+  - `execution_service`
+  - `subgraph_service`
 
 Each of these hooks is optional—define only the functions you want to use custom logic for.
 
-Each function takes a single parameter: `context`, an object with `extensions` and `headers` fields. Each function must _return_ a `context` object with any necessary modifications.
+Each function takes a single parameter: `service`, this is typed for each of the different services. The various service functions are not required to return anything. If they do, the return is ignored.
+
+The full functionality of a Rust plugin is not available, but the following methods are available for service interactions.
+
+  - `map_request`
+  - `map_response`
+
+These can be invoked as methods on the supplied service object and are expected to provide a callback function which is invoked for actual request or response processing.
+
+All request/response callback functions are provided with a typed Request/Response which can be interacted with to manipulate headers and context. In addition, operation_name details are available for all requests.
 
 ## Examples
 
 ### Example 1
 
-This example manipulates headers and the request context:
+This example illustrates how to register router request handling.
 
 ```javascript
-fn router_service_request(context) {
-    // Verify that x-custom-header is present and has the expected value
-    if context.headers["x-custom-header"] != "CUSTOM_VALUE" {
-        throw "Error: you did not provide the right custom header";
-    }
-    context
+
+// At the router_service stage, register callbacks for processing requests
+fn router_service(service) {
+    let request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
+    service.map_request(request_callback); // Register the callback
 }
 
-fn router_service_response(context) {
-    context.headers["test-header"] = "here is a test";
-    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
-        context.headers.greetings = "hello";
-    }
-    let value = context.extensions.test + 10;
-    context.headers["coming_from_extensions"] = `value_${value}`;
-    context.extensions.test = 42;
-    context.extensions.addition = "Here is a new element in the context";
-
-    context
+// Generate a log for each request
+fn process_request(request) {
+    log_info("this is info level log message");
 }
 ```
 
 ### Example 2
 
+This example manipulates headers and the request context:
+
+```javascript
+// At the router_service stage, register callbacks for processing requests and
+// responses.
+fn router_service(service) {
+    let request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
+    service.map_request(request_callback); // Register the request callback
+    let response_callback = Fn("process_response"); // This is standard Rhai functionality for creating a function pointer
+    service.map_response(response_callback); // Register the response callback
+}
+
+// Ensure the header is present in the request
+// If an error is thrown, then the request is short-circuited to an error response
+fn process_request(request) {
+    log_info("processing request"); // This will appear in the router log as an INFO log
+    // Verify that x-custom-header is present and has the expected value
+    if request.headers["x-custom-header"] != "CUSTOM_VALUE" {
+        log_error("Error: you did not provide the right custom header"); // This will appear in the router log as an ERROR log
+        throw "Error: you did not provide the right custom header"; // This will appear in the errors response and short-circuit the request
+    }
+    // Put the header into the context and check the context in the response
+    request.context["x-custom-header"] = request.headers["x-custom-header"];
+}
+
+// Ensure the header is present in the response context
+// If an error is thrown, then the response is short-circuited to an error response
+fn process_response(response) {
+    log_info("processing response"); // This will appear in the router log as an INFO log
+    // Verify that x-custom-header is present and has the expected value
+    if request.context["x-custom-header"] != "CUSTOM_VALUE" {
+        log_error("Error: we lost our custom header from our context"); // This will appear in the router log as an ERROR log
+        throw "Error: we lost our custom header from our context"; // This will appear in the errors response and short-circuit the request
+    }
+}
+```
+
+### Example 3
+
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
 
 ```javascript
-// This converts all cookie pairs into headers.
-// If you only want to convert certain cookies, you
+// Call map_request with our service and pass in a string with the name
+// of the function to callback
+fn subgraph_service(service) {
+    print("registering request callback"); // print() is the same as using log_info()
+    let request_callback = Fn("process_request");
+    map_request(service, request_callback);
+}
+
+// This will convert all cookie pairs into headers.
+// If you only wish to convert certain cookies, you
 // can add logic to modify the processing.
-fn subgraph_service_request(context) {
+fn process_request(request) {
+    print("adding cookies as headers");
+
     // Find our cookies
-    let cookies = context.headers["Cookie"].split(';');
+    let cookies = request.headers["cookie"].split(';');
     for cookie in cookies {
         // Split our cookies into name and value
         let k_v = cookie.split('=', 2);
@@ -98,10 +144,15 @@ fn subgraph_service_request(context) {
             k_v[0].trim();
             k_v[1].trim();
             // update our headers
-            context.headers[k_v[0]] = k_v[1];
+            // Note: we must update sub_headers, since we are
+            // setting a header in our sub graph request
+            request.sub_headers[k_v[0]] = k_v[1];
         }
     }
-    // Always return the context
-    context
 }
 ```
+
+There are three complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are:
+
+ - rhai-logging
+ - op-name-to-header
