@@ -45,7 +45,7 @@ mod tracing;
 pub static ROUTER_SPAN_NAME: &str = "router";
 static CLIENT_NAME: &str = "apollo_telemetry::client_name";
 static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
-pub(crate) static EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
     config: config::Conf,
@@ -468,7 +468,7 @@ impl Telemetry {
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
         {
-            let exclude: Option<bool> = context.get(EXCLUDE).unwrap_or_default();
+            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
             let operation_count = operation_count(&usage_reporting.stats_report_key);
 
             //The basic metrics only has operation count

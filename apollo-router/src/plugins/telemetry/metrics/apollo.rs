@@ -519,7 +519,7 @@ impl DurationHistogram {
 mod test {
     use super::super::super::config;
     use super::*;
-    use crate::plugins::telemetry::{apollo, Telemetry, EXCLUDE};
+    use crate::plugins::telemetry::{apollo, Telemetry, STUDIO_EXCLUDE};
     use apollo_router_core::utils::test::IntoSchema::Canned;
     use apollo_router_core::utils::test::PluginTestHarness;
     use apollo_router_core::RouterRequest;
@@ -848,7 +848,7 @@ mod test {
     async fn apollo_metrics_exclude() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
         let context = Context::new();
-        context.insert(EXCLUDE, true)?;
+        context.insert(STUDIO_EXCLUDE, true)?;
         let results = get_metrics_for_request(query, None, Some(context)).await?;
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(results);
