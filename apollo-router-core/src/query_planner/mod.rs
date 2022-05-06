@@ -24,14 +24,18 @@ pub struct QueryPlan {
 
 /// This default impl is useful for plugin::utils users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
+#[buildstructor::builder]
 impl QueryPlan {
-    pub fn for_tests() -> Self {
+    pub(crate) fn fake_new(
+        root: Option<PlanNode>,
+        usage_reporting: Option<UsageReporting>,
+    ) -> Self {
         Self {
-            usage_reporting: UsageReporting {
+            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
-            },
-            root: PlanNode::Sequence { nodes: Vec::new() },
+            }),
+            root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
         }
     }
 }

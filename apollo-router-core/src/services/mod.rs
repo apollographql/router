@@ -542,12 +542,12 @@ impl ExecutionRequest {
     /// difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         originating_request: Option<http_compat::Request<Request>>,
-        query_plan: Option<Arc<QueryPlan>>,
+        query_plan: Option<QueryPlan>,
         context: Option<Context>,
     ) -> ExecutionRequest {
         ExecutionRequest::new(
             originating_request.unwrap_or_else(http_compat::Request::mock),
-            query_plan.unwrap_or_else(|| Arc::new(QueryPlan::for_tests())),
+            Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
     }
