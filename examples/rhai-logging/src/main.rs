@@ -28,15 +28,7 @@ mod tests {
         // Let's set up our mock to make sure it will be called once
         mock.expect_call()
             .once()
-            .returning(move |req: RouterRequest| {
-                // Let's make sure our request contains our new header
-                assert_eq!(
-                    req.originating_request
-                        .headers()
-                        .get("X-operation-name")
-                        .expect("X-operation-name is present"),
-                    "me"
-                );
+            .returning(move |_req: RouterRequest| {
                 RouterResponse::fake_builder()
                     .data(expected_mock_response_data)
                     .build()
@@ -46,7 +38,7 @@ mod tests {
         let mock_service = mock.build();
 
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/op_name_to_header.rhai",
+            "filename": "src/rhai_logging.rhai",
         }))
         .expect("json must be valid");
 

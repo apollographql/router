@@ -79,7 +79,7 @@ mod tests {
         }))
         .expect("json must be valid");
 
-        // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
+        // Build a rhai plugin instance from our conf
         let mut rhai = Rhai::new(conf)
             .await
             .expect("valid configuration should succeed");
