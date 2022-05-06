@@ -234,7 +234,9 @@ impl Plugin for Telemetry {
                     let start = Instant::now();
                     async move {
                         let result: Result<RouterResponse, BoxError> = fut.await;
-                        Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
+                        if !matches!(sender, Sender::Noop) {
+                            Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
+                        }
                         Self::update_metrics(metrics, &result);
                         result
                     }
