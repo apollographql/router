@@ -42,4 +42,9 @@ The router now sets "router" as default service name in Opentelemetry traces, th
 Endpoint configuration for Datadog and OTLP take a URL as argument, but was incorrectly recognizing addresses of the format "host:port"
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Prevent tests from handing on telemetry drop [PR #972](https://github.com/apollographql/router/pull/972)
+If the telemetry plugin is in use there is a chance that subscribers may hang if dropped in a single threaded runtime.
+During testing spawn a new multi-threaded tokio new runtime to do the drop.
+
 ## 📚 Documentation ( :books: )

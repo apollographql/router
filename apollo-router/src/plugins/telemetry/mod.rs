@@ -103,10 +103,28 @@ impl Drop for Telemetry {
             // We must make the call to force_flush() from spawn_blocking() (or spawn a thread) to
             // ensure that the call to force_flush() is made from a separate thread.
             ::tracing::debug!("flushing telemetry");
-            let jh = tokio::task::spawn_blocking(move || {
-                opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
-            });
-            futures::executor::block_on(jh).expect("failed to flush tracer provider");
+
+            // During tests we may be running in a single threaded tokio runtime.
+            // This will hang, so we always spawn a new runtime in this case.
+            #[cfg(test)]
+            {
+                let _ = std::thread::spawn(|| {
+                    let rt = tokio::runtime::Builder::new_multi_thread()
+                        .build()
+                        .expect("could not create tokio runtime");
+                    rt.spawn_blocking(move || async move {
+                        opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
+                    });
+                });
+            };
+
+            #[cfg(not(test))]
+            {
+                let jh = tokio::task::spawn_blocking(move || {
+                    opentelemetry::trace::TracerProvider::force_flush(&tracer_provider);
+                });
+                futures::executor::block_on(jh).expect("failed to flush tracer provider");
+            };
         }
 
         if let Some(sender) = self.spaceport_shutdown.take() {
