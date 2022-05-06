@@ -360,7 +360,7 @@ async fn extract_graph_usage(
     drop(all_entries);
     let mut results = Vec::with_capacity(drained.len());
     for (graph, query_usage) in drained {
-        tracing::info!("submitting: {} operations", query_usage.operation_count);
+        tracing::debug!("submitting: {} operations", query_usage.operation_count);
         tracing::debug!("containing: {:?}", query_usage);
         match crate::Report::try_new(&graph.reference) {
             Ok(mut report) => {
