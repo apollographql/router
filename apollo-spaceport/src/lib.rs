@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 pub mod report {
     tonic::include_proto!("report");
 }

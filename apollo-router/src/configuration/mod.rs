@@ -1,5 +1,5 @@
 //! Logic for loading configuration in to an object model
-
+// This entire file is license key functionality
 mod yaml;
 
 use crate::subscriber::is_global_subscriber_set;

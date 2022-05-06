@@ -1,3 +1,5 @@
+//! Apollo metrics
+// This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::{MetricsBuilder, MetricsConfigurator};

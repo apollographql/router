@@ -1,4 +1,5 @@
-//! Telemetry customization.
+//! Telemetry plugin.
+// This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::Sender;

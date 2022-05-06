@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 use crate::{
     agent::{
         reporter_server::{Reporter, ReporterServer},

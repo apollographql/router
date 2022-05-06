@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 syntax = "proto3";
 
 import "proto/reports.proto";
