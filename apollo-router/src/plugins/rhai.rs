@@ -642,7 +642,10 @@ impl Rhai {
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
             .register_fn("contains", |x: &mut HeaderMap, key: &str| -> bool {
-                x.contains_key(HeaderName::from_str(key).unwrap())
+                match HeaderName::from_str(key) {
+                    Ok(hn) => x.contains_key(hn),
+                    Err(_e) => false,
+                }
             })
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
@@ -654,11 +657,12 @@ impl Rhai {
                     .map_err(|e| e.to_string())?
                     .to_string())
             })
-            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
+            .register_indexer_set_result(|x: &mut HeaderMap, key: &str, value: &str| {
                 x.insert(
-                    HeaderName::from_str(key).unwrap(),
-                    HeaderValue::from_str(value).unwrap(),
+                    HeaderName::from_str(key).map_err(|e| e.to_string())?,
+                    HeaderValue::from_str(value).map_err(|e| e.to_string())?,
                 );
+                Ok(())
             })
             // Register a Context indexer so we can get/set context
             .register_indexer_get_result(|x: &mut Context, key: &str| {
