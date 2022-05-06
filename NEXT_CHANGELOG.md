@@ -25,6 +25,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.8] - (unreleased)
 ## ❗ BREAKING ❗
 ## 🚀 Features ( :rocket: )
+
+### Default server listen on 0.0.0.0 and port configurable by `PORT` environment variable [PR #970](https://github.com/apollographql/router/pull/970)
+Updates the default server listen address to be "unspecified" or 0.0.0.0 IP. Also allows setting the server listening port via the `PORT` environment variable while retaining the default of 4000 as it was previously.
+
 ## 🐛 Fixes ( :bug: )
 
 ### Improve the configuration error report [PR #963](https://github.com/apollographql/router/pull/963)
