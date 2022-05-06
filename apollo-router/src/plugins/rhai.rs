@@ -24,6 +24,37 @@ pub trait Accessor<Access>: Send {
     fn accessor_mut(&mut self) -> &mut Access;
 }
 
+trait OptionDance<T> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
+
+    fn replace(&self, f: impl FnOnce(T) -> T);
+
+    fn take_unwrap(self) -> T;
+}
+
+impl<T> OptionDance<T> for Arc<Mutex<Option<T>>> {
+    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let mut guard = self.lock().expect("poisoned mutex");
+        f(guard.as_mut().expect("re-entrant option dance"))
+    }
+
+    fn replace(&self, f: impl FnOnce(T) -> T) {
+        let mut guard = self.lock().expect("poisoned mutex");
+        *guard = Some(f(guard.take().expect("re-entrant option dance")))
+    }
+
+    fn take_unwrap(self) -> T {
+        match Arc::try_unwrap(self) {
+            Ok(mutex) => mutex.into_inner().expect("poisoned mutex"),
+
+            // TODO: Should we assume the Arc refcount is 1
+            // and use `try_unwrap().expect("shared ownership")` instead of this fallback ?
+            Err(arc) => arc.lock().expect("poisoned mutex").take(),
+        }
+        .expect("re-entrant option dance")
+    }
+}
+
 #[export_module]
 mod router_plugin_mod {
     macro_rules! gen_rhai_interface {
@@ -36,93 +67,39 @@ mod router_plugin_mod {
                 pub fn [<get_operation_name_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Dynamic {
-                    let mut guard = obj.lock().unwrap();
-                    let request_opt = guard.take();
-                    match request_opt {
-                        Some(mut request) => {
-                            let result = get_operation_name(&mut request);
-                            guard.replace(request);
-                            result
-                        }
-                        None => panic!("surely there is a request here..."),
-                    }
+                    obj.with_mut(get_operation_name)
                 }
 
                 pub fn [<get_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Context, Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let request_opt = guard.take();
-                    match request_opt {
-                        Some(mut request) => {
-                            let result = get_context(&mut request);
-                            guard.replace(request);
-                            result
-                        }
-                        None => panic!("surely there is a request here..."),
-                    }
+                    obj.with_mut(get_context)
                 }
 
                 pub fn [<get_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
                 ) -> Result<Context, Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let response_opt = guard.take();
-                    match response_opt {
-                        Some(mut response) => {
-                            let result = get_context(&mut response);
-                            guard.replace(response);
-                            result
-                        }
-                        None => panic!("surely there is a response here..."),
-                    }
+                    obj.with_mut(get_context)
                 }
 
                 pub fn [<insert_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     context: Context
                 ) -> Result<(), Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let request_opt = guard.take();
-                    match request_opt {
-                        Some(mut request) => {
-                            let result = insert_context(&mut request, context);
-                            guard.replace(request);
-                            result
-                        }
-                        None => panic!("surely there is a request here..."),
-                    }
+                    obj.with_mut(|request| insert_context(request, context))
                 }
 
                 pub fn [<insert_context_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
                     context: Context
                 ) -> Result<(), Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let response_opt = guard.take();
-                    match response_opt {
-                        Some(mut response) => {
-                            let result = insert_context(&mut response, context);
-                            guard.replace(response);
-                            result
-                        }
-                        None => panic!("surely there is a response here..."),
-                    }
+                    obj.with_mut(|response| insert_context(response, context))
                 }
 
                 pub fn [<get_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<HeaderMap, Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let request_opt = guard.take();
-                    match request_opt {
-                        Some(mut request) => {
-                            let result = get_originating_headers(&mut request);
-                            guard.replace(request);
-                            result
-                        }
-                        None => panic!("surely there is a request here..."),
-                    }
+                    obj.with_mut(get_originating_headers)
                 }
 
                 /* XXX ONLY VALID FOR CERTAIN TYPES
@@ -130,16 +107,7 @@ mod router_plugin_mod {
                 pub fn [<get_originating_headers_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
                 ) -> Result<HeaderMap, Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let response_opt = guard.take();
-                    match response_opt {
-                        Some(mut response) => {
-                            let result = get_originating_headers(&mut response);
-                            guard.replace(response);
-                            result
-                        }
-                        None => panic!("surely there is a response here..."),
-                    }
+                    obj.with_mut(get_originating_headers)
                 }
                 */
 
@@ -147,16 +115,7 @@ mod router_plugin_mod {
                     obj: &mut [<Shared $base:camel Request>],
                     headers: HeaderMap
                 ) -> Result<(), Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let request_opt = guard.take();
-                    match request_opt {
-                        Some(mut request) => {
-                            let result = set_originating_headers(&mut request, headers);
-                            guard.replace(request);
-                            result
-                        }
-                        None => panic!("surely there is a request here..."),
-                    }
+                    obj.with_mut(|request| set_originating_headers(request, headers))
                 }
 
                 /* XXX ONLY VALID FOR CERTAIN TYPES
@@ -164,16 +123,7 @@ mod router_plugin_mod {
                     obj: &mut [<Shared $base:camel Response>],
                     headers: HeaderMap
                 ) -> Result<(), Box<EvalAltResult>> {
-                    let mut guard = obj.lock().unwrap();
-                    let response_opt = guard.take();
-                    match response_opt {
-                        Some(mut response) => {
-                            let result = set_originating_headers(&mut response, headers);
-                            guard.replace(response);
-                            result
-                        }
-                        None => panic!("surely there is a response here..."),
-                    }
+                    obj.with_mut(|response| set_originating_headers(response, context))
                 }
                 */
             }
@@ -186,16 +136,7 @@ mod router_plugin_mod {
     pub fn get_subgraph_headers(
         obj: &mut SharedSubgraphRequest,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(request) => {
-                let result = Ok(request.subgraph_request.headers().clone());
-                guard.replace(request);
-                result
-            }
-            None => panic!("surely there is a request here..."),
-        }
+        obj.with_mut(|request| Ok(request.subgraph_request.headers().clone()))
     }
 
     #[rhai_fn(set = "sub_headers", return_raw)]
@@ -203,32 +144,17 @@ mod router_plugin_mod {
         obj: &mut SharedSubgraphRequest,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let request_opt = guard.take();
-        match request_opt {
-            Some(mut request) => {
-                *request.subgraph_request.headers_mut() = headers;
-                guard.replace(request);
-                Ok(())
-            }
-            None => panic!("surely there is a request here..."),
-        }
+        obj.with_mut(|request| {
+            *request.subgraph_request.headers_mut() = headers;
+            Ok(())
+        })
     }
 
     #[rhai_fn(get = "headers", return_raw)]
     pub fn get_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let response_opt = guard.take();
-        match response_opt {
-            Some(mut response) => {
-                let result = get_originating_headers_response_response_body(&mut response);
-                guard.replace(response);
-                result
-            }
-            None => panic!("surely there is a response here..."),
-        }
+        obj.with_mut(get_originating_headers_response_response_body)
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -236,16 +162,7 @@ mod router_plugin_mod {
         obj: &mut SharedRouterResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        let mut guard = obj.lock().unwrap();
-        let response_opt = guard.take();
-        match response_opt {
-            Some(mut response) => {
-                let result = set_originating_headers_response_response_body(&mut response, headers);
-                guard.replace(response);
-                result
-            }
-            None => panic!("surely there is a response here..."),
-        }
+        obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
     }
 
     // This is a getter for 'RouterRequest::operation_name'.
@@ -344,103 +261,79 @@ impl Plugin for Rhai {
 
     fn router_service(
         &mut self,
-        mut service: BoxService<RouterRequest, RouterResponse, BoxError>,
+        service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "router_service";
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("router_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Router(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
         }
-        service = shared_service.lock().unwrap().take().unwrap();
-
-        service
+        tracing::debug!("router_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Router(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
     }
 
     fn query_planning_service(
         &mut self,
-        mut service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
+        service: BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError>,
     ) -> BoxService<QueryPlannerRequest, QueryPlannerResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "query_planner_service";
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("query_planner_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::QueryPlanner(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
         }
-        service = shared_service.lock().unwrap().take().unwrap();
-
-        service
+        tracing::debug!("query_planner_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::QueryPlanner(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
     }
 
     fn execution_service(
         &mut self,
-        mut service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
+        service: BoxService<ExecutionRequest, ExecutionResponse, BoxError>,
     ) -> BoxService<ExecutionRequest, ExecutionResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "execution_service";
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("execution_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Execution(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
         }
-        service = shared_service.lock().unwrap().take().unwrap();
-
-        service
+        tracing::debug!("execution_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Execution(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
     }
 
     fn subgraph_service(
         &mut self,
         _name: &str,
-        mut service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
+        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
-        let shared_service = Arc::new(Mutex::new(Some(service)));
-        if self
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == FUNCTION_NAME_SERVICE)
-        {
-            tracing::debug!("subgraph_service function found");
-
-            if let Err(error) = self.run_rhai_service(
-                FUNCTION_NAME_SERVICE,
-                ServiceStep::Subgraph(shared_service.clone()),
-            ) {
-                tracing::error!("service callback failed: {error}");
-            }
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
         }
-        service = shared_service.lock().unwrap().take().unwrap();
-
-        service
+        tracing::debug!("subgraph_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            ServiceStep::Subgraph(shared_service.clone()),
+        ) {
+            tracing::error!("service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
     }
 }
 
@@ -452,51 +345,21 @@ pub(crate) enum ServiceStep {
     Subgraph(SharedSubgraphService),
 }
 
-macro_rules! gen_shared_types {
+macro_rules! accessor_mut_for_shared_types {
     (subgraph) => {
-            #[allow(dead_code)]
-            type SharedSubgraphService = Arc<Mutex<Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>>>>;
-
-            #[allow(dead_code)]
-            type SharedSubgraphRequest = Arc<Mutex<Option<SubgraphRequest>>>;
-
-            #[allow(dead_code)]
-            type SharedSubgraphResponse = Arc<Mutex<Option<SubgraphResponse>>>;
-
-            impl Accessor<Context> for SubgraphRequest {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<Context> for SubgraphResponse {
-
-                fn accessor(&self) -> &Context {
-                    &self.context
-                }
-
-                fn accessor_mut(&mut self) -> &mut Context {
-                    &mut self.context
-                }
-            }
-
-            impl Accessor<http_compat::Request<Request>> for SubgraphRequest {
-
-                fn accessor(&self) -> &http_compat::Request<Request> {
-                    &self.originating_request
-                }
-
-                // XXX CAN'T DO THIS FOR SUBGRAPH
-                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
-                    panic!("cannot mutate originating request on a subgraph");
-                }
-            }
+        // XXX CAN'T DO THIS FOR SUBGRAPH
+        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+            panic!("cannot mutate originating request on a subgraph");
+        }
     };
+    ($_base: ident) => {
+        fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
+            &mut self.originating_request
+        }
+    };
+}
+
+macro_rules! gen_shared_types {
     ($($base: ident), +) => {
         $(
         paste::paste! {
@@ -537,9 +400,7 @@ macro_rules! gen_shared_types {
                     &self.originating_request
                 }
 
-                fn accessor_mut(&mut self) -> &mut http_compat::Request<Request> {
-                    &mut self.originating_request
-                }
+                accessor_mut_for_shared_types!($base);
             }
         }
         )*
@@ -550,48 +411,42 @@ macro_rules! gen_shared_types {
 macro_rules! gen_map_request {
     ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
         paste::paste! {
-            let mut guard = $borrow.lock().unwrap();
-            let service_opt = guard.take();
-            match service_opt {
-                Some(service) => {
-                    let new_service = ServiceBuilder::new()
-                        .checkpoint(move |request: [<$base:camel Request>]| {
-                            // Let's define a local function to build an error response
-                            fn failure_message(
-                                context: Context,
-                                msg: String,
-                                status: StatusCode,
-                            ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
-                                let res = [<$base:camel Response>]::error_builder()
-                                    .errors(vec![apollo_router_core::Error {
-                                        message: msg,
-                                        ..Default::default()
-                                    }])
-                                    .status_code(status)
-                                    .context(context)
-                                    .build()?;
-                                Ok(ControlFlow::Break(res))
-                            }
-                            let shared_request = Shared::new(Mutex::new(Some(request)));
-                            let result: Result<Dynamic, String> = $callback
-                                .call(&$engine, &$ast, (shared_request.clone(),))
-                                .map_err(|err| err.to_string());
-                            if let Err(error) = result {
-                                tracing::error!("map_request callback failed: {error}");
-                                let mut guard = shared_request.lock().unwrap();
-                                let request_opt = guard.take();
-                                return failure_message(request_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
-                            }
+            $borrow.replace(|service| {
+                ServiceBuilder::new()
+                    .checkpoint(move |request: [<$base:camel Request>]| {
+                        // Let's define a local function to build an error response
+                        fn failure_message(
+                            context: Context,
+                            msg: String,
+                            status: StatusCode,
+                        ) -> Result<ControlFlow<[<$base:camel Response>], [<$base:camel Request>]>, BoxError> {
+                            let res = [<$base:camel Response>]::error_builder()
+                                .errors(vec![apollo_router_core::Error {
+                                    message: msg,
+                                    ..Default::default()
+                                }])
+                                .status_code(status)
+                                .context(context)
+                                .build()?;
+                            Ok(ControlFlow::Break(res))
+                        }
+                        let shared_request = Shared::new(Mutex::new(Some(request)));
+                        let result: Result<Dynamic, String> = $callback
+                            .call(&$engine, &$ast, (shared_request.clone(),))
+                            .map_err(|err| err.to_string());
+                        if let Err(error) = result {
+                            tracing::error!("map_request callback failed: {error}");
                             let mut guard = shared_request.lock().unwrap();
                             let request_opt = guard.take();
-                            Ok(ControlFlow::Continue(request_opt.unwrap()))
-                        })
-                        .service(service)
-                        .boxed();
-                    guard.replace(new_service);
-                }
-                None => panic!("surely there is a service here..."),
-            }
+                            return failure_message(request_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
+                        }
+                        let mut guard = shared_request.lock().unwrap();
+                        let request_opt = guard.take();
+                        Ok(ControlFlow::Continue(request_opt.unwrap()))
+                    })
+                    .service(service)
+                    .boxed()
+            })
         }
     };
 }
@@ -599,53 +454,47 @@ macro_rules! gen_map_request {
 macro_rules! gen_map_response {
     ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
         paste::paste! {
-            let mut guard = $borrow.lock().unwrap();
-            let service_opt = guard.take();
-            match service_opt {
-                Some(service) => {
-                    let new_service = service
-                        .map_response(move |response: [<$base:camel Response>]| {
-                            // Let's define a local function to build an error response
-                            // XXX: This isn't ideal. We already have a response, so ideally we'd
-                            // like to append this error into the existing response. However,
-                            // the significantly different treatment of errors in different
-                            // response types makes this extremely painful. This needs to be
-                            // re-visited at some point post GA.
-                            fn failure_message(
-                                context: Context,
-                                msg: String,
-                                status: StatusCode,
-                            ) -> [<$base:camel Response>] {
-                                let res = [<$base:camel Response>]::error_builder()
-                                    .errors(vec![apollo_router_core::Error {
-                                        message: msg,
-                                        ..Default::default()
-                                    }])
-                                    .status_code(status)
-                                    .context(context)
-                                    .build()
-                                    .expect("can't fail to build our error message");
-                                res
-                            }
-                            let shared_response = Shared::new(Mutex::new(Some(response)));
-                            let result: Result<Dynamic, String> = $callback
-                                .call(&$engine, &$ast, (shared_response.clone(),))
-                                .map_err(|err| err.to_string());
-                            if let Err(error) = result {
-                                tracing::error!("map_response callback failed: {error}");
-                                let mut guard = shared_response.lock().unwrap();
-                                let response_opt = guard.take();
-                                return failure_message(response_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
-                            }
+            $borrow.replace(|service| {
+                service
+                    .map_response(move |response: [<$base:camel Response>]| {
+                        // Let's define a local function to build an error response
+                        // XXX: This isn't ideal. We already have a response, so ideally we'd
+                        // like to append this error into the existing response. However,
+                        // the significantly different treatment of errors in different
+                        // response types makes this extremely painful. This needs to be
+                        // re-visited at some point post GA.
+                        fn failure_message(
+                            context: Context,
+                            msg: String,
+                            status: StatusCode,
+                        ) -> [<$base:camel Response>] {
+                            let res = [<$base:camel Response>]::error_builder()
+                                .errors(vec![apollo_router_core::Error {
+                                    message: msg,
+                                    ..Default::default()
+                                }])
+                                .status_code(status)
+                                .context(context)
+                                .build()
+                                .expect("can't fail to build our error message");
+                            res
+                        }
+                        let shared_response = Shared::new(Mutex::new(Some(response)));
+                        let result: Result<Dynamic, String> = $callback
+                            .call(&$engine, &$ast, (shared_response.clone(),))
+                            .map_err(|err| err.to_string());
+                        if let Err(error) = result {
+                            tracing::error!("map_response callback failed: {error}");
                             let mut guard = shared_response.lock().unwrap();
                             let response_opt = guard.take();
-                            response_opt.unwrap()
-                        })
-                        .boxed();
-                    guard.replace(new_service);
-                }
-                None => panic!("surely there is a service here..."),
-            }
+                            return failure_message(response_opt.unwrap().context, format!("rhai execution error: '{}'", error), StatusCode::INTERNAL_SERVER_ERROR);
+                        }
+                        let mut guard = shared_response.lock().unwrap();
+                        let response_opt = guard.take();
+                        response_opt.unwrap()
+                    })
+                    .boxed()
+            })
         }
     };
 }
@@ -891,6 +740,10 @@ impl Rhai {
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
         engine
+    }
+
+    fn ast_has_function(&self, name: &str) -> bool {
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }
 
