@@ -285,7 +285,9 @@ impl ValueExt for Value {
                 },
                 PathElement::Key(k) => match current_node {
                     Value::Object(o) => {
-                        current_node = o.entry(k.as_str()).or_insert(Value::default());
+                        current_node = o
+                            .get_mut(k.as_str())
+                            .expect("the value at that key was just inserted");
                     }
                     Value::Null => {
                         let mut m = Map::new();
