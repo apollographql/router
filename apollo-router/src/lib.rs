@@ -288,9 +288,7 @@ impl ConfigurationKind {
 
     fn read_config(path: &Path) -> Result<Configuration, FederatedServerError> {
         let config = fs::read_to_string(path).map_err(FederatedServerError::ReadConfigError)?;
-        validate_configuration(&config).map_err(FederatedServerError::ConfigError)?;
-        let config =
-            serde_yaml::from_str(&config).map_err(FederatedServerError::DeserializeConfigError)?;
+        let config = validate_configuration(&config).map_err(FederatedServerError::ConfigError)?;
 
         Ok(config)
     }
@@ -579,9 +577,7 @@ impl FederatedServerHandle {
                     State::Startup => {
                         tracing::info!("starting Apollo Router")
                     }
-                    State::Running { address, .. } => {
-                        tracing::info!("listening on {} 🚀", address)
-                    }
+                    State::Running { .. } => {}
                     State::Stopped => {
                         tracing::info!("stopped")
                     }
@@ -710,7 +706,7 @@ mod tests {
         request: &graphql::Request,
     ) -> Result<graphql::Response, graphql::FetchError> {
         Ok(reqwest::Client::new()
-            .post(format!("{}/graphql", listen_addr))
+            .post(format!("{}/", listen_addr))
             .json(request)
             .send()
             .await

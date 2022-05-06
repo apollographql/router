@@ -91,22 +91,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .clone()
                 .map(|cors_configuration| cors_configuration.into_layer())
                 .unwrap_or_else(|| Cors::builder().build().into_layer());
-
+            let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
+                // Needed for axium
+                format!("{}router_extra_path", configuration.server.endpoint)
+            } else {
+                configuration.server.endpoint.clone()
+            };
             let mut router = Router::new()
                 .route(
-                    "/",
-                    get({
-                        let display_landing_page = configuration.server.landing_page;
-                        move |host: Host,
-                              service: Extension<BufferedService>,
-                              http_request: Request<Body>| {
-                            handle_get(host, service, http_request, display_landing_page)
-                        }
-                    })
-                    .post(handle_post),
-                )
-                .route(
-                    "/graphql",
+                    &graphql_endpoint,
                     get({
                         let display_landing_page = configuration.server.landing_page;
                         move |host: Host,
@@ -180,6 +173,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(FederatedServerError::ServerCreationError)?;
 
+            tracing::info!(
+                "GraphQL endpoint exposed at {}{} 🚀",
+                actual_listen_address,
+                configuration.server.endpoint
+            );
             // this server reproduces most of hyper::server::Server's behaviour
             // we select over the stop_listen_receiver channel and the listener's
             // accept future. If the channel received something or the sender
@@ -767,25 +765,20 @@ mod tests {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
-        for url in vec![
-            format!("{}/", server.listen_address()),
-            format!("{}/graphql", server.listen_address()),
-        ] {
-            // Regular studio redirect
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "text/html")
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::OK,
-                "{}",
-                response.text().await.unwrap()
-            );
-            assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
-        }
+        // Regular studio redirect
+        let response = client
+            .get(&format!("{}/", server.listen_address()))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "{}",
+            response.text().await.unwrap()
+        );
+        assert_eq!(response.bytes().await.unwrap(), display_home_page().0);
         // }
         // insta::assert_json_snapshot!(test_span::get_spans_for_root(
         //     &root_span.id().unwrap(),
@@ -800,7 +793,7 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/graphql", server.listen_address()))
+            .post(format!("{}/", server.listen_address()))
             .body("Garbage")
             .send()
             .await
@@ -833,7 +826,7 @@ mod tests {
                     .into())
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/graphql", server.listen_address());
+        let url = format!("{}/", server.listen_address());
 
         // Post query
         let response = client
@@ -871,6 +864,249 @@ mod tests {
         //     &root_span.id().unwrap(),
         //     &test_span::Filter::new(Level::INFO)
         // ));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bad_response() -> Result<(), FederatedServerError> {
+        let expectations = MockRouterService::new();
+        let (server, client) = init(expectations).await;
+        let url = format!("{}/test", server.listen_address());
+
+        // Post query
+        let err = client
+            .post(url.as_str())
+            .body(json!({ "query": "query" }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect_err("should be not found");
+
+        assert!(err.is_status());
+        assert_eq!(err.status(), Some(StatusCode::NOT_FOUND));
+
+        // Get query
+        let err = client
+            .get(url.as_str())
+            .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect_err("should be not found");
+
+        assert!(err.is_status());
+        assert_eq!(err.status(), Some(StatusCode::NOT_FOUND));
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_with_custom_endpoint() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Some(
+                        Cors::builder()
+                            .origins(vec!["http://studio".to_string()])
+                            .build(),
+                    ))
+                    .endpoint(String::from("/graphql"))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let url = format!("{}/graphql", server.listen_address());
+
+        // Post query
+        let response = client
+            .post(url.as_str())
+            .body(json!({ "query": "query" }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let response = client
+            .get(url.as_str())
+            .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_with_custom_prefix_endpoint() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(2)
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Some(
+                        Cors::builder()
+                            .origins(vec!["http://studio".to_string()])
+                            .build(),
+                    ))
+                    .endpoint(String::from("/:my_prefix/graphql"))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        let url = format!("{}/prefix/graphql", server.listen_address());
+
+        // Post query
+        let response = client
+            .post(url.as_str())
+            .body(json!({ "query": "query" }).to_string())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        // Get query
+        let response = client
+            .get(url.as_str())
+            .query(&json!({ "query": "query" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+
+        assert_eq!(
+            response.json::<graphql::Response>().await.unwrap(),
+            expected_response,
+        );
+
+        server.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_with_custom_endpoint_wildcard() -> Result<(), FederatedServerError> {
+        let expected_response = graphql::Response::builder()
+            .data(json!({"response": "yay"}))
+            .build();
+        let example_response = expected_response.clone();
+        let mut expectations = MockRouterService::new();
+        expectations
+            .expect_service_call()
+            .times(4)
+            .returning(move |_| {
+                let example_response = example_response.clone();
+                Ok(http::Response::builder()
+                    .status(200)
+                    .body(ResponseBody::GraphQL(example_response))
+                    .unwrap()
+                    .into())
+            });
+        let conf = Configuration::builder()
+            .server(
+                crate::configuration::Server::builder()
+                    .listen(SocketAddr::from_str("127.0.0.1:0").unwrap())
+                    .cors(Some(
+                        Cors::builder()
+                            .origins(vec!["http://studio".to_string()])
+                            .build(),
+                    ))
+                    .endpoint(String::from("/graphql/*"))
+                    .build(),
+            )
+            .build();
+        let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
+        for url in &[
+            format!("{}/graphql/test", server.listen_address()),
+            format!("{}/graphql/anothertest", server.listen_address()),
+        ] {
+            // Post query
+            let response = client
+                .post(url.as_str())
+                .body(json!({ "query": "query" }).to_string())
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+
+            assert_eq!(
+                response.json::<graphql::Response>().await.unwrap(),
+                expected_response,
+            );
+
+            // Get query
+            let response = client
+                .get(url.as_str())
+                .query(&json!({ "query": "query" }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+
+            assert_eq!(
+                response.json::<graphql::Response>().await.unwrap(),
+                expected_response,
+            );
+        }
+
+        server.shutdown().await?;
         Ok(())
     }
 
@@ -913,7 +1149,7 @@ mod tests {
                     .into())
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/graphql", server.listen_address());
+        let url = format!("{}/", server.listen_address());
 
         let response = client
             .get(url.as_str())
@@ -972,7 +1208,7 @@ mod tests {
                     .into())
             });
         let (server, client) = init(expectations).await;
-        let url = format!("{}/graphql", server.listen_address());
+        let url = format!("{}/", server.listen_address());
 
         let response = client
             .post(url.as_str())
@@ -1012,7 +1248,7 @@ mod tests {
         let (server, client) = init(expectations).await;
 
         let response = client
-            .post(format!("{}/graphql", server.listen_address()))
+            .post(format!("{}/", server.listen_address()))
             .body(
                 json!(
                 {
@@ -1043,41 +1279,36 @@ mod tests {
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
 
-        for url in vec![
-            format!("{}/", server.listen_address()),
-            format!("{}/graphql", server.listen_address()),
-        ] {
-            let response = client
-                .request(Method::OPTIONS, &url)
-                .header(ACCEPT, "text/html")
-                .header(ORIGIN, "http://studio")
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .header(ACCESS_CONTROL_REQUEST_HEADERS, "Content-type")
-                .send()
-                .await
-                .unwrap();
+        let response = client
+            .request(Method::OPTIONS, &format!("{}/", server.listen_address()))
+            .header(ACCEPT, "text/html")
+            .header(ORIGIN, "http://studio")
+            .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .header(ACCESS_CONTROL_REQUEST_HEADERS, "Content-type")
+            .send()
+            .await
+            .unwrap();
 
-            assert_header!(
-                &response,
-                ACCESS_CONTROL_ALLOW_ORIGIN,
-                vec!["http://studio"],
-                "Incorrect access control allow origin header"
-            );
-            assert_header_contains!(
-                &response,
-                ACCESS_CONTROL_ALLOW_HEADERS,
-                &["content-type"],
-                "Incorrect access control allow header header"
-            );
-            assert_header_contains!(
-                &response,
-                ACCESS_CONTROL_ALLOW_METHODS,
-                &["GET", "POST", "OPTIONS"],
-                "Incorrect access control allow methods header"
-            );
+        assert_header!(
+            &response,
+            ACCESS_CONTROL_ALLOW_ORIGIN,
+            vec!["http://studio"],
+            "Incorrect access control allow origin header"
+        );
+        assert_header_contains!(
+            &response,
+            ACCESS_CONTROL_ALLOW_HEADERS,
+            &["content-type"],
+            "Incorrect access control allow header header"
+        );
+        assert_header_contains!(
+            &response,
+            ACCESS_CONTROL_ALLOW_METHODS,
+            &["GET", "POST", "OPTIONS"],
+            "Incorrect access control allow methods header"
+        );
 
-            assert_eq!(response.status(), StatusCode::OK);
-        }
+        assert_eq!(response.status(), StatusCode::OK);
 
         server.shutdown().await
     }
@@ -1219,7 +1450,7 @@ Content-Type: application/json\r
 
         let expectations = MockRouterService::new();
         let (server, client) = init(expectations).await;
-        let url = format!("{}/graphql", server.listen_address());
+        let url = format!("{}", server.listen_address());
         let response = client
             .post(url.as_str())
             .header(CONTENT_TYPE, "application/yaml")
@@ -1250,19 +1481,14 @@ Content-Type: application/json\r
             )
             .build();
         let (server, client) = init_with_config(expectations, conf, HashMap::new()).await;
-        for url in vec![
-            format!("{}/", server.listen_address()),
-            format!("{}/graphql", server.listen_address()),
-        ] {
-            let response = client
-                .get(url.as_str())
-                .header(ACCEPT, "text/html")
-                .send()
-                .await
-                .unwrap();
+        let response = client
+            .get(&format!("{}/", server.listen_address()))
+            .header(ACCEPT, "text/html")
+            .send()
+            .await
+            .unwrap();
 
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        }
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         server.shutdown().await
     }
@@ -1354,7 +1580,7 @@ Content-Type: application/json\r
         let mut expectations = MockRouterService::new();
         expectations
             .expect_service_call()
-            .times(4)
+            .times(2)
             .returning(move |req| {
                 Ok(http::Response::builder()
                     .status(200)
@@ -1372,45 +1598,36 @@ Content-Type: application/json\r
         {
           "query": "query",
         });
-        for url in vec![
-            format!("{}/", server.listen_address()),
-            format!("{}/graphql", server.listen_address()),
-        ] {
-            let response = client.get(&url).query(&query).send().await.unwrap();
+        let url = format!("{}/", server.listen_address());
+        let response = client.get(&url).query(&query).send().await.unwrap();
 
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response.text().await.unwrap(),
-                serde_json::to_string(&format!(
-                    "GET + {}?query=query + {:?}",
-                    url,
-                    serde_json::to_string(&query).unwrap()
-                ))
-                .unwrap()
-            );
-        }
-        for url in vec![
-            format!("{}/", server.listen_address()),
-            format!("{}/graphql", server.listen_address()),
-        ] {
-            let response = client
-                .post(&url)
-                .body(query.to_string())
-                .send()
-                .await
-                .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.text().await.unwrap(),
+            serde_json::to_string(&format!(
+                "GET + {}?query=query + {:?}",
+                url,
+                serde_json::to_string(&query).unwrap()
+            ))
+            .unwrap()
+        );
+        let response = client
+            .post(&url)
+            .body(query.to_string())
+            .send()
+            .await
+            .unwrap();
 
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response.text().await.unwrap(),
-                serde_json::to_string(&format!(
-                    "POST + {} + {:?}",
-                    url,
-                    serde_json::to_string(&query).unwrap()
-                ))
-                .unwrap()
-            );
-        }
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.text().await.unwrap(),
+            serde_json::to_string(&format!(
+                "POST + {} + {:?}",
+                url,
+                serde_json::to_string(&query).unwrap()
+            ))
+            .unwrap()
+        );
         server.shutdown().await
     }
 }
