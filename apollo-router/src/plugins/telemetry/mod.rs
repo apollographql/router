@@ -526,7 +526,7 @@ impl Telemetry {
     }
 
     fn populate_context(config: &Config, req: &RouterRequest) {
-        let context = req.context.clone();
+        let context = &req.context;
         let http_request = &req.originating_request;
         let headers = http_request.headers();
         let client_name_header = &config.client_name_header;
