@@ -14,7 +14,7 @@ use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
     http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt as ServiceBuilderExt2, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
