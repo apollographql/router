@@ -84,7 +84,10 @@ pub struct Configuration {
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
 fn default_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+    let port: u16 = std::env::var("PORT").ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(4000);
+    SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, port)).into()
 }
 
 impl Configuration {
