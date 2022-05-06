@@ -24,6 +24,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [v0.1.0-preview.8] - (unreleased)
 ## ❗ BREAKING ❗
+
+### Add configuration to declare your own GraphQL endpoint [PR #976](https://github.com/apollographql/router/pull/976)
+You are now able to declare your own GraphQL endpoint in the config like this:
+```yaml
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  # Default is /
+  endpoint: /graphql
+```
+But we also deleted the `/graphql` endpoint by default, you will know have only one existing GraphQL endpoint and by default it's `/`. If you need to use `/graphql` instead then refer to my previous example.
+
 ## 🚀 Features ( :rocket: )
 ## 🐛 Fixes ( :bug: )
 
