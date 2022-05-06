@@ -437,7 +437,7 @@ macro_rules! implement_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
         #[derive(Debug)]
         $visibility struct $name {
-            name: String,
+            pub(crate) name: String,
             fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
         }

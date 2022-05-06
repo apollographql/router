@@ -15,9 +15,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
+use std::cmp::Ordering;
 use std::fmt;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer, Origin};
@@ -258,7 +258,7 @@ pub enum ListenAddr {
     SocketAddr(SocketAddr),
     /// Unix socket.
     #[cfg(unix)]
-    UnixSocket(PathBuf),
+    UnixSocket(std::path::PathBuf),
 }
 
 impl From<SocketAddr> for ListenAddr {
@@ -457,44 +457,109 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
             Ok(yaml) => {
                 let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-                let errors = errors
-                    .enumerate()
-                    .filter_map(|(idx, e)| {
-                        if let Some(element) = yaml.get_element(&e.instance_path) {
-                            // Dirty hack.
-                            // If the element is a string and it has env variable expansion then we can't validate
-                            // Leave it up to serde to catch these.
-                            if let yaml::Value::String(value, _) = element {
-                                if &envmnt::expand(
-                                    value,
-                                    Some(ExpandOptions::new().clone_with_expansion_type(
-                                        ExpansionType::UnixBracketsWithDefaults,
-                                    )),
-                                ) != value
-                                {
-                                    return None;
+                let errors =
+                    errors
+                        .enumerate()
+                        .filter_map(|(idx, e)| {
+                            if let Some(element) = yaml.get_element(&e.instance_path) {
+                                const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
+                                match element {
+                                    yaml::Value::String(value, marker) => {
+                                        // Dirty hack.
+                                        // If the element is a string and it has env variable expansion then we can't validate
+                                        // Leave it up to serde to catch these.
+                                        if &envmnt::expand(
+                                            value,
+                                            Some(ExpandOptions::new().clone_with_expansion_type(
+                                                ExpansionType::UnixBracketsWithDefaults,
+                                            )),
+                                        ) != value
+                                        {
+                                            return None;
+                                        }
+
+                                        let lines =
+                                            yaml_split_by_lines[0.max(marker.line().saturating_sub(
+                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                            ))
+                                                ..marker.line()]
+                                                .iter()
+                                                .join("\n");
+
+                                        Some(format!(
+                                            "{}. {}\n\n{}\n{}^----- {}",
+                                            idx + 1,
+                                            e.instance_path,
+                                            lines,
+                                            " ".repeat(0.max(marker.col())),
+                                            e
+                                        ))
+                                    }
+                                    seq_element @ yaml::Value::Sequence(_, m) => {
+                                        let (start_marker, end_marker) =
+                                            (m, seq_element.end_marker());
+
+                                        let offset =
+                                            0.max(start_marker.line().saturating_sub(
+                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                            ));
+                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(idx, line)| {
+                                                let real_line = idx + offset;
+                                                match real_line.cmp(&start_marker.line()) {
+                                                    Ordering::Equal => format!("┌ {line}"),
+                                                    Ordering::Greater => format!("| {line}"),
+                                                    Ordering::Less => line.to_string(),
+                                                }
+                                            })
+                                            .join("\n");
+
+                                        Some(format!(
+                                            "{}. {}\n\n{}\n└-----> {}",
+                                            idx + 1,
+                                            e.instance_path,
+                                            lines,
+                                            e
+                                        ))
+                                    }
+                                    map_value @ yaml::Value::Mapping(current_label, _, _marker) => {
+                                        let (start_marker, end_marker) = (
+                                            current_label.as_ref()?.marker.as_ref()?,
+                                            map_value.end_marker(),
+                                        );
+                                        let offset =
+                                            0.max(start_marker.line().saturating_sub(
+                                                NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY,
+                                            ));
+                                        let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(idx, line)| {
+                                                let real_line = idx + offset;
+                                                match real_line.cmp(&start_marker.line()) {
+                                                    Ordering::Equal => format!("┌ {line}"),
+                                                    Ordering::Greater => format!("| {line}"),
+                                                    Ordering::Less => line.to_string(),
+                                                }
+                                            })
+                                            .join("\n");
+
+                                        Some(format!(
+                                            "{}. {}\n\n{}\n└-----> {}",
+                                            idx + 1,
+                                            e.instance_path,
+                                            lines,
+                                            e
+                                        ))
+                                    }
                                 }
+                            } else {
+                                None
                             }
-
-                            let marker = element.marker();
-                            let lines = yaml_split_by_lines
-                                [0.max(marker.line() as isize - 5) as usize..marker.line()]
-                                .iter()
-                                .join("\n");
-
-                            Some(format!(
-                                "{}. {}\n\n{}\n{}^----- {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                " ".repeat(marker.col()),
-                                e
-                            ))
-                        } else {
-                            None
-                        }
-                    })
-                    .join("\n\n");
+                        })
+                        .join("\n\n");
 
                 // There were no remaining errors after expansion.
                 if errors.is_empty() {
@@ -660,6 +725,70 @@ plugins:
 
 telemetry:  
   another_non_existant: 3
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_errors_after_first_field() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  bad: "donotwork"
+  another_one: true
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_bad_type() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: true
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_inline_sequence() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers: [ Content-Type, 5 ]
+        "#,
+        )
+        .expect_err("should have resulted in an error");
+        insta::assert_snapshot!(error.to_string());
+    }
+
+    #[test]
+    fn line_precise_config_errors_with_sequence() {
+        let error = validate_configuration(
+            r#"
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  cors:
+    allow_headers:
+      - Content-Type
+      - 5
         "#,
         )
         .expect_err("should have resulted in an error");

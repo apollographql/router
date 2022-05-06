@@ -25,7 +25,7 @@ Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/)
 ## Common configuration
 
 ### Trace config
-The `trace_config` section contains common configuration that will be used in the for all exporters. It is optional and will fall back on env variables as specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
+The `trace_config` section contains common configuration that will be used by all exporters. It is optional and will fall back on env variables as specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -55,7 +55,7 @@ telemetry:
 
 If `service_name` is set then environment variables are not used. However, it is possible to embed environment variables into your router config using Unix `${key:default}` syntax.
 
-If no environment variable is set and service_name is not present then the default of `service_unknown` will be used as per the OpenTelemetry spec.
+If no environment variable is set and `service_name` is not present then `router` will be used as default service name.
 
 ### Propagation
 
