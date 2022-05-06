@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.55"
-apollo-parser = "0.2.5"
 apollo-router-core = { path = "../apollo-router-core" }
 apollo-uplink = { path = "../uplink" }
 async-trait = "0.1.53"

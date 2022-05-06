@@ -79,7 +79,6 @@ name = "apollo-router"
 version = "0.1.0-preview.7"
 dependencies = [
  "anyhow",
- "apollo-parser",
  "apollo-router-core",
  "apollo-spaceport",
  "apollo-uplink",
