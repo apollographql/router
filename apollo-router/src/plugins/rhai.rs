@@ -7,6 +7,7 @@ use apollo_router_core::{
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
+use rhai::serde::to_dynamic;
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -681,15 +682,23 @@ impl Rhai {
             .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.1.clone()
             })
-            // Register get for query from Request
+            // Request.query
             .register_get("query", |x: &mut Request| {
                 x.query.clone().map_or(Dynamic::from(()), Dynamic::from)
             })
-            // Register get for operation name from Request
+            // Request.operation_name
             .register_get("operation_name", |x: &mut Request| {
                 x.operation_name
                     .clone()
                     .map_or(Dynamic::from(()), Dynamic::from)
+            })
+            // Request.variables
+            .register_get_result("variables", |x: &mut Request| {
+                to_dynamic(x.variables.clone())
+            })
+            // Request.extensions
+            .register_get_result("extensions", |x: &mut Request| {
+                to_dynamic(x.extensions.clone())
             })
             // Register a series of logging functions
             .register_fn("log_trace", |x: &str| {

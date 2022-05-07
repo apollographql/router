@@ -54,7 +54,7 @@ The full functionality of a Rust plugin is not available, but the following meth
 
 These can be invoked as methods on the supplied service object and are expected to provide a callback function which is invoked for actual request or response processing.
 
-All request/response callback functions are provided with a typed Request/Response which can be interacted with to manipulate headers and context. In addition, partial body details (query, operation name) are available to be read for all requests. The examples illustrate how to interact with request/response objects.
+All request/response callback functions are provided with a typed Request/Response which may be interacted with to manipulate headers and context. In addition, request details (query, operation name, variables and extensions) are available to be read for all requests as sub-fields of the body. For example to read a request query, simply access "request.body.query". The examples illustrate how to interact with request/response objects.
 
 ## Examples
 
