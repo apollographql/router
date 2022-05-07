@@ -88,7 +88,7 @@ typed-builder = "0.10.0"
 url = { version = "2.2.2", features = ["serde"] }
 apollo-spaceport = { path = "../apollo-spaceport" }
 axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
-rhai = { version = "1.6.1", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.7.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.125"
 yaml-rust = "0.4.5"
 

@@ -8,7 +8,7 @@ use apollo_router_core::{
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
 use rhai::serde::to_dynamic;
-use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Scope, Shared, AST};
+use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -119,6 +119,13 @@ mod router_plugin_mod {
                     obj.with_mut(|request| set_originating_headers(request, headers))
                 }
 
+                pub fn [<set_originating_body_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                    body: Request
+                ) -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| set_originating_body(request, body))
+                }
+
                 /* XXX ONLY VALID FOR CERTAIN TYPES
                 pub fn [<set_originating_headers_ $base _response>](
                     obj: &mut [<Shared $base:camel Response>],
@@ -203,6 +210,14 @@ mod router_plugin_mod {
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().headers_mut() = headers;
+        Ok(())
+    }
+
+    fn set_originating_body<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+        body: Request,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().body_mut() = body;
         Ok(())
     }
 
@@ -548,6 +563,11 @@ macro_rules! register_rhai_interface {
                 router_plugin_mod::router_generated_mod::[<get_originating_body_ $base _request>],
             );
 
+            $engine.register_set_result(
+                "body",
+                router_plugin_mod::router_generated_mod::[<set_originating_body_ $base _request>],
+            );
+
             }
 
         )*
@@ -686,19 +706,35 @@ impl Rhai {
             .register_get("query", |x: &mut Request| {
                 x.query.clone().map_or(Dynamic::from(()), Dynamic::from)
             })
+            .register_set("query", |x: &mut Request, value: &str| {
+                x.query = Some(value.to_string());
+            })
             // Request.operation_name
             .register_get("operation_name", |x: &mut Request| {
                 x.operation_name
                     .clone()
                     .map_or(Dynamic::from(()), Dynamic::from)
             })
+            .register_set("operation_name", |x: &mut Request, value: &str| {
+                x.operation_name = Some(value.to_string());
+            })
             // Request.variables
             .register_get_result("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
             })
+            /* XXX CANNOT DO BECAUSE variables is Arc
+            .register_set_result("variables", |x: &mut Request, om: Map| {
+                x.variables = from_dynamic(om)
+            })
+            */
             // Request.extensions
             .register_get_result("extensions", |x: &mut Request| {
                 to_dynamic(x.extensions.clone())
+            })
+            .register_set_result("extensions", |x: &mut Request, om: Map| {
+                let v = rhai::format_map_as_json(&om);
+                x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                Ok(())
             })
             // Register a series of logging functions
             .register_fn("log_trace", |x: &str| {
