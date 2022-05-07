@@ -488,10 +488,13 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 
 register_plugin!("apollo", "telemetry", Telemetry);
 
+//
+// Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
+//
 #[cfg(test)]
 mod tests {
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
@@ -501,7 +504,7 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
