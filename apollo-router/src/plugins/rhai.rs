@@ -7,7 +7,7 @@ use apollo_router_core::{
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
-use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Scope, Shared, AST};
+use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -219,19 +219,15 @@ mod router_plugin_mod {
     }
 
     pub(crate) fn map_request(rhai_service: &mut RhaiService, callback: FnPtr) {
-        rhai_service.service.map_request(
-            rhai_service.engine.clone(),
-            rhai_service.ast.clone(),
-            callback,
-        )
+        rhai_service
+            .service
+            .map_request(rhai_service.clone(), callback)
     }
 
     pub(crate) fn map_response(rhai_service: &mut RhaiService, callback: FnPtr) {
-        rhai_service.service.map_response(
-            rhai_service.engine.clone(),
-            rhai_service.ast.clone(),
-            callback,
-        )
+        rhai_service
+            .service
+            .map_response(rhai_service.clone(), callback)
     }
 
     gen_rhai_interface!(router, query_planner, execution, subgraph);
@@ -409,7 +405,7 @@ macro_rules! gen_shared_types {
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_request {
-    ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         paste::paste! {
             $borrow.replace(|service| {
                 ServiceBuilder::new()
@@ -431,8 +427,9 @@ macro_rules! gen_map_request {
                             Ok(ControlFlow::Break(res))
                         }
                         let shared_request = Shared::new(Mutex::new(Some(request)));
-                        let result: Result<Dynamic, String> = $callback
-                            .call(&$engine, &$ast, (shared_request.clone(),))
+                        let mut scope = $rhai_service.scope.clone();
+                        let result: Result<Dynamic, String> = $rhai_service.engine
+                            .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_request.clone(),))
                             .map_err(|err| err.to_string());
                         if let Err(error) = result {
                             tracing::error!("map_request callback failed: {error}");
@@ -452,7 +449,7 @@ macro_rules! gen_map_request {
 }
 
 macro_rules! gen_map_response {
-    ($base: ident, $borrow: ident, $engine: ident, $ast: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         paste::paste! {
             $borrow.replace(|service| {
                 service
@@ -480,8 +477,9 @@ macro_rules! gen_map_response {
                             res
                         }
                         let shared_response = Shared::new(Mutex::new(Some(response)));
-                        let result: Result<Dynamic, String> = $callback
-                            .call(&$engine, &$ast, (shared_response.clone(),))
+                        let mut scope = $rhai_service.scope.clone();
+                        let result: Result<Dynamic, String> = $rhai_service.engine
+                            .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_response.clone(),))
                             .map_err(|err| err.to_string());
                         if let Err(error) = result {
                             tracing::error!("map_response callback failed: {error}");
@@ -560,36 +558,37 @@ macro_rules! register_rhai_interface {
 }
 
 impl ServiceStep {
-    fn map_request(&mut self, engine: Arc<Engine>, ast: AST, callback: FnPtr) {
+    // fn map_request(&mut self, engine: Arc<Engine>, scope: Scope, ast: AST, callback: FnPtr) {
+    fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_request!(router, service, engine, ast, callback);
+                gen_map_request!(router, service, rhai_service, callback);
             }
             ServiceStep::QueryPlanner(service) => {
-                gen_map_request!(query_planner, service, engine, ast, callback);
+                gen_map_request!(query_planner, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_request!(execution, service, engine, ast, callback);
+                gen_map_request!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_request!(subgraph, service, engine, ast, callback);
+                gen_map_request!(subgraph, service, rhai_service, callback);
             }
         }
     }
 
-    fn map_response(&mut self, engine: Arc<Engine>, ast: AST, callback: FnPtr) {
+    fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_response!(router, service, engine, ast, callback);
+                gen_map_response!(router, service, rhai_service, callback);
             }
             ServiceStep::QueryPlanner(service) => {
-                gen_map_response!(query_planner, service, engine, ast, callback);
+                gen_map_response!(query_planner, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_response!(execution, service, engine, ast, callback);
+                gen_map_response!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
-                gen_map_response!(subgraph, service, engine, ast, callback);
+                gen_map_response!(subgraph, service, rhai_service, callback);
             }
         }
     }
@@ -597,6 +596,7 @@ impl ServiceStep {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
+    scope: Scope<'static>,
     service: ServiceStep,
     engine: Arc<Engine>,
     ast: AST,
@@ -605,7 +605,9 @@ pub(crate) struct RhaiService {
 impl Rhai {
     fn run_rhai_service(&self, function_name: &str, service: ServiceStep) -> Result<(), String> {
         let mut scope = Scope::new();
+        scope.push_constant("apollo_start", Instant::now());
         let rhai_service = RhaiService {
+            scope: scope.clone(),
             service,
             engine: self.engine.clone(),
             ast: self.ast.clone(),
@@ -698,6 +700,10 @@ impl Rhai {
             })
             .register_fn("log_error", |x: &str| {
                 tracing::error!("{}", x);
+            })
+            // Register a function for printing to stderr
+            .register_fn("eprint", |x: &str| {
+                eprintln!("{}", x);
             })
             // Default representation in rhai is the "type", so
             // we need to register a to_string function for all our registered

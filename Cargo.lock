@@ -3,6 +3,19 @@
 version = 3
 
 [[package]]
+name = "add-timestamp-header"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
