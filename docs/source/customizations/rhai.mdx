@@ -54,7 +54,7 @@ The full functionality of a Rust plugin is not available, but the following meth
 
 These can be invoked as methods on the supplied service object and are expected to provide a callback function which is invoked for actual request or response processing.
 
-All request/response callback functions are provided with a typed Request/Response which can be interacted with to manipulate headers and context. In addition, operation_name details are available for all requests.
+All request/response callback functions are provided with a typed Request/Response which can be interacted with to manipulate headers and context. In addition, partial body details (query, operation name) are available to be read for all requests. The examples illustrate how to interact with request/response objects.
 
 ## Examples
 
@@ -152,7 +152,4 @@ fn process_request(request) {
 }
 ```
 
-There are three complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are:
-
- - rhai-logging
- - op-name-to-header
+There are four complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.

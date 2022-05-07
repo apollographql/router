@@ -11,7 +11,7 @@ fn process_request(request) {
     print("adding operation name to header");
 
     // We may not have an operation name, so check if we do
-    if request.operation_name != () {
-        request.headers["x-operation-name"] = request.operation_name;
+    if request.body.operation_name != () {
+        request.headers["x-operation-name"] = request.body.operation_name;
     }
 }

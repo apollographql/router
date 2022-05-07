@@ -64,12 +64,6 @@ mod router_plugin_mod {
                 $(
             paste::paste! {
 
-                pub fn [<get_operation_name_ $base _request>](
-                    obj: &mut [<Shared $base:camel Request>],
-                ) -> Dynamic {
-                    obj.with_mut(get_operation_name)
-                }
-
                 pub fn [<get_context_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Context, Box<EvalAltResult>> {
@@ -100,6 +94,12 @@ mod router_plugin_mod {
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<HeaderMap, Box<EvalAltResult>> {
                     obj.with_mut(get_originating_headers)
+                }
+
+                pub fn [<get_originating_body_ $base _request>](
+                    obj: &mut [<Shared $base:camel Request>],
+                ) -> Result<Request, Box<EvalAltResult>> {
+                    obj.with_mut(get_originating_body)
                 }
 
                 /* XXX ONLY VALID FOR CERTAIN TYPES
@@ -165,15 +165,6 @@ mod router_plugin_mod {
         obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
     }
 
-    // This is a getter for 'RouterRequest::operation_name'.
-    fn get_operation_name<T: Accessor<http_compat::Request<Request>>>(obj: &mut T) -> Dynamic {
-        obj.accessor()
-            .body()
-            .operation_name
-            .clone()
-            .map_or(Dynamic::from(()), Dynamic::from)
-    }
-
     fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.accessor().clone())
     }
@@ -190,6 +181,12 @@ mod router_plugin_mod {
         obj: &mut T,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.accessor().headers().clone())
+    }
+
+    fn get_originating_body<T: Accessor<http_compat::Request<Request>>>(
+        obj: &mut T,
+    ) -> Result<Request, Box<EvalAltResult>> {
+        Ok(obj.accessor().body().clone())
     }
 
     fn get_originating_headers_response_response_body<
@@ -515,12 +512,6 @@ macro_rules! register_rhai_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
             paste::paste! {
-            // Operation name
-            $engine.register_get(
-                "operation_name",
-                router_plugin_mod::router_generated_mod::[<get_operation_name_ $base _request>],
-            );
-
             // Context stuff
             $engine.register_get_result(
                 "context",
@@ -551,6 +542,11 @@ macro_rules! register_rhai_interface {
                 router_plugin_mod::router_generated_mod::[<set_originating_headers_ $base _request>],
             );
 
+            $engine.register_get_result(
+                "body",
+                router_plugin_mod::router_generated_mod::[<get_originating_body_ $base _request>],
+            );
+
             }
 
         )*
@@ -558,7 +554,6 @@ macro_rules! register_rhai_interface {
 }
 
 impl ServiceStep {
-    // fn map_request(&mut self, engine: Arc<Engine>, scope: Scope, ast: AST, callback: FnPtr) {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
@@ -640,6 +635,7 @@ impl Rhai {
             .register_type::<HeaderName>()
             .register_type::<HeaderValue>()
             .register_type::<(Option<HeaderName>, HeaderValue)>()
+            .register_type::<Request>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -684,6 +680,16 @@ impl Rhai {
             })
             .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.1.clone()
+            })
+            // Register get for query from Request
+            .register_get("query", |x: &mut Request| {
+                x.query.clone().map_or(Dynamic::from(()), Dynamic::from)
+            })
+            // Register get for operation name from Request
+            .register_get("operation_name", |x: &mut Request| {
+                x.operation_name
+                    .clone()
+                    .map_or(Dynamic::from(()), Dynamic::from)
             })
             // Register a series of logging functions
             .register_fn("log_trace", |x: &str| {
@@ -745,7 +751,10 @@ impl Rhai {
                         x.1.to_str().map_or("".to_string(), |v| v.to_string())
                     )
                 },
-            );
+            )
+            .register_fn("to_string", |x: &mut Request| -> String {
+                format!("{:?}", x)
+            });
 
         register_rhai_interface!(engine, router, query_planner, execution, subgraph);
 
