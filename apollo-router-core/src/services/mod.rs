@@ -17,14 +17,13 @@ use std::convert::Infallible;
 use std::str::FromStr;
 use std::sync::Arc;
 use tower::BoxError;
+pub use tower_subgraph_service::TowerSubgraphService;
 
 mod execution_service;
 pub mod http_compat;
 pub(crate) mod layers;
 mod router_service;
 mod tower_subgraph_service;
-
-pub use tower_subgraph_service::TowerSubgraphService;
 
 /// Different kinds of body we could have as the Router's response
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
@@ -205,7 +204,7 @@ assert_impl_all!(RouterResponse: Send);
 /// [`Context`] and [`http_compat::Response<ResponseBody>`] for the response.
 ///
 /// This consists of the response body and the context.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RouterResponse {
     pub response: http_compat::Response<ResponseBody>,
     pub context: Context,
@@ -376,7 +375,7 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(Default::default()),
+            Arc::new(QueryPlan::fake_builder().build()),
             context,
         ))
     }
@@ -580,12 +579,12 @@ impl ExecutionRequest {
     /// difficult to construct and not required for the pusposes of the test.
     pub fn fake_new(
         originating_request: Option<http_compat::Request<Request>>,
-        query_plan: Option<Arc<QueryPlan>>,
+        query_plan: Option<QueryPlan>,
         context: Option<Context>,
     ) -> ExecutionRequest {
         ExecutionRequest::new(
             originating_request.unwrap_or_else(http_compat::Request::mock),
-            query_plan.unwrap_or_default(),
+            Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
     }

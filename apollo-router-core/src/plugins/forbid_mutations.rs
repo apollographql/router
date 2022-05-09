@@ -54,12 +54,10 @@ impl Plugin for ForbidMutations {
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::http_compat::Request;
     use crate::query_planner::fetch::OperationKind;
-    use crate::{plugin::utils::test::MockExecutionService, QueryPlan};
+    use crate::{plugin::utils::test::MockExecutionService, PlanNode, QueryPlan};
     use http::{Method, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
@@ -134,7 +132,7 @@ mod forbid_http_get_mutations_tests {
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> crate::ExecutionRequest {
-        let root = if operation_kind == OperationKind::Mutation {
+        let root: PlanNode = if operation_kind == OperationKind::Mutation {
             serde_json::from_value(json!({
                 "kind": "Sequence",
                 "nodes": [
@@ -171,7 +169,7 @@ mod forbid_http_get_mutations_tests {
             .expect("expecting valid request");
         ExecutionRequest::fake_builder()
             .originating_request(request)
-            .query_plan(Arc::new(QueryPlan { root }))
+            .query_plan(QueryPlan::fake_builder().root(root).build())
             .build()
     }
 }

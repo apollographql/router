@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 syntax = "proto3";
 
 import "proto/reports.proto";
@@ -22,10 +23,14 @@ message ReporterStats {
     ReporterGraph graph = 1;
     string key = 2;
     Report.ContextualizedStats stats = 3;
+    map<string, Report.ReferencedFieldsForType> fields = 4;
+    // Total number of operations processed during this period.
+    uint64 operation_count = 5;
 }
 
 message ReporterTrace {
     ReporterGraph graph = 1;
     string key = 2;
     Report.Trace trace = 3;
+    map<string, Report.ReferencedFieldsForType> fields = 4;
 }

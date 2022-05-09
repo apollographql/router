@@ -1,3 +1,4 @@
+// This entire file is license key functionality
 use crate::configuration::{Configuration, ConfigurationError};
 use apollo_router_core::prelude::*;
 use apollo_router_core::{

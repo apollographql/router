@@ -7,6 +7,7 @@ pub use caching_query_planner::*;
 use fetch::OperationKind;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
+use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use std::collections::HashSet;
 use tracing::Instrument;
@@ -17,15 +18,24 @@ pub struct QueryPlanOptions {}
 /// A plan for a [`crate::Query`]
 #[derive(Debug)]
 pub struct QueryPlan {
+    pub usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
 }
 
 /// This default impl is useful for plugin::utils users
 /// who will need `QueryPlan`s to work with the `QueryPlannerService` and the `ExecutionService`
-impl Default for QueryPlan {
-    fn default() -> Self {
+#[buildstructor::builder]
+impl QueryPlan {
+    pub(crate) fn fake_new(
+        root: Option<PlanNode>,
+        usage_reporting: Option<UsageReporting>,
+    ) -> Self {
         Self {
-            root: PlanNode::Sequence { nodes: Vec::new() },
+            usage_reporting: usage_reporting.unwrap_or_else(|| UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            }),
+            root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
         }
     }
 }
@@ -610,6 +620,10 @@ mod tests {
     async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
         };
 
         let mut mock_products_service = plugin::utils::test::MockSubgraphService::new();
@@ -642,6 +656,10 @@ mod tests {
     async fn fetch_includes_operation_name() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
@@ -679,6 +697,10 @@ mod tests {
     async fn fetch_makes_post_requests() {
         let query_plan: QueryPlan = QueryPlan {
             root: serde_json::from_str(test_query_plan!()).unwrap(),
+            usage_reporting: UsageReporting {
+                stats_report_key: "this is a test report key".to_string(),
+                referenced_fields_by_type: Default::default(),
+            },
         };
 
         let succeeded: Arc<AtomicBool> = Default::default();
