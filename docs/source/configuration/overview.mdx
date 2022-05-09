@@ -51,6 +51,7 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <td>
 
 The absolute or relative path to the router's optional [YAML configuration file](#configuration-file).
+
 </td>
 </tr>
 
@@ -161,7 +162,7 @@ The time between polls to Apollo uplink. Minimum 10s.
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option.  If the `--hot-reload` flag is also passed (or the `ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 
@@ -176,7 +177,7 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 server:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
-  listen: 127.0.0.1:5000
+  listen: "127.0.0.1:5000"
 ```
 
 It can also listen on a Unix socket (not supported on Windows):
@@ -185,7 +186,6 @@ It can also listen on a Unix socket (not supported on Windows):
 server:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
-
 ```
 
 ### Introspection
@@ -211,7 +211,6 @@ By default, the router displays a landing page if you're accessing the router vi
 server:
   landing_page: false
 ```
-
 
 ### Subgraph routing URLs
 
@@ -267,10 +266,11 @@ This is useful for referencing secrets without embedding them directly into the 
 
 Unix style expansion is used. Either:
 
-* `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
-* `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
+- `${ENV_VAR_NAME}`- Expands to the environment variable `ENV_VAR_NAME`.
+- `${ENV_VAR_NAME:some_default}` - Expands to `ENV_VAR_NAME` or `some_default` if the environment variable did not exist.
 
 Only values may be expanded (not keys):
+
 ```yaml {4,8} title="router.yaml"
 example:
   passord: "${MY_PASSWORD}"
@@ -293,7 +293,6 @@ headers:
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
 
-
 ## Configuration awareness in your text editor
 
 The Apollo Router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
@@ -306,8 +305,8 @@ Generate the schema with the following command:
 
 After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
 
-* [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
-* [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
-* [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
-* [Sublime](https://github.com/sublimelsp/LSP-yaml)
-* [Vim](https://github.com/Quramy/vison)
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)
