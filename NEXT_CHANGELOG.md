@@ -102,6 +102,10 @@ Endpoint configuration for Datadog and OTLP take a URL as argument, but was inco
 query-planner-js 2.0.2 implements stricter usage of the @inaccessible directive.
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### Use official SPDX license identifier for Elastic License v2 (ELv2) [Issue #418](https://github.com/apollographql/router/issues/418)
+
+Rather than pointing to our `LICENSE` file, we now use the `Elastic-2.0` SPDX license identifier to indicate that a particular component is governed by the Elastic License 2.0 (ELv2).  This should facilitate automated compatibility with licensing tools which assist with compliance.
 ## 📚 Documentation ( :books: )
 
 ### Add license notice to first line of Router output  [PR #986](https://github.com/apollographql/router/pull/986)
