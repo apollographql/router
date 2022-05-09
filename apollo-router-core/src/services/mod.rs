@@ -448,7 +448,7 @@ pub struct SubgraphResponse {
 impl SubgraphResponse {
     /// This is the constructor to use when constructing a real SubgraphResponse..
     ///
-    /// In this case, you already hve a valid response and just wish to associate it with a context
+    /// In this case, you already have a valid response and just wish to associate it with a context
     /// and create a SubgraphResponse.
     pub fn new_from_response(
         response: http_compat::Response<Response>,
@@ -604,7 +604,7 @@ pub struct ExecutionResponse {
 impl ExecutionResponse {
     /// This is the constructor to use when constructing a real ExecutionResponse.
     ///
-    /// In this case, you already hve a valid request and just wish to associate it with a context
+    /// In this case, you already have a valid request and just wish to associate it with a context
     /// and create a ExecutionResponse.
     pub fn new_from_response(
         response: http_compat::Response<Response>,
