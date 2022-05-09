@@ -177,12 +177,12 @@ By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. Y
 server:
   # The socket address and port to listen on
   # (Defaults to 127.0.0.1:4000)
-  listen: "127.0.0.1:5000"
+  listen: 127.0.0.1
 ```
 
 It can also listen on a Unix socket (not supported on Windows):
 
-```yaml title="router.yaml"
+```yaml title="router_linux.yaml"
 server:
   # Absolute path to a Unix socket
   listen: /tmp/router.sock
