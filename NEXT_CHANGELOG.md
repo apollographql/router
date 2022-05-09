@@ -41,5 +41,10 @@ If interface is encountered and  `__typename` is queried, additionally checks th
 
 ### Set the service name if not specified in config or environment [PR #960](https://github.com/apollographql/router/pull/960)
 The router now sets "router" as default service name in Opentelemetry traces, that can be replaced using the configuration file or environment variables. It also sets the key "process.executable_name".
+
+### Accept an endpoint URL without scheme for telemetry [PR #964](https://github.com/apollographql/router/pull/964)
+
+Endpoint configuration for Datadog and OTLP take a URL as argument, but was incorrectly recognizing addresses of the format "host:port"
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )

@@ -1,3 +1,7 @@
+//!
+//! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
+//!
+
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, Telemetry};
 use apollo_router_core::{
@@ -63,7 +67,7 @@ macro_rules! assert_federated_response {
     };
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -73,7 +77,7 @@ async fn basic_request() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -85,7 +89,7 @@ async fn basic_composition() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
     let request = graphql::Request::builder()
         .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
@@ -113,7 +117,7 @@ async fn api_schema_hides_field() {
         .contains("Cannot query field \"inStock\" on type \"Product\"."));
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
@@ -126,7 +130,7 @@ async fn traced_basic_request() {
     insta::assert_json_snapshot!(get_spans());
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
@@ -141,7 +145,7 @@ async fn traced_basic_composition() {
     insta::assert_json_snapshot!(get_spans());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -164,7 +168,7 @@ async fn basic_mutation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -198,7 +202,7 @@ async fn queries_should_work_over_get() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_post() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -238,7 +242,7 @@ async fn queries_should_work_over_post() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
         message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
@@ -263,7 +267,7 @@ async fn service_errors_should_be_propagated() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -306,7 +310,7 @@ async fn mutation_should_not_work_over_get() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_work_over_post() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -357,7 +361,7 @@ async fn mutation_should_work_over_post() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
     let (router, registry) = setup_router_and_registry().await;
 
@@ -443,7 +447,7 @@ async fn automated_persisted_queries() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 async fn variables() {
     assert_federated_response!(
         r#"
@@ -468,7 +472,7 @@ async fn variables() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(Some(

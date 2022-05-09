@@ -24,7 +24,7 @@ derivative = "2.2.0"
 displaydoc = "0.2"
 futures = "0.3.21"
 hex = "0.4.3"
-http = "0.2.6"
+http = "0.2.7"
 http-body = "0.4.4"
 hyper = { version = "0.14.18", features = ["client"] }
 hyper-rustls = { version = "0.23.0", features = ["http1", "http2"] }
@@ -64,7 +64,7 @@ urlencoding = "2.1.0"
 [dev-dependencies]
 insta = "1.12.0"
 mockall = "0.11.0"
-serde_yaml = "0.8.23"
+serde_yaml = "0.8.24"
 static_assertions = "1"
 test-log = { version = "0.2.10", default-features = false, features = [
     "trace",
