@@ -188,11 +188,7 @@ pub async fn rt_main() -> Result<()> {
 
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
-            tracing::info!(
-                "{}@{}",
-                std::env!("CARGO_PKG_NAME"),
-                std::env!("CARGO_PKG_VERSION")
-            );
+            tracing::info!("Apollo Router v{} // (c) ApolloGraph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -205,11 +201,7 @@ pub async fn rt_main() -> Result<()> {
             }
         }
         (None, Some(apollo_key)) => {
-            tracing::info!(
-                "{}@{}",
-                std::env!("CARGO_PKG_NAME"),
-                std::env!("CARGO_PKG_VERSION")
-            );
+            tracing::info!("Apollo Router v{} // (c) ApolloGraph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
             if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
@@ -226,7 +218,7 @@ pub async fn rt_main() -> Result<()> {
             let version = std::env!("CARGO_PKG_VERSION");
             return Err(anyhow!(
                 r#"
-APOLLO ROUTER v{version}
+Apollo Router v{version} // (c) ApolloGraph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)"
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 

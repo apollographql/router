@@ -577,7 +577,6 @@ impl FederatedServerHandle {
             .for_each(|state| {
                 match state {
                     State::Startup => {
-                        tracing::info!("ELv2 licensed software (https://go.apollo.dev/elv2)");
                         tracing::info!("starting Apollo Router")
                     }
                     State::Running { address, .. } => {
