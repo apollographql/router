@@ -618,7 +618,7 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, Configura
                 ConfigurationError::InvalidConfiguration {
                     message: "invalid 'server.endpoint' configuration",
                     error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' it won't work you need to specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
                         config.server.endpoint
                     ),
                 },
