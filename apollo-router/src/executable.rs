@@ -69,11 +69,11 @@ pub struct Opt {
 
     /// The endpoint polled to fetch the latest supergraph schema.
     #[clap(long, env)]
-    apollo_schema_config_delivery_endpoint: Option<Url>,
+    apollo_uplink_url: Option<Url>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
-    apollo_schema_poll_interval: Duration,
+    apollo_uplink_poll_interval: Duration,
 
     /// Display version and exit
     #[clap(parse(from_flag), long, short = 'V')]
@@ -222,15 +222,15 @@ pub async fn rt_main() -> Result<()> {
                 std::env!("CARGO_PKG_VERSION")
             );
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-            if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
+            if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
             }
 
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_schema_config_delivery_endpoint,
-                poll_interval: opt.apollo_schema_poll_interval,
+                url: opt.apollo_uplink_url,
+                poll_interval: opt.apollo_uplink_poll_interval,
             }
         }
         _ => {
