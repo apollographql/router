@@ -1,6 +1,0 @@
----
-source: apollo-router-core/src/query_planner/bridge_query_planner.rs
-assertion_line: 149
-expression: "BridgeQueryPlanner::new(Arc::new(example_schema())).await.unwrap().get(include_str!(\"testdata/unknown_introspection_query.graphql\").into(),\n                                                                       None,\n                                                                       Default::default()).await.unwrap_err()"
----
-EmptyPlan

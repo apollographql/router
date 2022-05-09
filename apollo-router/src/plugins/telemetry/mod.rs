@@ -1,5 +1,8 @@
-//! Telemetry customization.
+//! Telemetry plugin.
+// This entire file is license key functionality
+use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
+use crate::plugins::telemetry::metrics::apollo::Sender;
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -7,10 +10,11 @@ use crate::plugins::telemetry::metrics::{
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
+use apollo_router_core::reexports::router_bridge::planner::UsageReporting;
 use apollo_router_core::{
-    http_compat, register_plugin, ExecutionRequest, ExecutionResponse, Handler, Plugin,
+    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Handler, Plugin,
     QueryPlannerRequest, QueryPlannerResponse, ResponseBody, RouterRequest, RouterResponse,
-    ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
+    ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
@@ -26,7 +30,7 @@ use opentelemetry::{global, KeyValue};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tower::steer::Steer;
 use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
@@ -39,11 +43,13 @@ mod otlp;
 mod tracing;
 
 pub static ROUTER_SPAN_NAME: &str = "router";
+static CLIENT_NAME: &str = "apollo_telemetry::client_name";
+static CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) static STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 
 pub struct Telemetry {
     config: config::Conf,
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
-
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
@@ -51,6 +57,7 @@ pub struct Telemetry {
     meter_provider: AggregateMeterProvider,
     custom_endpoints: HashMap<String, Handler>,
     spaceport_shutdown: Option<futures::channel::oneshot::Sender<()>>,
+    apollo_metrics_sender: metrics::apollo::Sender,
 }
 
 #[derive(Debug)]
@@ -84,14 +91,6 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
         builder = config.apply(builder, metrics_common)?;
     }
     Ok(builder)
-}
-
-fn apollo_key() -> Option<String> {
-    std::env::var("APOLLO_KEY").ok()
-}
-
-fn apollo_graph_reference() -> Option<String> {
-    std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
 impl Drop for Telemetry {
@@ -146,13 +145,9 @@ impl Plugin for Telemetry {
 
     async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = config.apollo.get_or_insert_with(Default::default);
-        if apollo.apollo_key.is_none() {
-            apollo.apollo_key = apollo_key()
-        }
-        if apollo.apollo_graph_ref.is_none() {
-            apollo.apollo_graph_ref = apollo_graph_reference()
-        }
+        let apollo = config.apollo.get_or_insert_with(|| {
+            serde_json::from_str("{}").expect("could not create default telemetry apollo config")
+        });
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let (spaceport, shutdown_tx) = match apollo {
@@ -198,12 +193,12 @@ impl Plugin for Telemetry {
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
             meter_provider: builder.meter_provider(),
+            apollo_metrics_sender: builder.apollo_metrics_provider(),
             config,
         });
 
         // We're safe now for shutdown.
-
-        // Finally actually start spaceport
+        // Start spaceport
         if let Some(spaceport) = spaceport {
             tokio::spawn(async move {
                 if let Err(e) = spaceport.serve().await {
@@ -226,37 +221,31 @@ impl Plugin for Telemetry {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
+        let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
+        let config = self.config.apollo.clone().unwrap_or_default();
         ServiceBuilder::new()
-            .instrument(Self::router_service_span(
-                self.config.apollo.clone().unwrap_or_default(),
-            ))
-            .service(service)
-            .map_future(move |f| {
-                let metrics = metrics.clone();
-                // Using Instant because it is guaranteed to be monotonically increasing.
-                let now = Instant::now();
-                f.map(move |r: Result<RouterResponse, BoxError>| {
-                    match &r {
-                        Ok(response) => {
-                            metrics.http_requests_total.add(
-                                1,
-                                &[KeyValue::new(
-                                    "status",
-                                    response.response.status().as_u16().to_string(),
-                                )],
-                            );
+            .instrument(Self::router_service_span(config.clone()))
+            .map_future_with_context(
+                move |req: &RouterRequest| {
+                    Self::populate_context(&config, req);
+                    req.context.clone()
+                },
+                move |ctx, fut| {
+                    let metrics = metrics.clone();
+                    let sender = metrics_sender.clone();
+                    let start = Instant::now();
+                    async move {
+                        let result: Result<RouterResponse, BoxError> = fut.await;
+                        if !matches!(sender, Sender::Noop) {
+                            Self::update_apollo_metrics(ctx, sender, &result, start.elapsed());
                         }
-                        Err(_) => {
-                            metrics.http_requests_error_total.add(1, &[]);
-                        }
+                        Self::update_metrics(metrics, &result);
+                        result
                     }
-                    metrics
-                        .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[]);
-                    r
-                })
-            })
+                },
+            )
+            .service(service)
             .boxed()
     }
 
@@ -395,7 +384,9 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        // TODO Apollo tracing at some point in the future.
+        // This is the shell of what was previously used to transmit metrics, but will in future be useful for sending traces.
+        // builder = setup_tracing(builder, &config.apollo, trace_config)?;
         let tracer_provider = builder.build();
         Ok(tracer_provider)
     }
@@ -404,6 +395,7 @@ impl Telemetry {
         let metrics_config = config.metrics.clone().unwrap_or_default();
         let metrics_common_config = &metrics_config.common.unwrap_or_default();
         let mut builder = MetricsBuilder::default();
+        builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
         builder =
             setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
@@ -469,6 +461,115 @@ impl Telemetry {
             );
             span
         }
+    }
+
+    fn update_apollo_metrics(
+        context: Context,
+        sender: Sender,
+        _result: &Result<RouterResponse, BoxError>,
+        duration: Duration,
+    ) {
+        if let Some(usage_reporting) = context
+            .get::<_, UsageReporting>(USAGE_REPORTING)
+            .unwrap_or_default()
+        {
+            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
+            let operation_count = operation_count(&usage_reporting.stats_report_key);
+
+            //The basic metrics only has operation count
+            let mut apollo_metrics = metrics::apollo::Metrics {
+                operation_count,
+                client_name: context
+                    .get(CLIENT_NAME)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                client_version: context
+                    .get(CLIENT_VERSION)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                stats_report_key: usage_reporting.stats_report_key.to_string(),
+                ..Default::default()
+            };
+            if !exclude.unwrap_or_default() {
+                apollo_metrics.referenced_fields_by_type = usage_reporting
+                    .referenced_fields_by_type
+                    .into_iter()
+                    .map(|(k, v)| (k, convert(v)))
+                    .collect();
+                apollo_metrics.query_latency_stats.latency_count = duration;
+                apollo_metrics.query_latency_stats.request_count = 1;
+            };
+            sender.send(apollo_metrics);
+        };
+    }
+
+    fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
+        // Using Instant because it is guaranteed to be monotonically increasing.
+        let now = Instant::now();
+        match &result {
+            Ok(response) => {
+                metrics.http_requests_total.add(
+                    1,
+                    &[KeyValue::new(
+                        "status",
+                        response.response.status().as_u16().to_string(),
+                    )],
+                );
+            }
+            Err(_) => {
+                metrics.http_requests_error_total.add(1, &[]);
+            }
+        }
+        metrics
+            .http_requests_duration
+            .record(now.elapsed().as_secs_f64(), &[]);
+    }
+
+    fn populate_context(config: &Config, req: &RouterRequest) {
+        let context = &req.context;
+        let http_request = &req.originating_request;
+        let headers = http_request.headers();
+        let client_name_header = &config.client_name_header;
+        let client_version_header = &config.client_version_header;
+        let _ = context.insert(
+            CLIENT_NAME,
+            headers
+                .get(client_name_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+        let _ = context.insert(
+            CLIENT_VERSION,
+            headers
+                .get(client_version_header)
+                .cloned()
+                .unwrap_or_else(|| HeaderValue::from_static(""))
+                .to_str()
+                .unwrap_or_default()
+                .to_string(),
+        );
+    }
+}
+
+// Planner errors return stats report key that start with `## `
+// while successful planning stats report key start with `# `
+fn operation_count(stats_report_key: &str) -> u64 {
+    if stats_report_key.starts_with("## ") {
+        0
+    } else {
+        1
+    }
+}
+
+fn convert(
+    referenced_fields: apollo_router_core::reexports::router_bridge::planner::ReferencedFieldsForType,
+) -> apollo_spaceport::ReferencedFieldsForType {
+    apollo_spaceport::ReferencedFieldsForType {
+        field_names: referenced_fields.field_names,
+        is_interface: referenced_fields.is_interface,
     }
 }
 

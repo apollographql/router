@@ -77,6 +77,7 @@ pub mod prelude {
 
 /// Useful reexports.
 pub mod reexports {
+    pub use router_bridge;
     pub use serde_json;
     pub use startup;
 }

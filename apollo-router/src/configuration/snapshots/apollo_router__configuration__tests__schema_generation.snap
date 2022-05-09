@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 562
 expression: "&schema"
 ---
 {
@@ -425,10 +424,12 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "apollo_graph_ref": {
+              "default": "${APOLLO_GRAPH_REF}",
               "type": "string",
               "nullable": true
             },
             "apollo_key": {
+              "default": "${APOLLO_KEY}",
               "type": "string",
               "nullable": true
             },

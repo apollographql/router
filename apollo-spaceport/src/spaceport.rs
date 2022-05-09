@@ -1,4 +1,5 @@
 //! Main entry point for CLI command to start spaceport.
+// This entire file is license key functionality
 use std::net::SocketAddr;
 
 use apollo_spaceport::server::ReportSpaceport;

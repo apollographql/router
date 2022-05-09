@@ -29,6 +29,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 This is a re-working of our rhai scripting support. The intent is to make writing a rhai plugin more like writing a rust plugin, with full participation in the service plugin lifecycle. The work is still some way from complete, but does provide new capabilities (such as logging from rhai) and provides a more solid basis on which we can evolve our implementation. The examples and documentation should make clear how to modify any existing scripts to accomodate the changes.
 
 ## 🚀 Features ( :rocket: )
+
+### Apollo studio Usage Reporting [PR #898](https://github.com/apollographql/router/pull/898)
+If you have [enabled telemetry](https://www.apollographql.com/docs/router/configuration/apollo-telemetry#enabling-usage-reporting), you can now see field usage reporting for your queries by heading to the Apollo studio fields section.
+Here is more information on how to [set up telemetry](https://www.apollographql.com/docs/studio/metrics/usage-reporting#pushing-metrics-from-apollo-server) and [Field Usage](https://www.apollographql.com/docs/studio/metrics/field-usage)
+
+### PluginTestHarness [PR #898](https://github.com/apollographql/router/pull/898)
+Added a simple plugin test harness that can provide canned responses to queries. This harness is early in development and the functionality and APIs will probably change. 
+```rust
+ let mut test_harness = PluginTestHarness::builder()
+            .plugin(plugin)
+            .schema(Canned)
+            .build()
+            .await?;
+
+let _ = test_harness
+    .call(
+        RouterRequest::fake_builder()
+            .header("name_header", "test_client")
+            .header("version_header", "1.0-test")
+            .query(query)
+            .and_operation_name(operation_name)
+            .and_context(context)
+            .build()?,
+    )
+    .await;
+```
 ## 🐛 Fixes ( :bug: )
 
 ### Improve the configuration error report [PR #963](https://github.com/apollographql/router/pull/963)

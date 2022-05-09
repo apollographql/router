@@ -3,6 +3,7 @@
 use crate::async_checkpoint::AsyncCheckpointLayer;
 use crate::instrument::InstrumentLayer;
 use crate::layers::cache::CachingLayer;
+use crate::map_future_with_context::{MapFutureWithContextLayer, MapFutureWithContextService};
 use crate::sync_checkpoint::CheckpointLayer;
 use futures::future::BoxFuture;
 use moka::sync::Cache;
@@ -14,6 +15,8 @@ use tower::layer::util::Stack;
 use tower::{BoxError, ServiceBuilder};
 use tower_service::Service;
 use tracing::Span;
+
+pub mod map_future_with_context;
 
 pub mod async_checkpoint;
 pub mod cache;
@@ -245,6 +248,42 @@ pub trait ServiceBuilderExt<L>: Sized {
         self.layer(InstrumentLayer::new(span_fn))
     }
 
+    /// Similar to map_future but also providing an opportunity to extract information out of the
+    /// request for use when constructing the response.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `map_fn`: The callback to map the future.
+    ///
+    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use std::future::Future;
+    /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
+    /// # use tower::util::BoxService;
+    /// # use tower_service::Service;
+    /// # use tracing::info_span;
+    /// # use apollo_router_core::{Context, RouterRequest, RouterResponse, ServiceBuilderExt};
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// let _ : BoxService<RouterRequest, S::Response, S::Error> = ServiceBuilder::new()
+    ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
+    ///                 fut.await
+    ///              })
+    ///             .service(service)
+    ///             .boxed();
+    /// # }
+    /// ```
+    fn map_future_with_context<C, F>(
+        self,
+        ctx_fn: C,
+        map_fn: F,
+    ) -> ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>> {
+        self.layer(MapFutureWithContextLayer::new(ctx_fn, map_fn))
+    }
+
     /// Utility function to allow us to specify default methods on this trait rather than duplicating in the impl.
     ///
     /// # Arguments
@@ -266,3 +305,46 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         self.buffer(DEFAULT_BUFFER_SIZE)
     }
 }
+
+pub trait ServiceExt<Request>: Service<Request> {
+    /// Similar to map_future but also providing an opportunity to extract information out of the
+    /// request for use when constructing the response.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx_fn`: The callback to extract a context from the request.
+    /// * `map_fn`: The callback to map the future.
+    ///
+    /// returns: ServiceBuilder<Stack<MapFutureWithContextLayer<C, F>, L>>
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use std::future::Future;
+    /// # use tower::{BoxError, ServiceBuilder, ServiceExt};
+    /// # use tower::util::BoxService;
+    /// # use tower_service::Service;
+    /// # use tracing::info_span;
+    /// # use apollo_router_core::{Context, RouterRequest, RouterResponse, ServiceBuilderExt, ServiceExt as ApolloServiceExt};
+    /// # fn test<S: Service<RouterRequest, Response = Result<RouterResponse, BoxError>> + 'static + Send>(service: S) where <S as Service<RouterRequest>>::Future: Send, <S as Service<RouterRequest>>::Error: Send + Sync + std::error::Error, <S as Service<RouterRequest>>::Response: Send {
+    /// let _ : BoxService<RouterRequest, S::Response, S::Error> = service
+    ///             .map_future_with_context(|req: &RouterRequest| req.context.clone(), |ctx : Context, fut| async {
+    ///                 fut.await
+    ///              })
+    ///             .boxed();
+    /// # }
+    /// ```
+    fn map_future_with_context<C, F>(
+        self,
+        cxt_fn: C,
+        map_fn: F,
+    ) -> MapFutureWithContextService<Self, C, F>
+    where
+        Self: Sized,
+        C: Clone,
+        F: Clone,
+    {
+        MapFutureWithContextService::new(self, cxt_fn, map_fn)
+    }
+}
+impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}

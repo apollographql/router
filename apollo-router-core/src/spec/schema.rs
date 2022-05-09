@@ -8,7 +8,7 @@ use router_bridge::api_schema;
 use std::collections::{HashMap, HashSet};
 
 /// A GraphQL schema.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Schema {
     string: String,
     subtype_map: HashMap<String, HashSet<String>>,
@@ -411,20 +411,6 @@ impl Schema {
         }
     }
 
-    pub fn empty() -> Schema {
-        Schema {
-            string: "".to_string(),
-            subtype_map: Default::default(),
-            subgraphs: Default::default(),
-            object_types: Default::default(),
-            interfaces: Default::default(),
-            input_types: Default::default(),
-            custom_scalars: Default::default(),
-            enums: Default::default(),
-            api_schema: None,
-        }
-    }
-
     pub fn boxed(self) -> Box<Self> {
         Box::new(self)
     }
@@ -583,10 +569,31 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1") {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
+    }
+
     #[test]
     fn is_subtype() {
         fn gen_schema_types(schema: &str) -> Schema {
-            let base_schema = r#"
+            let base_schema = with_supergraph_boilerplate(
+                r#"
             type Query {
               me: String
             }
@@ -601,12 +608,14 @@ mod tests {
             }
             
             union UnionType2 = Foo | Bar
-            "#;
+            "#,
+            );
             format!("{}\n{}", base_schema, schema).parse().unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
-            let base_schema = r#"
+            let base_schema = with_supergraph_boilerplate(
+                r#"
             type Query {
               me: String
             }
@@ -622,7 +631,8 @@ mod tests {
 
             type ObjectType2 implements Foo & Bar { me: String }
             interface InterfaceType2 implements Foo & Bar { me: String }
-            "#;
+            "#,
+            );
             format!("{}\n{}", base_schema, schema).parse().unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
