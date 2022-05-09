@@ -97,20 +97,16 @@ mod router_plugin_mod {
                     obj.with_mut(get_originating_headers)
                 }
 
+                // It would be nice to generate get_originating_headers for
+                // all response types. However, variations in the composition
+                // of <Type>Response means this isn't currently possible.
+                // We could revisit this later if these structures are re-shaped.
+
                 pub fn [<get_originating_body_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                 ) -> Result<Request, Box<EvalAltResult>> {
                     obj.with_mut(get_originating_body)
                 }
-
-                /* XXX ONLY VALID FOR CERTAIN TYPES
-                 *
-                pub fn [<get_originating_headers_ $base _response>](
-                    obj: &mut [<Shared $base:camel Response>],
-                ) -> Result<HeaderMap, Box<EvalAltResult>> {
-                    obj.with_mut(get_originating_headers)
-                }
-                */
 
                 pub fn [<set_originating_headers_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
@@ -119,6 +115,11 @@ mod router_plugin_mod {
                     obj.with_mut(|request| set_originating_headers(request, headers))
                 }
 
+                // It would be nice to generate set_originating_headers for
+                // all response types. However, variations in the composition
+                // of <Type>Response means this isn't currently possible.
+                // We could revisit this later if these structures are re-shaped.
+
                 pub fn [<set_originating_body_ $base _request>](
                     obj: &mut [<Shared $base:camel Request>],
                     body: Request
@@ -126,14 +127,6 @@ mod router_plugin_mod {
                     obj.with_mut(|request| set_originating_body(request, body))
                 }
 
-                /* XXX ONLY VALID FOR CERTAIN TYPES
-                pub fn [<set_originating_headers_ $base _response>](
-                    obj: &mut [<Shared $base:camel Response>],
-                    headers: HeaderMap
-                ) -> Result<(), Box<EvalAltResult>> {
-                    obj.with_mut(|response| set_originating_headers(response, context))
-                }
-                */
             }
                 )*
             }
