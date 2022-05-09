@@ -25,6 +25,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.1.0-preview.8] - (unreleased)
 ## ❗ BREAKING ❗
 
+### Env variables naming [PR #990](https://github.com/apollographql/router/pull/990)
+Environment variables have been renamed for consistency:
+* `RUST_LOG` -> `APOLLO_ROUTER_LOG`
+* `CONFIGURATION_PATH` -> `APOLLO_ROUTER_CONFIG_PATH`
+* `SUPERGRAPH_PATH` -> `APOLLO_ROUTER_SUPERGRAPH_PATH`
+* `ROUTER_HOT_RELOAD` -> `APOLLO_ROUTER_HOT_RELOAD`
+* `APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT` -> `APOLLO_UPLINK_URL`
+* `APOLLO_SCHEMA_POLL_INTERVAL`-> `APOLLO_UPLINK_INTERVAL`
+
+In addition, the following command line flags have changed:
+* `--apollo-schema-config-delivery-endpoint` -> `--apollo-uplink-url`
+* `--apollo-schema-poll-interval` -> `--apollo-uplink-poll-interval`
+
+### Rhai scripts should be able to do more things (like rust plugins) [PR #971](https://github.com/apollographql/router/pull/971)
 ### Add configuration to declare your own GraphQL endpoint [PR #976](https://github.com/apollographql/router/pull/976)
 You are now able to declare your own GraphQL endpoint in the config like this:
 ```yaml
