@@ -780,7 +780,7 @@ server:
   "#,
         )
         .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' it won't work you need to specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
     }
 
     #[test]
