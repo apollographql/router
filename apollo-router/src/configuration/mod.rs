@@ -419,6 +419,7 @@ impl Cors {
     }
 }
 
+/// Generate a JSON schema for the configuration.
 pub fn generate_config_schema() -> RootSchema {
     let settings = SchemaSettings::draft07().with(|s| {
         s.option_nullable = true;

@@ -1,4 +1,4 @@
-//! Provides a CachingLayer used to implement the cache functionality of [`crate::services::ServiceBuilderExt`].
+//! Provides a CachingLayer used to implement the cache functionality of [`crate::ServiceBuilderExt`].
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
