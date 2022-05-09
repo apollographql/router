@@ -3,6 +3,19 @@
 version = 3
 
 [[package]]
+name = "add-timestamp-header"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -124,6 +137,7 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
+ "paste",
  "prometheus",
  "regex",
  "reqwest",
@@ -148,6 +162,7 @@ dependencies = [
  "tracing-core",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "tracing-test",
  "typed-builder 0.10.0",
  "url",
  "uuid 1.0.0",
@@ -2809,6 +2824,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
+name = "op-name-to-header"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3609,9 +3637,9 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.6.1"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ef3d57e55ca044c53ced279d2d3ee9df229b247556b005a23713d5206a2ecfc"
+checksum = "9f06953bb8b9e4307cb7ccc0d9d018e2ddd25a30d32831f631ce4fe8f17671f7"
 dependencies = [
  "ahash",
  "bitflags",
@@ -3621,6 +3649,19 @@ dependencies = [
  "serde",
  "smallvec",
  "smartstring",
+]
+
+[[package]]
+name = "rhai-logging"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
@@ -4934,6 +4975,29 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-test"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3eb7bda2e93bbc9c5b247034acc6a4b3d04f033a3d4b8fc1cb87d4d1c7c7ebd7"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4801dca35e4e2cee957c469bd4a1c370fadb7894c0d50721a40eba3523e6e91c"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
 ]
 
 [[package]]

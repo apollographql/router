@@ -16,9 +16,7 @@ pub type Entries = Arc<DashMap<String, Value>>;
 #[derive(Clone, Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
-    // This should be private, the only reason it's public for now (and should disappear) is for the RHAI plugin.
-    // Please do not use Entries directly, but use public api.
-    pub entries: Entries,
+    entries: Entries,
 }
 
 impl Context {

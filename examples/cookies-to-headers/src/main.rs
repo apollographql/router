@@ -79,7 +79,7 @@ mod tests {
         }))
         .expect("json must be valid");
 
-        // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
+        // Build a rhai plugin instance from our conf
         let mut rhai = Rhai::new(conf)
             .await
             .expect("valid configuration should succeed");
@@ -87,6 +87,7 @@ mod tests {
         let service_stack = rhai.subgraph_service("mock", mock_service.boxed());
 
         let mut sub_request = http_compat::Request::mock();
+        let mut originating_request = http_compat::Request::mock();
 
         let headers = vec![(
             HeaderName::from_static("cookie"),
@@ -94,11 +95,15 @@ mod tests {
         )];
 
         for (name, value) in headers {
-            sub_request.headers_mut().insert(name, value);
+            sub_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+            originating_request.headers_mut().insert(name, value);
         }
 
         // Let's create a request with our cookies
         let request_with_appropriate_cookies = SubgraphRequest::fake_builder()
+            .originating_request(std::sync::Arc::new(originating_request))
             .subgraph_request(sub_request)
             .build();
 
