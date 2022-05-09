@@ -186,7 +186,7 @@ pub async fn rt_main() -> Result<()> {
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
 
-    tracing::info!("Apollo Router v{} // (c) ApolloGraph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+    tracing::info!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
             let supergraph_path = if supergraph_path.is_relative() {
