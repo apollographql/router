@@ -31,7 +31,7 @@ If you have [enabled telemetry](https://www.apollographql.com/docs/router/config
 Here is more information on how to [set up telemetry](https://www.apollographql.com/docs/studio/metrics/usage-reporting#pushing-metrics-from-apollo-server) and [Field Usage](https://www.apollographql.com/docs/studio/metrics/field-usage)
 
 ### PluginTestHarness [PR #898](https://github.com/apollographql/router/pull/898)
-Added a simple plugin test harness that provides can provide canned responses to queries. This harness is early in development and the functionality and APIs will change going forward. 
+Added a simple plugin test harness that can provide canned responses to queries. This harness is early in development and the functionality and APIs will probably change. 
 ```rust
  let mut test_harness = PluginTestHarness::builder()
             .plugin(plugin)
