@@ -1,9 +1,9 @@
 //! Implements the router phase of the request lifecycle.
 
 use crate::services::execution_service::ExecutionService;
+use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::services::layers::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     Introspection, Plugin, QueryCache, QueryPlannerRequest, QueryPlannerResponse, ResponseBody,
@@ -355,7 +355,7 @@ impl PluggableRouterServiceBuilder {
         // NB: Cannot use .buffer() here or the code won't compile...
         let execution_service = Buffer::new(
             ServiceBuilder::new()
-                .layer(ForbidHttpGetMutationsLayer::default())
+                .layer(AllowOnlyHttpPostMutationsLayer::default())
                 .service(
                     self.plugins.iter_mut().rev().fold(
                         ExecutionService::builder()

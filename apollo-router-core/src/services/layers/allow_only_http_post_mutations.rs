@@ -9,9 +9,9 @@ use std::ops::ControlFlow;
 use tower::{BoxError, Layer, Service};
 
 #[derive(Default)]
-pub struct ForbidHttpGetMutationsLayer {}
+pub struct AllowOnlyHttpPostMutationsLayer {}
 
-impl<S> Layer<S> for ForbidHttpGetMutationsLayer
+impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
     S: Service<ExecutionRequest, Response = ExecutionResponse> + Send + 'static,
     <S as Service<ExecutionRequest>>::Future: Send + 'static,
@@ -22,11 +22,11 @@ where
     fn layer(&self, service: S) -> Self::Service {
         CheckpointService::new(
             |req: ExecutionRequest| {
-                if req.originating_request.method() == Method::GET
+                if req.originating_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
                     let errors = vec![crate::Error {
-                        message: "GET supports only query operation".to_string(),
+                        message: "Mutations can only be sent over HTTP POST".to_string(),
                         locations: Default::default(),
                         path: Default::default(),
                         extensions: Default::default(),
@@ -73,7 +73,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Query);
 
@@ -92,7 +92,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::POST, OperationKind::Mutation);
 
@@ -111,7 +111,7 @@ mod forbid_http_get_mutations_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
 
         let http_post_query_plan_request = create_request(Method::GET, OperationKind::Query);
 
@@ -120,9 +120,9 @@ mod forbid_http_get_mutations_tests {
     }
 
     #[tokio::test]
-    async fn it_doesnt_let_http_get_mutations_pass_through() {
+    async fn it_doesnt_let_non_http_post_mutations_pass_through() {
         let expected_error = crate::Error {
-            message: "GET supports only query operation".to_string(),
+            message: "Mutations can only be sent over HTTP POST".to_string(),
             locations: Default::default(),
             path: Default::default(),
             extensions: Default::default(),
@@ -131,19 +131,33 @@ mod forbid_http_get_mutations_tests {
         let expected_allow_header = "POST";
 
         let mock = MockExecutionService::new().build();
-        let mut service_stack = ForbidHttpGetMutationsLayer::default().layer(mock);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock);
 
-        let http_post_query_plan_request = create_request(Method::GET, OperationKind::Mutation);
+        let forbidden_requests = [
+            Method::GET,
+            Method::HEAD,
+            Method::OPTIONS,
+            Method::PUT,
+            Method::DELETE,
+            Method::TRACE,
+            Method::CONNECT,
+            Method::PATCH,
+        ]
+        .into_iter()
+        .map(|method| create_request(method, OperationKind::Mutation));
 
         let services = service_stack.ready().await.unwrap();
-        let actual_error = services.call(http_post_query_plan_request).await.unwrap();
 
-        assert_eq!(expected_status, actual_error.response.status());
-        assert_eq!(
-            expected_allow_header,
-            actual_error.response.headers().get("Allow").unwrap()
-        );
-        assert_error_matches(&expected_error, actual_error);
+        for request in forbidden_requests {
+            let actual_error = services.call(request).await.unwrap();
+
+            assert_eq!(expected_status, actual_error.response.status());
+            assert_eq!(
+                expected_allow_header,
+                actual_error.response.headers().get("Allow").unwrap()
+            );
+            assert_error_matches(&expected_error, actual_error);
+        }
     }
 
     fn assert_error_matches(expected_error: &crate::Error, response: crate::ExecutionResponse) {
