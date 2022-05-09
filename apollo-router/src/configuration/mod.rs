@@ -882,8 +882,12 @@ server:
         #[cfg(unix)]
         let filename_matcher =
             Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
+        #[cfg(not(unix))]
         let embedded_yaml_matcher =
             Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
+        #[cfg(unix)]
+        let embedded_yaml_matcher =
+            Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
         for entry in WalkDir::new("..")
             .follow_links(true)
             .into_iter()
@@ -900,10 +904,14 @@ server:
             if filename_matcher.is_match(&name) {
                 let config = fs::read_to_string(entry.path()).expect("failed to read file");
                 let yamls = if name.ends_with(".mdx") {
+                    #[cfg(unix)]
+                    let index = 2usize;
+                    #[cfg(not(unix))]
+                    let index = 1usize;
                     // Extract yaml from docs
                     embedded_yaml_matcher
                         .captures_iter(&config)
-                        .map(|i| i.get(1).unwrap().as_str().into())
+                        .map(|i| i.get(index).unwrap().as_str().into())
                         .collect()
                 } else {
                     vec![config]
