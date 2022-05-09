@@ -375,7 +375,7 @@ impl QueryPlannerResponse {
     ) -> Result<QueryPlannerResponse, BoxError> {
         tracing::warn!("no way to propagate error response from QueryPlanner");
         Ok(QueryPlannerResponse::new(
-            Arc::new(Default::default()),
+            Arc::new(QueryPlan::fake_new(None, None)),
             context,
         ))
     }
