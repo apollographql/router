@@ -185,10 +185,10 @@ pub async fn rt_main() -> Result<()> {
             }
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
-
-    tracing::info!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+    let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
+            tracing::info!("{apollo_router_msg}");
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -201,6 +201,7 @@ pub async fn rt_main() -> Result<()> {
             }
         }
         (None, Some(apollo_key)) => {
+            tracing::info!("{apollo_router_msg}");
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
             if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
@@ -215,7 +216,7 @@ pub async fn rt_main() -> Result<()> {
         }
         _ => {
             return Err(anyhow!(
-                r#"
+                r#"{apollo_router_msg}
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
