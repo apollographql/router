@@ -69,7 +69,7 @@ pub struct Opt {
 
     /// The endpoint polled to fetch the latest supergraph schema.
     #[clap(long, env)]
-    apollo_uplink_url: Option<Url>,
+    apollo_uplink_endpoints: Option<Url>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
@@ -221,7 +221,7 @@ pub async fn rt_main() -> Result<()> {
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_uplink_url,
+                url: opt.apollo_uplink_endpoints,
                 poll_interval: opt.apollo_uplink_poll_interval,
             }
         }

@@ -35,14 +35,15 @@ Many Apollo tools use environment variables prefixed with `APOLLO_` to set certa
 
 Make sure to note any environment variables you set in your existing gateway's environment, _especially_ those prefixed with `APOLLO_`
 
-The Apollo Router supports most (non-deprecated) `APOLLO_`-prefixed environment variables, including:
+The Apollo Router supports:
 
 - `APOLLO_KEY`
 - `APOLLO_GRAPH_REF`
 
-> Deprecated Apollo environment variables (such as `ENGINE_API_KEY`) are _not_ supported.
->
-> Additionally, the Apollo Router does not currently support the [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) variable.  If you require this functionality, please follow and vote on [this GitHub issue](https://github.com/apollographql/router/issues/692).
+Renamed environment variables:
+- [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](https://www.apollographql.com/docs/federation/managed-federation/uplink/#environment-variable) -> `APOLLO_UPLINK_ENDPOINTS`
+
+Note that only one URL is currently supported by `APOLLO_UPLINK_ENDPOINTS`. 
 
 ## `ApolloGateway` constructor options
 
