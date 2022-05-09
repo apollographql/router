@@ -877,7 +877,11 @@ server:
 
     #[test]
     fn validate_project_config_files() {
+        #[cfg(not(unix))]
         let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
+        #[cfg(unix)]
+        let filename_matcher =
+            Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
         let embedded_yaml_matcher =
             Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
         for entry in WalkDir::new("..")
