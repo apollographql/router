@@ -83,5 +83,9 @@ The router now sets "router" as default service name in Opentelemetry traces, th
 
 Endpoint configuration for Datadog and OTLP take a URL as argument, but was incorrectly recognizing addresses of the format "host:port"
 
+### Stricter application of @inaccessible [PR #985](https://github.com/apollographql/router/pull/985)
+
+query-planner-js 2.0.2 implements stricter usage of the @inaccessible directive.
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )

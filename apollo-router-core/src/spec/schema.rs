@@ -749,4 +749,18 @@ mod tests {
             .get("inStock")
             .is_none());
     }
+
+    // test for https://github.com/apollographql/federation/pull/1769
+    #[test]
+    fn inaccessible_on_non_core() {
+        match Schema::from_str(include_str!("../testdata/inaccessible_on_non_core.graphql")) {
+            Err(SchemaError::Api(s)) => {
+                assert_eq!(
+                    s,
+                    "The supergraph schema failed to produce a valid API schema"
+                );
+            }
+            other => panic!("unexpected schema result: {:?}", other),
+        };
+    }
 }
