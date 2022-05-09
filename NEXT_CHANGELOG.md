@@ -43,3 +43,6 @@ Endpoint configuration for Datadog and OTLP take a URL as argument, but was inco
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
+
+### Add license notice to first line of Router output  [PR #986](https://github.com/apollographql/router/pull/986)
+Display the [ELv2 license](https://www.elastic.co/blog/elastic-license-v2) at the start of the Router
