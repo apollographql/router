@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 621
 expression: "&schema"
 ---
 {
@@ -324,7 +325,8 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "cors": null,
         "introspection": true,
-        "landing_page": true
+        "landing_page": true,
+        "endpoint": "/"
       },
       "type": "object",
       "properties": {
@@ -389,6 +391,11 @@ expression: "&schema"
           },
           "additionalProperties": false,
           "nullable": true
+        },
+        "endpoint": {
+          "description": "GraphQL endpoint default: \"/\"",
+          "default": "/",
+          "type": "string"
         },
         "introspection": {
           "description": "introspection queries enabled by default",

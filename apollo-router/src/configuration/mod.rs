@@ -57,6 +57,8 @@ pub enum ConfigurationError {
         message: &'static str,
         error: String,
     },
+    /// could not deserialize configuration: {0}
+    DeserializeConfigError(serde_yaml::Error),
 }
 
 /// The configuration for the router.
@@ -248,6 +250,12 @@ pub struct Server {
     #[serde(default = "default_landing_page")]
     #[builder(default_code = "default_landing_page()", setter(into))]
     pub landing_page: bool,
+
+    /// GraphQL endpoint
+    /// default: "/"
+    #[serde(default = "default_endpoint")]
+    #[builder(default_code = "default_endpoint()", setter(into))]
+    pub endpoint: String,
 }
 
 /// Listening address.
@@ -360,6 +368,10 @@ fn default_landing_page() -> bool {
     true
 }
 
+fn default_endpoint() -> String {
+    String::from("/")
+}
+
 impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
@@ -431,7 +443,7 @@ pub fn generate_config_schema() -> RootSchema {
 ///
 /// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
 ///
-pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> {
+pub fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
     let yaml =
         &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
@@ -561,15 +573,12 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                         })
                         .join("\n\n");
 
-                // There were no remaining errors after expansion.
-                if errors.is_empty() {
-                    return Ok(());
+                if !errors.is_empty() {
+                    return Err(ConfigurationError::InvalidConfiguration {
+                        message: "configuration had errors",
+                        error: format!("\n{}", errors),
+                    });
                 }
-
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "configuration had errors",
-                    error: format!("\n{}", errors),
-                });
             }
             Err(e) => {
                 // the yaml failed to parse. Just let serde do it's thing.
@@ -577,11 +586,46 @@ pub fn validate_configuration(raw_yaml: &str) -> Result<(), ConfigurationError> 
                     "failed to parse yaml using marked parser: {}. Falling back to serde validation",
                     e
                 );
-                return Ok(());
             }
         }
     }
-    Ok(())
+
+    let config: Configuration =
+        serde_yaml::from_str(raw_yaml).map_err(ConfigurationError::DeserializeConfigError)?;
+
+    // Custom validations
+    if !config.server.endpoint.starts_with('/') {
+        return Err(ConfigurationError::InvalidConfiguration {
+            message: "invalid 'server.endpoint' configuration",
+            error: format!(
+                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                config.server.endpoint,
+                config.server.endpoint
+            ),
+        });
+    }
+    if config.server.endpoint.ends_with('*') && !config.server.endpoint.ends_with("/*") {
+        return Err(ConfigurationError::InvalidConfiguration {
+            message: "invalid 'server.endpoint' configuration",
+            error: format!(
+                "'{}' is invalid, you can only set a wildcard after a '/'",
+                config.server.endpoint
+            ),
+        });
+    }
+    if config.server.endpoint.contains("/*/") {
+        return Err(
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid 'server.endpoint' configuration",
+                    error: format!(
+                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                        config.server.endpoint
+                    ),
+                },
+            );
+    }
+
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -716,6 +760,42 @@ mod tests {
     }
 
     #[test]
+    fn bad_endpoint_configuration_without_slash() {
+        let error = validate_configuration(
+            r#"
+server:
+  endpoint: test
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+    }
+
+    #[test]
+    fn bad_endpoint_configuration_with_wildcard_as_prefix() {
+        let error = validate_configuration(
+            r#"
+server:
+  endpoint: /*/test
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    }
+
+    #[test]
+    fn bad_endpoint_configuration_with_bad_ending_wildcard() {
+        let error = validate_configuration(
+            r#"
+server:
+  endpoint: /test*
+  "#,
+        )
+        .expect_err("should have resulted in an error");
+        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
+    }
+
+    #[test]
     fn line_precise_config_errors() {
         let error = validate_configuration(
             r#"
@@ -797,9 +877,17 @@ server:
 
     #[test]
     fn validate_project_config_files() {
+        #[cfg(not(unix))]
         let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
+        #[cfg(unix)]
+        let filename_matcher =
+            Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
+        #[cfg(not(unix))]
         let embedded_yaml_matcher =
             Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
+        #[cfg(unix)]
+        let embedded_yaml_matcher =
+            Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
         for entry in WalkDir::new("..")
             .follow_links(true)
             .into_iter()
@@ -816,10 +904,14 @@ server:
             if filename_matcher.is_match(&name) {
                 let config = fs::read_to_string(entry.path()).expect("failed to read file");
                 let yamls = if name.ends_with(".mdx") {
+                    #[cfg(unix)]
+                    let index = 2usize;
+                    #[cfg(not(unix))]
+                    let index = 1usize;
                     // Extract yaml from docs
                     embedded_yaml_matcher
                         .captures_iter(&config)
-                        .map(|i| i.get(1).unwrap().as_str().into())
+                        .map(|i| i.get(index).unwrap().as_str().into())
                         .collect()
                 } else {
                     vec![config]
