@@ -29,20 +29,30 @@ pub struct Opt {
         long = "log",
         default_value = "info",
         alias = "log-level",
-        env = "RUST_LOG"
+        env = "APOLLO_ROUTER_LOG"
     )]
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "ROUTER_HOT_RELOAD")]
+    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
-    #[clap(short, long = "config", parse(from_os_str), env)]
-    configuration_path: Option<PathBuf>,
+    #[clap(
+        short,
+        long = "config",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_CONFIG_PATH"
+    )]
+    config_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
-    #[clap(short, long = "supergraph", parse(from_os_str), env)]
+    #[clap(
+        short,
+        long = "supergraph",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
+    )]
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
@@ -115,7 +125,7 @@ impl fmt::Display for ProjectDir {
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("ROUTER_NUM_CORES")
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
@@ -153,8 +163,9 @@ pub async fn rt_main() -> Result<()> {
     // a FmtSubscriber to set_global_subscriber(), but we can't because of the
     // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
     // for more details.
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.log_level).context("could not parse log")?);
+    let builder = tracing_subscriber::fmt::fmt().with_env_filter(
+        EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
+    );
 
     let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
         RouterSubscriber::TextSubscriber(builder.finish())
@@ -169,7 +180,7 @@ pub async fn rt_main() -> Result<()> {
     let current_directory = std::env::current_dir()?;
 
     let configuration = opt
-        .configuration_path
+        .config_path
         .as_ref()
         .map(|path| {
             let path = if path.is_relative() {

@@ -30,7 +30,7 @@ Options are described below. Some may also be configured via env variable, howev
 <tr class="required">
 <td>
 
-##### `-s` / `--supergraph` <br/><br/> `SUPERGRAPH_PATH`
+##### `-s` / `--supergraph` <br/><br/> `APOLLO_ROUTER_SUPERGRAPH_PATH`
 
 </td>
 <td>
@@ -45,7 +45,7 @@ To learn how to compose your supergraph schema with the Rover CLI, see the [Fede
 <tr>
 <td style="min-width: 150px;">
 
-##### `-c` / `--config` <br/><br/> `CONFIGURATION_PATH`
+##### `-c` / `--config` <br/><br/> `APOLLO_ROUTER_CONFIG_PATH`
 
 </td>
 <td>
@@ -58,7 +58,7 @@ The absolute or relative path to the router's optional [YAML configuration file]
 <tr>
 <td style="min-width: 150px;">
 
-##### `--log` <br/><br/> `RUST_LOG`
+##### `--log` <br/><br/> `APOLLO_ROUTER_LOG`
 
 </td>
 <td>
@@ -86,7 +86,7 @@ Prints out a JSON schema of the configuration file, including plugin configurati
 <tr>
 <td style="min-width: 150px;">
 
-##### `--hr` / `--hot-reload`
+##### `--hr` / `--hot-reload` <br/><br/> `APOLLO_ROUTER_HOT_RELOAD`
 
 </td>
 <td>
@@ -162,7 +162,7 @@ The time between polls to Apollo uplink. Minimum 10s.
 
 ## Configuration file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `APOLLO_ROUTER_HOT_RELOAD` environment variable is set to `true`), the router will automatically restart when changes to the configuration file are made.
 
 This file enables you to customize the router's behavior in many ways:
 
