@@ -1,2 +1,2 @@
-pub mod canned;
+pub(super) mod canned;
 pub mod subgraph;
