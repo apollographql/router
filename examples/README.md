@@ -17,7 +17,10 @@ Extending the functionality of the Apollo Router.
 
 ### Rhai
 Experimental scripting support.
+* [Time request and add to header](./add-timestamp-header)
 * [Cookies to headers](./cookies-to-headers)
+* [Operation Name to headers](./op-name-to-header)
+* [Logging](./rhai-logging)
 
 ### Native Rust Plugins
 Writing your own plugins in rust!

@@ -37,6 +37,9 @@ server:
 ```
 But we also deleted the `/graphql` endpoint by default, you will know have only one existing GraphQL endpoint and by default it's `/`. If you need to use `/graphql` instead then refer to my previous example.
 
+### rhai scripts should be able to do more things (like rust plugins) [PR #971](https://github.com/apollographql/router/pull/971)
+This is a re-working of our rhai scripting support. The intent is to make writing a rhai plugin more like writing a rust plugin, with full participation in the service plugin lifecycle. The work is still some way from complete, but does provide new capabilities (such as logging from rhai) and provides a more solid basis on which we can evolve our implementation. The examples and documentation should make clear how to modify any existing scripts to accomodate the changes.
+
 ## 🚀 Features ( :rocket: )
 ## 🐛 Fixes ( :bug: )
 

@@ -1,26 +1,31 @@
 // This is a test used for rhai plugin
 
-fn router_service_response(context) {
-    context.headers["blabla"] = "here is a test";
-    // Header names are always in lower case
-    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
-        context.headers.coucou = "hello";
-    }
-    let value = context.entries.test + 10;
-    context.headers["coming_from_entries"] = `value_${value}`;
-    context.entries.test = 42;
-    context.entries.addition = "Here is a new element in the context";
-
-    context
+fn router_service(service) {
+    let response = Fn("router_response");
+    service.map_response(response);
 }
 
-fn execution_service_request(context) {
-    // Header names are always in lower case
-    if context.headers["x-custom-header"] == "CUSTOM_VALUE" {
-        context.headers.coucou = "hello";
+fn router_response(response) {
+    if response.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        response.headers["coucou"] = "hello";
     }
-    context.entries.test = 42;
-    context.entries.addition = `Here is a new element in the context with value ${context.entries.test}`;
-    context.entries.test = 25;
+    let value = response.context["test"] + 10;
+    response.headers["coming_from_entries"] = `value_${value}`;
+    response.context["test"] = 42;
+    response.context["addition"] = "Here is a new element in the context";
+}
+
+fn execution_service(service) {
+    let request = Fn("execution_request");
+    service.map_request(request);
+}
+
+fn execution_request(request) {
+    if request.headers["x-custom-header"] == "CUSTOM_VALUE" {
+        request.headers["coucou"] = "hello";
+    }
+    request.context["test"] = 42;
+    request.context["addition"] = `Here is a new element in the context with value ${request.context["test"]}`;
+    request.context["test"] = 25;
     throw "An error occured";
 }
