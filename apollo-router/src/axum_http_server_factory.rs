@@ -92,7 +92,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map(|cors_configuration| cors_configuration.into_layer())
                 .unwrap_or_else(|| Cors::builder().build().into_layer());
             let graphql_endpoint = if configuration.server.endpoint.ends_with("/*") {
-                // Needed for axum
+                // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
                 format!("{}router_extra_path", configuration.server.endpoint)
             } else {
                 configuration.server.endpoint.clone()
