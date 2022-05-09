@@ -316,7 +316,6 @@ impl ReportSpaceport {
         // that we are adding a lot of data for transfer. It is derived
         // empirically from load testing.
         let total = self.total.fetch_add(1, Ordering::SeqCst);
-        // TODO: check tick ?
         if total > TRIGGER_BATCH_LIMIT {
             match self.tx.send(()).await {
                 Ok(_v) => {
