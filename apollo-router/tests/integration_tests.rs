@@ -36,7 +36,12 @@ macro_rules! assert_federated_response {
 
 
 
-        let expected = query_node(&request).await.unwrap();
+        let expected = match query_node(&request).await {
+            Ok(e) => e,
+            Err(err) => {
+                panic!("query_node failed: {err}. Probably caused by missing gateway during testing");
+            }
+        };
 
         let originating_request = http_compat::Request::fake_builder().method(Method::POST)
             .body(request)
@@ -519,15 +524,21 @@ async fn missing_variables() {
 }
 
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    Ok(reqwest::Client::new()
+    reqwest::Client::new()
         .post("http://localhost:4100/graphql")
         .json(request)
         .send()
         .await
-        .expect("couldn't send request")
+        .map_err(|err| graphql::FetchError::SubrequestHttpError {
+            service: "test node".to_string(),
+            reason: err.to_string(),
+        })?
         .json()
         .await
-        .expect("couldn't deserialize response"))
+        .map_err(|err| graphql::FetchError::SubrequestMalformedResponse {
+            service: "test node".to_string(),
+            reason: err.to_string(),
+        })
 }
 
 async fn query_rust(
