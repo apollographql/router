@@ -700,7 +700,7 @@ impl Operation {
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema))
+            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
             .collect::<Option<_>>()?;
 
         let variables = operation

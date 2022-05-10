@@ -29,7 +29,17 @@ impl Selection {
         selection: ast::Selection,
         current_type: &FieldType,
         schema: &Schema,
+        mut count: usize,
     ) -> Option<Self> {
+        // The RECURSION_LIMIT is chosen to be:
+        //   < # expected to cause stack overflow &&
+        //   > # expected in a legitimate query
+        const RECURSION_LIMIT: usize = 512;
+        if count > RECURSION_LIMIT {
+            tracing::error!("selection processing recursion limit({RECURSION_LIMIT}) exceeded");
+            return None;
+        }
+        count += 1;
         match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             ast::Selection::Field(field) => {
@@ -71,7 +81,9 @@ impl Selection {
                     field.selection_set().and_then(|x| {
                         x.selections()
                             .into_iter()
-                            .map(|selection| Selection::from_ast(selection, &field_type, schema))
+                            .map(|selection| {
+                                Selection::from_ast(selection, &field_type, schema, count)
+                            })
                             .collect()
                     })
                 };
@@ -132,7 +144,7 @@ impl Selection {
                     .expect("the node SelectionSet is not optional in the spec; qed")
                     .selections()
                     .into_iter()
-                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema))
+                    .map(|selection| Selection::from_ast(selection, &fragment_type, schema, count))
                     .collect::<Option<_>>()?;
 
                 let skip = inline_fragment
