@@ -18,7 +18,9 @@ Here's an example which would use helm to install the router:
  - with helm install name "router-test"
  - with support for prometheus enabled
 
-You would run this command from <repo>/helm/chart directory.
+You would run this command from "repo"/helm/chart directory.
+
+(where "repo" is the directory containing your checked out router github repository)
 
 ```bash
 helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test router --values router/values.yaml
