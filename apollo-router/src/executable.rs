@@ -280,10 +280,11 @@ pub async fn rt_main() -> Result<()> {
 
 fn setup_panic_handler() {
     // Redirect panics to the logs.
-    let backtrace_env = std::env!("RUST_BACKTRACE");
-    let show_backtraces = backtrace_env == "1" || backtrace_env == "full";
+    let backtrace_env = std::env::var("RUST_BACKTRACE");
+    let show_backtraces =
+        backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
     if show_backtraces {
-        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env);
+        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env).as_ref().unwrap();
     }
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
