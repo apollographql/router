@@ -353,6 +353,8 @@ fn default_cors_headers() -> Vec<String> {
         "Content-Type".into(),
         "apollographql-client-name".into(),
         "apollographql-client-version".into(),
+        "x-apollo-operation-name".into(),
+        "apollo-require-preflight".into(),
     ]
 }
 

@@ -207,6 +207,7 @@ dependencies = [
  "lazy_static",
  "lru",
  "miette",
+ "mime",
  "mockall",
  "moka",
  "multimap",

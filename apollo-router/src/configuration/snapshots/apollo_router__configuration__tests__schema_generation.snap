@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 621
 expression: "&schema"
 ---
 {
@@ -9,6 +8,16 @@ expression: "&schema"
   "description": "The configuration for the router. Currently maintains a mapping of subgraphs.",
   "type": "object",
   "properties": {
+    "csrf": {
+      "type": "object",
+      "properties": {
+        "disabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "forbid_mutations": {
       "type": "boolean"
     },
@@ -352,7 +361,9 @@ expression: "&schema"
               "default": [
                 "Content-Type",
                 "apollographql-client-name",
-                "apollographql-client-version"
+                "apollographql-client-version",
+                "x-apollo-operation-name",
+                "apollo-require-preflight"
               ],
               "type": "array",
               "items": {
