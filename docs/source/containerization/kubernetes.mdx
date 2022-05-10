@@ -36,7 +36,7 @@ helm list --namespace router-deploy
 
 If you aren't familiar with helm, the following example illustrates how you could do the same thing manually or as a base for kustomize.
 
-Note: This example is generated using the helm template capability to generate the required kubernetes configuration from our helm chart.
+Note: This example is generated using the helm template capability to generate the required kubernetes configuration from our helm chart. After generation, it is edited to remove the Helm management annotations.
 
 ```yaml
 ---
@@ -46,11 +46,9 @@ kind: ServiceAccount
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
     app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
 apiVersion: v1
@@ -58,11 +56,9 @@ kind: Secret
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
     app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "REDACTED"
 ---
@@ -72,11 +68,9 @@ kind: ConfigMap
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
     app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
     server:
@@ -92,11 +86,9 @@ kind: Service
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
     app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
   ports:
@@ -114,11 +106,9 @@ kind: Deployment
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
     app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
   annotations:
     prometheus.io/path: /plugins/apollo.telemetry/prometheus
     prometheus.io/port: "80"
@@ -179,27 +169,6 @@ spec:
         - name: router-configuration
           configMap:
             name: router-test
----
-# Source: router/templates/tests/test-connection.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: "router-test-test-connection"
-  labels:
-    helm.sh/chart: router-0.1.2
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.9.0-rc.0"
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    "helm.sh/hook": test
-spec:
-  containers:
-    - name: wget
-      image: busybox
-      command: ['wget']
-      args: ['router-test:80']
-  restartPolicy: Never
 ```
 
 ## The health endpoint
