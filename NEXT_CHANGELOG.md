@@ -38,7 +38,6 @@ In addition, the following command line flags have changed:
 * `--apollo-schema-config-delivery-endpoint` -> `--apollo-uplink-url`
 * `--apollo-schema-poll-interval` -> `--apollo-uplink-poll-interval`
 
-### Rhai scripts should be able to do more things (like rust plugins) [PR #971](https://github.com/apollographql/router/pull/971)
 ### Add configuration to declare your own GraphQL endpoint [PR #976](https://github.com/apollographql/router/pull/976)
 You are now able to declare your own GraphQL endpoint in the config like this:
 ```yaml
@@ -55,6 +54,10 @@ But we also deleted the `/graphql` endpoint by default, you will know have only 
 This is a re-working of our rhai scripting support. The intent is to make writing a rhai plugin more like writing a rust plugin, with full participation in the service plugin lifecycle. The work is still some way from complete, but does provide new capabilities (such as logging from rhai) and provides a more solid basis on which we can evolve our implementation. The examples and documentation should make clear how to modify any existing scripts to accomodate the changes.
 
 ## 🚀 Features ( :rocket: )
+
+### Panics now output to logs  [PR #1001](https://github.com/apollographql/router/pull/1001)
+Previously panics would get swallowed. Now they are output to the logs.
+Setting `RUST_BACKTRACE=1` or `RUST_BACKTRACE=full` enables the full backtrace to also be logged.
 
 ### Apollo studio Usage Reporting [PR #898](https://github.com/apollographql/router/pull/898)
 If you have [enabled telemetry](https://www.apollographql.com/docs/router/configuration/apollo-telemetry#enabling-usage-reporting), you can now see field usage reporting for your queries by heading to the Apollo studio fields section.
