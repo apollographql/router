@@ -1,9 +1,9 @@
 //! Customization via Rhai.
 
 use apollo_router_core::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, Request, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
+    http_compat, register_plugin, Context, Error, ExecutionRequest, ExecutionResponse, Object,
+    Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
+    RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
@@ -158,12 +158,27 @@ mod router_plugin_mod {
         obj.with_mut(get_originating_headers_response_response_body)
     }
 
+    #[rhai_fn(get = "body", return_raw)]
+    pub fn get_originating_body_router_response(
+        obj: &mut SharedRouterResponse,
+    ) -> Result<ResponseBody, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_body_response_response_body)
+    }
+
     #[rhai_fn(set = "headers", return_raw)]
     pub fn set_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub fn set_originating_body_router_response(
+        obj: &mut SharedRouterResponse,
+        body: ResponseBody,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_body_response_response_body(response, body))
     }
 
     fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
@@ -198,6 +213,14 @@ mod router_plugin_mod {
         Ok(obj.accessor().headers().clone())
     }
 
+    fn get_originating_body_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
+        obj: &mut T,
+    ) -> Result<ResponseBody, Box<EvalAltResult>> {
+        Ok(obj.accessor().body().clone())
+    }
+
     fn set_originating_headers<T: Accessor<http_compat::Request<Request>>>(
         obj: &mut T,
         headers: HeaderMap,
@@ -221,6 +244,16 @@ mod router_plugin_mod {
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().headers_mut() = headers;
+        Ok(())
+    }
+
+    fn set_originating_body_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
+        obj: &mut T,
+        body: ResponseBody,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().body_mut() = body;
         Ok(())
     }
 
@@ -650,6 +683,11 @@ impl Rhai {
             .register_type::<HeaderValue>()
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             .register_type::<Request>()
+            .register_type::<Object>()
+            .register_type::<ResponseBody>()
+            .register_type::<Response>()
+            .register_type::<Value>()
+            .register_type::<Error>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -729,6 +767,50 @@ impl Rhai {
                 x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
                 Ok(())
             })
+            // ResponseBody.resposne
+            .register_get_result("response", |x: &mut ResponseBody| match x {
+                ResponseBody::GraphQL(resp) => Ok(resp.clone()),
+                _ => Err("wrong type of response".into()),
+            })
+            .register_set_result("response", |x: &mut ResponseBody, value: Response| {
+                match x {
+                    ResponseBody::GraphQL(_resp) => {
+                        *x = ResponseBody::GraphQL(value)
+                        // resp = value;
+                    }
+                    _ => return Err("wrong type of response".into()),
+                }
+                Ok(())
+            })
+            // Response.label
+            .register_get("label", |x: &mut Response| {
+                x.label.clone().map_or(Dynamic::from(()), Dynamic::from)
+            })
+            .register_set("label", |x: &mut Response, value: &str| {
+                x.label = Some(value.to_string());
+            })
+            // Response.data
+            .register_get("data", |x: &mut Response| {
+                x.data.clone().map_or(Dynamic::from(()), Dynamic::from)
+            })
+            .register_set("data", |x: &mut Response, value: Value| {
+                x.data = Some(value);
+            })
+            // Response.path (Not Implemented)
+            // Response.errors
+            .register_get("errors", |x: &mut Response| x.errors.clone())
+            .register_set("errors", |x: &mut Response, value: Vec<Error>| {
+                x.errors = value;
+            })
+            // Response.extensions
+            .register_get_result("extensions", |x: &mut Response| {
+                to_dynamic(x.extensions.clone())
+            })
+            .register_set_result("extensions", |x: &mut Response, om: Map| {
+                let v = rhai::format_map_as_json(&om);
+                x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                Ok(())
+            })
             // Register a series of logging functions
             .register_fn("log_trace", |x: &str| {
                 tracing::trace!("{}", x);
@@ -791,6 +873,24 @@ impl Rhai {
                 },
             )
             .register_fn("to_string", |x: &mut Request| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut ResponseBody| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Response| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Vec<Error>| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Error| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Object| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
             });
 
