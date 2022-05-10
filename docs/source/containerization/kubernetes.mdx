@@ -46,10 +46,10 @@ kind: ServiceAccount
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -58,10 +58,10 @@ kind: Secret
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "REDACTED"
@@ -72,10 +72,10 @@ kind: ConfigMap
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
@@ -92,10 +92,10 @@ kind: Service
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -114,10 +114,10 @@ kind: Deployment
 metadata:
   name: router-test
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     prometheus.io/path: /plugins/apollo.telemetry/prometheus
@@ -142,7 +142,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v0.1.0-preview.7"
+          image: "ghcr.io/apollographql/router:v0.9.0-rc.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
@@ -186,10 +186,10 @@ kind: Pod
 metadata:
   name: "router-test-test-connection"
   labels:
-    helm.sh/chart: router-0.1.1
+    helm.sh/chart: router-0.1.2
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: router-test
-    app.kubernetes.io/version: "v0.1.0-preview.7"
+    app.kubernetes.io/version: "v0.9.0-rc.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test
