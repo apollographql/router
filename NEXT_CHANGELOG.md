@@ -55,7 +55,7 @@ This is a re-working of our rhai scripting support. The intent is to make writin
 
 ## 🚀 Features ( :rocket: )
 
-### Panics now output to logs  [PR #1001](https://github.com/apollographql/router/pull/1001)
+### Panics now output to logs [PR #1001](https://github.com/apollographql/router/pull/1001) [PR #1004](https://github.com/apollographql/router/pull/1004)
 Previously panics would get swallowed. Now they are output to the logs.
 Setting `RUST_BACKTRACE=1` or `RUST_BACKTRACE=full` enables the full backtrace to also be logged.
 
