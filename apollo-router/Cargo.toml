@@ -16,6 +16,7 @@ apollo-router-core = { path = "../apollo-router-core" }
 apollo-uplink = { path = "../uplink" }
 async-trait = "0.1.53"
 atty = "0.2.14"
+backtrace = "0.3.65"
 buildstructor = "0.1.12"
 bytes = "1.1.0"
 clap = { version = "3.1.3", default-features = false, features = ["env", "derive", "std"] }

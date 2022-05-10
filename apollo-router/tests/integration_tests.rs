@@ -541,6 +541,13 @@ async fn setup_router_and_registry() -> (
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+    std::panic::set_hook(Box::new(|e| {
+        let backtrace = backtrace::Backtrace::new();
+        tracing::error!("{}\n{:?}", e, backtrace)
+    }));
     let schema: Arc<Schema> =
         Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let counting_registry = CountingServiceRegistry::new();

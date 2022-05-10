@@ -200,6 +200,8 @@ pub async fn rt_main() -> Result<()> {
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
             tracing::info!("{apollo_router_msg}");
+            setup_panic_handler();
+
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -274,6 +276,23 @@ pub async fn rt_main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn setup_panic_handler() {
+    // Redirect panics to the logs.
+    let backtrace_env = std::env!("RUST_BACKTRACE");
+    let show_backtraces = backtrace_env == "1" || backtrace_env == "full";
+    if show_backtraces {
+        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env);
+    }
+    std::panic::set_hook(Box::new(move |e| {
+        if show_backtraces {
+            let backtrace = backtrace::Backtrace::new();
+            tracing::error!("{}\n{:?}", e, backtrace)
+        } else {
+            tracing::error!("{}", e)
+        }
+    }));
 }
 
 fn copy_args_to_env() {
