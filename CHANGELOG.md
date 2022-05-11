@@ -24,7 +24,7 @@ You'll need to adjust to the new environment variable names, as follows:
 - `SUPERGRAPH_PATH` -> `APOLLO_ROUTER_SUPERGRAPH_PATH`
 - `ROUTER_HOT_RELOAD` -> `APOLLO_ROUTER_HOT_RELOAD`
 - `APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT` -> `APOLLO_UPLINK_ENDPOINTS`
-- `APOLLO_SCHEMA_POLL_INTERVAL`-> `APOLLO_UPLINK_INTERVAL`
+- `APOLLO_SCHEMA_POLL_INTERVAL`-> `APOLLO_UPLINK_POLL_INTERVAL`
 
 In addition, the following command line flags have changed:
 - `--apollo-schema-config-delivery-endpoint` -> `--apollo-uplink-url`
