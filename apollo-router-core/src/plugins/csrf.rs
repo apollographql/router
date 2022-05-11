@@ -39,6 +39,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
     "text/plain",
 ];
 
+/// The Csrf plugin makes sure any request received would have been preflighted if it was sent by a browser.
 #[derive(Debug, Clone)]
 struct Csrf {
     config: CSRFConfig,
@@ -60,7 +61,7 @@ impl Plugin for Csrf {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
-                    if should_accept(&req, required_headers.as_slice()) {
+                    if is_preflighted(&req, required_headers.as_slice()) {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         let error = crate::Error {
@@ -89,23 +90,34 @@ impl Plugin for Csrf {
     }
 }
 
-fn should_accept(req: &RouterRequest, required_headers: &[String]) -> bool {
+// A `preflighted` request is the opposite of a `simple` request.
+//
+// A simple request is a request that satisfies the three predicates below:
+// - Has method `GET` `POST` or `HEAD` (which turns out to be the three methods our web server allows)
+// - If content-type is set, it must be with a mime type that is application/x-www-form-urlencoded OR multipart/form-data OR text/plain
+// - The only headers added by javascript code are part of the cors safelisted request headers (Accept,Accept-Language,Content-Language,Content-Type, and simple Range
+//
+// Given the first step is covered in our web browser, we'll take care of the two other steps below:
+fn is_preflighted(req: &RouterRequest, required_headers: &[String]) -> bool {
     let headers = req.originating_request.headers();
     content_type_requires_preflight(headers)
         || recommended_header_is_provided(headers, required_headers)
 }
 
-fn recommended_header_is_provided(headers: &HeaderMap, required_headers: &[String]) -> bool {
-    required_headers
-        .iter()
-        .any(|header| headers.get(header).is_some())
-}
-
+// Part two of the algorithm above:
+// If content-type is set, it must be with a mime type that is application/x-www-form-urlencoded OR multipart/form-data OR text/plain
+// The details of the algorithm are covered in the fetch specification https://fetch.spec.whatwg.org/#cors-safelisted-request-header
+//
+// content_type_requires_preflight will thus return true if
+// the header value is !(`application/x-www-form-urlencoded` || `multipart/form-data` || `text/plain`)
 fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
     let joined_content_type_header_value = if let Ok(combined_headers) = headers
         .get_all(header::CONTENT_TYPE)
         .iter()
         .map(|header_value| {
+            // The mime type parser we're using is a bit askew,
+            // so we're going to perform a bit of trimming, and character replacement
+            // before we combine the header values 
             // https://github.com/apollographql/router/pull/1006#discussion_r869777439
             header_value
                 .to_str()
@@ -120,27 +132,38 @@ fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
         return false;
     };
 
-    dbg!("'\u{002C}\u{0020}'");
-
     if let Ok(mime_type) = joined_content_type_header_value.parse::<mime::Mime>() {
+        !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
+    } else {
         // If we get here, this means that we couldn't parse the content-type value into
         // a valid mime type... which would be safe enough for us to assume preflight was triggered if the `mime`
         // crate followed the fetch specification, but it unfortunately doesn't (see comment above).
         //
         // Better safe than sorry, we will claim we don't have solid enough reasons
         // to believe the request will have triggered preflight
-
-        !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
-    } else {
         false
     }
+}
+
+// Part three of the algorithm described above:
+// The only headers added by javascript code are part of the cors safelisted request headers (Accept,Accept-Language,Content-Language,Content-Type, and simple Range
+//
+// It would be pretty hard for us to keep track of the headers browser send themselves,
+// and the ones that were explicitely added by a javascript client (and have thus triggered preflight).
+// so we will do the oposite:
+// We hereby challenge any client to provide one of the required_headers.
+// Browsers definitely will not add any "x-apollo-operation-name" or "apollo-require-preflight" to every request anytime soon,
+// which means if the header is present, javascript has added it, and the browser will have triggered preflight. 
+fn recommended_header_is_provided(headers: &HeaderMap, required_headers: &[String]) -> bool {
+    required_headers
+        .iter()
+        .any(|header| headers.get(header).is_some())
 }
 
 register_plugin!("apollo", "csrf", Csrf);
 
 #[cfg(test)]
 mod csrf_tests {
-
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugins()
