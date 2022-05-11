@@ -41,6 +41,7 @@ impl Fragments {
                                 selection,
                                 &FieldType::Named(type_condition.clone()),
                                 schema,
+                                0,
                             )
                         })
                         .collect::<Option<_>>()?;
