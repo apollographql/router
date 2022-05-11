@@ -39,3 +39,6 @@ Note: prometheus metrics are not enabled by default in the helm chart.
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ## 🐛 Fixes ( :bug: )
+
+### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
+Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
