@@ -105,8 +105,8 @@ telemetry:
   tracing:
     jaeger:
       agent:
-        # Either 'default' or a socket address 
-        endpoint: default
+        # Either 'default' or an url 
+        endpoint: docker_jaeger:14268
       
 ```
 
@@ -175,8 +175,8 @@ telemetry:
   tracing:
     zipkin:
       agent:
-        # Either 'default' or a socket address 
-        endpoint: default
+        # Either 'default' or an url 
+        endpoint: http://my_zipkin_agent.dev
 ```
 
 ### Collector config
