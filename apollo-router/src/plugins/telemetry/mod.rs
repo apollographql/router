@@ -498,6 +498,9 @@ impl Telemetry {
                     .collect();
                 apollo_metrics.query_latency_stats.latency_count = duration;
                 apollo_metrics.query_latency_stats.request_count = 1;
+                apollo_metrics
+                    .query_latency_stats
+                    .requests_without_field_instrumentation = 1;
             };
             sender.send(apollo_metrics);
         };
