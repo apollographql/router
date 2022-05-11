@@ -8,7 +8,10 @@ telemetry:
   tracing:
     trace_config:
       service_name: router
-    datadog:
-      endpoint: datadog-agent:8126
+    jaeger:
+      agent:
+        endpoint: jaeger:14268
+        #endpoint: default
+        #endpoint: 127.0.0.1:14268
     propagation:
-      datadog: true
+      jaeger: true
