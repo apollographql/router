@@ -1,5 +1,4 @@
 server:
-  listen: localhost:4000
   cors:
     # adding the headers in the CSRF section
     # and not here would fail the OPTIONS preflight
