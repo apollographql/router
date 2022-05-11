@@ -108,7 +108,7 @@ fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
         .any(|content_type| {
             if let Ok(as_str) = content_type.to_str() {
                 // https://github.com/apollographql/router/pull/1006#discussion_r869777439
-                let trimmed_and_tabs_removed = as_str.trim().replace("\t", " ");
+                let trimmed_and_tabs_removed = as_str.trim().replace('\t', " ");
                 if let Ok(mime_type) = trimmed_and_tabs_removed.parse::<mime::Mime>() {
                     !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
                 } else {
