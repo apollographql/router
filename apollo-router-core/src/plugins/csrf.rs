@@ -40,6 +40,29 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 ];
 
 /// The Csrf plugin makes sure any request received would have been preflighted if it was sent by a browser.
+///
+/// Quoting the great apollo server comment:
+/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26 
+///
+/// We don't want random websites to be able to execute actual GraphQL operations
+/// from a user's browser unless our CORS policy supports it. It's not good
+/// enough just to ensure that the browser can't read the response from the
+/// operation; we also want to prevent CSRF, where the attacker can cause side
+/// effects with an operation or can measure the timing of a read operation. Our
+/// goal is to ensure that we don't run the context function or execute the
+/// GraphQL operation until the browser has evaluated the CORS policy, which
+/// means we want all operations to be pre-flighted. We can do that by only
+/// processing operations that have at least one header set that appears to be
+/// manually set by the JS code rather than by the browser automatically.
+///
+/// POST requests generally have a content-type `application/json`, which is
+/// sufficient to trigger preflighting. So we take extra care with requests that
+/// specify no content-type or that specify one of the three non-preflighted
+/// content types. For those operations, we require (if this feature is enabled)
+/// one of a set of specific headers to be set. By ensuring that every operation
+/// either has a custom content-type or sets one of these headers, we know we
+/// won't execute operations at the request of origins who our CORS policy will
+/// block.
 #[derive(Debug, Clone)]
 struct Csrf {
     config: CSRFConfig,
