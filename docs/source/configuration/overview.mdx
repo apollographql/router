@@ -190,10 +190,9 @@ server:
 
 ### Endpoint
 
-By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`. If you want to change the default behavior you can change it thanks to the `endpoint` properties in `server`.
-There are some rules to respect. If you want an endpoint which set a dynamic prefix in the path URL you can specify it with this syntax `endpoint: /:my_dynamic_prefix/graphql`, with this configuration you'll be able
-to call routes like `/my_project_a/graphql`, `/my_other_project/graphql`, ... You can also add a wildcard as a suffix, here is an example, with this configuration `endpoint: /graphql/*` the router will
-answer to all these routes `/graphql/my_project_a`, `/graphql/my_other_project`, ...
+By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
+
+To change the default behavior set `server.endpoint` within your `router.yaml`.
 
 ```yaml title="router.yaml"
 #
@@ -205,8 +204,15 @@ server:
   endpoint: /graphql
 ```
 
-> Limitations: you can't have wildcmard in the middle of a path segment (eg: `/*/graphql`) you need to use the parameter notation instead (eg: `/:my_prefix/graphql`). An endpoint path must be absolute,
-> which means must start with `/`.
+Wildcards and parameters are supported. For instance:
+
+- `/:my_dynamic_prefix/graphql` matches `/my_project_a/graphql`, `/my_other_project/graphql`
+- `/graphql/*` matches `/graphql/my_project_a`, `/graphql/my_other_project`
+
+> Note:
+>
+> Wildcard in the middle of a path segment (eg: `/*/graphql`) is not supported. Use the parameter notation instead (eg: `/:my_prefix/graphql`).
+> Endpoints must start with `/`.
 
 ### Introspection
 
