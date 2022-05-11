@@ -59,7 +59,7 @@ opentelemetry-otlp = { version = "0.10.0", default-features = false, features = 
 ] }
 opentelemetry-semantic-conventions = "0.9.0"
 opentelemetry-zipkin = { version = "0.15.0", default-features = false, features = [
-    "reqwest-blocking-client",
+    "reqwest-client",
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.10.0"
