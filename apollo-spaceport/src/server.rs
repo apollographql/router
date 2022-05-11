@@ -82,7 +82,7 @@ impl StatsOrTrace {
     fn operation_count(&self) -> u64 {
         match self {
             StatsOrTrace::Stats(s) => s.operation_count,
-            StatsOrTrace::Trace(_) => 0, // For now :)
+            StatsOrTrace::Trace(_) => todo!("trace reporting is not supported yet"),
         }
     }
 }
