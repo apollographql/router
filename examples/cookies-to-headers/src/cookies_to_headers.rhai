@@ -1,6 +1,6 @@
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
-fn subgraph_service(service) {
+fn subgraph_service(service, subgraph) {
     print("registering request callback");
     let request_callback = Fn("process_request");
     map_request(service, request_callback);

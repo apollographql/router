@@ -21,6 +21,7 @@ Experimental scripting support.
 * [Cookies to headers](./cookies-to-headers)
 * [Operation Name to headers](./op-name-to-header)
 * [Logging](./rhai-logging)
+* [Response modification](./rhai-response-mutate)
 
 ### Native Rust Plugins
 Writing your own plugins in rust!

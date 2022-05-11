@@ -3707,6 +3707,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rhai-response-mutate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rhai_codegen"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

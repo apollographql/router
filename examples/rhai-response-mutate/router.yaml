@@ -1,0 +1,3 @@
+plugins:
+  experimental.rhai:
+    filename: src/rhai_response_mutate.rhai

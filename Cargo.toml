@@ -15,6 +15,7 @@ members = [
     "examples/status-code-propagation",
     "examples/op-name-to-header",
     "examples/rhai-logging",
+    "examples/rhai-response-mutate",
     "examples/jwt-auth",
     "fuzz",
     "uplink",
