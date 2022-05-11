@@ -3,48 +3,16 @@ use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use tower::BoxError;
-use url::Url;
+
+use super::{deser_endpoint, AgentEndpoint};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
     pub endpoint: AgentEndpoint,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub enum AgentEndpoint {
-    Default(AgentDefault),
-    Url(Url),
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum AgentDefault {
-    Default,
-}
-
-fn deser_endpoint<'de, D>(deserializer: D) -> Result<AgentEndpoint, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let mut s = String::deserialize(deserializer)?;
-    if s == "default" {
-        return Ok(AgentEndpoint::Default(AgentDefault::Default));
-    }
-    let mut url = Url::parse(&s).map_err(serde::de::Error::custom)?;
-
-    // support the case of 'collector:4317' where url parses 'collector'
-    // as the scheme instead of the host
-    if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-        s = format!("http://{}", s);
-
-        url = Url::parse(&s).map_err(serde::de::Error::custom)?;
-    }
-    Ok(AgentEndpoint::Url(url))
 }
 
 impl TracingConfigurator for Config {
@@ -67,6 +35,10 @@ impl TracingConfigurator for Config {
 
 #[cfg(test)]
 mod tests {
+    use reqwest::Url;
+
+    use crate::plugins::telemetry::tracing::AgentDefault;
+
     use super::*;
 
     #[test]

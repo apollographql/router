@@ -188,6 +188,32 @@ server:
   listen: /tmp/router.sock
 ```
 
+### Endpoint
+
+By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
+
+To change the default behavior set `server.endpoint` within your `router.yaml`.
+
+```yaml title="router.yaml"
+#
+# server: Configuration of the HTTP server
+#
+server:
+  # The exposed endpoint to answer to GraphQL queries
+  # (Defaults to /)
+  endpoint: /graphql
+```
+
+Wildcards and parameters are supported. For instance:
+
+- `/:my_dynamic_prefix/graphql` matches `/my_project_a/graphql`, `/my_other_project/graphql`
+- `/graphql/*` matches `/graphql/my_project_a`, `/graphql/my_other_project`
+
+> Note:
+>
+> Wildcard in the middle of a path segment (eg: `/*/graphql`) is not supported. Use the parameter notation instead (eg: `/:my_prefix/graphql`).
+> Endpoints must start with `/`.
+
 ### Introspection
 
 By default, the router answers to some introspection queries. You can override this behavior to disable the introspection like so:
