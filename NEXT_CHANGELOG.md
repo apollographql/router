@@ -36,6 +36,19 @@ e.g.: helm install --set router.configuration.telemetry.metrics.prometheus.enabl
 Note: prometheus metrics are not enabled by default in the helm chart.
 
 ## 🐛 Fixes ( :bug: )
+
+### Configuration for Jaeger/Zipkin agent requires an URL instead of a socket address [PR #1018](https://github.com/apollographql/router/pull/1018)
+The router now support URL for a Jaeger or Zipkin agent. So you are able to provide this kind of configuration:
+```yaml
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    jaeger:
+      agent:
+        endpoint: jaeger:14268
+```
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ## 🐛 Fixes ( :bug: )
