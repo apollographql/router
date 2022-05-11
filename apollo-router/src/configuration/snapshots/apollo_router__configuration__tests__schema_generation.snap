@@ -16,8 +16,8 @@ expression: "&schema"
           "default": false,
           "type": "boolean"
         },
-        "recommended_headers": {
-          "description": "Override the headers to check for by setting custom_headers Note that if you set recommended_headers here, you may also want to have a look at your `CORS` configuration, and make sure you either: - did not set any `allow_headers` list (so it defaults to `mirror_request`) - added your recommended headers to the allow_headers list, as shown in the `examples/cors-and-csrf/*.router.yaml` files.",
+        "required_headers": {
+          "description": "Override the headers to check for by setting custom_headers Note that if you set required_headers here, you may also want to have a look at your `CORS` configuration, and make sure you either: - did not set any `allow_headers` list (so it defaults to `mirror_request`) - added your required headers to the allow_headers list, as shown in the `examples/cors-and-csrf/*.router.yaml` files.",
           "default": [
             "x-apollo-operation-name",
             "apollo-require-preflight"

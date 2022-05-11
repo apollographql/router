@@ -16,14 +16,14 @@ struct CSRFConfig {
     disabled: bool,
     /// Override the headers to check for by setting
     /// custom_headers
-    /// Note that if you set recommended_headers here,
+    /// Note that if you set required_headers here,
     /// you may also want to have a look at your `CORS` configuration,
     /// and make sure you either:
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
-    /// - added your recommended headers to the allow_headers list, as shown in the
+    /// - added your required headers to the allow_headers list, as shown in the
     /// `examples/cors-and-csrf/*.router.yaml` files.
     #[serde(default = "apollo_custom_preflight_headers")]
-    recommended_headers: Vec<String>,
+    required_headers: Vec<String>,
 }
 
 fn apollo_custom_preflight_headers() -> Vec<String> {
@@ -57,10 +57,10 @@ impl Plugin for Csrf {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         if !self.config.disabled {
-            let recommended_headers = self.config.recommended_headers.clone();
+            let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
-                    if should_accept(&req, recommended_headers.as_slice()) {
+                    if should_accept(&req, required_headers.as_slice()) {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         let error = crate::Error {
@@ -68,7 +68,7 @@ impl Plugin for Csrf {
                             Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
                             or provide one of the following headers: {}", 
                             NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
-                            recommended_headers.join(", ")),
+                            required_headers.join(", ")),
                             locations: Default::default(),
                             path: Default::default(),
                             extensions: Default::default(),
@@ -89,42 +89,51 @@ impl Plugin for Csrf {
     }
 }
 
-fn should_accept(req: &RouterRequest, recommended_headers: &[String]) -> bool {
+fn should_accept(req: &RouterRequest, required_headers: &[String]) -> bool {
     let headers = req.originating_request.headers();
     content_type_requires_preflight(headers)
-        || recommended_header_is_provided(headers, recommended_headers)
+        || recommended_header_is_provided(headers, required_headers)
 }
 
-fn recommended_header_is_provided(headers: &HeaderMap, recommended_headers: &[String]) -> bool {
-    recommended_headers
+fn recommended_header_is_provided(headers: &HeaderMap, required_headers: &[String]) -> bool {
+    required_headers
         .iter()
         .any(|header| headers.get(header).is_some())
 }
 
 fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
-    headers
+    let joined_content_type_header_value = if let Ok(combined_headers) = headers
         .get_all(header::CONTENT_TYPE)
         .iter()
-        .any(|content_type| {
-            if let Ok(as_str) = content_type.to_str() {
-                // https://github.com/apollographql/router/pull/1006#discussion_r869777439
-                let trimmed_and_tabs_removed = as_str.trim().replace('\t', " ");
-                if let Ok(mime_type) = trimmed_and_tabs_removed.parse::<mime::Mime>() {
-                    !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
-                } else {
-                    // If we get here, this means that we couldn't parse the content-type value into
-                    // a valid mime type... which would be safe enough for us to assume preflight was triggered if the `mime`
-                    // crate followed the fetch specification, but it unfortunately doesn't (see comment above).
-                    //
-                    // Better safe than sorry, we will mark this content_type value as not sufficient to have triggered preflight
-                    false
-                }
-            } else {
-                // If we get here, this means that turning the content-type header value
-                // into a string failed (ie it's not valid UTF-8) which would lead to a preflight.
-                true
-            }
+        .map(|header_value| {
+            // https://github.com/apollographql/router/pull/1006#discussion_r869777439
+            header_value
+                .to_str()
+                .map(|as_str| as_str.trim().replace('\u{0009}', "\u{0020}")) // replace tab with space
         })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        // https://fetch.spec.whatwg.org/#concept-header-list-combine
+        combined_headers.join("\u{002C}\u{0020}") // ', '
+    } else {
+        // We couldn't parse a header value, let's err on the side of caution here
+        return false;
+    };
+
+    dbg!("'\u{002C}\u{0020}'");
+
+    if let Ok(mime_type) = joined_content_type_header_value.parse::<mime::Mime>() {
+        // If we get here, this means that we couldn't parse the content-type value into
+        // a valid mime type... which would be safe enough for us to assume preflight was triggered if the `mime`
+        // crate followed the fetch specification, but it unfortunately doesn't (see comment above).
+        //
+        // Better safe than sorry, we will claim we don't have solid enough reasons
+        // to believe the request will have triggered preflight
+
+        !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
+    } else {
+        false
+    }
 }
 
 register_plugin!("apollo", "csrf", Csrf);
@@ -169,7 +178,7 @@ mod csrf_tests {
 
         let mut service_stack = Csrf::new(CSRFConfig {
             disabled: false,
-            recommended_headers: apollo_custom_preflight_headers(),
+            required_headers: apollo_custom_preflight_headers(),
         })
         .await
         .unwrap()
@@ -214,7 +223,7 @@ mod csrf_tests {
 
         let service_stack = Csrf::new(CSRFConfig {
             disabled: false,
-            recommended_headers: apollo_custom_preflight_headers(),
+            required_headers: apollo_custom_preflight_headers(),
         })
         .await
         .unwrap()
@@ -236,7 +245,7 @@ mod csrf_tests {
 
         let service_stack = Csrf::new(CSRFConfig {
             disabled: false,
-            recommended_headers: apollo_custom_preflight_headers(),
+            required_headers: apollo_custom_preflight_headers(),
         })
         .await
         .unwrap()
@@ -274,7 +283,7 @@ mod csrf_tests {
 
         let service_stack = Csrf::new(CSRFConfig {
             disabled: true,
-            recommended_headers: apollo_custom_preflight_headers(),
+            required_headers: apollo_custom_preflight_headers(),
         })
         .await
         .unwrap()
