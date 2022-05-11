@@ -114,12 +114,11 @@ impl AddAssign<Metrics> for AggregatedMetrics {
         for (k, v) in metrics.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
         }
-        for (k, v) in metrics.referenced_fields_by_type {
-            // Merging is not required because metrics are always groupd by schema and query.
-            // The tuple (client_name, client_version, stats_report_key, referenced_fields_by_type) is always unique.
-            self.referenced_fields_by_type.entry(k).or_insert(v);
-        }
 
+        // Merging is not required because metrics are always grouped by schema and query.
+        // The tuple (client_name, client_version, stats_report_key, referenced_fields_by_type) is always unique.
+        // therefore we can just take ownership of the referenced_fields_by_type map.
+        self.referenced_fields_by_type = metrics.referenced_fields_by_type;
         self.operation_count += metrics.operation_count;
     }
 }
