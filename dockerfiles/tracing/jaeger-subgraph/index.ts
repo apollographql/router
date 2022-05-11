@@ -5,18 +5,16 @@ import { buildFederatedSchema } from '@apollo/federation';
 
 import express from 'express';
 import http from 'http';
-import * as opentracing from 'opentracing';
+const { Tags, FORMAT_HTTP_HEADERS } = require('opentracing');
 
-var initTracer = require('jaeger-client').initTracer;
+var initTracerFromEnv = require('jaeger-client').initTracerFromEnv;
 
 // See schema https://github.com/jaegertracing/jaeger-client-node/blob/master/src/configuration.js#L37
 var config = {
   serviceName: 'accounts',
 };
-var options = {
-  tags: {},
-};
-var tracer = initTracer(config, options);
+var options = {};
+var tracer = initTracerFromEnv(config, options);
 
 const typeDefs = gql`
   extend type Query {
@@ -59,15 +57,29 @@ const users = [
   }
 ];
 
-var dd_options = {
-  'response_code':true,
-  'tags': ['app:my_app']
-}
-
-
 async function startApolloServer(typeDefs, resolvers) {
-  // Required logic for integrating with Express
   const app = express();
+
+  app.use(function jaegerExpressMiddleware(req, res, next) {
+    const parentSpanContext = tracer.extract(FORMAT_HTTP_HEADERS, req.headers)
+    const span = tracer.startSpan('http_server', {
+        childOf: parentSpanContext,
+        tags: {[Tags.SPAN_KIND]: Tags.SPAN_KIND_RPC_SERVER}
+    });
+
+    setTimeout(() => {
+      span.log({
+        statusCode: "200",
+        objectId: "42"
+      });
+    }, 1);
+
+    setTimeout(() => {
+      span.finish();
+    }, 2);
+
+    next();
+  });
 
   const httpServer = http.createServer(app);
 

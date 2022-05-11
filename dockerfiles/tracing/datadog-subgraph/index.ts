@@ -47,12 +47,6 @@ const users = [
   }
 ];
 
-var dd_options = {
-  'response_code':true,
-  'tags': ['app:my_app']
-}
-
-
 async function startApolloServer(typeDefs, resolvers) {
   // Required logic for integrating with Express
   const app = express();

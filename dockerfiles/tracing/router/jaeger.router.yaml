@@ -10,8 +10,6 @@ telemetry:
       service_name: router
     jaeger:
       agent:
-        endpoint: jaeger:14268
-        #endpoint: default
-        #endpoint: 127.0.0.1:14268
+        endpoint: jaeger:6831
     propagation:
       jaeger: true
