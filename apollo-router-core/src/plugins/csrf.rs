@@ -1,5 +1,5 @@
 use crate::{register_plugin, Plugin, RouterRequest, RouterResponse, ServiceBuilderExt};
-use http::header::{self, HeaderName};
+use http::header;
 use http::{HeaderMap, StatusCode};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -10,17 +10,28 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CSRFConfig {
+    /// CSRFConfig is enabled by default;
+    /// set disabled = true to disable the plugin behavior
     #[serde(default)]
     disabled: bool,
+    /// Override the headers to check for by setting
+    /// custom_headers
+    /// Note that if you set recommended_headers here,
+    /// you may also want to have a look at your `CORS` configuration,
+    /// and make sure you either:
+    /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
+    /// - added your recommended headers to the allow_headers list, as shown in the
+    /// `examples/cors-and-csrf/*.router.yaml` files.
+    #[serde(default = "apollo_custom_preflight_headers")]
+    recommended_headers: Vec<String>,
 }
 
-static NON_PREFLIGHTED_HEADER_NAMES: &[HeaderName] = &[
-    header::ACCEPT,
-    header::ACCEPT_LANGUAGE,
-    header::CONTENT_LANGUAGE,
-    header::CONTENT_TYPE,
-    header::RANGE,
-];
+fn apollo_custom_preflight_headers() -> Vec<String> {
+    vec![
+        "x-apollo-operation-name".to_string(),
+        "apollo-require-preflight".to_string(),
+    ]
+}
 
 static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
     "application/x-www-form-urlencoded",
@@ -46,17 +57,18 @@ impl Plugin for Csrf {
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
         if !self.config.disabled {
+            let recommended_headers = self.config.recommended_headers.clone();
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
-                    if should_accept(&req) {
+                    if should_accept(&req, recommended_headers.as_slice()) {
                         Ok(ControlFlow::Continue(req))
                     } else {
                         let error = crate::Error {
                             message: format!("This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                             Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
-                            or provide a header such that the request is preflighted: \
-                            https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests", 
-                            NON_PREFLIGHTED_CONTENT_TYPES.join(",")),
+                            or provide one of the following headers: {}", 
+                            NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
+                            recommended_headers.join(", ")),
                             locations: Default::default(),
                             path: Default::default(),
                             extensions: Default::default(),
@@ -77,34 +89,42 @@ impl Plugin for Csrf {
     }
 }
 
-fn should_accept(req: &RouterRequest) -> bool {
+fn should_accept(req: &RouterRequest, recommended_headers: &[String]) -> bool {
     let headers = req.originating_request.headers();
-    headers_require_preflight(headers) || content_type_requires_preflight(headers)
+    content_type_requires_preflight(headers)
+        || recommended_header_is_provided(headers, recommended_headers)
 }
 
-fn headers_require_preflight(headers: &HeaderMap) -> bool {
-    headers
-        .keys()
-        .any(|header_name| !NON_PREFLIGHTED_HEADER_NAMES.contains(header_name))
+fn recommended_header_is_provided(headers: &HeaderMap, recommended_headers: &[String]) -> bool {
+    recommended_headers
+        .iter()
+        .any(|header| headers.get(header).is_some())
 }
 
 fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
     headers
-        .get(header::CONTENT_TYPE)
-        .map(|content_type| {
+        .get_all(header::CONTENT_TYPE)
+        .iter()
+        .any(|content_type| {
             if let Ok(as_str) = content_type.to_str() {
-                if let Ok(mime_type) = as_str.parse::<mime::Mime>() {
-                    return !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str());
+                // https://github.com/apollographql/router/pull/1006#discussion_r869777439
+                let trimmed_and_tabs_removed = as_str.trim().replace("\t", " ");
+                if let Ok(mime_type) = trimmed_and_tabs_removed.parse::<mime::Mime>() {
+                    !NON_PREFLIGHTED_CONTENT_TYPES.contains(&mime_type.essence_str())
+                } else {
+                    // If we get here, this means that we couldn't parse the content-type value into
+                    // a valid mime type... which would be safe enough for us to assume preflight was triggered if the `mime`
+                    // crate followed the fetch specification, but it unfortunately doesn't (see comment above).
+                    //
+                    // Better safe than sorry, we will mark this content_type value as not sufficient to have triggered preflight
+                    false
                 }
+            } else {
+                // If we get here, this means that turning the content-type header value
+                // into a string failed (ie it's not valid UTF-8) which would lead to a preflight.
+                true
             }
-            // If we get here, this means that either turning the content-type header value
-            // into a string failed (ie it's not valid UTF-8), or we couldn't parse it into
-            // a valid mime type... which is actually *ok* because that would lead to a preflight.
-            // (That said, it would also be reasonable to reject such requests with provided
-            // yet unparsable Content-Type here.)
-            true
         })
-        .unwrap_or(false)
 }
 
 register_plugin!("apollo", "csrf", Csrf);
@@ -147,10 +167,13 @@ mod csrf_tests {
 
         let mock = mock_service.build();
 
-        let mut service_stack = Csrf::new(CSRFConfig { disabled: false })
-            .await
-            .unwrap()
-            .router_service(mock.boxed());
+        let mut service_stack = Csrf::new(CSRFConfig {
+            disabled: false,
+            recommended_headers: apollo_custom_preflight_headers(),
+        })
+        .await
+        .unwrap()
+        .router_service(mock.boxed());
 
         let with_preflight_content_type = RouterRequest::fake_builder()
             .headers(
@@ -169,16 +192,11 @@ mod csrf_tests {
             .await
             .unwrap();
 
-        match res.response.into_body() {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(res.data.unwrap(), expected_response_data);
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
+        assert_data(res, expected_response_data.clone());
 
         let with_preflight_header = RouterRequest::fake_builder()
             .headers(
-                [("x-this-is-a-custom-header".into(), "this-is-a-test".into())]
+                [("apollo-require-preflight".into(), "this-is-a-test".into())]
                     .into_iter()
                     .collect(),
             )
@@ -187,22 +205,20 @@ mod csrf_tests {
 
         let res = service_stack.oneshot(with_preflight_header).await.unwrap();
 
-        match res.response.into_body() {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(res.data.unwrap(), expected_response_data);
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
+        assert_data(res, expected_response_data);
     }
 
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let mock = MockRouterService::new().build();
 
-        let service_stack = Csrf::new(CSRFConfig { disabled: false })
-            .await
-            .unwrap()
-            .router_service(mock.boxed());
+        let service_stack = Csrf::new(CSRFConfig {
+            disabled: false,
+            recommended_headers: apollo_custom_preflight_headers(),
+        })
+        .await
+        .unwrap()
+        .router_service(mock.boxed());
 
         let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
 
@@ -211,24 +227,20 @@ mod csrf_tests {
             .await
             .unwrap();
 
-        match res.response.into_body() {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-                Please either specify a 'content-type' header (with a mime-type that is not one of application/x-www-form-urlencoded,multipart/form-data,text/plain) \
-                or provide a header such that the request is preflighted: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests");
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
+        assert_error(res);
     }
 
     #[tokio::test]
     async fn it_rejects_non_preflighted_content_type_request() {
         let mock = MockRouterService::new().build();
 
-        let service_stack = Csrf::new(CSRFConfig { disabled: false })
-            .await
-            .unwrap()
-            .router_service(mock.boxed());
+        let service_stack = Csrf::new(CSRFConfig {
+            disabled: false,
+            recommended_headers: apollo_custom_preflight_headers(),
+        })
+        .await
+        .unwrap()
+        .router_service(mock.boxed());
 
         let non_preflighted_request = RouterRequest::fake_builder()
             .headers(
@@ -244,14 +256,7 @@ mod csrf_tests {
             .await
             .unwrap();
 
-        match res.response.into_body() {
-            ResponseBody::GraphQL(res) => {
-                assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-                Please either specify a 'content-type' header (with a mime-type that is not one of application/x-www-form-urlencoded,multipart/form-data,text/plain) \
-                or provide a header such that the request is preflighted: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests");
-            }
-            other => panic!("expected graphql response, found {:?}", other),
-        }
+        assert_error(res);
     }
 
     #[tokio::test]
@@ -267,10 +272,13 @@ mod csrf_tests {
 
         let mock = mock_service.build();
 
-        let service_stack = Csrf::new(CSRFConfig { disabled: true })
-            .await
-            .unwrap()
-            .router_service(mock.boxed());
+        let service_stack = Csrf::new(CSRFConfig {
+            disabled: true,
+            recommended_headers: apollo_custom_preflight_headers(),
+        })
+        .await
+        .unwrap()
+        .router_service(mock.boxed());
 
         let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
 
@@ -279,9 +287,32 @@ mod csrf_tests {
             .await
             .unwrap();
 
+        assert_data(res, expected_response_data);
+    }
+
+    fn assert_data(res: RouterResponse, expected_response_data: serde_json_bytes::Value) {
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {
                 assert_eq!(res.data.unwrap(), expected_response_data);
+            }
+            other => panic!("expected graphql response, found {:?}", other),
+        }
+    }
+
+    fn assert_error(res: RouterResponse) {
+        match res.response.into_body() {
+            ResponseBody::GraphQL(res) => {
+                assert_eq!(
+                    1,
+                    res.errors.len(),
+                    "expected one(1) error in the RouterResponse, found {}\n{:?}",
+                    res.errors.len(),
+                    res.errors
+                );
+                assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+                Please either specify a 'content-type' header \
+                (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
+                or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight");
             }
             other => panic!("expected graphql response, found {:?}", other),
         }

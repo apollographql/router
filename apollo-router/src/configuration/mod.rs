@@ -20,7 +20,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use thiserror::Error;
-use tower_http::cors::{Any, CorsLayer, Origin};
+use tower_http::cors::{self, CorsLayer};
 use typed_builder::TypedBuilder;
 
 /// Configuration error.
@@ -321,10 +321,19 @@ pub struct Cors {
     pub allow_credentials: Option<bool>,
 
     /// The headers to allow.
-    /// Defaults to the required request header for Apollo Studio
-    #[serde(default = "default_cors_headers")]
-    #[builder(default_code = "default_cors_headers()")]
-    pub allow_headers: Vec<String>,
+    /// If this is not set, we will default to
+    /// the `mirror_request` mode, which mirrors the received
+    /// `access-control-request-headers` preflight has sent.
+    ///
+    /// Note that if you set headers here,
+    /// you also want to have a look at your `CSRF` plugins configuration,
+    /// and make sure you either:
+    /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
+    /// - defined `csrf` recommended headers in your yml configuration, as shown in the
+    /// `examples/cors-and-csrf/*.router.yaml` files.
+    #[serde(default)]
+    #[builder(default)]
+    pub allow_headers: Option<Vec<String>>,
 
     #[serde(default)]
     #[builder(default)]
@@ -346,16 +355,6 @@ pub struct Cors {
 
 fn default_origins() -> Vec<String> {
     vec!["https://studio.apollographql.com".into()]
-}
-
-fn default_cors_headers() -> Vec<String> {
-    vec![
-        "Content-Type".into(),
-        "apollographql-client-name".into(),
-        "apollographql-client-version".into(),
-        "x-apollo-operation-name".into(),
-        "apollo-require-preflight".into(),
-    ]
 }
 
 fn default_cors_methods() -> Vec<String> {
@@ -382,41 +381,50 @@ impl Default for Server {
 
 impl Cors {
     pub fn into_layer(self) -> CorsLayer {
-        let cors =
-            CorsLayer::new()
-                .allow_credentials(self.allow_credentials.unwrap_or_default())
-                .allow_headers(self.allow_headers.iter().filter_map(|header| {
-                    header
-                        .parse()
-                        .map_err(|_| tracing::error!("header name '{header}' is not valid"))
-                        .ok()
-                }))
-                .expose_headers(self.expose_headers.unwrap_or_default().iter().filter_map(
-                    |header| {
+        let allow_headers = if let Some(headers_to_allow) = self.allow_headers {
+            cors::AllowHeaders::list(headers_to_allow.iter().filter_map(|header| {
+                header
+                    .parse()
+                    .map_err(|_| tracing::error!("header name '{header}' is not valid"))
+                    .ok()
+            }))
+        } else {
+            cors::AllowHeaders::mirror_request()
+        };
+        let cors = CorsLayer::new()
+            .allow_credentials(self.allow_credentials.unwrap_or_default())
+            .allow_headers(allow_headers)
+            .expose_headers(cors::ExposeHeaders::list(
+                self.expose_headers
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|header| {
                         header
                             .parse()
                             .map_err(|_| tracing::error!("header name '{header}' is not valid"))
                             .ok()
-                    },
-                ))
-                .allow_methods(self.methods.iter().filter_map(|method| {
+                    }),
+            ))
+            .allow_methods(cors::AllowMethods::list(self.methods.iter().filter_map(
+                |method| {
                     method
                         .parse()
                         .map_err(|_| tracing::error!("method '{method}' is not valid"))
                         .ok()
-                }));
+                },
+            )));
 
         if self.allow_any_origin.unwrap_or_default() {
-            cors.allow_origin(Any)
+            cors.allow_origin(cors::Any)
         } else {
-            cors.allow_origin(Origin::list(self.origins.into_iter().filter_map(
-                |origin| {
+            cors.allow_origin(cors::AllowOrigin::list(
+                self.origins.into_iter().filter_map(|origin| {
                     origin
                         .parse()
                         .map_err(|_| tracing::error!("origin '{origin}' is not valid"))
                         .ok()
-                },
-            )))
+                }),
+            ))
         }
     }
 }
@@ -759,6 +767,11 @@ mod tests {
         assert!(
             !cors.allow_any_origin.unwrap_or_default(),
             "Allow any origin should be disabled by default"
+        );
+
+        assert!(
+            cors.allow_headers.is_none(),
+            "No allow_headers list should be present by default"
         );
     }
 

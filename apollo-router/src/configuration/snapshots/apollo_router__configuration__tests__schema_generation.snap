@@ -12,8 +12,20 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "disabled": {
+          "description": "CSRFConfig is enabled by default; set disabled = true to disable the plugin behavior",
           "default": false,
           "type": "boolean"
+        },
+        "recommended_headers": {
+          "description": "Override the headers to check for by setting custom_headers Note that if you set recommended_headers here, you may also want to have a look at your `CORS` configuration, and make sure you either: - did not set any `allow_headers` list (so it defaults to `mirror_request`) - added your recommended headers to the allow_headers list, as shown in the `examples/cors-and-csrf/*.router.yaml` files.",
+          "default": [
+            "x-apollo-operation-name",
+            "apollo-require-preflight"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -357,18 +369,13 @@ expression: "&schema"
               "nullable": true
             },
             "allow_headers": {
-              "description": "The headers to allow. Defaults to the required request header for Apollo Studio",
-              "default": [
-                "Content-Type",
-                "apollographql-client-name",
-                "apollographql-client-version",
-                "x-apollo-operation-name",
-                "apollo-require-preflight"
-              ],
+              "description": "The headers to allow. If this is not set, we will default to the `mirror_request` mode, which mirrors the received `access-control-request-headers` preflight has sent.\n\nNote that if you set headers here, you also want to have a look at your `CSRF` plugins configuration, and make sure you either: - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight` - defined `csrf` recommended headers in your yml configuration, as shown in the `examples/cors-and-csrf/*.router.yaml` files.",
+              "default": null,
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "nullable": true
             },
             "expose_headers": {
               "description": "Which response headers should be made available to scripts running in the browser, in response to a cross-origin request.",
