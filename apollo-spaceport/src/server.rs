@@ -2,25 +2,21 @@
 use crate::{
     agent::{
         reporter_server::{Reporter, ReporterServer},
-        ReporterGraph, ReporterResponse,
+        ReporterRequest, ReporterResponse,
     },
     report::Report,
-    ReporterStats, ReporterTrace, TracesAndStats,
 };
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use prost::Message;
-use prost_types::Timestamp;
 use reqwest::Client;
-use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
@@ -29,72 +25,23 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
 
-type StatsReportKey = String;
-type GraphUsageMap = Arc<Mutex<HashMap<ReporterGraph, QueryUsage>>>;
-
-#[derive(Debug, Default)]
-struct QueryUsage {
-    traces_and_stats_for_key: HashMap<StatsReportKey, TracesAndStats>,
-    operation_count: u64,
-}
+type QueuedReports = Arc<Mutex<Vec<ReporterRequest>>>;
 
 static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 static INGRESS_CLOCK_TICK: Duration = Duration::from_secs(5);
 static TRIGGER_BATCH_LIMIT: u32 = 50; // TODO: arbitrary but it seems to work :D
 
-/// Allows common transfer code to be more easily represented
-#[allow(clippy::large_enum_variant)]
-enum StatsOrTrace {
-    Stats(ReporterStats),
-    Trace(ReporterTrace),
-}
-
-impl StatsOrTrace {
-    fn get_traces_and_stats(&self) -> TracesAndStats {
-        match self {
-            StatsOrTrace::Stats(s) => TracesAndStats {
-                stats_with_context: vec![],
-                referenced_fields_by_type: s.fields.clone(),
-                ..Default::default()
-            },
-            StatsOrTrace::Trace(_) => TracesAndStats {
-                trace: vec![],
-                ..Default::default()
-            },
-        }
-    }
-
-    fn graph(&self) -> Option<ReporterGraph> {
-        match self {
-            StatsOrTrace::Stats(s) => s.graph.clone(),
-            StatsOrTrace::Trace(t) => t.graph.clone(),
-        }
-    }
-
-    fn key(&self) -> String {
-        match self {
-            StatsOrTrace::Stats(s) => s.key.clone(),
-            StatsOrTrace::Trace(t) => t.key.clone(),
-        }
-    }
-
-    fn operation_count(&self) -> u64 {
-        match self {
-            StatsOrTrace::Stats(s) => s.operation_count,
-            StatsOrTrace::Trace(_) => todo!("trace reporting is not supported yet"),
-        }
-    }
-}
-
 /// Accept Traces and Stats from clients and transfer to an Apollo Ingress
 pub struct ReportSpaceport {
     shutdown_signal: Option<Pin<Box<dyn Future<Output = ()> + Send + Sync>>>,
     listener: Option<TcpListener>,
     addr: SocketAddr,
-    // This Map will only have a single entry if used internally from a router.
-    // (because a router can only be serving a single graph)
-    graph_usage: GraphUsageMap,
+    // This vec will contains all queued reports to send.
+    // Previously we were doing some aggregation on metrics in Spaceport, but for now this has been removed.
+    // Each report potentially contains details about the machine that the report came from, so we would
+    // have to think about if aggregation is really appropriate at the Spaceport level.
+    queued_reports: QueuedReports,
     tx: Sender<()>,
     total: Arc<AtomicU32>,
 }
@@ -118,8 +65,8 @@ impl ReportSpaceport {
 
         // Spawn a task which will check if there are reports to
         // submit every interval.
-        let graph_usage: GraphUsageMap = Arc::new(Mutex::new(HashMap::new()));
-        let task_graph_usage = graph_usage.clone();
+        let queued_reports: QueuedReports = Arc::new(Mutex::new(Vec::new()));
+        let task_queued_reports = queued_reports.clone();
         let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(10);
         let total = Arc::new(AtomicU32::new(0u32));
         let task_total = total.clone();
@@ -134,14 +81,14 @@ impl ReportSpaceport {
                     mopt = rx.recv() => {
                         tracing::debug!("spaceport triggered");
                         match mopt {
-                            Some(_msg) => process_all_graphs(&client, task_graph_usage.clone()).await,
+                            Some(_msg) => process_all_reports(&client, task_queued_reports.clone()).await,
                             None => break
                         }
                     },
                     _ = interval.tick() => {
                         tracing::trace!("spaceport ticked");
                         task_total.store(0, Ordering::SeqCst);
-                        process_all_graphs(&client, task_graph_usage.clone()).await;
+                        process_all_reports(&client, task_queued_reports.clone()).await;
                     }
                 };
             }
@@ -150,7 +97,7 @@ impl ReportSpaceport {
             shutdown_signal,
             listener: Some(listener),
             addr,
-            graph_usage,
+            queued_reports: queued_reports,
             tx,
             total,
         })
@@ -266,46 +213,25 @@ impl ReportSpaceport {
 
 #[tonic::async_trait]
 impl Reporter for ReportSpaceport {
-    async fn add_stats(
+    async fn add(
         &self,
-        request: Request<ReporterStats>,
+        request: Request<ReporterRequest>,
     ) -> Result<Response<ReporterResponse>, Status> {
         tracing::debug!("received request: {:?}", request);
         let msg = request.into_inner();
-        self.add_stats_or_trace(StatsOrTrace::Stats(msg)).await
-    }
-
-    async fn add_trace(
-        &self,
-        request: Request<ReporterTrace>,
-    ) -> Result<Response<ReporterResponse>, Status> {
-        tracing::debug!("received request: {:?}", request);
-        let msg = request.into_inner();
-        self.add_stats_or_trace(StatsOrTrace::Trace(msg)).await
+        self.add_report(msg).await
     }
 }
 
 impl ReportSpaceport {
-    async fn add_stats_or_trace(
+    async fn add_report(
         &self,
-        record: StatsOrTrace,
+        report: ReporterRequest,
     ) -> Result<Response<ReporterResponse>, Status> {
-        let mut graph_usage = self.graph_usage.lock().await;
-        let mut query_usage = graph_usage
-            .entry(record.graph().unwrap())
-            .or_insert_with(Default::default);
-        let entry = query_usage
-            .traces_and_stats_for_key
-            .entry(record.key())
-            .or_insert_with(|| record.get_traces_and_stats());
-        query_usage.operation_count += record.operation_count();
-
-        match record {
-            StatsOrTrace::Stats(mut s) => entry.stats_with_context.push(s.stats.take().unwrap()),
-            StatsOrTrace::Trace(mut t) => entry.trace.push(t.trace.take().unwrap()),
-        }
+        let mut queued_reports = self.queued_reports.lock().await;
+        queued_reports.push(report);
         // Drop the graph_usage lock to maximise concurrency
-        drop(graph_usage);
+        drop(queued_reports);
 
         // This is inherently both imprecise and racy, but it doesn't matter
         // because we are just hinting to the spaceport that it's probably a
@@ -338,8 +264,8 @@ impl ReportSpaceport {
     }
 }
 
-async fn process_all_graphs(client: &Client, task_graph_usage: GraphUsageMap) {
-    for result in extract_graph_usage(client, task_graph_usage).await {
+async fn process_all_reports(client: &Client, queued_reports: QueuedReports) {
+    for result in process_reports(client, queued_reports).await {
         match result {
             Ok(v) => tracing::debug!("report submission succeeded: {:?}", v),
             Err(e) => tracing::error!("report submission failed: {}", e),
@@ -347,45 +273,23 @@ async fn process_all_graphs(client: &Client, task_graph_usage: GraphUsageMap) {
     }
 }
 
-async fn extract_graph_usage(
+async fn process_reports(
     client: &Client,
-    task_graph_usage: GraphUsageMap,
+    queued_reports: QueuedReports,
 ) -> Vec<Result<Response<ReporterResponse>, Status>> {
-    let mut all_entries = task_graph_usage.lock().await;
-    let drained = all_entries
-        .drain()
-        .collect::<Vec<(ReporterGraph, QueryUsage)>>();
+    let mut all_entries = queued_reports.lock().await;
+    let drained = std::mem::replace(&mut *all_entries, Vec::new());
     // Release the lock ASAP so that clients can continue to add data
     drop(all_entries);
     let mut results = Vec::with_capacity(drained.len());
-    for (graph, query_usage) in drained {
-        tracing::debug!("submitting: {} operations", query_usage.operation_count);
-        tracing::debug!("containing: {:?}", query_usage);
-        match crate::Report::try_new(&graph.reference) {
-            Ok(mut report) => {
-                report.traces_per_query = query_usage.traces_and_stats_for_key;
-                let time = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        results.push(Err(Status::internal(e.to_string())));
-                        continue;
-                    }
-                };
-                report.operation_count = query_usage.operation_count;
-                let seconds = time.as_secs();
-                let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-                let ts_end = Timestamp {
-                    seconds: seconds as i64,
-                    nanos: nanos as i32,
-                };
-                report.end_time = Some(ts_end);
-
-                results.push(ReportSpaceport::submit_report(client, graph.key, report).await)
-            }
-            Err(e) => {
-                results.push(Err(Status::internal(e.to_string())));
-                continue;
-            }
+    tracing::debug!("submitting: {} reports", drained.len());
+    for report in drained {
+        if let Some(report_to_send) = report.report {
+            results.push(
+                ReportSpaceport::submit_report(client, report.apollo_key, report_to_send).await,
+            )
+        } else {
+            results.push(Err(Status::internal("missing report")));
         }
     }
     results

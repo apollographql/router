@@ -2,7 +2,7 @@
 // This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::plugins::telemetry::metrics::apollo::{Metrics, MetricsKey, QueryLatencyStats, Sender};
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -469,41 +469,57 @@ impl Telemetry {
         _result: &Result<RouterResponse, BoxError>,
         duration: Duration,
     ) {
-        if let Some(usage_reporting) = context
+        let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
         {
-            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
             let operation_count = operation_count(&usage_reporting.stats_report_key);
-
-            //The basic metrics only has operation count
-            let mut apollo_metrics = metrics::apollo::Metrics {
-                operation_count,
-                client_name: context
-                    .get(CLIENT_NAME)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-                client_version: context
-                    .get(CLIENT_VERSION)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-                stats_report_key: usage_reporting.stats_report_key.to_string(),
+            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
+            if exclude.unwrap_or_default() {
+                // The request was excluded don't report the details, but do report the operation count
+                Metrics {
+                    operation_count,
+                    key: MetricsKey::Excluded,
+                    ..Default::default()
+                }
+            } else {
+                metrics::apollo::Metrics {
+                    operation_count,
+                    key: metrics::apollo::MetricsKey::Regular {
+                        client_name: context
+                            .get(CLIENT_NAME)
+                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        client_version: context
+                            .get(CLIENT_VERSION)
+                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        stats_report_key: usage_reporting.stats_report_key.to_string(),
+                    },
+                    referenced_fields_by_type: usage_reporting
+                        .referenced_fields_by_type
+                        .into_iter()
+                        .map(|(k, v)| (k, convert(v)))
+                        .collect(),
+                    // TODO Add some more info to the query latency stats.
+                    query_latency_stats: QueryLatencyStats {
+                        latency_count: duration,
+                        request_count: 1,
+                        requests_without_field_instrumentation: 1,
+                        ..Default::default()
+                    },
+                    per_type_stat: Default::default(),
+                }
+            }
+        } else {
+            // Usage reporting was missing, so it counts as one operation.
+            Metrics {
+                operation_count: 1,
+                key: MetricsKey::Excluded,
                 ..Default::default()
-            };
-            if !exclude.unwrap_or_default() {
-                apollo_metrics.referenced_fields_by_type = usage_reporting
-                    .referenced_fields_by_type
-                    .into_iter()
-                    .map(|(k, v)| (k, convert(v)))
-                    .collect();
-                apollo_metrics.query_latency_stats.latency_count = duration;
-                apollo_metrics.query_latency_stats.request_count = 1;
-                apollo_metrics
-                    .query_latency_stats
-                    .requests_without_field_instrumentation = 1;
-            };
-            sender.send(apollo_metrics);
+            }
         };
+        sender.send(metrics);
     }
 
     fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
