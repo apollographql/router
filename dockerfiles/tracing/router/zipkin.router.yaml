@@ -1,0 +1,17 @@
+server:
+  listen: 0.0.0.0:4000
+  cors:
+    origins:
+      - https://studio.apollographql.com
+
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    zipkin:
+      agent:
+        endpoint: default
+        #endpoint: default
+        #endpoint: 127.0.0.1:14268
+    propagation:
+      zipkin: true 

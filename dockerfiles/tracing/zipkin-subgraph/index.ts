@@ -1,0 +1,116 @@
+import { ApolloServer, gql } from 'apollo-server-express';
+import { ApolloServerPluginDrainHttpServer } from 'apollo-server-core';
+import { buildFederatedSchema } from '@apollo/federation';
+
+
+import express from 'express';
+import http from 'http';
+const ZipkinJavascriptOpentracing = require("zipkin-javascript-opentracing");
+
+const { recorder } = require("./recorder");
+
+const tracer = new ZipkinJavascriptOpentracing({
+  serviceName: "My Service",
+  recorder,
+  kind: "client"
+});
+
+const typeDefs = gql`
+  extend type Query {
+    me: User
+  }
+
+  type User @key(fields: "id") {
+    id: ID!
+    name: String
+    username: String
+  }
+`;
+
+const resolvers = {
+  Query: {
+    me() {
+      return users[0];
+    }
+  },
+  User: {
+    __resolveReference(object) {
+      return users.find(user => user.id === object.id);
+    }
+  }
+};
+
+
+const users = [
+  {
+    id: "1",
+    name: "Ada Lovelace",
+    birthDate: "1815-12-10",
+    username: "@ada"
+  },
+  {
+    id: "2",
+    name: "Alan Turing",
+    birthDate: "1912-06-23",
+    username: "@complete"
+  }
+];
+
+var dd_options = {
+  'response_code':true,
+  'tags': ['app:my_app']
+}
+
+
+async function startApolloServer(typeDefs, resolvers) {
+  // Required logic for integrating with Express
+  const app = express();
+  app.use(function zipkinExpressMiddleware(req, res, next) {
+    const span = tracer.startSpan("My Span");
+  
+    setTimeout(() => {
+      span.log({
+        statusCode: "200",
+        objectId: "42"
+      });
+    }, 100);
+  
+    setTimeout(() => {
+      span.finish();
+    }, 200);
+  
+    next();
+  });
+
+  const httpServer = http.createServer(app);
+
+  // Same ApolloServer initialization as before, plus the drain plugin.
+  const server = new ApolloServer({
+    schema: buildFederatedSchema([
+      {
+        typeDefs,
+        resolvers
+      }
+    ]),
+    csrfPrevention: true,
+    plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
+  });
+
+  // More required logic for integrating with Express
+  await server.start();
+  server.applyMiddleware({
+    app,
+
+    // By default, apollo-server hosts its GraphQL endpoint at the
+    // server root. However, *other* Apollo Server packages host it at
+    // /graphql. Optionally provide this to match apollo-server.
+    path: '/'
+  });
+
+  // Modified server startup
+  await new Promise<void>(resolve => httpServer.listen({ port: 4001 }, resolve));
+  console.log(`🚀 Server ready at http://localhost:4001${server.graphqlPath}`);
+}
+
+console.log("starting")
+startApolloServer(typeDefs, resolvers)
