@@ -24,9 +24,17 @@ Description! And a link to a [reference](http://url)
 
 # [v0.9.0-rc.1] - (unreleased)
 ## ❗ BREAKING ❗
-
-## ❗ BREAKING ❗
 ## 🚀 Features ( :rocket: )
+
+### helm chart now supports prometheus metrics [PR #1005](https://github.com/apollographql/router/pull/1005)
+The router has supported exporting prometheus metrics for a while. This change updates our helm chart to enable router deployment prometheus metrics. 
+
+Configure by updating your values.yaml or by specifying the value on your helm install command line.
+
+e.g.: helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true <etc...>
+
+Note: prometheus metrics are not enabled by default in the helm chart.
+
 ## 🐛 Fixes ( :bug: )
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
