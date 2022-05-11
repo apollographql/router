@@ -10,7 +10,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CSRFConfig {
-    /// CSRFConfig is enabled by default;
+    /// The CSRF plugin is enabled by default;
     /// set disabled = true to disable the plugin behavior
     #[serde(default)]
     disabled: bool,
@@ -21,7 +21,7 @@ struct CSRFConfig {
     /// and make sure you either:
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
-    /// `examples/cors-and-csrf/*.router.yaml` files.
+    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
     #[serde(default = "apollo_custom_preflight_headers")]
     required_headers: Vec<String>,
 }
@@ -42,7 +42,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 /// The Csrf plugin makes sure any request received would have been preflighted if it was sent by a browser.
 ///
 /// Quoting the great apollo server comment:
-/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26 
+/// https://github.com/apollographql/apollo-server/blob/12bf5fc8ef305caa6a8848e37f862d32dae5957f/packages/server/src/preventCsrf.ts#L26
 ///
 /// We don't want random websites to be able to execute actual GraphQL operations
 /// from a user's browser unless our CORS policy supports it. It's not good
@@ -140,7 +140,7 @@ fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
         .map(|header_value| {
             // The mime type parser we're using is a bit askew,
             // so we're going to perform a bit of trimming, and character replacement
-            // before we combine the header values 
+            // before we combine the header values
             // https://github.com/apollographql/router/pull/1006#discussion_r869777439
             header_value
                 .to_str()
@@ -176,7 +176,7 @@ fn content_type_requires_preflight(headers: &HeaderMap) -> bool {
 // so we will do the oposite:
 // We hereby challenge any client to provide one of the required_headers.
 // Browsers definitely will not add any "x-apollo-operation-name" or "apollo-require-preflight" to every request anytime soon,
-// which means if the header is present, javascript has added it, and the browser will have triggered preflight. 
+// which means if the header is present, javascript has added it, and the browser will have triggered preflight.
 fn recommended_header_is_provided(headers: &HeaderMap, required_headers: &[String]) -> bool {
     required_headers
         .iter()

@@ -329,8 +329,8 @@ pub struct Cors {
     /// you also want to have a look at your `CSRF` plugins configuration,
     /// and make sure you either:
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
-    /// - defined `csrf` recommended headers in your yml configuration, as shown in the
-    /// `examples/cors-and-csrf/*.router.yaml` files.
+    /// - defined `csrf` required headers in your yml configuration, as shown in the
+    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
     #[serde(default)]
     #[builder(default)]
     pub allow_headers: Option<Vec<String>>,
