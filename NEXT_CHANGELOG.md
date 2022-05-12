@@ -24,6 +24,33 @@ Description! And a link to a [reference](http://url)
 
 # [v0.9.0-rc.1] - (unreleased)
 ## ❗ BREAKING ❗
+
+### Remove the agent endpoint configuration for Zipkin [PR #1025](https://github.com/apollographql/router/pull/1025)
+Zipkin only supports the collector endpoint URL configuration.
+
+The Zipkin configuration changes from:
+
+```yaml
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    zipkin:
+      collector:
+        endpoint: default
+```
+
+to:
+
+```yaml
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    zipkin:
+      endpoint: default
+```
+
 ## 🚀 Features ( :rocket: )
 
 ### helm chart now supports prometheus metrics [PR #1005](https://github.com/apollographql/router/pull/1005)
@@ -49,15 +76,10 @@ telemetry:
         endpoint: jaeger:14268
 ```
 
-### Remove the agent endpoint configuration for Zipkin [PR #1025](https://github.com/apollographql/router/pull/1025)
-Zipkin only supports the collector endpoint URL configuration.
+### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
+Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
-
-## 🐛 Fixes ( :bug: )
-
-### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
-Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
