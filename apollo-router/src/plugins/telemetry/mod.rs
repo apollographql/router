@@ -40,7 +40,7 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
-pub(crate) mod apollo;
+pub mod apollo;
 pub mod config;
 mod metrics;
 mod otlp;
@@ -630,7 +630,7 @@ mod tests {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "tracing": null }))
+            .create_instance(&serde_json::json!({"apollo": {}, "tracing": {}}))
             .await
             .unwrap();
     }
@@ -641,8 +641,8 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
+                "apollo": {},
                 "tracing": {
-
                     "trace_config": {
                         "service_name": "router",
                         "attributes": {
