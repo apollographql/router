@@ -816,12 +816,12 @@ impl Rhai {
             // Register a Context indexer so we can get/set context
             .register_indexer_get_result(|x: &mut Context, key: &str| {
                 x.get(key)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string().into())
             })
             .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
                 x.insert(key, value)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
@@ -834,7 +834,7 @@ impl Rhai {
             })
             // Request.query
             .register_get("query", |x: &mut Request| {
-                x.query.clone().map_or(Dynamic::from(()), Dynamic::from)
+                x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
             })
             .register_set("query", |x: &mut Request, value: &str| {
                 x.query = Some(value.to_string());
@@ -843,7 +843,7 @@ impl Rhai {
             .register_get("operation_name", |x: &mut Request| {
                 x.operation_name
                     .clone()
-                    .map_or(Dynamic::from(()), Dynamic::from)
+                    .map_or(Dynamic::UNIT, Dynamic::from)
             })
             .register_set("operation_name", |x: &mut Request, value: &str| {
                 x.operation_name = Some(value.to_string());
@@ -866,21 +866,50 @@ impl Rhai {
                 x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
                 Ok(())
             })
-            // ResponseBody.resposne
+            .register_get_result("data", |x: &mut ResponseBody| match x {
+                ResponseBody::GraphQL(resp) => {
+                    // Because we are short-cutting the response here
+                    // we need to select the data we need from our resp
+                    to_dynamic(resp.data.clone())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            .register_set_result("data", |x: &mut ResponseBody, om: Map| match x {
+                ResponseBody::GraphQL(resp) => {
+                    // Because we are short-cutting the response here
+                    // we need to wrap our data.
+                    let v = rhai::format_map_as_json(&om);
+                    let v_j: Value = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                    let data_json = serde_json::json!({ "data": v_j });
+                    let data: Response =
+                        serde_json::from_value(data_json).map_err(|e| e.to_string())?;
+                    let _ = std::mem::replace(resp, data);
+                    Ok(())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            // ResponseBody.response
+            /* XXX: We short-cut the treatment of ResponseBody processing to directly
+             * manipulate "data" rather than moving the enum as we probably should.
+             * We do this to "harmonise" the interactions with response data for Rhai
+             * scripts and (effectively) hide the ResponseBody enum from sight.
+             * At some point: ResponseBody should probably be taken out of the
+             * codebase, so this is probably a good decision.
             .register_get_result("response", |x: &mut ResponseBody| match x {
                 ResponseBody::GraphQL(resp) => Ok(resp.clone()),
                 _ => Err("wrong type of response".into()),
             })
             .register_set_result("response", |x: &mut ResponseBody, value: Response| {
                 match x {
-                    ResponseBody::GraphQL(_resp) => *x = ResponseBody::GraphQL(value),
+                    ResponseBody::GraphQL(resp) => std::mem::replace(resp, value),
                     _ => return Err("wrong type of response".into()),
-                }
+                };
                 Ok(())
             })
+            */
             // Response.label
             .register_get("label", |x: &mut Response| {
-                x.label.clone().map_or(Dynamic::from(()), Dynamic::from)
+                x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
             })
             .register_set("label", |x: &mut Response, value: &str| {
                 x.label = Some(value.to_string());
