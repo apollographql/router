@@ -101,8 +101,8 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
 }
 
 async fn create_plugins(
-    configuration: &Arc<Configuration>,
-    schema: &Arc<Schema>,
+    configuration: &Configuration,
+    schema: &Schema,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
     let plugin_registry = apollo_router_core::plugins();

@@ -208,14 +208,12 @@ impl managed::Manager for ReporterManager {
 
 #[cfg(test)]
 mod test {
-    use std::future::Future;
-
-    use http::header::HeaderName;
-
     use apollo_router_core::utils::test::IntoSchema::Canned;
     use apollo_router_core::utils::test::PluginTestHarness;
     use apollo_router_core::RouterRequest;
     use apollo_router_core::{Context, Plugin};
+    use http::header::HeaderName;
+    use std::future::Future;
 
     use crate::plugins::telemetry::{apollo, Telemetry, STUDIO_EXCLUDE};
 

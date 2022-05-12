@@ -41,7 +41,7 @@ use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
 pub(crate) mod apollo;
-pub(crate) mod config;
+pub mod config;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -479,8 +479,11 @@ impl Telemetry {
             .unwrap_or_default()
         {
             let operation_count = operation_count(&usage_reporting.stats_report_key);
-            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
-            if exclude.unwrap_or_default() {
+
+            if context
+                .get(STUDIO_EXCLUDE)
+                .map_or(false, |x| x.unwrap_or_default())
+            {
                 // The request was excluded don't report the details, but do report the operation count
                 Report {
                     operation_count,
