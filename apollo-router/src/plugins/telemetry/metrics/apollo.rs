@@ -119,7 +119,6 @@ impl ApolloMetricsExporter {
         // * If the exporter is dropped the remaining records are flushed.
         let (tx, rx) = mpsc::channel::<Report>(DEFAULT_QUEUE_SIZE);
 
-        // TODO fill out this stuff
         let header = apollo_spaceport::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,

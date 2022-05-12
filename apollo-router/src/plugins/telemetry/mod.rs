@@ -40,8 +40,8 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
-mod apollo;
-pub mod config;
+pub(crate) mod apollo;
+pub(crate) mod config;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -149,9 +149,10 @@ impl Plugin for Telemetry {
 
     async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = config.apollo.get_or_insert_with(|| {
-            serde_json::from_str("{}").expect("could not create default telemetry apollo config")
-        });
+        let apollo = config
+            .apollo
+            .as_mut()
+            .expect("telemetry apollo config must be present");
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let (spaceport, shutdown_tx) = match apollo {

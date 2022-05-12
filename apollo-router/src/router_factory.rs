@@ -110,18 +110,6 @@ async fn create_plugins(
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
         // Ugly hack to get the schema sha into the the telemetry plugin
-        if name == "apollo.telemetry" {
-            if let (Some(schema_id), Some(apollo)) =
-                (&schema.schema_id, configuration.get_mut("apollo"))
-            {
-                if let Some(apollo) = apollo.as_object_mut() {
-                    apollo.insert(
-                        "schema_id".to_string(),
-                        Value::String(schema_id.to_string()),
-                    );
-                }
-            }
-        }
 
         let name = name.clone();
         match plugin_registry.get(name.as_str()) {
@@ -131,7 +119,9 @@ async fn create_plugins(
                     name,
                     configuration
                 );
-
+                if name == "apollo.telemetry" {
+                    inject_schema_id(schema, &mut configuration)
+                }
                 // expand any env variables in the config before processing.
                 let configuration = expand_env_variables(&configuration);
                 match factory.create_instance(&configuration).await {
@@ -165,6 +155,23 @@ async fn create_plugins(
     }
 }
 
+fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
+    if configuration.get("apollo").is_none() {
+        if let Some(telemetry) = configuration.as_object_mut() {
+            telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+        }
+    }
+
+    if let (Some(schema_id), Some(apollo)) = (&schema.schema_id, configuration.get_mut("apollo")) {
+        if let Some(apollo) = apollo.as_object_mut() {
+            apollo.insert(
+                "schema_id".to_string(),
+                Value::String(schema_id.to_string()),
+            );
+        }
+    }
+}
+
 fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
     let mut configuration = configuration.clone();
     visit(&mut configuration);
@@ -190,12 +197,13 @@ fn visit(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod test {
-    use crate::router_factory::RouterServiceFactory;
+    use crate::router_factory::{inject_schema_id, RouterServiceFactory};
     use crate::{Configuration, YamlRouterServiceFactory};
     use apollo_router_core::Schema;
     use apollo_router_core::{register_plugin, Plugin};
     use schemars::JsonSchema;
     use serde::Deserialize;
+    use serde_json::json;
     use std::error::Error;
     use std::fmt;
     use std::sync::Arc;
@@ -354,5 +362,16 @@ mod test {
             .create(Arc::new(config), Arc::new(schema), None)
             .await;
         service.map(|_| ())
+    }
+
+    #[test]
+    fn test_inject_schema_id() {
+        let mut schema = Schema::default();
+        schema.schema_id = Some("schema_sha".to_string());
+        let mut config = json!({});
+        inject_schema_id(&schema, &mut config);
+        let config =
+            serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
+        assert_eq!(&config.apollo.unwrap().schema_id.unwrap(), "schema_sha");
     }
 }
