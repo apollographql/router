@@ -48,13 +48,14 @@ telemetry:
       agent:
         endpoint: jaeger:14268
 ```
+### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
+Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
 
 ## 🛠 Maintenance ( :hammer_and_wrench: )
+
+### OpenTracing examples [PR #1015](https://github.com/apollographql/router/pull/1015)
+We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipkin, that can be started with docker-compose.
+
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
-
-## 🐛 Fixes ( :bug: )
-
-### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
-Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
