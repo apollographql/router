@@ -97,7 +97,7 @@ impl ReportSpaceport {
             shutdown_signal,
             listener: Some(listener),
             addr,
-            queued_reports: queued_reports,
+            queued_reports,
             tx,
             total,
         })
@@ -278,7 +278,7 @@ async fn process_reports(
     queued_reports: QueuedReports,
 ) -> Vec<Result<Response<ReporterResponse>, Status>> {
     let mut all_entries = queued_reports.lock().await;
-    let drained = std::mem::replace(&mut *all_entries, Vec::new());
+    let drained = std::mem::take(&mut *all_entries);
     // Release the lock ASAP so that clients can continue to add data
     drop(all_entries);
     let mut results = Vec::with_capacity(drained.len());
