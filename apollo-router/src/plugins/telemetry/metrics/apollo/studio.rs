@@ -36,7 +36,6 @@ impl AggregatedMetrics {
                 report.traces_per_query.insert(
                     stats_report_key,
                     apollo_spaceport::TracesAndStats {
-                        trace: vec![],
                         stats_with_context: vec![apollo_spaceport::ContextualizedStats {
                             context: Some(StatsContext {
                                 client_name,
@@ -50,7 +49,7 @@ impl AggregatedMetrics {
                                 .collect(),
                         }],
                         referenced_fields_by_type: metrics.referenced_fields_by_type,
-                        internal_traces_contributing_to_stats: vec![],
+                        ..Default::default()
                     },
                 );
             }
