@@ -14,7 +14,7 @@ use futures_batch::ChunksTimeoutStreamExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::AddAssign;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tower::BoxError;
 use url::Url;
 
@@ -350,20 +350,10 @@ fn to_report(
     header: ReportHeader,
     aggregated_metrics: HashMap<MetricsKey, AggregatedMetrics>,
 ) -> apollo_spaceport::Report {
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let seconds = time.as_secs();
-    let nanos = time.as_nanos() - (seconds as u128 * 1_000_000_000);
-    let end_time = apollo_spaceport::Timestamp {
-        seconds: seconds as i64,
-        nanos: nanos as i32,
-    };
-
     let mut report = Report {
         header: Some(header),
         traces_per_query: Default::default(),
-        end_time: Some(end_time),
+        end_time: Some(SystemTime::now().into()),
         operation_count: 0,
     };
 
