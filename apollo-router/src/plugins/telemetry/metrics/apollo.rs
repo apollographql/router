@@ -156,7 +156,7 @@ impl ApolloMetricsExporter {
 
                     match pool.get().await {
                         Ok(mut reporter) => {
-                            let report = aggregated_report.to_report(header.clone());
+                            let report = aggregated_report.into_report(header.clone());
                             match reporter
                                 .submit(apollo_spaceport::ReporterRequest {
                                     apollo_key: apollo_key.clone(),

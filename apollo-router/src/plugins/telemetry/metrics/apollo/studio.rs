@@ -15,7 +15,7 @@ impl AggregatedReport {
         aggregated_report
     }
 
-    pub(crate) fn to_report(self, header: ReportHeader) -> apollo_spaceport::Report {
+    pub(crate) fn into_report(self, header: ReportHeader) -> apollo_spaceport::Report {
         let mut report = apollo_spaceport::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
