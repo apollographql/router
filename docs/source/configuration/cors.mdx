@@ -10,7 +10,8 @@ import { Link } from 'gatsby';
 
 Apollo Router's default CORS behavior enables only the Apollo studio to tell a user's browser to connect to your server.
 
-> If your Apollo Router is serving data for web applications, you want to either add it to the list of allowed origins, or switch to `allow_any_origin`.
+If your Apollo Router is serving data for web applications, you want to either add it to the list of allowed origins, or switch to `allow_any_origin`.
+
 > ⚠️ If your app is only visible on a private network and uses network separation for security, the default CORS behavior is **not secure**. See [Specifying origins](#specifying-origins) for more information.
 
 By default, websites running on domains that differ from your server's domain can't pass cookies with their requests. For details on enabling cross-origin cookie passing for authentication, see [Passing credentials with CORS](#passing-credentials-with-cors).
@@ -54,11 +55,11 @@ CORS uses [specific HTTP request headers](https://developer.mozilla.org/en-US/do
 
 Depending on what you're building, the origins you specify in your CORS configuration might need to change when you're ready to deploy your application.
 
-#### ⚠️ Applications on private networks
+#### Applications on private networks
 
-If your browser is running your API on a private network (i.e., not on the public internet) and it relies on the privacy of that network for security, **the default CORS behavior of Apollo Server is insecure**. We strongly recommend [specifying which origins](#configuring-cors-options-for-apollo-server) can access your server's resources.
+If your browser is running your API on a private network (i.e., not on the public internet) and it relies on the privacy of that network for security, we strongly recommend [specifying which origins](#configuring-cors-options-for-apollo-server) can access your server's resources.
 
-If you don't, while your personal computer is on your private network, a script on any website could potentially make your browser talk to your private API. [Some browsers, such as Chrome, have features under development](https://wicg.github.io/private-network-access/) to solve this problem. But in the meantime, all servers on private networks should *always* specify origins in their CORS configuration.
+If you instead rely on `allow_any_origin`, while your personal computer is on your private network, a script on any website could potentially make your browser talk to your private API. [Some browsers, such as Chrome, have features under development](https://wicg.github.io/private-network-access/) to solve this problem. But in the meantime, all servers on private networks should *always* specify origins in their CORS configuration.
 
 #### APIs that require cookies
 
@@ -68,7 +69,7 @@ For examples, see [Passing credentials with CORS](#passing-credentials-with-cors
 
 #### APIs with known consumers
 
-If you create an API on the public internet to serve resources to your _own_ websites or apps, you might want to [specify which origins](#configuring-cors-options-for-apollo-server) can access your server's resources. Explicitly specifying origins can provide an extra level of security.
+If you create an API on the public internet to serve resources to your _own_ websites or apps, you want to [specify which origins](#configuring-cors-options-for-apollo-server) can access your server's resources.
 
 #### Public or embedded APIs
 
@@ -80,7 +81,7 @@ server:
     allow_any_origin: true
 ```
 
-> Using the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the ACAO header enables _any_ website to tell a user's browser to send an arbitrary request (without cookies or other credentials) to your server and read that server's response.
+> Using `allow_any_origin` makes the router send the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the ACAO header, which enables _any_ website to tell a user's browser to send an arbitrary request (without cookies or other credentials) to your server and read that server's response.
 
 #### APIs with non browser consumers
 
@@ -89,21 +90,16 @@ You can always specify origins in your CORS configuration later.
 
 ##  Configuring CORS options for Apollo Server
 
-By default, the batteries-included `apollo-server` package serves the `Access-Control-Allow-Origin` HTTP header with the wildcard value (`*`). This allows scripts on any origin to make requests, _without cookies_, to the server and read its responses.
+By default, the apollo router only allows requests from https://studio.apollographql.com. If your Apollo Router is serving data for web applications, you want to either add their origin to the list of allowed origins, or switch to `allow_any_origin`.
 
-> If you need to pass credentials to your server (e.g., via cookies), you can't use the wildcard value (`*`) for your origin. You _must_ provide specific origins. For examples, see [Passing credentials with CORS](#passing-credentials-with-cors).
+> If you need to pass credentials to your server (e.g., via cookies), you can't use the `allow_any_origin` flag. You _must_ provide specific origins. For examples, see [Passing credentials with CORS](#passing-credentials-with-cors).
 
 The batteries-included `apollo-server` [has a `cors` option](../api/apollo-server/#cors), which you can use to change your server's default CORS behavior:
 
-```js
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  csrfPrevention: true,  // see below for more about this
-  cors: {
-    origin: ["https://www.your-app.example", "https://studio.apollographql.com"]
-  },
-});
+```yml
+server:
+  cors:
+    allow_any_origin: true
 ```
 
 Under the hood, the batteries-included `apollo-server` wraps around middleware provided by the [`cors`](https://github.com/expressjs/cors#configuration-options) npm package, enabling you to configure the `Access-Control-Allow-Origin` header via the `origin` option. The example above enables CORS requests from `https://www.your-app.example`, along with `https://studio.apollographql.com`.
