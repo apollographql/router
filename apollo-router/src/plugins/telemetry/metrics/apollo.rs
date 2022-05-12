@@ -10,8 +10,8 @@ use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
 use futures_batch::ChunksTimeoutStreamExt;
 use std::time::Duration;
-use studio::AggregatedReport;
 use studio::Report;
+use studio::SingleReport;
 use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
@@ -25,11 +25,11 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 #[derive(Clone)]
 pub(crate) enum Sender {
     Noop,
-    Spaceport(mpsc::Sender<Report>),
+    Spaceport(mpsc::Sender<SingleReport>),
 }
 
 impl Sender {
-    pub(crate) fn send(&self, metrics: Report) {
+    pub(crate) fn send(&self, metrics: SingleReport) {
         match &self {
             Sender::Noop => {}
             Sender::Spaceport(channel) => {
@@ -101,7 +101,7 @@ fn get_uname() -> Result<String, std::io::Error> {
 }
 
 struct ApolloMetricsExporter {
-    tx: mpsc::Sender<Report>,
+    tx: mpsc::Sender<SingleReport>,
 }
 
 impl ApolloMetricsExporter {
@@ -117,7 +117,7 @@ impl ApolloMetricsExporter {
         // * If we cannot connect to spaceport metrics are discarded and a warning raised.
         // * When the stream of metrics finishes we terminate the thread.
         // * If the exporter is dropped the remaining records are flushed.
-        let (tx, rx) = mpsc::channel::<Report>(DEFAULT_QUEUE_SIZE);
+        let (tx, rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
 
         let header = apollo_spaceport::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
@@ -151,7 +151,7 @@ impl ApolloMetricsExporter {
             // But in the interested of getting something over the line quickly let's go with this as it is simple to understand.
             rx.chunks_timeout(DEFAULT_BATCH_SIZE, Duration::from_secs(10))
                 .for_each(|reports| async {
-                    let aggregated_report = AggregatedReport::new(reports);
+                    let aggregated_report = Report::new(reports);
 
                     match pool.get().await {
                         Ok(mut reporter) => {
@@ -310,7 +310,7 @@ mod test {
         query: &str,
         operation_name: Option<&str>,
         context: Option<Context>,
-    ) -> Result<Vec<Report>, BoxError> {
+    ) -> Result<Vec<SingleReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.

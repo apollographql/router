@@ -3,7 +3,7 @@
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
-    ContextualizedStats, QueryLatencyStats, Report, TracesAndStats,
+    SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
 };
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
@@ -485,17 +485,17 @@ impl Telemetry {
                 .map_or(false, |x| x.unwrap_or_default())
             {
                 // The request was excluded don't report the details, but do report the operation count
-                Report {
+                SingleReport {
                     operation_count,
                     ..Default::default()
                 }
             } else {
-                metrics::apollo::studio::Report {
+                metrics::apollo::studio::SingleReport {
                     operation_count,
                     traces_and_stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
-                        TracesAndStats {
-                            stats_with_context: ContextualizedStats {
+                        SingleTracesAndStats {
+                            stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
                                     client_name: context
                                         .get(CLIENT_NAME)
@@ -506,7 +506,7 @@ impl Telemetry {
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
                                 },
-                                query_latency_stats: QueryLatencyStats {
+                                query_latency_stats: SingleQueryLatencyStats {
                                     latency_count: duration,
                                     request_count: 1,
                                     requests_without_field_instrumentation: 1,
@@ -525,7 +525,7 @@ impl Telemetry {
             }
         } else {
             // Usage reporting was missing, so it counts as one operation.
-            Report {
+            SingleReport {
                 operation_count: 1,
                 ..Default::default()
             }

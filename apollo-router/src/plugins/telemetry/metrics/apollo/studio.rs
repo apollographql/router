@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime};
 
-impl AggregatedReport {
-    pub(crate) fn new(reports: Vec<Report>) -> AggregatedReport {
-        let mut aggregated_report = AggregatedReport::default();
+impl Report {
+    pub(crate) fn new(reports: Vec<SingleReport>) -> Report {
+        let mut aggregated_report = Report::default();
         for report in reports {
             aggregated_report += report;
         }
@@ -31,34 +31,34 @@ impl AggregatedReport {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct Report {
-    pub(crate) traces_and_stats: HashMap<String, TracesAndStats>,
+pub(crate) struct SingleReport {
+    pub(crate) traces_and_stats: HashMap<String, SingleTracesAndStats>,
     pub(crate) operation_count: u64,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct TracesAndStats {
-    pub(crate) stats_with_context: ContextualizedStats,
+pub(crate) struct SingleTracesAndStats {
+    pub(crate) stats_with_context: SingleContextualizedStats,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct ContextualizedStats {
+pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
-    pub(crate) query_latency_stats: QueryLatencyStats,
-    pub(crate) per_type_stat: HashMap<String, TypeStat>,
+    pub(crate) query_latency_stats: SingleQueryLatencyStats,
+    pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
 }
 
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct QueryLatencyStats {
+pub(crate) struct SingleQueryLatencyStats {
     pub(crate) latency_count: Duration,
     pub(crate) request_count: u64,
     pub(crate) cache_hits: u64,
     pub(crate) persisted_query_hits: u64,
     pub(crate) persisted_query_misses: u64,
     pub(crate) cache_latency_count: Duration,
-    pub(crate) root_error_stats: PathErrorStats,
+    pub(crate) root_error_stats: SinglePathErrorStats,
     pub(crate) requests_with_errors_count: u64,
     pub(crate) public_cache_ttl_count: Duration,
     pub(crate) private_cache_ttl_count: Duration,
@@ -68,19 +68,19 @@ pub(crate) struct QueryLatencyStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct PathErrorStats {
-    pub(crate) children: HashMap<String, PathErrorStats>,
+pub(crate) struct SinglePathErrorStats {
+    pub(crate) children: HashMap<String, SinglePathErrorStats>,
     pub(crate) errors_count: u64,
     pub(crate) requests_with_errors_count: u64,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct TypeStat {
-    pub(crate) per_field_stat: HashMap<String, FieldStat>,
+pub(crate) struct SingleTypeStat {
+    pub(crate) per_field_stat: HashMap<String, SingleFieldStat>,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct FieldStat {
+pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
     pub(crate) observed_execution_count: u64,
@@ -90,13 +90,13 @@ pub(crate) struct FieldStat {
 }
 
 #[derive(Default, Serialize)]
-pub(crate) struct AggregatedReport {
-    traces_per_query: HashMap<String, AggregatedTracesAndStats>,
+pub(crate) struct Report {
+    traces_per_query: HashMap<String, TracesAndStats>,
     operation_count: u64,
 }
 
-impl AddAssign<Report> for AggregatedReport {
-    fn add_assign(&mut self, report: Report) {
+impl AddAssign<SingleReport> for Report {
+    fn add_assign(&mut self, report: SingleReport) {
         for (k, v) in report.traces_and_stats {
             *self.traces_per_query.entry(k).or_default() += v;
         }
@@ -106,14 +106,14 @@ impl AddAssign<Report> for AggregatedReport {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedTracesAndStats {
+pub(crate) struct TracesAndStats {
     #[serde(with = "vectorize")]
-    pub(crate) stats_with_context: HashMap<StatsContext, AggregatedContextualizedStats>,
+    pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl AddAssign<TracesAndStats> for AggregatedTracesAndStats {
-    fn add_assign(&mut self, stats: TracesAndStats) {
+impl AddAssign<SingleTracesAndStats> for TracesAndStats {
+    fn add_assign(&mut self, stats: SingleTracesAndStats) {
         *self
             .stats_with_context
             .entry(stats.stats_with_context.context.clone())
@@ -125,14 +125,14 @@ impl AddAssign<TracesAndStats> for AggregatedTracesAndStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedContextualizedStats {
+pub(crate) struct ContextualizedStats {
     context: StatsContext,
-    query_latency_stats: AggregatedQueryLatencyStats,
-    per_type_stat: HashMap<String, AggregatedTypeStat>,
+    query_latency_stats: QueryLatencyStats,
+    per_type_stat: HashMap<String, TypeStat>,
 }
 
-impl AddAssign<ContextualizedStats> for AggregatedContextualizedStats {
-    fn add_assign(&mut self, stats: ContextualizedStats) {
+impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
+    fn add_assign(&mut self, stats: SingleContextualizedStats) {
         self.context = stats.context;
         self.query_latency_stats += stats.query_latency_stats;
         for (k, v) in stats.per_type_stat {
@@ -142,14 +142,14 @@ impl AddAssign<ContextualizedStats> for AggregatedContextualizedStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedQueryLatencyStats {
+pub(crate) struct QueryLatencyStats {
     latency_count: DurationHistogram,
     request_count: u64,
     cache_hits: u64,
     persisted_query_hits: u64,
     persisted_query_misses: u64,
     cache_latency_count: DurationHistogram,
-    root_error_stats: AggregatedPathErrorStats,
+    root_error_stats: PathErrorStats,
     requests_with_errors_count: u64,
     public_cache_ttl_count: DurationHistogram,
     private_cache_ttl_count: DurationHistogram,
@@ -158,8 +158,8 @@ pub(crate) struct AggregatedQueryLatencyStats {
     requests_without_field_instrumentation: u64,
 }
 
-impl AddAssign<QueryLatencyStats> for AggregatedQueryLatencyStats {
-    fn add_assign(&mut self, stats: QueryLatencyStats) {
+impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
+    fn add_assign(&mut self, stats: SingleQueryLatencyStats) {
         self.latency_count
             .increment_duration(stats.latency_count, 1);
         self.request_count += stats.request_count;
@@ -181,14 +181,14 @@ impl AddAssign<QueryLatencyStats> for AggregatedQueryLatencyStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedPathErrorStats {
-    children: HashMap<String, AggregatedPathErrorStats>,
+pub(crate) struct PathErrorStats {
+    children: HashMap<String, PathErrorStats>,
     errors_count: u64,
     requests_with_errors_count: u64,
 }
 
-impl AddAssign<PathErrorStats> for AggregatedPathErrorStats {
-    fn add_assign(&mut self, stats: PathErrorStats) {
+impl AddAssign<SinglePathErrorStats> for PathErrorStats {
+    fn add_assign(&mut self, stats: SinglePathErrorStats) {
         for (k, v) in stats.children.into_iter() {
             *self.children.entry(k).or_default() += v;
         }
@@ -198,12 +198,12 @@ impl AddAssign<PathErrorStats> for AggregatedPathErrorStats {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedTypeStat {
-    per_field_stat: HashMap<String, AggregatedFieldStat>,
+pub(crate) struct TypeStat {
+    per_field_stat: HashMap<String, FieldStat>,
 }
 
-impl AddAssign<TypeStat> for AggregatedTypeStat {
-    fn add_assign(&mut self, stat: TypeStat) {
+impl AddAssign<SingleTypeStat> for TypeStat {
+    fn add_assign(&mut self, stat: SingleTypeStat) {
         for (k, v) in stat.per_field_stat.into_iter() {
             *self.per_field_stat.entry(k).or_default() += v;
         }
@@ -211,7 +211,7 @@ impl AddAssign<TypeStat> for AggregatedTypeStat {
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct AggregatedFieldStat {
+pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
     observed_execution_count: u64,
@@ -220,8 +220,8 @@ pub(crate) struct AggregatedFieldStat {
     latency_count: DurationHistogram,
 }
 
-impl AddAssign<FieldStat> for AggregatedFieldStat {
-    fn add_assign(&mut self, stat: FieldStat) {
+impl AddAssign<SingleFieldStat> for FieldStat {
+    fn add_assign(&mut self, stat: SingleFieldStat) {
         self.latency_count.increment_duration(stat.latency_count, 1);
         self.requests_with_errors_count += stat.requests_with_errors_count;
         self.estimated_execution_count += stat.estimated_execution_count;
@@ -231,8 +231,8 @@ impl AddAssign<FieldStat> for AggregatedFieldStat {
     }
 }
 
-impl From<AggregatedContextualizedStats> for apollo_spaceport::ContextualizedStats {
-    fn from(stats: AggregatedContextualizedStats) -> Self {
+impl From<ContextualizedStats> for apollo_spaceport::ContextualizedStats {
+    fn from(stats: ContextualizedStats) -> Self {
         Self {
             per_type_stat: stats
                 .per_type_stat
@@ -245,8 +245,8 @@ impl From<AggregatedContextualizedStats> for apollo_spaceport::ContextualizedSta
     }
 }
 
-impl From<AggregatedTracesAndStats> for apollo_spaceport::TracesAndStats {
-    fn from(stats: AggregatedTracesAndStats) -> Self {
+impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
+    fn from(stats: TracesAndStats) -> Self {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
             referenced_fields_by_type: stats.referenced_fields_by_type,
@@ -255,8 +255,8 @@ impl From<AggregatedTracesAndStats> for apollo_spaceport::TracesAndStats {
     }
 }
 
-impl From<AggregatedQueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
-    fn from(stats: AggregatedQueryLatencyStats) -> Self {
+impl From<QueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
+    fn from(stats: QueryLatencyStats) -> Self {
         Self {
             latency_count: stats.latency_count.buckets,
             request_count: stats.request_count,
@@ -275,8 +275,8 @@ impl From<AggregatedQueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
     }
 }
 
-impl From<AggregatedPathErrorStats> for apollo_spaceport::PathErrorStats {
-    fn from(stats: AggregatedPathErrorStats) -> Self {
+impl From<PathErrorStats> for apollo_spaceport::PathErrorStats {
+    fn from(stats: PathErrorStats) -> Self {
         Self {
             children: stats
                 .children
@@ -289,8 +289,8 @@ impl From<AggregatedPathErrorStats> for apollo_spaceport::PathErrorStats {
     }
 }
 
-impl From<AggregatedTypeStat> for apollo_spaceport::TypeStat {
-    fn from(stat: AggregatedTypeStat) -> Self {
+impl From<TypeStat> for apollo_spaceport::TypeStat {
+    fn from(stat: TypeStat) -> Self {
         Self {
             per_field_stat: stat
                 .per_field_stat
@@ -301,8 +301,8 @@ impl From<AggregatedTypeStat> for apollo_spaceport::TypeStat {
     }
 }
 
-impl From<AggregatedFieldStat> for apollo_spaceport::FieldStat {
-    fn from(stat: AggregatedFieldStat) -> Self {
+impl From<FieldStat> for apollo_spaceport::FieldStat {
+    fn from(stat: FieldStat) -> Self {
         Self {
             return_type: stat.return_type,
             errors_count: stat.errors_count,
@@ -340,7 +340,7 @@ mod test {
     fn test_aggregation() {
         let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
         let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
-        let aggregated_metrics = AggregatedReport::new(vec![metric_1, metric_2]);
+        let aggregated_metrics = Report::new(vec![metric_1, metric_2]);
 
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(aggregated_metrics);
@@ -355,7 +355,7 @@ mod test {
         let metric_4 = create_test_metric("client_1", "version_2", "report_key_1");
         let metric_5 = create_test_metric("client_1", "version_1", "report_key_2");
         let aggregated_metrics =
-            AggregatedReport::new(vec![metric_1, metric_2, metric_3, metric_4, metric_5]);
+            Report::new(vec![metric_1, metric_2, metric_3, metric_4, metric_5]);
         assert_eq!(aggregated_metrics.traces_per_query.len(), 2);
         assert_eq!(
             aggregated_metrics.traces_per_query["report_key_1"]
@@ -375,36 +375,36 @@ mod test {
         client_name: &str,
         client_version: &str,
         stats_report_key: &str,
-    ) -> Report {
+    ) -> SingleReport {
         // This makes me sad. Really this should have just been a case of generate a couple of metrics using
         // a prop testing library and then assert that things got merged OK. But in practise everything was too hard to use
 
         let mut count = Count::default();
 
-        Report {
+        SingleReport {
             operation_count: count.inc_u64(),
             traces_and_stats: HashMap::from([(
                 stats_report_key.to_string(),
-                TracesAndStats {
-                    stats_with_context: ContextualizedStats {
+                SingleTracesAndStats {
+                    stats_with_context: SingleContextualizedStats {
                         context: StatsContext {
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
                         },
-                        query_latency_stats: QueryLatencyStats {
+                        query_latency_stats: SingleQueryLatencyStats {
                             latency_count: Duration::from_secs(1),
                             request_count: count.inc_u64(),
                             cache_hits: count.inc_u64(),
                             persisted_query_hits: count.inc_u64(),
                             persisted_query_misses: count.inc_u64(),
                             cache_latency_count: Duration::from_secs(1),
-                            root_error_stats: PathErrorStats {
+                            root_error_stats: SinglePathErrorStats {
                                 children: HashMap::from([(
                                     "path1".to_string(),
-                                    PathErrorStats {
+                                    SinglePathErrorStats {
                                         children: HashMap::from([(
                                             "path2".to_string(),
-                                            PathErrorStats {
+                                            SinglePathErrorStats {
                                                 children: Default::default(),
                                                 errors_count: count.inc_u64(),
                                                 requests_with_errors_count: count.inc_u64(),
@@ -427,7 +427,7 @@ mod test {
                         per_type_stat: HashMap::from([
                             (
                                 "type1".into(),
-                                TypeStat {
+                                SingleTypeStat {
                                     per_field_stat: HashMap::from([
                                         ("field1".into(), field_stat(&mut count)),
                                         ("field2".into(), field_stat(&mut count)),
@@ -436,7 +436,7 @@ mod test {
                             ),
                             (
                                 "type2".into(),
-                                TypeStat {
+                                SingleTypeStat {
                                     per_field_stat: HashMap::from([
                                         ("field1".into(), field_stat(&mut count)),
                                         ("field2".into(), field_stat(&mut count)),
@@ -457,8 +457,8 @@ mod test {
         }
     }
 
-    fn field_stat(count: &mut Count) -> FieldStat {
-        FieldStat {
+    fn field_stat(count: &mut Count) -> SingleFieldStat {
+        SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
             observed_execution_count: count.inc_u64(),
