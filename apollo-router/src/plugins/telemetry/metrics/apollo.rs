@@ -12,6 +12,7 @@ use futures_batch::ChunksTimeoutStreamExt;
 use std::time::Duration;
 use studio::AggregatedMetrics;
 use studio::Metrics;
+use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
 
@@ -76,6 +77,29 @@ impl MetricsConfigurator for Config {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn get_uname() -> Result<String, std::io::Error> {
+    let u = uname::uname()?;
+    Ok(format!(
+        "{}, {}, {}, {}, {},",
+        u.sysname, u.nodename, u.release, u.version, u.machine
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn get_uname() -> Result<String, std::io::Error> {
+    // Best we can do on windows right now
+    let sysname = sys_info::os_type().unwrap_or_else(|_| "Windows".to_owned());
+    let nodename = sys_info::hostname().unwrap_or_else(|_| "unknown".to_owned());
+    let release = sys_info::os_release().unwrap_or_else(|_| "unknown".to_owned());
+    let version = "unknown";
+    let machine = "unknown";
+    Ok(format!(
+        "{}, {}, {}, {}, {}",
+        sysname, nodename, release, version, machine
+    ))
+}
+
 struct ApolloMetricsExporter {
     tx: mpsc::Sender<Metrics>,
 }
@@ -98,12 +122,16 @@ impl ApolloMetricsExporter {
         // TODO fill out this stuff
         let header = apollo_spaceport::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
-            hostname: "".to_string(),
-            agent_version: "".to_string(),
-            service_version: "".to_string(),
-            runtime_version: "".to_string(),
-            uname: "".to_string(),
+            hostname: hostname()?,
+            agent_version: format!(
+                "{}@{}",
+                std::env!("CARGO_PKG_NAME"),
+                std::env!("CARGO_PKG_VERSION")
+            ),
+            runtime_version: "rust".to_string(),
+            uname: get_uname()?,
             executable_schema_id: schema_id.to_string(),
+            ..Default::default()
         };
 
         // Deadpool gives us connection pooling to spaceport
