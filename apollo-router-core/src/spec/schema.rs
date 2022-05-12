@@ -760,6 +760,14 @@ mod tests {
     #[test]
     fn schema_id() {
         let schema = Schema::from_str(include_str!("../testdata/contract_schema.graphql")).unwrap();
+
+        // Line endings affect the schema hash.
+        #[cfg(windows)]
+        assert_eq!(
+            schema.schema_id,
+            Some("C081A7FF570F630BDF22CB6CA73A2BB1D46657EF69FC66749F5A1F99332B5ECB".to_string())
+        );
+        #[cfg(not(windows))]
         assert_eq!(
             schema.schema_id,
             Some("6881633761291F4A6E4F9A4A6BBE7AD69A80C63EBEBFC357464B7A6EF276EF0A".to_string())
