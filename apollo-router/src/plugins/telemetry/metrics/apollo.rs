@@ -10,8 +10,8 @@ use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
 use futures_batch::ChunksTimeoutStreamExt;
 use std::time::Duration;
-use studio::AggregatedMetrics;
-use studio::Metrics;
+use studio::AggregatedReport;
+use studio::Report;
 use sys_info::hostname;
 use tower::BoxError;
 use url::Url;
@@ -25,11 +25,11 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 #[derive(Clone)]
 pub(crate) enum Sender {
     Noop,
-    Spaceport(mpsc::Sender<Metrics>),
+    Spaceport(mpsc::Sender<Report>),
 }
 
 impl Sender {
-    pub(crate) fn send(&self, metrics: Metrics) {
+    pub(crate) fn send(&self, metrics: Report) {
         match &self {
             Sender::Noop => {}
             Sender::Spaceport(channel) => {
@@ -101,7 +101,7 @@ fn get_uname() -> Result<String, std::io::Error> {
 }
 
 struct ApolloMetricsExporter {
-    tx: mpsc::Sender<Metrics>,
+    tx: mpsc::Sender<Report>,
 }
 
 impl ApolloMetricsExporter {
@@ -117,7 +117,7 @@ impl ApolloMetricsExporter {
         // * If we cannot connect to spaceport metrics are discarded and a warning raised.
         // * When the stream of metrics finishes we terminate the thread.
         // * If the exporter is dropped the remaining records are flushed.
-        let (tx, rx) = mpsc::channel::<Metrics>(DEFAULT_QUEUE_SIZE);
+        let (tx, rx) = mpsc::channel::<Report>(DEFAULT_QUEUE_SIZE);
 
         // TODO fill out this stuff
         let header = apollo_spaceport::ReportHeader {
@@ -151,13 +151,12 @@ impl ApolloMetricsExporter {
             // This implementation is not ideal as we do have to store all the data when really it could be folded as it is generated.
             // But in the interested of getting something over the line quickly let's go with this as it is simple to understand.
             rx.chunks_timeout(DEFAULT_BATCH_SIZE, Duration::from_secs(10))
-                .for_each(|stats| async {
-                    let aggregated_metrics = AggregatedMetrics::aggregate(stats);
+                .for_each(|reports| async {
+                    let aggregated_report = AggregatedReport::new(reports);
 
                     match pool.get().await {
                         Ok(mut reporter) => {
-                            let report =
-                                AggregatedMetrics::to_report(header.clone(), aggregated_metrics);
+                            let report = aggregated_report.to_report(header.clone());
                             match reporter
                                 .submit(apollo_spaceport::ReporterRequest {
                                     apollo_key: apollo_key.clone(),
@@ -314,7 +313,7 @@ mod test {
         query: &str,
         operation_name: Option<&str>,
         context: Option<Context>,
-    ) -> Result<Vec<Metrics>, BoxError> {
+    ) -> Result<Vec<Report>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
@@ -343,10 +342,10 @@ mod test {
             .await
             .into_iter()
             .map(|mut m| {
-                // Fix the latency counts to a known quantity so that insta tests don't fail.
-                if m.query_latency_stats.latency_count != Duration::default() {
-                    m.query_latency_stats.latency_count = Duration::from_millis(100);
-                }
+                m.traces_and_stats.iter_mut().for_each(|(_k, v)| {
+                    v.stats_with_context.query_latency_stats.latency_count =
+                        Duration::from_millis(100)
+                });
                 m
             })
             .collect();

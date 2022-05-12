@@ -2,7 +2,9 @@
 // This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::studio::{Metrics, MetricsKey, QueryLatencyStats};
+use crate::plugins::telemetry::metrics::apollo::studio::{
+    ContextualizedStats, QueryLatencyStats, Report, TracesAndStats,
+};
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -17,6 +19,7 @@ use apollo_router_core::{
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
@@ -478,45 +481,48 @@ impl Telemetry {
             let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
             if exclude.unwrap_or_default() {
                 // The request was excluded don't report the details, but do report the operation count
-                Metrics {
+                Report {
                     operation_count,
-                    key: MetricsKey::Excluded,
                     ..Default::default()
                 }
             } else {
-                metrics::apollo::studio::Metrics {
+                metrics::apollo::studio::Report {
                     operation_count,
-                    key: metrics::apollo::studio::MetricsKey::Regular {
-                        client_name: context
-                            .get(CLIENT_NAME)
-                            .unwrap_or_default()
-                            .unwrap_or_default(),
-                        client_version: context
-                            .get(CLIENT_VERSION)
-                            .unwrap_or_default()
-                            .unwrap_or_default(),
-                        stats_report_key: usage_reporting.stats_report_key.to_string(),
-                    },
-                    referenced_fields_by_type: usage_reporting
-                        .referenced_fields_by_type
-                        .into_iter()
-                        .map(|(k, v)| (k, convert(v)))
-                        .collect(),
-                    // TODO Add some more info to the query latency stats.
-                    query_latency_stats: QueryLatencyStats {
-                        latency_count: duration,
-                        request_count: 1,
-                        requests_without_field_instrumentation: 1,
-                        ..Default::default()
-                    },
-                    per_type_stat: Default::default(),
+                    traces_and_stats: HashMap::from([(
+                        usage_reporting.stats_report_key.to_string(),
+                        TracesAndStats {
+                            stats_with_context: ContextualizedStats {
+                                context: StatsContext {
+                                    client_name: context
+                                        .get(CLIENT_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_version: context
+                                        .get(CLIENT_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                },
+                                query_latency_stats: QueryLatencyStats {
+                                    latency_count: duration,
+                                    request_count: 1,
+                                    requests_without_field_instrumentation: 1,
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
+                            referenced_fields_by_type: usage_reporting
+                                .referenced_fields_by_type
+                                .into_iter()
+                                .map(|(k, v)| (k, convert(v)))
+                                .collect(),
+                        },
+                    )]),
                 }
             }
         } else {
             // Usage reporting was missing, so it counts as one operation.
-            Metrics {
+            Report {
                 operation_count: 1,
-                key: MetricsKey::Excluded,
                 ..Default::default()
             }
         };

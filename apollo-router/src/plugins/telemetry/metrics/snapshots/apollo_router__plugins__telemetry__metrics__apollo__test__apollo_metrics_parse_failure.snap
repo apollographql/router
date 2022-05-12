@@ -4,46 +4,49 @@ expression: results
 ---
 [
   {
-    "key": {
-      "Regular": {
-        "client_name": "test_client",
-        "client_version": "1.0-test",
-        "stats_report_key": "## GraphQLParseFailure\n"
+    "traces_and_stats": {
+      "## GraphQLParseFailure\n": {
+        "stats_with_context": {
+          "context": {
+            "client_name": "test_client",
+            "client_version": "1.0-test"
+          },
+          "query_latency_stats": {
+            "latency_count": {
+              "secs": 0,
+              "nanos": 100000000
+            },
+            "request_count": 1,
+            "cache_hits": 0,
+            "persisted_query_hits": 0,
+            "persisted_query_misses": 0,
+            "cache_latency_count": {
+              "secs": 0,
+              "nanos": 0
+            },
+            "root_error_stats": {
+              "children": {},
+              "errors_count": 0,
+              "requests_with_errors_count": 0
+            },
+            "requests_with_errors_count": 0,
+            "public_cache_ttl_count": {
+              "secs": 0,
+              "nanos": 0
+            },
+            "private_cache_ttl_count": {
+              "secs": 0,
+              "nanos": 0
+            },
+            "registered_operation_count": 0,
+            "forbidden_operation_count": 0,
+            "requests_without_field_instrumentation": 1
+          },
+          "per_type_stat": {}
+        },
+        "referenced_fields_by_type": {}
       }
     },
-    "query_latency_stats": {
-      "latency_count": {
-        "secs": 0,
-        "nanos": 100000000
-      },
-      "request_count": 1,
-      "cache_hits": 0,
-      "persisted_query_hits": 0,
-      "persisted_query_misses": 0,
-      "cache_latency_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "root_error_stats": {
-        "children": {},
-        "errors_count": 0,
-        "requests_with_errors_count": 0
-      },
-      "requests_with_errors_count": 0,
-      "public_cache_ttl_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "private_cache_ttl_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "registered_operation_count": 0,
-      "forbidden_operation_count": 0,
-      "requests_without_field_instrumentation": 1
-    },
-    "per_type_stat": {},
-    "referenced_fields_by_type": {},
     "operation_count": 0
   }
 ]

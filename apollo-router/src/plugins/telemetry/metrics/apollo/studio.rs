@@ -1,85 +1,52 @@
 use super::duration_histogram::DurationHistogram;
-use apollo_spaceport::{ReferencedFieldsForType, Report, ReportHeader, StatsContext};
+use apollo_spaceport::{ReferencedFieldsForType, ReportHeader, StatsContext};
+use itertools::Itertools;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime};
 
-impl AggregatedMetrics {
-    pub(crate) fn aggregate(metrics: Vec<Metrics>) -> HashMap<MetricsKey, AggregatedMetrics> {
-        let mut aggregated_metrics = HashMap::<_, AggregatedMetrics>::new();
-        for metric in metrics {
-            *aggregated_metrics.entry(metric.key.clone()).or_default() += metric;
+impl AggregatedReport {
+    pub(crate) fn new(reports: Vec<Report>) -> AggregatedReport {
+        let mut aggregated_report = AggregatedReport::default();
+        for report in reports {
+            aggregated_report += report;
         }
-        aggregated_metrics
+        aggregated_report
     }
 
-    pub(crate) fn to_report(
-        header: ReportHeader,
-        aggregated_metrics: HashMap<MetricsKey, AggregatedMetrics>,
-    ) -> apollo_spaceport::Report {
-        let mut report = Report {
+    pub(crate) fn to_report(self, header: ReportHeader) -> apollo_spaceport::Report {
+        let mut report = apollo_spaceport::Report {
             header: Some(header),
-            traces_per_query: Default::default(),
             end_time: Some(SystemTime::now().into()),
-            operation_count: 0,
+            operation_count: self.operation_count,
+            ..Default::default()
         };
 
-        for (key, metrics) in aggregated_metrics {
-            report.operation_count += metrics.operation_count;
-            if let MetricsKey::Regular {
-                client_name,
-                client_version,
-                stats_report_key,
-            } = key
-            {
-                report.traces_per_query.insert(
-                    stats_report_key,
-                    apollo_spaceport::TracesAndStats {
-                        stats_with_context: vec![apollo_spaceport::ContextualizedStats {
-                            context: Some(StatsContext {
-                                client_name,
-                                client_version,
-                            }),
-                            query_latency_stats: Some(metrics.query_latency_stats.into()),
-                            per_type_stat: metrics
-                                .per_type_stat
-                                .into_iter()
-                                .map(|(k, v)| (k, v.into()))
-                                .collect(),
-                        }],
-                        referenced_fields_by_type: metrics.referenced_fields_by_type,
-                        ..Default::default()
-                    },
-                );
-            }
+        for (key, traces_and_stats) in self.traces_per_query {
+            report.traces_per_query.insert(key, traces_and_stats.into());
         }
         report
     }
 }
 
-#[derive(Clone, Hash, Eq, PartialEq, Debug, Serialize)]
-pub enum MetricsKey {
-    Excluded,
-    Regular {
-        client_name: String,
-        client_version: String,
-        stats_report_key: String,
-    },
-}
-impl Default for MetricsKey {
-    fn default() -> Self {
-        MetricsKey::Excluded
-    }
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct Report {
+    pub(crate) traces_and_stats: HashMap<String, TracesAndStats>,
+    pub(crate) operation_count: u64,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct Metrics {
-    pub(crate) key: MetricsKey,
+pub(crate) struct TracesAndStats {
+    pub(crate) stats_with_context: ContextualizedStats,
+    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+}
+
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct ContextualizedStats {
+    pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: QueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, TypeStat>,
-    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
-    pub(crate) operation_count: u64,
 }
 
 // TODO Make some of these fields bool
@@ -123,30 +90,58 @@ pub(crate) struct FieldStat {
 }
 
 #[derive(Default, Serialize)]
-pub(crate) struct AggregatedMetrics {
-    key: MetricsKey,
-    query_latency_stats: AggregatedQueryLatencyStats,
-    per_type_stat: HashMap<String, AggregatedTypeStat>,
-    referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
-    pub(crate) operation_count: u64,
+pub(crate) struct AggregatedReport {
+    traces_per_query: HashMap<String, AggregatedTracesAndStats>,
+    operation_count: u64,
 }
 
-impl AddAssign<Metrics> for AggregatedMetrics {
-    fn add_assign(&mut self, metrics: Metrics) {
-        self.query_latency_stats += metrics.query_latency_stats;
-        for (k, v) in metrics.per_type_stat {
-            *self.per_type_stat.entry(k).or_default() += v;
+impl AddAssign<Report> for AggregatedReport {
+    fn add_assign(&mut self, report: Report) {
+        for (k, v) in report.traces_and_stats {
+            *self.traces_per_query.entry(k).or_default() += v;
         }
 
-        // Merging is not required because metrics are always grouped by schema and query.
-        // The tuple (client_name, client_version, stats_report_key, referenced_fields_by_type) is always unique.
-        // therefore we can just take ownership of the referenced_fields_by_type map.
-        self.referenced_fields_by_type = metrics.referenced_fields_by_type;
-        self.operation_count += metrics.operation_count;
+        self.operation_count += report.operation_count;
     }
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct AggregatedTracesAndStats {
+    #[serde(with = "vectorize")]
+    pub(crate) stats_with_context: HashMap<StatsContext, AggregatedContextualizedStats>,
+    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+}
+
+impl AddAssign<TracesAndStats> for AggregatedTracesAndStats {
+    fn add_assign(&mut self, stats: TracesAndStats) {
+        *self
+            .stats_with_context
+            .entry(stats.stats_with_context.context.clone())
+            .or_default() += stats.stats_with_context;
+
+        // No merging required here because references fields by type will always be the same for each stats report key.
+        self.referenced_fields_by_type = stats.referenced_fields_by_type;
+    }
+}
+
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct AggregatedContextualizedStats {
+    context: StatsContext,
+    query_latency_stats: AggregatedQueryLatencyStats,
+    per_type_stat: HashMap<String, AggregatedTypeStat>,
+}
+
+impl AddAssign<ContextualizedStats> for AggregatedContextualizedStats {
+    fn add_assign(&mut self, stats: ContextualizedStats) {
+        self.context = stats.context;
+        self.query_latency_stats += stats.query_latency_stats;
+        for (k, v) in stats.per_type_stat {
+            *self.per_type_stat.entry(k).or_default() += v;
+        }
+    }
+}
+
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct AggregatedQueryLatencyStats {
     latency_count: DurationHistogram,
     request_count: u64,
@@ -185,7 +180,7 @@ impl AddAssign<QueryLatencyStats> for AggregatedQueryLatencyStats {
     }
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct AggregatedPathErrorStats {
     children: HashMap<String, AggregatedPathErrorStats>,
     errors_count: u64,
@@ -202,7 +197,7 @@ impl AddAssign<PathErrorStats> for AggregatedPathErrorStats {
     }
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct AggregatedTypeStat {
     per_field_stat: HashMap<String, AggregatedFieldStat>,
 }
@@ -215,7 +210,7 @@ impl AddAssign<TypeStat> for AggregatedTypeStat {
     }
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct AggregatedFieldStat {
     return_type: String,
     errors_count: u64,
@@ -233,6 +228,30 @@ impl AddAssign<FieldStat> for AggregatedFieldStat {
         self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
+    }
+}
+
+impl From<AggregatedContextualizedStats> for apollo_spaceport::ContextualizedStats {
+    fn from(stats: AggregatedContextualizedStats) -> Self {
+        Self {
+            per_type_stat: stats
+                .per_type_stat
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            query_latency_stats: Some(stats.query_latency_stats.into()),
+            context: Some(stats.context),
+        }
+    }
+}
+
+impl From<AggregatedTracesAndStats> for apollo_spaceport::TracesAndStats {
+    fn from(stats: AggregatedTracesAndStats) -> Self {
+        Self {
+            stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
+            referenced_fields_by_type: stats.referenced_fields_by_type,
+            ..Default::default()
+        }
     }
 }
 
@@ -295,6 +314,21 @@ impl From<AggregatedFieldStat> for apollo_spaceport::FieldStat {
     }
 }
 
+pub mod vectorize {
+    use serde::{Serialize, Serializer};
+
+    pub fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: IntoIterator<Item = (&'a K, &'a V)>,
+        K: Serialize + 'a,
+        V: Serialize + 'a,
+    {
+        let container: Vec<_> = target.into_iter().collect();
+        serde::Serialize::serialize(&container, ser)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -306,17 +340,10 @@ mod test {
     fn test_aggregation() {
         let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
         let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
-        let aggregated_metrics = AggregatedMetrics::aggregate(vec![metric_1, metric_2]);
+        let aggregated_metrics = AggregatedReport::new(vec![metric_1, metric_2]);
 
-        assert_eq!(aggregated_metrics.len(), 1);
-        // The way to read snapshot this is that each field should be increasing by 2, except the duration fields which have a histogram.
         insta::with_settings!({sort_maps => true}, {
-            insta::assert_json_snapshot!(aggregated_metrics.get(&MetricsKey::Regular {
-                client_name: "client_1".into(),
-                client_version: "version_1".into(),
-                stats_report_key: "report_key_1".into(),
-
-            }).expect("metric not found"));
+            insta::assert_json_snapshot!(aggregated_metrics);
         });
     }
 
@@ -328,87 +355,105 @@ mod test {
         let metric_4 = create_test_metric("client_1", "version_2", "report_key_1");
         let metric_5 = create_test_metric("client_1", "version_1", "report_key_2");
         let aggregated_metrics =
-            AggregatedMetrics::aggregate(vec![metric_1, metric_2, metric_3, metric_4, metric_5]);
-        assert_eq!(aggregated_metrics.len(), 4);
+            AggregatedReport::new(vec![metric_1, metric_2, metric_3, metric_4, metric_5]);
+        assert_eq!(aggregated_metrics.traces_per_query.len(), 2);
+        assert_eq!(
+            aggregated_metrics.traces_per_query["report_key_1"]
+                .stats_with_context
+                .len(),
+            3
+        );
+        assert_eq!(
+            aggregated_metrics.traces_per_query["report_key_2"]
+                .stats_with_context
+                .len(),
+            1
+        );
     }
 
     fn create_test_metric(
         client_name: &str,
         client_version: &str,
         stats_report_key: &str,
-    ) -> Metrics {
+    ) -> Report {
         // This makes me sad. Really this should have just been a case of generate a couple of metrics using
         // a prop testing library and then assert that things got merged OK. But in practise everything was too hard to use
 
         let mut count = Count::default();
 
-        Metrics {
-            key: MetricsKey::Regular {
-                client_name: client_name.into(),
-                client_version: client_version.into(),
-                stats_report_key: stats_report_key.into(),
-            },
-            query_latency_stats: QueryLatencyStats {
-                latency_count: Duration::from_secs(1),
-                request_count: count.inc_u64(),
-                cache_hits: count.inc_u64(),
-                persisted_query_hits: count.inc_u64(),
-                persisted_query_misses: count.inc_u64(),
-                cache_latency_count: Duration::from_secs(1),
-                root_error_stats: PathErrorStats {
-                    children: HashMap::from([(
-                        "path1".to_string(),
-                        PathErrorStats {
-                            children: HashMap::from([(
-                                "path2".to_string(),
-                                PathErrorStats {
-                                    children: Default::default(),
-                                    errors_count: count.inc_u64(),
-                                    requests_with_errors_count: count.inc_u64(),
-                                },
-                            )]),
-                            errors_count: count.inc_u64(),
+        Report {
+            operation_count: count.inc_u64(),
+            traces_and_stats: HashMap::from([(
+                stats_report_key.to_string(),
+                TracesAndStats {
+                    stats_with_context: ContextualizedStats {
+                        context: StatsContext {
+                            client_name: client_name.to_string(),
+                            client_version: client_version.to_string(),
+                        },
+                        query_latency_stats: QueryLatencyStats {
+                            latency_count: Duration::from_secs(1),
+                            request_count: count.inc_u64(),
+                            cache_hits: count.inc_u64(),
+                            persisted_query_hits: count.inc_u64(),
+                            persisted_query_misses: count.inc_u64(),
+                            cache_latency_count: Duration::from_secs(1),
+                            root_error_stats: PathErrorStats {
+                                children: HashMap::from([(
+                                    "path1".to_string(),
+                                    PathErrorStats {
+                                        children: HashMap::from([(
+                                            "path2".to_string(),
+                                            PathErrorStats {
+                                                children: Default::default(),
+                                                errors_count: count.inc_u64(),
+                                                requests_with_errors_count: count.inc_u64(),
+                                            },
+                                        )]),
+                                        errors_count: count.inc_u64(),
+                                        requests_with_errors_count: count.inc_u64(),
+                                    },
+                                )]),
+                                errors_count: count.inc_u64(),
+                                requests_with_errors_count: count.inc_u64(),
+                            },
                             requests_with_errors_count: count.inc_u64(),
+                            public_cache_ttl_count: Duration::from_secs(1),
+                            private_cache_ttl_count: Duration::from_secs(1),
+                            registered_operation_count: count.inc_u64(),
+                            forbidden_operation_count: count.inc_u64(),
+                            requests_without_field_instrumentation: count.inc_u64(),
+                        },
+                        per_type_stat: HashMap::from([
+                            (
+                                "type1".into(),
+                                TypeStat {
+                                    per_field_stat: HashMap::from([
+                                        ("field1".into(), field_stat(&mut count)),
+                                        ("field2".into(), field_stat(&mut count)),
+                                    ]),
+                                },
+                            ),
+                            (
+                                "type2".into(),
+                                TypeStat {
+                                    per_field_stat: HashMap::from([
+                                        ("field1".into(), field_stat(&mut count)),
+                                        ("field2".into(), field_stat(&mut count)),
+                                    ]),
+                                },
+                            ),
+                        ]),
+                    },
+                    referenced_fields_by_type: HashMap::from([(
+                        "type1".into(),
+                        ReferencedFieldsForType {
+                            field_names: vec!["field1".into(), "field2".into()],
+                            is_interface: false,
                         },
                     )]),
-                    errors_count: count.inc_u64(),
-                    requests_with_errors_count: count.inc_u64(),
-                },
-                requests_with_errors_count: count.inc_u64(),
-                public_cache_ttl_count: Duration::from_secs(1),
-                private_cache_ttl_count: Duration::from_secs(1),
-                registered_operation_count: count.inc_u64(),
-                forbidden_operation_count: count.inc_u64(),
-                requests_without_field_instrumentation: count.inc_u64(),
-            },
-            per_type_stat: HashMap::from([
-                (
-                    "type1".into(),
-                    TypeStat {
-                        per_field_stat: HashMap::from([
-                            ("field1".into(), field_stat(&mut count)),
-                            ("field2".into(), field_stat(&mut count)),
-                        ]),
-                    },
-                ),
-                (
-                    "type2".into(),
-                    TypeStat {
-                        per_field_stat: HashMap::from([
-                            ("field1".into(), field_stat(&mut count)),
-                            ("field2".into(), field_stat(&mut count)),
-                        ]),
-                    },
-                ),
-            ]),
-            referenced_fields_by_type: HashMap::from([(
-                "type1".into(),
-                ReferencedFieldsForType {
-                    field_names: vec!["field1".into(), "field2".into()],
-                    is_interface: false,
                 },
             )]),
-            operation_count: count.inc_u64(),
         }
     }
 

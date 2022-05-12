@@ -4,40 +4,7 @@ expression: results
 ---
 [
   {
-    "key": "Excluded",
-    "query_latency_stats": {
-      "latency_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "request_count": 0,
-      "cache_hits": 0,
-      "persisted_query_hits": 0,
-      "persisted_query_misses": 0,
-      "cache_latency_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "root_error_stats": {
-        "children": {},
-        "errors_count": 0,
-        "requests_with_errors_count": 0
-      },
-      "requests_with_errors_count": 0,
-      "public_cache_ttl_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "private_cache_ttl_count": {
-        "secs": 0,
-        "nanos": 0
-      },
-      "registered_operation_count": 0,
-      "forbidden_operation_count": 0,
-      "requests_without_field_instrumentation": 0
-    },
-    "per_type_stat": {},
-    "referenced_fields_by_type": {},
+    "traces_and_stats": {},
     "operation_count": 1
   }
 ]

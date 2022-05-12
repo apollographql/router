@@ -50,6 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .type_attribute("PathErrorStats", "#[derive(serde::Serialize)]")
         .type_attribute("FieldStat", "#[derive(serde::Serialize)]")
         .type_attribute("ReferencedFieldsForType", "#[derive(serde::Serialize)]")
+        .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
         .build_server(true)
         .compile(&proto_files, &["."])?;
 

@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::time::Duration;
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub(crate) struct DurationHistogram {
     pub(crate) buckets: Vec<i64>,
     entries: u64,
