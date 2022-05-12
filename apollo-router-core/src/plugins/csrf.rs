@@ -33,6 +33,15 @@ fn apollo_custom_preflight_headers() -> Vec<String> {
     ]
 }
 
+impl Default for CSRFConfig {
+    fn default() -> Self {
+        Self {
+            disabled: false,
+            required_headers: apollo_custom_preflight_headers(),
+        }
+    }
+}
+
 static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
     "application/x-www-form-urlencoded",
     "multipart/form-data",
@@ -207,29 +216,11 @@ mod csrf_tests {
     use super::*;
     use crate::{plugin::utils::test::MockRouterService, ResponseBody};
     use serde_json_bytes::json;
-    use tower::{Service, ServiceExt};
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn it_lets_preflighted_request_pass_through() {
-        let expected_response_data = json!({ "test": 1234 });
-        let expected_response_data2 = expected_response_data.clone();
-        let mut mock_service = MockRouterService::new();
-        mock_service.expect_call().times(2).returning(move |_| {
-            RouterResponse::fake_builder()
-                .data(expected_response_data2.clone())
-                .build()
-        });
-
-        let mock = mock_service.build();
-
-        let mut service_stack = Csrf::new(CSRFConfig {
-            disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        })
-        .await
-        .unwrap()
-        .router_service(mock.boxed());
-
+        let config = CSRFConfig::default();
         let with_preflight_content_type = RouterRequest::fake_builder()
             .headers(
                 [("content-type".into(), "application/json".into())]
@@ -238,16 +229,7 @@ mod csrf_tests {
             )
             .build()
             .unwrap();
-
-        let res = service_stack
-            .ready()
-            .await
-            .unwrap()
-            .call(with_preflight_content_type)
-            .await
-            .unwrap();
-
-        assert_data(res, expected_response_data.clone());
+        assert_accepted(config.clone(), with_preflight_content_type).await;
 
         let with_preflight_header = RouterRequest::fake_builder()
             .headers(
@@ -257,46 +239,19 @@ mod csrf_tests {
             )
             .build()
             .unwrap();
-
-        let res = service_stack.oneshot(with_preflight_header).await.unwrap();
-
-        assert_data(res, expected_response_data);
+        assert_accepted(config, with_preflight_header).await;
     }
 
     #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
-        let mock = MockRouterService::new().build();
-
-        let service_stack = Csrf::new(CSRFConfig {
-            disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        })
-        .await
-        .unwrap()
-        .router_service(mock.boxed());
-
+        let config = CSRFConfig::default();
         let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
-
-        let res = service_stack
-            .oneshot(non_preflighted_request)
-            .await
-            .unwrap();
-
-        assert_error(res);
+        assert_rejected(config, non_preflighted_request).await
     }
 
     #[tokio::test]
     async fn it_rejects_non_preflighted_content_type_request() {
-        let mock = MockRouterService::new().build();
-
-        let service_stack = Csrf::new(CSRFConfig {
-            disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        })
-        .await
-        .unwrap()
-        .router_service(mock.boxed());
-
+        let config = CSRFConfig::default();
         let non_preflighted_request = RouterRequest::fake_builder()
             .headers(
                 [("content-type".into(), "text/plain".into())]
@@ -305,56 +260,50 @@ mod csrf_tests {
             )
             .build()
             .unwrap();
-
-        let res = service_stack
-            .oneshot(non_preflighted_request)
-            .await
-            .unwrap();
-
-        assert_error(res);
+        assert_rejected(config, non_preflighted_request).await
     }
 
     #[tokio::test]
     async fn it_accepts_non_preflighted_headers_request_when_plugin_is_disabled() {
-        let expected_response_data = json!({ "test": 1234 });
-        let expected_response_data2 = expected_response_data.clone();
+        let config = CSRFConfig {
+            disabled: true,
+            ..Default::default()
+        };
+        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
+        assert_accepted(config, non_preflighted_request).await
+    }
+
+    async fn assert_accepted(config: CSRFConfig, request: RouterRequest) {
         let mut mock_service = MockRouterService::new();
         mock_service.expect_call().times(1).returning(move |_| {
             RouterResponse::fake_builder()
-                .data(expected_response_data2.clone())
+                .data(json!({ "test": 1234_u32 }))
                 .build()
         });
 
         let mock = mock_service.build();
-
-        let service_stack = Csrf::new(CSRFConfig {
-            disabled: true,
-            required_headers: apollo_custom_preflight_headers(),
-        })
-        .await
-        .unwrap()
-        .router_service(mock.boxed());
-
-        let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();
-
-        let res = service_stack
-            .oneshot(non_preflighted_request)
+        let service_stack = Csrf::new(config)
             .await
-            .unwrap();
+            .unwrap()
+            .router_service(mock.boxed());
+        let res = service_stack.oneshot(request).await.unwrap();
 
-        assert_data(res, expected_response_data);
-    }
-
-    fn assert_data(res: RouterResponse, expected_response_data: serde_json_bytes::Value) {
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {
-                assert_eq!(res.data.unwrap(), expected_response_data);
+                assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
             }
             other => panic!("expected graphql response, found {:?}", other),
         }
     }
 
-    fn assert_error(res: RouterResponse) {
+    async fn assert_rejected(config: CSRFConfig, request: RouterRequest) {
+        let mock = MockRouterService::new().build();
+        let service_stack = Csrf::new(config)
+            .await
+            .unwrap()
+            .router_service(mock.boxed());
+        let res = service_stack.oneshot(request).await.unwrap();
+
         match res.response.into_body() {
             ResponseBody::GraphQL(res) => {
                 assert_eq!(
