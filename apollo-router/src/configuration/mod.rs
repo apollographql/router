@@ -642,6 +642,7 @@ mod tests {
     use schemars::gen::SchemaSettings;
     use std::collections::HashMap;
     use std::fs;
+    use walkdir::DirEntry;
     use walkdir::WalkDir;
 
     #[cfg(unix)]
@@ -889,18 +890,12 @@ server:
         #[cfg(unix)]
         let embedded_yaml_matcher =
             Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
-        for entry in WalkDir::new("..")
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if entry
-                .path()
-                .with_file_name(".skipconfigvalidation")
-                .exists()
-            {
-                continue;
-            }
+
+        fn it(path: &str) -> impl Iterator<Item = DirEntry> {
+            WalkDir::new(path).into_iter().filter_map(|e| e.ok())
+        }
+
+        for entry in it(".").chain(it("../examples")).chain(it("../docs")) {
             let name = entry.file_name().to_string_lossy();
             if filename_matcher.is_match(&name) {
                 let config = fs::read_to_string(entry.path()).expect("failed to read file");
