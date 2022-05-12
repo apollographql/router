@@ -63,7 +63,7 @@ impl MetricsConfigurator for Config {
                 endpoint: Some(endpoint),
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
-                schema_id: Some(schema_id),
+                schema_id,
                 ..
             } => {
                 let exporter = ApolloMetricsExporter::new(endpoint, key, reference, schema_id)?;
@@ -228,7 +228,7 @@ mod test {
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
-            schema_id: Some("schema_sha".to_string()),
+            schema_id: "schema_sha".to_string(),
         })
         .await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
@@ -356,7 +356,7 @@ mod test {
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
-            schema_id: Some("schema_sha".to_string()),
+            schema_id: "schema_sha".to_string(),
         })
     }
 

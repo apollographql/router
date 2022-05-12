@@ -630,7 +630,7 @@ mod tests {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({"apollo": {}, "tracing": {}}))
+            .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
             .await
             .unwrap();
     }
@@ -641,7 +641,7 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
-                "apollo": {},
+                "apollo": {"schema_id":"abc"},
                 "tracing": {
                     "trace_config": {
                         "service_name": "router",

@@ -372,6 +372,6 @@ mod test {
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
-        assert_eq!(&config.apollo.unwrap().schema_id.unwrap(), "schema_sha");
+        assert_eq!(&config.apollo.unwrap().schema_id, "schema_sha");
     }
 }
