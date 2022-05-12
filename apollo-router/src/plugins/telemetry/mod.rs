@@ -2,7 +2,7 @@
 // This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::{Metrics, MetricsKey, QueryLatencyStats, Sender};
+use crate::plugins::telemetry::metrics::apollo::studio::{Metrics, MetricsKey, QueryLatencyStats};
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -20,6 +20,7 @@ use apollo_spaceport::server::ReportSpaceport;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
+use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -483,9 +484,9 @@ impl Telemetry {
                     ..Default::default()
                 }
             } else {
-                metrics::apollo::Metrics {
+                metrics::apollo::studio::Metrics {
                     operation_count,
-                    key: metrics::apollo::MetricsKey::Regular {
+                    key: metrics::apollo::studio::MetricsKey::Regular {
                         client_name: context
                             .get(CLIENT_NAME)
                             .unwrap_or_default()
