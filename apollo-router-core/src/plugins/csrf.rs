@@ -260,7 +260,17 @@ mod csrf_tests {
             )
             .build()
             .unwrap();
-        assert_rejected(config, non_preflighted_request).await
+        assert_rejected(config.clone(), non_preflighted_request).await;
+
+        let non_preflighted_request = RouterRequest::fake_builder()
+            .headers(
+                [("content-type".into(), "text/plain; charset=utf8".into())]
+                    .into_iter()
+                    .collect(),
+            )
+            .build()
+            .unwrap();
+        assert_rejected(config, non_preflighted_request).await;
     }
 
     #[tokio::test]
