@@ -11,9 +11,10 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 #[serde(deny_unknown_fields)]
 struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
-    /// set disabled = true to disable the plugin behavior
+    /// set unsafe_disabled = true to disable the plugin behavior
+    /// Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
     #[serde(default)]
-    disabled: bool,
+    unsafe_disabled: bool,
     /// Override the headers to check for by setting
     /// custom_headers
     /// Note that if you set required_headers here,
@@ -36,7 +37,7 @@ fn apollo_custom_preflight_headers() -> Vec<String> {
 impl Default for CSRFConfig {
     fn default() -> Self {
         Self {
-            disabled: false,
+            unsafe_disabled: false,
             required_headers: apollo_custom_preflight_headers(),
         }
     }
@@ -89,7 +90,7 @@ impl Plugin for Csrf {
         &mut self,
         service: BoxService<RouterRequest, RouterResponse, BoxError>,
     ) -> BoxService<RouterRequest, RouterResponse, BoxError> {
-        if !self.config.disabled {
+        if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
@@ -201,7 +202,7 @@ mod csrf_tests {
         crate::plugins()
             .get("apollo.csrf")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "disabled": true }))
+            .create_instance(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
@@ -276,7 +277,7 @@ mod csrf_tests {
     #[tokio::test]
     async fn it_accepts_non_preflighted_headers_request_when_plugin_is_disabled() {
         let config = CSRFConfig {
-            disabled: true,
+            unsafe_disabled: true,
             ..Default::default()
         };
         let non_preflighted_request = RouterRequest::fake_builder().build().unwrap();

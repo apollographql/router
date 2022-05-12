@@ -13,7 +13,7 @@ server:
       - x-and-an-other-required-header
       - content-type # and many more!
 csrf:
-  # you could set disabled: false, but That wouldn't be safe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
+  # you could set unsafe_disabled: true, but That wouldn't be safe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
 
   # pick required headers that are custom enough
   # to make sure browsers would need to have added them with javascript,

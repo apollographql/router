@@ -6,63 +6,11 @@ description: Control access to your server's resources
 
 import { Link } from 'gatsby';
 
-The Apollo Router supports [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) (CORS) to indicate which origins it accepts requests from. **By default, the router accepts requests from the Apollo studio**.
-
-If your environment has security requirements around CORS, you can specify them in the router's [configuration file](./overview/#configuration-file):
-
-```yaml title="router.yaml"
-server:
-  #
-  # CORS (Cross Origin Resource Sharing)
-  #
-  cors:
-
-    # Set to true to allow any origin
-    # (Defaults to false)
-    allow_any_origin: true
-
-    # List of accepted origins
-    # (Ignored if allow_any_origin is true)
-    # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
-    origins:
-      - https://www.my-frontend.com
-
-    # Set to true to add the `Access-Control-Allow-Credentials` header
-    # (Defaults to false)
-    allow_credentials: true
-
-    # The headers to allow.
-    # If this field is not set, CORS will default to the `mirror_request` mode,
-    # which mirrors the received `access-control-request-headers`
-    # (This is equivalent to allowing any headers)
-    allow_headers: [ Content-Type, Authorization, x-my-custom-required-header, x-and-an-other-required-header ]
-
-    # Allowed request methods
-    # (Defaults to [ GET, POST, OPTIONS ])
-    methods: [ POST, OPTIONS ]
-
-    # Which response headers are available to scripts running in the
-    # browser in response to a cross-origin request.
-    # (Defaults to empty array)
-    expose_headers: []
-
-csrf:
-  # you could set disabled: false, but That wouldn't be safe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
-
-  # pick required headers that are custom enough
-  # to make sure browsers would need to have added them with javascript,
-  # which would trigger a preflight https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#what_requests_use_cors
-  # `content-type` is not a safe idea for example.
-  required_headers:
-    - x-my-custom-required-header # we will look for presence of this header...
-    - x-and-an-other-required-header # ...or that one if a request was made with a `simple` content type https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests
-
-```
-
 [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) (CORS) is an HTTP-header-based protocol that enables a server to dictate which origins can access its resources. Put another way, your server can specify which websites can tell a user's browser to talk to your server, and precisely which types of HTTP requests are allowed.
 
-Apollo Server's default CORS behavior enables any website on the internet to tell a user's browser to connect to your server.
+Apollo Router's default CORS behavior enables only the Apollo studio to tell a user's browser to connect to your server.
 
+> If your Apollo Router is serving data for web applications, you want to either add it to the list of allowed origins, or switch to `allow_any_origin`.
 > ⚠️ If your app is only visible on a private network and uses network separation for security, the default CORS behavior is **not secure**. See [Specifying origins](#specifying-origins) for more information.
 
 By default, websites running on domains that differ from your server's domain can't pass cookies with their requests. For details on enabling cross-origin cookie passing for authentication, see [Passing credentials with CORS](#passing-credentials-with-cors).
@@ -112,12 +60,6 @@ If your browser is running your API on a private network (i.e., not on the publi
 
 If you don't, while your personal computer is on your private network, a script on any website could potentially make your browser talk to your private API. [Some browsers, such as Chrome, have features under development](https://wicg.github.io/private-network-access/) to solve this problem. But in the meantime, all servers on private networks should *always* specify origins in their CORS configuration.
 
-#### Federated subgraphs
-
-If you're building a [federated graph](/federation/), we strongly recommend that _all_ of your production subgraph servers [_disable_ CORS](../api/apollo-server#cors) (or at least specify origins and limit them to tools like the Apollo Explorer). Most subgraphs should allow communication _only_ from your gateways, and that communication doesn't involve a browser at all.
-
-For more information, see [Securing your subgraphs](/federation/subgraphs/#securing-your-subgraphs).
-
 #### APIs that require cookies
 
 If your API needs to accept [cross-origin cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies) with requests, you _must_ specify origins in your CORS configuration. Otherwise, cross-origin cookies are automatically disabled. This is _not_ a security vulnerability, but it does prevent your API from successfully providing cookies.
@@ -130,13 +72,20 @@ If you create an API on the public internet to serve resources to your _own_ web
 
 #### Public or embedded APIs
 
-If you create a public API or an API to embed in websites you don't control yourself, you probably want to allow _all_ origins to access your server's resources. You can use Apollo Server's default ACAO value (the wildcard `*`) in these situations, allowing requests from any origin.
+If you create a public API or an API to embed in websites you don't control yourself, you probably want to allow _any_ origin to access your server's resources. You can set `allow_any_origin` in your `router.yml` configuration:
+
+```yml
+server:
+  cors:
+    allow_any_origin: true
+```
 
 > Using the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the ACAO header enables _any_ website to tell a user's browser to send an arbitrary request (without cookies or other credentials) to your server and read that server's response.
 
-#### None of the above
+#### APIs with non browser consumers
 
-If your application doesn't fit into any of the above categories, the default Apollo Server CORS behavior should suit your use case. You can always specify origins in your CORS configuration later or disable cross-origin requests by [disabling CORS for your server](../api/apollo-server#cors).
+The default Apollo Server CORS behavior should suit your use case, and https://studio.apollographql.com/sandbox/explorer allows you to run queries against your Apollo Router.
+You can always specify origins in your CORS configuration later. 
 
 ##  Configuring CORS options for Apollo Server
 
@@ -258,3 +207,57 @@ HTTP requests that satisfy none of the conditions above will be rejected with a 
 You can also configure the set of headers that allow execution. For example, if you use a GraphQL client that performs `GET` requests without sending `Content-Type`, `X-Apollo-Operation-Name`, or `Apollo-Require-Preflight` headers, but it does send a `Some-Special-Header` header, you can pass `csrfPrevention: { requestHeaders: ['Some-Special-Header'] }` to `new ApolloServer()`.  This option replaces checking for the two headers `X-Apollo-Operation-Name` and `Apollo-Require-Preflight` in the CSRF prevention logic. The check for `Content-Type` remains the same.
 
 Note that Apollo Server does not permit executing mutations in `GET` requests (just queries). As long as you ensure that only mutations can have side effects, you are somewhat protected from the "side effects" aspect of CSRFs even without enabling CSRF protection. However, you would still be vulnerable to XS-Search timing attacks.
+
+
+The Apollo Router supports [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) (CORS) to indicate which origins it accepts requests from. **By default, the router accepts requests from the Apollo studio**.
+
+If your environment has security requirements around CORS, you can specify them in the router's [configuration file](./overview/#configuration-file):
+
+```yaml title="router.yaml"
+server:
+  #
+  # CORS (Cross Origin Resource Sharing)
+  #
+  cors:
+
+    # Set to true to allow any origin
+    # (Defaults to false)
+    allow_any_origin: true
+
+    # List of accepted origins
+    # (Ignored if allow_any_origin is true)
+    # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
+    origins:
+      - https://www.my-frontend.com
+
+    # Set to true to add the `Access-Control-Allow-Credentials` header
+    # (Defaults to false)
+    allow_credentials: true
+
+    # The headers to allow.
+    # If this field is not set, CORS will default to the `mirror_request` mode,
+    # which mirrors the received `access-control-request-headers`
+    # (This is equivalent to allowing any headers)
+    allow_headers: [ Content-Type, Authorization, x-my-custom-required-header, x-and-an-other-required-header ]
+
+    # Allowed request methods
+    # (Defaults to [ GET, POST, OPTIONS ])
+    methods: [ POST, OPTIONS ]
+
+    # Which response headers are available to scripts running in the
+    # browser in response to a cross-origin request.
+    # (Defaults to empty array)
+    expose_headers: []
+
+csrf:
+  # you could set unsafe_disabled: true, but That wouldn't be safe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
+
+  # pick required headers that are custom enough
+  # to make sure browsers would need to have added them with javascript,
+  # which would trigger a preflight https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#what_requests_use_cors
+  # `content-type` is not a safe idea for example.
+  required_headers:
+    - x-my-custom-required-header # we will look for presence of this header...
+    - x-and-an-other-required-header # ...or that one if a request was made with a `simple` content type https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests
+
+```
