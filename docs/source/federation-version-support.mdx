@@ -4,15 +4,12 @@ title: Federation version support in the Apollo Router
 
 import { Link } from 'gatsby';
 
-The Apollo Router uses Federation 2.x. However, Federation 2.x
-is [backward compatible with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/)
-.
+The Apollo Router uses Apollo Federation 2.x. Federation 2.x
+is [backward compatible with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/), so you can use the router with a valid Federation 1.x supergraph.
 
-As long as your graph is valid then your Federation 1 graph will work.
+> If your Federation 1.x supergraph _doesn't_ work with the Apollo Router, see [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/) for possible causes.
 
-Apollo Federation is an evolving project, and it will receive new features and bug fixes over time. If you need to run a
-particular version of Federation then the following table shows the version that the Router releases are compiled
-against.
+Apollo Federation is an evolving project, and it will receive new features and bug fixes over time. If you need to run a particular version of federation, the following table shows which version of federation each router release is compiled against:
 
 <table>
     <thead>
@@ -85,7 +82,3 @@ against.
     </tr>
     </tbody>
 </table>
-
-If your Federation 1.x graph is not working with the Router, then please check
-the [backward compatibility with Federation 1.x](https://www.apollographql.com/docs/federation/federation-2/backward-compatibility/)
-notes to see if there is an issue with your graph.
