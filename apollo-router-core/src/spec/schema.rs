@@ -371,7 +371,7 @@ impl std::str::FromStr for Schema {
 
             let mut hasher = Sha256::new();
             hasher.update(schema.as_bytes());
-            let schema_id = Some(format!("{:X}", hasher.finalize()));
+            let schema_id = Some(format!("{:X}", hasher.finalize()).to_lowercase());
 
             Ok(Schema {
                 subtype_map,
@@ -765,12 +765,12 @@ mod tests {
         #[cfg(windows)]
         assert_eq!(
             schema.schema_id,
-            Some("C081A7FF570F630BDF22CB6CA73A2BB1D46657EF69FC66749F5A1F99332B5ECB".to_string())
+            Some("c081a7ff570f630bdf22cb6ca73a2bb1d46657ef69fc66749f5a1f99332b5ecb".to_string())
         );
         #[cfg(not(windows))]
         assert_eq!(
             schema.schema_id,
-            Some("6881633761291F4A6E4F9A4A6BBE7AD69A80C63EBEBFC357464B7A6EF276EF0A".to_string())
+            Some("6881633761291f4a6e4f9a4a6bbe7ad69a80c63ebebfc357464b7a6ef276ef0a".to_string())
         );
     }
 
