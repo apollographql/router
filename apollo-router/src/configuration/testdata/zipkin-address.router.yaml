@@ -3,4 +3,4 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      endpoint: default
+      endpoint: zipkin:9411
