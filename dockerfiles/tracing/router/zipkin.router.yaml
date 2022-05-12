@@ -9,7 +9,6 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      collector:
-        endpoint: http://zipkin:9411/api/v2/spans
+      endpoint: http://zipkin:9411/api/v2/spans
     propagation:
       zipkin: true 
