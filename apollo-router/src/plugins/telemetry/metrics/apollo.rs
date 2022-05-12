@@ -240,9 +240,10 @@ impl MetricsConfigurator for Config {
                 endpoint: Some(endpoint),
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
+                schema_id: Some(schema_id),
                 ..
             } => {
-                let exporter = ApolloMetricsExporter::new(endpoint, key, reference, "TODO")?;
+                let exporter = ApolloMetricsExporter::new(endpoint, key, reference, schema_id)?;
 
                 builder
                     .with_apollo_metrics_collector(exporter.provider())
@@ -262,7 +263,7 @@ impl ApolloMetricsExporter {
         endpoint: &Url,
         apollo_key: &str,
         apollo_graph_ref: &str,
-        executable_schema_id: &str,
+        schema_id: &str,
     ) -> Result<ApolloMetricsExporter, BoxError> {
         let apollo_key = apollo_key.to_string();
         // Desired behavior:
@@ -280,7 +281,7 @@ impl ApolloMetricsExporter {
             service_version: "".to_string(),
             runtime_version: "".to_string(),
             uname: "".to_string(),
-            executable_schema_id: executable_schema_id.to_string(),
+            executable_schema_id: schema_id.to_string(),
         };
 
         // Deadpool gives us connection pooling to spaceport
@@ -680,7 +681,12 @@ mod test {
         assert_eq!(aggregated_metrics.len(), 1);
         // The way to read snapshot this is that each field should be increasing by 2, except the duration fields which have a histogram.
         insta::with_settings!({sort_maps => true}, {
-            insta::assert_json_snapshot!(aggregated_metrics);
+            insta::assert_json_snapshot!(aggregated_metrics.get(&MetricsKey::Regular {
+                client_name: "client_1".into(),
+                client_version: "version_1".into(),
+                stats_report_key: "report_key_1".into(),
+
+            }).expect("metric not found"));
         });
     }
 
@@ -809,6 +815,7 @@ mod test {
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
+            schema_id: Some("schema_sha".to_string()),
         })
         .await?;
         assert!(matches!(plugin.apollo_metrics_sender, Sender::Noop));
@@ -936,6 +943,7 @@ mod test {
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),
             client_version_header: HeaderName::from_static("version_header"),
+            schema_id: Some("schema_sha".to_string()),
         })
     }
 

@@ -70,7 +70,7 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
         // Process the plugins.
-        let plugins = process_plugins(configuration.clone()).await?;
+        let plugins = create_plugins(&configuration, &schema).await?;
 
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
@@ -100,14 +100,29 @@ impl RouterServiceFactory for YamlRouterServiceFactory {
     }
 }
 
-async fn process_plugins(
-    configuration: Arc<Configuration>,
+async fn create_plugins(
+    configuration: &Arc<Configuration>,
+    schema: &Arc<Schema>,
 ) -> Result<HashMap<String, Box<dyn DynPlugin>>, BoxError> {
     let mut errors = Vec::new();
     let plugin_registry = apollo_router_core::plugins();
-    let mut plugin_instances = Vec::with_capacity(configuration.plugins().len());
+    let mut plugin_instances = Vec::new();
 
-    for (name, configuration) in configuration.plugins().iter() {
+    for (name, mut configuration) in configuration.plugins().into_iter() {
+        // Ugly hack to get the schema sha into the the telemetry plugin
+        if name == "apollo.telemetry" {
+            if let (Some(schema_id), Some(apollo)) =
+                (&schema.schema_id, configuration.get_mut("apollo"))
+            {
+                if let Some(apollo) = apollo.as_object_mut() {
+                    apollo.insert(
+                        "schema_id".to_string(),
+                        Value::String(schema_id.to_string()),
+                    );
+                }
+            }
+        }
+
         let name = name.clone();
         match plugin_registry.get(name.as_str()) {
             Some(factory) => {
@@ -118,7 +133,7 @@ async fn process_plugins(
                 );
 
                 // expand any env variables in the config before processing.
-                let configuration = expand_env_variables(configuration);
+                let configuration = expand_env_variables(&configuration);
                 match factory.create_instance(&configuration).await {
                     Ok(plugin) => {
                         plugin_instances.push((name.clone(), plugin));

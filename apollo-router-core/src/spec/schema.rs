@@ -5,6 +5,8 @@ use apollo_parser::ast;
 use http::Uri;
 use itertools::Itertools;
 use router_bridge::api_schema;
+use sha2::Digest;
+use sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 
 /// A GraphQL schema.
@@ -19,6 +21,7 @@ pub struct Schema {
     pub(crate) custom_scalars: HashSet<String>,
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
+    pub schema_id: Option<String>,
 }
 
 impl std::str::FromStr for Schema {
@@ -366,6 +369,10 @@ impl std::str::FromStr for Schema {
                 })
                 .collect();
 
+            let mut hasher = Sha256::new();
+            hasher.update(schema.as_bytes());
+            let schema_id = Some(format!("{:X}", hasher.finalize()));
+
             Ok(Schema {
                 subtype_map,
                 string: schema.to_owned(),
@@ -376,6 +383,7 @@ impl std::str::FromStr for Schema {
                 custom_scalars,
                 enums,
                 api_schema: None,
+                schema_id,
             })
         }
     }
@@ -692,7 +700,6 @@ mod tests {
         .parse()
         .unwrap();
 
-        println!("subgraphs: {:?}", schema.subgraphs);
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
             schema
@@ -748,6 +755,15 @@ mod tests {
             .fields
             .get("inStock")
             .is_none());
+    }
+
+    #[test]
+    fn schema_id() {
+        let schema = Schema::from_str(include_str!("../testdata/contract_schema.graphql")).unwrap();
+        assert_eq!(
+            schema.schema_id,
+            Some("6881633761291F4A6E4F9A4A6BBE7AD69A80C63EBEBFC357464B7A6EF276EF0A".to_string())
+        );
     }
 
     // test for https://github.com/apollographql/federation/pull/1769
