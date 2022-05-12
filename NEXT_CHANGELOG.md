@@ -49,6 +49,9 @@ telemetry:
         endpoint: jaeger:14268
 ```
 
+### Remove the agent endpoint configuration for Zipkin [PR #1025](https://github.com/apollographql/router/pull/1025)
+Zipkin only supports the collector endpoint URL configuration.
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
