@@ -9,9 +9,7 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      agent:
-        endpoint: default
-        #endpoint: default
-        #endpoint: 127.0.0.1:14268
+      collector:
+        endpoint: http://zipkin:9411/api/v2/spans
     propagation:
       zipkin: true 

@@ -10,9 +10,9 @@ const ZipkinJavascriptOpentracing = require("zipkin-javascript-opentracing");
 const { recorder } = require("./recorder");
 
 const tracer = new ZipkinJavascriptOpentracing({
-  serviceName: "My Service",
+  serviceName: "accounts",
   recorder,
-  kind: "client"
+  kind: "server"
 });
 
 const typeDefs = gql`
@@ -57,21 +57,25 @@ const users = [
 ];
 
 async function startApolloServer(typeDefs, resolvers) {
-  // Required logic for integrating with Express
   const app = express();
+
   app.use(function zipkinExpressMiddleware(req, res, next) {
-    const span = tracer.startSpan("My Span");
+    const context = tracer.extract(
+      ZipkinJavascriptOpentracing.FORMAT_HTTP_HEADERS,
+      req.headers
+    );
+    const span = tracer.startSpan("subgraph", { childOf: context });
   
     setTimeout(() => {
       span.log({
         statusCode: "200",
         objectId: "42"
       });
-    }, 100);
+    }, 1);
   
     setTimeout(() => {
       span.finish();
-    }, 200);
+    }, 2);
   
     next();
   });
