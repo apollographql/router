@@ -4,9 +4,13 @@ expression: results
 ---
 [
   {
-    "client_name": "test_client",
-    "client_version": "1.0-test",
-    "stats_report_key": "## GraphQLUnknownOperationName\n",
+    "key": {
+      "Regular": {
+        "client_name": "test_client",
+        "client_version": "1.0-test",
+        "stats_report_key": "## GraphQLUnknownOperationName\n"
+      }
+    },
     "query_latency_stats": {
       "latency_count": {
         "secs": 0,
@@ -36,7 +40,7 @@ expression: results
       },
       "registered_operation_count": 0,
       "forbidden_operation_count": 0,
-      "requests_without_field_instrumentation": 0
+      "requests_without_field_instrumentation": 1
     },
     "per_type_stat": {},
     "referenced_fields_by_type": {},
