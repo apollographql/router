@@ -371,7 +371,7 @@ impl std::str::FromStr for Schema {
 
             let mut hasher = Sha256::new();
             hasher.update(schema.as_bytes());
-            let schema_id = Some(format!("{:X}", hasher.finalize()).to_lowercase());
+            let schema_id = Some(format!("{:x}", hasher.finalize()));
 
             Ok(Schema {
                 subtype_map,
