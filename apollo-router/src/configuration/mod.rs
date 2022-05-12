@@ -896,6 +896,14 @@ server:
         }
 
         for entry in it(".").chain(it("../examples")).chain(it("../docs")) {
+            if entry
+                .path()
+                .with_file_name(".skipconfigvalidation")
+                .exists()
+            {
+                continue;
+            }
+
             let name = entry.file_name().to_string_lossy();
             if filename_matcher.is_match(&name) {
                 let config = fs::read_to_string(entry.path()).expect("failed to read file");
