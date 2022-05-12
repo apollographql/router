@@ -18,7 +18,7 @@ csrf:
   # pick required headers that are custom enough
   # to make sure browsers would need to have added them with javascript,
   # which would trigger a preflight https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#what_requests_use_cors
-  # `content-type` is not a good idea for example.
+  # `content-type` is not a safe idea for example.
   required_headers:
     - x-my-custom-required-header # we will look for presence of this header...
     - x-and-an-other-required-header # ...or that one if a request was made with a `simple` content type https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests
