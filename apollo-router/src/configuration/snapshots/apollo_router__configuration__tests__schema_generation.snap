@@ -11,11 +11,6 @@ expression: "&schema"
     "csrf": {
       "type": "object",
       "properties": {
-        "disabled": {
-          "description": "The CSRF plugin is enabled by default; set disabled = true to disable the plugin behavior",
-          "default": false,
-          "type": "boolean"
-        },
         "required_headers": {
           "description": "Override the headers to check for by setting custom_headers Note that if you set required_headers here, you may also want to have a look at your `CORS` configuration, and make sure you either: - did not set any `allow_headers` list (so it defaults to `mirror_request`) - added your required headers to the allow_headers list, as shown in the `examples/cors-and-csrf/custom-headers.router.yaml` files.",
           "default": [
@@ -26,6 +21,11 @@ expression: "&schema"
           "items": {
             "type": "string"
           }
+        },
+        "unsafe_disabled": {
+          "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF",
+          "default": false,
+          "type": "boolean"
         }
       },
       "additionalProperties": false
