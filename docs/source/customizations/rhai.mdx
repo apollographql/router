@@ -138,18 +138,18 @@ fn router_service(service) {
 All requests expose a mechanism for interacting with request Body, Headers and Context.
 
 ```
-    request.context
-    request.headers
-    request.body.query
-    request.body.operation_name
-    request.body.variables
-    request.body.extensions
+request.context
+request.headers
+request.body.query
+request.body.operation_name
+request.body.variables
+request.body.extensions
 ```
 
 In addition, SubgraphRequest, exposes the additional ability to interact with headers sent to subgraphs:
 
 ```
-    request.sub_headers
+request.sub_headers
 ```
 
 All of the above are read/write *apart* from `request.body.variables` which is read-only.
@@ -159,12 +159,12 @@ All of the above are read/write *apart* from `request.body.variables` which is r
 Most responses expose a mechanism for interacting with response Body, Headers and Context. QueryPlannerResponse only exposes a Context, since there are no Body or Headers accessible at that stage.
 
 ```
-    response.context
-    response.headers
-    response.body.label
-    response.body.data
-    response.body.errors
-    response.body.extensions
+response.context
+response.headers
+response.body.label
+response.body.data
+response.body.errors
+response.body.extensions
 ```
 
 All of the above are read/write.
