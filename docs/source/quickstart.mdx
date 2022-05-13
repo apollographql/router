@@ -7,14 +7,18 @@ Hello! This tutorial walks you through installing the Apollo Router and running 
 
 ## 1. Download and extract the Apollo Router binary
 
-### Automatic download (Linux, OSX, WSL)
+### Download options
 
-If you have a bash compatible terminal you can download the latest version of the Apollo Router directly to your current directory.
+#### Automatic download (Linux, OSX, WSL)
+
+If you have a bash-compatible terminal, you can download the latest version of the Apollo Router directly to your current directory with the following command:
+
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/apollographql/router/main/scripts/install.sh)  
+bash <(curl -fsSL https://raw.githubusercontent.com/apollographql/router/main/scripts/install.sh)
 ```
 
-### Manual download
+#### Manual download
+
 Go to the Apollo Router's [GitHub Releases page](https://github.com/apollographql/router/releases) and download the latest `.tar.gz` file that matches your system. Currently, tarballs are available for the following:
 
 * Linux (x86_64)
@@ -29,13 +33,15 @@ After downloading, extract the file by running the following from a new project 
 tar -xf path/to/file.tar.gz
 ```
 
-You can now try running Apollo Router from your project's root directory with the following command:
+### Running the binary
+
+You can now try running the Apollo Router from your project's root directory with the following command:
 
 ```bash
 ./dist/router
 ```
 
-If you do, you'll get the following:
+If you do, you'll get the following output:
 
 ```
 APOLLO ROUTER <version>
@@ -71,7 +77,7 @@ This is because Apollo Router requires a supergraph schema and we aren't providi
 
 ## 2. Download the example supergraph schema
 
-For this quickstart, we're using example Apollo-hosted subgraphs, along with an example supergraph schema that's composed from their schemas.
+For this quickstart, we're using example Apollo-hosted subgraphs, along with an example supergraph schema that's composed from those subgraph schemas.
 
 From your project's root directory, run the following:
 
