@@ -45,32 +45,32 @@ This section covers functionality specific to how router functionality is expose
 The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the EPOCH in unix environments.)
 
 ```javascript
-    fn router_service(service) {
-        // Define a closure to process our response
-        let f = |response| {
-            let start = apollo_start.elapsed;
-            // ... Do some processing
-            let duration = apollo_start.elapsed - start;
-            print(`response processing took: ${duration}`);
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        let start = apollo_start.elapsed;
+        // ... Do some processing
+        let duration = apollo_start.elapsed - start;
+        print(`response processing took: ${duration}`);
 
-            // Log out any errors we may have
-            print(response.body.errors);
-        };
-        // Map our response using our closure
-        service.map_response(f);
-    }
+        // Log out any errors we may have
+        print(response.body.errors);
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
 ```
 ### Logging
 
 If you print() a message then it will be logged to the router logs at info level. If you want more control over the log level, then there are a series of logging functions:
 
 ```javascript
-    print("this is a sample message");
-    log_error("this is error level log message");
-    log_warn("this is warn level log message");
-    log_info("this is info level log message");
-    log_debug("this is debug level log message");
-    log_trace("this is trace level log message");
+print("this is a sample message");
+log_error("this is error level log message");
+log_warn("this is warn level log message");
+log_info("this is info level log message");
+log_debug("this is debug level log message");
+log_trace("this is trace level log message");
 ```
 
 ### Exceptions
@@ -79,15 +79,15 @@ If you wish to indicate to the client that an error has occurred, Rhai supports 
 
 For example:
 ```javascript
-    fn router_service(service) {
-        // Define a closure to process our response
-        let f = |response| {
-            // Something goes wrong during response processing...
-            throw "an error occurred setting up the router_service...");
-        };
-        // Map our response using our closure
-        service.map_response(f);
-    }
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw "an error occurred setting up the router_service...");
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
 ```
 
 ### Service hooks
@@ -104,10 +104,10 @@ Each of these hooks is optional. Define only the functions you want to use custo
 Each function takes a single parameter: `service`, this is typed for each of the different services. The various service functions are not required to return anything. If they do, the return is ignored.
 
 ```javascript
-    fn router_service(service) {}
-    fn query_planner_service(service) {}
-    fn execution_service(service) {}
-    fn subgraph_service(service) {}
+fn router_service(service) {}
+fn query_planner_service(service) {}
+fn execution_service(service) {}
+fn subgraph_service(service) {}
 ```
 
 ### Service Interface
@@ -121,22 +121,22 @@ These can be invoked as methods on the supplied service object and are expected 
 
 For example:
 ```javascript
-    fn router_service(service) {
-        // Define a closure to process our response
-        let f = |response| {
-            // Log out any errors we may have
-            print(response.body.errors);
-        };
-        // Map our response using our closure
-        service.map_response(f);
-    }
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Log out any errors we may have
+        print(response.body.errors);
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
 ```
 
 ### Request Interface
 
 All requests expose a mechanism for interacting with request Body, Headers and Context.
 
-```javascript
+```
     request.context
     request.headers
     request.body.query
@@ -147,7 +147,7 @@ All requests expose a mechanism for interacting with request Body, Headers and C
 
 In addition, SubgraphRequest, exposes the additional ability to interact with headers sent to subgraphs:
 
-```javascipt
+```
     request.sub_headers
 ```
 
@@ -157,7 +157,7 @@ All of the above are read/write *apart* from `request.body.variables` which is r
 
 Most responses expose a mechanism for interacting with response Body, Headers and Context. QueryPlannerResponse only exposes a Context, since there are no Body or Headers accessible at that stage.
 
-```javascript
+```
     response.context
     response.headers
     response.body.label
