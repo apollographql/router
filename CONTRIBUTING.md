@@ -62,17 +62,13 @@ and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-the
 
 To contribute to these docs, you can add or edit the markdown & MDX files in the `docs/source` directory.
 
-To build and run the documentation site locally, you'll have to install the relevant packages by doing the following
-from the root of the `router` repository:
-
-```sh
-cd docs
-npm i
-npm start
-```
+To build and run the documentation site locally, you'll also need a clone of 
+the [apollographql/docs](https://github.com/apollographql/docs/) repository
+and run `npm run start:router` from there, after following 
+[installation instructions](https://github.com/apollographql/docs/#developing-locally).
 
 This will start up a development server with live reload enabled. You can see the docs by
-opening [localhost:8000](http://localhost:8000) in your browser.
+opening [localhost:8888](http://localhost:8888) in your browser.
 
 ### Adding a new page to the documentation
 
