@@ -471,7 +471,7 @@ impl Telemetry {
     fn update_apollo_metrics(
         context: Context,
         sender: Sender,
-        _result: &Result<RouterResponse, BoxError>,
+        result: &Result<RouterResponse, BoxError>,
         duration: Duration,
     ) {
         let metrics = if let Some(usage_reporting) = context
@@ -507,9 +507,19 @@ impl Telemetry {
                                         .unwrap_or_default(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
-                                    latency_count: duration,
-                                    request_count: 1,
-                                    requests_without_field_instrumentation: 1,
+                                    latency: duration,
+                                    has_errors: match result {
+                                        Ok(r) => {
+                                            !r.response.status().is_success()
+                                                || match r.response.body() {
+                                                    ResponseBody::GraphQL(r) => {
+                                                        !r.errors.is_empty()
+                                                    }
+                                                    _ => false,
+                                                }
+                                        }
+                                        Err(_) => true,
+                                    },
                                     ..Default::default()
                                 },
                                 ..Default::default()

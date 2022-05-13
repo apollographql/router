@@ -3,7 +3,7 @@ use std::time::Duration;
 #[derive(Serialize, Debug)]
 pub(crate) struct DurationHistogram {
     pub(crate) buckets: Vec<i64>,
-    entries: u64,
+    pub(crate) entries: u64,
 }
 
 impl Default for DurationHistogram {
@@ -45,8 +45,10 @@ impl DurationHistogram {
         unbounded_bucket as usize
     }
 
-    pub(crate) fn increment_duration(&mut self, duration: Duration, value: i64) {
-        self.increment_bucket(DurationHistogram::duration_to_bucket(duration), value)
+    pub(crate) fn increment_duration(&mut self, duration: Option<Duration>, value: i64) {
+        if let Some(duration) = duration {
+            self.increment_bucket(DurationHistogram::duration_to_bucket(duration), value)
+        }
     }
 
     fn increment_bucket(&mut self, bucket: usize, value: i64) {

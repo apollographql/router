@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
-assertion_line: 359
 expression: aggregated_metrics
 ---
 {
@@ -18,7 +17,7 @@ expression: aggregated_metrics
               "client_version": "version_1"
             },
             "query_latency_stats": {
-              "latency_count": {
+              "request_latencies": {
                 "buckets": [
                   0,
                   0,
@@ -169,11 +168,9 @@ expression: aggregated_metrics
                 ],
                 "entries": 2
               },
-              "request_count": 4,
-              "cache_hits": 6,
-              "persisted_query_hits": 8,
-              "persisted_query_misses": 10,
-              "cache_latency_count": {
+              "persisted_query_hits": 2,
+              "persisted_query_misses": 0,
+              "cache_hits": {
                 "buckets": [
                   0,
                   0,
@@ -330,18 +327,18 @@ expression: aggregated_metrics
                     "children": {
                       "path2": {
                         "children": {},
-                        "errors_count": 12,
-                        "requests_with_errors_count": 14
+                        "errors_count": 4,
+                        "requests_with_errors_count": 6
                       }
                     },
-                    "errors_count": 16,
-                    "requests_with_errors_count": 18
+                    "errors_count": 8,
+                    "requests_with_errors_count": 10
                   }
                 },
-                "errors_count": 20,
-                "requests_with_errors_count": 22
+                "errors_count": 12,
+                "requests_with_errors_count": 14
               },
-              "requests_with_errors_count": 24,
+              "requests_with_errors_count": 2,
               "public_cache_ttl_count": {
                 "buckets": [
                   0,
@@ -644,20 +641,19 @@ expression: aggregated_metrics
                 ],
                 "entries": 2
               },
-              "registered_operation_count": 26,
-              "forbidden_operation_count": 28,
-              "requests_without_field_instrumentation": 30
+              "registered_operation_count": 2,
+              "forbidden_operation_count": 2,
+              "requests_without_field_instrumentation": 2
             },
             "per_type_stat": {
               "type1": {
                 "per_field_stat": {
                   "field1": {
                     "return_type": "String",
-                    "errors_count": 32,
-                    "observed_execution_count": 34,
-                    "estimated_execution_count": 36.0,
-                    "requests_with_errors_count": 38,
-                    "latency_count": {
+                    "errors_count": 16,
+                    "estimated_execution_count": 18.0,
+                    "requests_with_errors_count": 20,
+                    "latency": {
                       "buckets": [
                         0,
                         0,
@@ -811,11 +807,10 @@ expression: aggregated_metrics
                   },
                   "field2": {
                     "return_type": "String",
-                    "errors_count": 40,
-                    "observed_execution_count": 42,
-                    "estimated_execution_count": 44.0,
-                    "requests_with_errors_count": 46,
-                    "latency_count": {
+                    "errors_count": 22,
+                    "estimated_execution_count": 24.0,
+                    "requests_with_errors_count": 26,
+                    "latency": {
                       "buckets": [
                         0,
                         0,
@@ -973,11 +968,10 @@ expression: aggregated_metrics
                 "per_field_stat": {
                   "field1": {
                     "return_type": "String",
-                    "errors_count": 48,
-                    "observed_execution_count": 50,
-                    "estimated_execution_count": 52.0,
-                    "requests_with_errors_count": 54,
-                    "latency_count": {
+                    "errors_count": 28,
+                    "estimated_execution_count": 30.0,
+                    "requests_with_errors_count": 32,
+                    "latency": {
                       "buckets": [
                         0,
                         0,
@@ -1131,11 +1125,10 @@ expression: aggregated_metrics
                   },
                   "field2": {
                     "return_type": "String",
-                    "errors_count": 56,
-                    "observed_execution_count": 58,
-                    "estimated_execution_count": 60.0,
-                    "requests_with_errors_count": 62,
-                    "latency_count": {
+                    "errors_count": 34,
+                    "estimated_execution_count": 36.0,
+                    "requests_with_errors_count": 38,
+                    "latency": {
                       "buckets": [
                         0,
                         0,

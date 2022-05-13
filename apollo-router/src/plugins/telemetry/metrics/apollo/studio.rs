@@ -52,19 +52,17 @@ pub(crate) struct SingleContextualizedStats {
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleQueryLatencyStats {
-    pub(crate) latency_count: Duration,
-    pub(crate) request_count: u64,
-    pub(crate) cache_hits: u64,
-    pub(crate) persisted_query_hits: u64,
-    pub(crate) persisted_query_misses: u64,
-    pub(crate) cache_latency_count: Duration,
+    pub(crate) latency: Duration,
+    pub(crate) cache_hit: bool,
+    pub(crate) persisted_query_hit: bool,
+    pub(crate) cache_latency: Option<Duration>,
     pub(crate) root_error_stats: SinglePathErrorStats,
-    pub(crate) requests_with_errors_count: u64,
-    pub(crate) public_cache_ttl_count: Duration,
-    pub(crate) private_cache_ttl_count: Duration,
-    pub(crate) registered_operation_count: u64,
-    pub(crate) forbidden_operation_count: u64,
-    pub(crate) requests_without_field_instrumentation: u64,
+    pub(crate) has_errors: bool,
+    pub(crate) public_cache_ttl_latency: Option<Duration>,
+    pub(crate) private_cache_ttl_latency: Option<Duration>,
+    pub(crate) registered_operation: bool,
+    pub(crate) forbidden_operation: bool,
+    pub(crate) without_field_instrumentation: bool,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -83,10 +81,9 @@ pub(crate) struct SingleTypeStat {
 pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
-    pub(crate) observed_execution_count: u64,
     pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
-    pub(crate) latency_count: Duration,
+    pub(crate) latency: Duration,
 }
 
 #[derive(Default, Serialize)]
@@ -143,12 +140,10 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct QueryLatencyStats {
-    latency_count: DurationHistogram,
-    request_count: u64,
-    cache_hits: u64,
+    request_latencies: DurationHistogram,
     persisted_query_hits: u64,
     persisted_query_misses: u64,
-    cache_latency_count: DurationHistogram,
+    cache_hits: DurationHistogram,
     root_error_stats: PathErrorStats,
     requests_with_errors_count: u64,
     public_cache_ttl_count: DurationHistogram,
@@ -160,23 +155,20 @@ pub(crate) struct QueryLatencyStats {
 
 impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     fn add_assign(&mut self, stats: SingleQueryLatencyStats) {
-        self.latency_count
-            .increment_duration(stats.latency_count, 1);
-        self.request_count += stats.request_count;
-        self.cache_hits += stats.cache_hits;
-        self.persisted_query_hits += stats.persisted_query_hits;
-        self.persisted_query_misses += stats.persisted_query_misses;
-        self.cache_latency_count
-            .increment_duration(stats.cache_latency_count, 1);
+        self.request_latencies
+            .increment_duration(Some(stats.latency), 1);
+        self.persisted_query_hits += stats.persisted_query_hit as u64;
+        self.persisted_query_misses += !stats.persisted_query_hit as u64;
+        self.cache_hits.increment_duration(stats.cache_latency, 1);
         self.root_error_stats += stats.root_error_stats;
-        self.requests_with_errors_count += stats.requests_with_errors_count;
+        self.requests_with_errors_count += stats.has_errors as u64;
         self.public_cache_ttl_count
-            .increment_duration(stats.public_cache_ttl_count, 1);
+            .increment_duration(stats.public_cache_ttl_latency, 1);
         self.private_cache_ttl_count
-            .increment_duration(stats.private_cache_ttl_count, 1);
-        self.registered_operation_count += stats.registered_operation_count;
-        self.forbidden_operation_count += stats.forbidden_operation_count;
-        self.requests_without_field_instrumentation += stats.requests_without_field_instrumentation;
+            .increment_duration(stats.private_cache_ttl_latency, 1);
+        self.registered_operation_count += stats.registered_operation as u64;
+        self.forbidden_operation_count += stats.forbidden_operation as u64;
+        self.requests_without_field_instrumentation += stats.without_field_instrumentation as u64;
     }
 }
 
@@ -214,18 +206,16 @@ impl AddAssign<SingleTypeStat> for TypeStat {
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
-    observed_execution_count: u64,
     estimated_execution_count: f64,
     requests_with_errors_count: u64,
-    latency_count: DurationHistogram,
+    latency: DurationHistogram,
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
     fn add_assign(&mut self, stat: SingleFieldStat) {
-        self.latency_count.increment_duration(stat.latency_count, 1);
+        self.latency.increment_duration(Some(stat.latency), 1);
         self.requests_with_errors_count += stat.requests_with_errors_count;
         self.estimated_execution_count += stat.estimated_execution_count;
-        self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
     }
@@ -258,12 +248,12 @@ impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
 impl From<QueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            latency_count: stats.latency_count.buckets,
-            request_count: stats.request_count,
-            cache_hits: stats.cache_hits,
+            latency_count: stats.request_latencies.buckets,
+            request_count: stats.request_latencies.entries,
+            cache_hits: stats.cache_hits.entries,
+            cache_latency_count: stats.cache_hits.buckets,
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
-            cache_latency_count: stats.cache_latency_count.buckets,
             root_error_stats: Some(stats.root_error_stats.into()),
             requests_with_errors_count: stats.requests_with_errors_count,
             public_cache_ttl_count: stats.public_cache_ttl_count.buckets,
@@ -306,10 +296,10 @@ impl From<FieldStat> for apollo_spaceport::FieldStat {
         Self {
             return_type: stat.return_type,
             errors_count: stat.errors_count,
-            observed_execution_count: stat.observed_execution_count,
+            observed_execution_count: stat.latency.entries,
             estimated_execution_count: stat.estimated_execution_count as u64,
             requests_with_errors_count: stat.requests_with_errors_count,
-            latency_count: stat.latency_count.buckets,
+            latency_count: stat.latency.buckets,
         }
     }
 }
@@ -392,12 +382,10 @@ mod test {
                             client_version: client_version.to_string(),
                         },
                         query_latency_stats: SingleQueryLatencyStats {
-                            latency_count: Duration::from_secs(1),
-                            request_count: count.inc_u64(),
-                            cache_hits: count.inc_u64(),
-                            persisted_query_hits: count.inc_u64(),
-                            persisted_query_misses: count.inc_u64(),
-                            cache_latency_count: Duration::from_secs(1),
+                            latency: Duration::from_secs(1),
+                            cache_hit: true,
+                            persisted_query_hit: true,
+                            cache_latency: Some(Duration::from_secs(1)),
                             root_error_stats: SinglePathErrorStats {
                                 children: HashMap::from([(
                                     "path1".to_string(),
@@ -417,12 +405,12 @@ mod test {
                                 errors_count: count.inc_u64(),
                                 requests_with_errors_count: count.inc_u64(),
                             },
-                            requests_with_errors_count: count.inc_u64(),
-                            public_cache_ttl_count: Duration::from_secs(1),
-                            private_cache_ttl_count: Duration::from_secs(1),
-                            registered_operation_count: count.inc_u64(),
-                            forbidden_operation_count: count.inc_u64(),
-                            requests_without_field_instrumentation: count.inc_u64(),
+                            has_errors: true,
+                            public_cache_ttl_latency: Some(Duration::from_secs(1)),
+                            private_cache_ttl_latency: Some(Duration::from_secs(1)),
+                            registered_operation: true,
+                            forbidden_operation: true,
+                            without_field_instrumentation: true,
                         },
                         per_type_stat: HashMap::from([
                             (
@@ -461,10 +449,9 @@ mod test {
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
-            observed_execution_count: count.inc_u64(),
             estimated_execution_count: count.inc_f64(),
             requests_with_errors_count: count.inc_u64(),
-            latency_count: Duration::from_secs(1),
+            latency: Duration::from_secs(1),
         }
     }
 

@@ -79,7 +79,7 @@ telemetry:
 ### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
 Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
 
-### Improvements to Studio reporting [PR #1020](https://github.com/apollographql/router/pull/1020)
+### Improvements to Studio reporting [PR #1020](https://github.com/apollographql/router/pull/1020), [PR #1037](https://github.com/apollographql/router/pull/1037)
 Studio reporting now aggregates at the Router only. This architectural change allows us to move towards full reporting functionality.  
 
 ### Add message to logs when Apollo usage reporting is enabled [PR #1029](https://github.com/apollographql/router/pull/1029)
