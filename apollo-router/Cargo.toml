@@ -76,6 +76,7 @@ serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
 serde_yaml = "0.8.24"
+sys-info = "0.9.1"
 thiserror = "1.0.30"
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.1", features = ["net", "codec"] }
@@ -94,6 +95,12 @@ axum = { version = "0.5.4", features = ["headers", "json", "original-uri"] }
 rhai = { version = "1.7.0", features = ["sync", "serde", "internals"] }
 libc = "0.2.125"
 yaml-rust = "0.4.5"
+
+[target.'cfg(macos)'.dependencies]
+uname = "0.1.1"
+
+[target.'cfg(unix)'.dependencies]
+uname = "0.1.1"
 
 [dev-dependencies]
 insta = "1.12.0"

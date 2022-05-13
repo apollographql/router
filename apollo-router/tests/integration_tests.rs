@@ -3,7 +3,7 @@
 //!
 
 use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::{self, Telemetry};
+use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router_core::{
     http_compat, prelude::*, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
     RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
@@ -564,7 +564,7 @@ async fn setup_router_and_registry() -> (
     let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
         metrics: Option::default(),
         tracing: Some(Tracing::default()),
-        apollo: Option::default(),
+        apollo: Some(apollo::Config::default()),
     })
     .await
     .unwrap();

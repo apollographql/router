@@ -1,13 +1,13 @@
 //! Customization via Rhai.
 
 use apollo_router_core::{
-    http_compat, register_plugin, Context, ExecutionRequest, ExecutionResponse, Plugin,
-    QueryPlannerRequest, QueryPlannerResponse, Request, ResponseBody, RouterRequest,
-    RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse,
+    http_compat, register_plugin, Context, Error, ExecutionRequest, ExecutionResponse, Object,
+    Plugin, QueryPlannerRequest, QueryPlannerResponse, Request, Response, ResponseBody,
+    RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
-use rhai::serde::to_dynamic;
+use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -158,12 +158,57 @@ mod router_plugin_mod {
         obj.with_mut(get_originating_headers_response_response_body)
     }
 
+    #[rhai_fn(get = "body", return_raw)]
+    pub fn get_originating_body_router_response(
+        obj: &mut SharedRouterResponse,
+    ) -> Result<ResponseBody, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_body_response_response_body)
+    }
+
+    #[rhai_fn(get = "body", return_raw)]
+    pub fn get_originating_body_execution_response(
+        obj: &mut SharedExecutionResponse,
+    ) -> Result<Response, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_body_response_response)
+    }
+
+    #[rhai_fn(get = "body", return_raw)]
+    pub fn get_originating_body_subgraph_response(
+        obj: &mut SharedSubgraphResponse,
+    ) -> Result<Response, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_body_response_response)
+    }
+
     #[rhai_fn(set = "headers", return_raw)]
     pub fn set_originating_headers_router_response(
         obj: &mut SharedRouterResponse,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub fn set_originating_body_router_response(
+        obj: &mut SharedRouterResponse,
+        body: ResponseBody,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_body_response_response_body(response, body))
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub fn set_originating_body_execution_response(
+        obj: &mut SharedExecutionResponse,
+        body: Response,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_body_response_response(response, body))
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub fn set_originating_body_subraph_response(
+        obj: &mut SharedSubgraphResponse,
+        body: Response,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_body_response_response(response, body))
     }
 
     fn get_context<T: Accessor<Context>>(obj: &mut T) -> Result<Context, Box<EvalAltResult>> {
@@ -198,6 +243,20 @@ mod router_plugin_mod {
         Ok(obj.accessor().headers().clone())
     }
 
+    fn get_originating_body_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
+        obj: &mut T,
+    ) -> Result<ResponseBody, Box<EvalAltResult>> {
+        Ok(obj.accessor().body().clone())
+    }
+
+    fn get_originating_body_response_response<T: Accessor<http_compat::Response<Response>>>(
+        obj: &mut T,
+    ) -> Result<Response, Box<EvalAltResult>> {
+        Ok(obj.accessor().body().clone())
+    }
+
     fn set_originating_headers<T: Accessor<http_compat::Request<Request>>>(
         obj: &mut T,
         headers: HeaderMap,
@@ -221,6 +280,24 @@ mod router_plugin_mod {
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().headers_mut() = headers;
+        Ok(())
+    }
+
+    fn set_originating_body_response_response_body<
+        T: Accessor<http_compat::Response<ResponseBody>>,
+    >(
+        obj: &mut T,
+        body: ResponseBody,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().body_mut() = body;
+        Ok(())
+    }
+
+    fn set_originating_body_response_response<T: Accessor<http_compat::Response<Response>>>(
+        obj: &mut T,
+        body: Response,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().body_mut() = body;
         Ok(())
     }
 
@@ -273,6 +350,7 @@ impl Plugin for Rhai {
         let shared_service = Arc::new(Mutex::new(Some(service)));
         if let Err(error) = self.run_rhai_service(
             FUNCTION_NAME_SERVICE,
+            None,
             ServiceStep::Router(shared_service.clone()),
         ) {
             tracing::error!("service callback failed: {error}");
@@ -292,6 +370,7 @@ impl Plugin for Rhai {
         let shared_service = Arc::new(Mutex::new(Some(service)));
         if let Err(error) = self.run_rhai_service(
             FUNCTION_NAME_SERVICE,
+            None,
             ServiceStep::QueryPlanner(shared_service.clone()),
         ) {
             tracing::error!("service callback failed: {error}");
@@ -311,6 +390,7 @@ impl Plugin for Rhai {
         let shared_service = Arc::new(Mutex::new(Some(service)));
         if let Err(error) = self.run_rhai_service(
             FUNCTION_NAME_SERVICE,
+            None,
             ServiceStep::Execution(shared_service.clone()),
         ) {
             tracing::error!("service callback failed: {error}");
@@ -320,7 +400,7 @@ impl Plugin for Rhai {
 
     fn subgraph_service(
         &mut self,
-        _name: &str,
+        name: &str,
         service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
     ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         const FUNCTION_NAME_SERVICE: &str = "subgraph_service";
@@ -331,6 +411,7 @@ impl Plugin for Rhai {
         let shared_service = Arc::new(Mutex::new(Some(service)));
         if let Err(error) = self.run_rhai_service(
             FUNCTION_NAME_SERVICE,
+            Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
         ) {
             tracing::error!("service callback failed: {error}");
@@ -433,10 +514,16 @@ macro_rules! gen_map_request {
                             Ok(ControlFlow::Break(res))
                         }
                         let shared_request = Shared::new(Mutex::new(Some(request)));
-                        let mut scope = $rhai_service.scope.clone();
-                        let result: Result<Dynamic, String> = $rhai_service.engine
-                            .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_request.clone(),))
-                            .map_err(|err| err.to_string());
+                        let result: Result<Dynamic, String> = if $callback.is_curried() {
+                            $callback
+                                .call(&$rhai_service.engine, &$rhai_service.ast, (shared_request.clone(),))
+                                .map_err(|err| err.to_string())
+                        } else {
+                            let mut scope = $rhai_service.scope.clone();
+                            $rhai_service.engine
+                                .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_request.clone(),))
+                                .map_err(|err| err.to_string())
+                        };
                         if let Err(error) = result {
                             tracing::error!("map_request callback failed: {error}");
                             let mut guard = shared_request.lock().unwrap();
@@ -483,10 +570,16 @@ macro_rules! gen_map_response {
                             res
                         }
                         let shared_response = Shared::new(Mutex::new(Some(response)));
-                        let mut scope = $rhai_service.scope.clone();
-                        let result: Result<Dynamic, String> = $rhai_service.engine
-                            .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_response.clone(),))
-                            .map_err(|err| err.to_string());
+                        let result: Result<Dynamic, String> = if $callback.is_curried() {
+                            $callback
+                                .call(&$rhai_service.engine, &$rhai_service.ast, (shared_response.clone(),))
+                                .map_err(|err| err.to_string())
+                        } else {
+                            let mut scope = $rhai_service.scope.clone();
+                            $rhai_service.engine
+                                .call_fn(&mut scope, &$rhai_service.ast, $callback.fn_name(), (shared_response.clone(),))
+                                .map_err(|err| err.to_string())
+                        };
                         if let Err(error) = result {
                             tracing::error!("map_response callback failed: {error}");
                             let mut guard = shared_response.lock().unwrap();
@@ -513,6 +606,26 @@ impl Accessor<http_compat::Response<ResponseBody>> for RouterResponse {
     }
 
     fn accessor_mut(&mut self) -> &mut http_compat::Response<ResponseBody> {
+        &mut self.response
+    }
+}
+
+impl Accessor<http_compat::Response<Response>> for ExecutionResponse {
+    fn accessor(&self) -> &http_compat::Response<Response> {
+        &self.response
+    }
+
+    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
+        &mut self.response
+    }
+}
+
+impl Accessor<http_compat::Response<Response>> for SubgraphResponse {
+    fn accessor(&self) -> &http_compat::Response<Response> {
+        &self.response
+    }
+
+    fn accessor_mut(&mut self) -> &mut http_compat::Response<Response> {
         &mut self.response
     }
 }
@@ -612,7 +725,12 @@ pub(crate) struct RhaiService {
 }
 
 impl Rhai {
-    fn run_rhai_service(&self, function_name: &str, service: ServiceStep) -> Result<(), String> {
+    fn run_rhai_service(
+        &self,
+        function_name: &str,
+        subgraph: Option<&str>,
+        service: ServiceStep,
+    ) -> Result<(), String> {
         let mut scope = Scope::new();
         scope.push_constant("apollo_start", Instant::now());
         let rhai_service = RhaiService {
@@ -621,9 +739,23 @@ impl Rhai {
             engine: self.engine.clone(),
             ast: self.ast.clone(),
         };
-        self.engine
-            .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
-            .map_err(|err| err.to_string())?;
+        match subgraph {
+            Some(name) => {
+                self.engine
+                    .call_fn(
+                        &mut scope,
+                        &self.ast,
+                        function_name,
+                        (rhai_service, name.to_string()),
+                    )
+                    .map_err(|err| err.to_string())?;
+            }
+            None => {
+                self.engine
+                    .call_fn(&mut scope, &self.ast, function_name, (rhai_service,))
+                    .map_err(|err| err.to_string())?;
+            }
+        }
 
         Ok(())
     }
@@ -650,6 +782,11 @@ impl Rhai {
             .register_type::<HeaderValue>()
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             .register_type::<Request>()
+            .register_type::<Object>()
+            .register_type::<ResponseBody>()
+            .register_type::<Response>()
+            .register_type::<Value>()
+            .register_type::<Error>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
@@ -659,6 +796,8 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
+            // Register "==" for Error so Vec<Error> can be interacted with
+            .register_fn("==", |this: &mut Error, that: Error| this == &that)
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
                 let search_name =
@@ -679,12 +818,12 @@ impl Rhai {
             // Register a Context indexer so we can get/set context
             .register_indexer_get_result(|x: &mut Context, key: &str| {
                 x.get(key)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string().into())
             })
             .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
                 x.insert(key, value)
-                    .map(|v: Option<Dynamic>| v.unwrap_or_else(|| Dynamic::from(())))
+                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
@@ -697,7 +836,7 @@ impl Rhai {
             })
             // Request.query
             .register_get("query", |x: &mut Request| {
-                x.query.clone().map_or(Dynamic::from(()), Dynamic::from)
+                x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
             })
             .register_set("query", |x: &mut Request, value: &str| {
                 x.query = Some(value.to_string());
@@ -706,7 +845,7 @@ impl Rhai {
             .register_get("operation_name", |x: &mut Request| {
                 x.operation_name
                     .clone()
-                    .map_or(Dynamic::from(()), Dynamic::from)
+                    .map_or(Dynamic::UNIT, Dynamic::from)
             })
             .register_set("operation_name", |x: &mut Request, value: &str| {
                 x.operation_name = Some(value.to_string());
@@ -717,7 +856,8 @@ impl Rhai {
             })
             /* XXX CANNOT DO BECAUSE variables is Arc
             .register_set_result("variables", |x: &mut Request, om: Map| {
-                x.variables = from_dynamic(om)
+                x.variables = from_dynamic(&om.into())?;
+                Ok(())
             })
             */
             // Request.extensions
@@ -725,8 +865,136 @@ impl Rhai {
                 to_dynamic(x.extensions.clone())
             })
             .register_set_result("extensions", |x: &mut Request, om: Map| {
-                let v = rhai::format_map_as_json(&om);
-                x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                x.extensions = from_dynamic(&om.into())?;
+                Ok(())
+            })
+            // ResponseBody "short-cuts" to bypass the enum
+            // ResponseBody.label
+            .register_get_result("label", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the label from our resp
+                        to_dynamic(resp.label.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("label", |x: &mut ResponseBody, value: Dynamic| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to update the label on our resp
+                        resp.label = from_dynamic(&value)?;
+                        Ok(())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            // ResponseBody.data
+            .register_get_result("data", |x: &mut ResponseBody| match x {
+                ResponseBody::GraphQL(resp) => {
+                    // Because we are short-cutting the response here
+                    // we need to select the data from our resp
+                    to_dynamic(resp.data.clone())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            .register_set_result("data", |x: &mut ResponseBody, om: Map| match x {
+                ResponseBody::GraphQL(resp) => {
+                    // Because we are short-cutting the response here
+                    // we need to update the data on our resp
+                    resp.data = from_dynamic(&om.into())?;
+                    Ok(())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            // ResponseBody.path (Not Implemented)
+            // ResponseBody.errors
+            .register_get_result("errors", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the errors from our resp
+                        to_dynamic(resp.errors.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("errors", |x: &mut ResponseBody, value: Dynamic| match x {
+                ResponseBody::GraphQL(resp) => {
+                    resp.errors = from_dynamic(&value)?;
+                    Ok(())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            // ResponseBody.extensions
+            .register_get_result("extensions", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the extensions from our resp
+                        to_dynamic(resp.extensions.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("extensions", |x: &mut ResponseBody, om: Map| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to update the extensions on our resp
+                        resp.extensions = from_dynamic(&om.into())?;
+                        Ok(())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            // ResponseBody.response
+            /* We short-cut the treatment of ResponseBody processing to directly
+             * manipulate "data" rather than moving the enum as we probably should.
+             * We do this to "harmonise" the interactions with response data for Rhai
+             * scripts and (effectively) hide the ResponseBody enum from sight.
+             * At some point: ResponseBody should probably be taken out of the
+             * codebase, so this is probably a good decision.
+            .register_get_result("response", |x: &mut ResponseBody| match x {
+                ResponseBody::GraphQL(resp) => Ok(resp.clone()),
+                _ => Err("wrong type of response".into()),
+            })
+            .register_set_result("response", |x: &mut ResponseBody, value: Response| {
+                match x {
+                    ResponseBody::GraphQL(resp) => std::mem::replace(resp, value),
+                    _ => return Err("wrong type of response".into()),
+                };
+                Ok(())
+            })
+            */
+            // Response.label
+            .register_get("label", |x: &mut Response| {
+                x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
+            })
+            .register_set("label", |x: &mut Response, value: &str| {
+                x.label = Some(value.to_string());
+            })
+            // Response.data
+            .register_get_result("data", |x: &mut Response| to_dynamic(x.data.clone()))
+            .register_set_result("data", |x: &mut Response, om: Map| {
+                x.data = from_dynamic(&om.into())?;
+                Ok(())
+            })
+            // Response.path (Not Implemented)
+            // Response.errors
+            .register_get_result("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
+            .register_set_result("errors", |x: &mut Response, value: Dynamic| {
+                x.errors = from_dynamic(&value)?;
+                Ok(())
+            })
+            // Response.extensions
+            .register_get_result("extensions", |x: &mut Response| {
+                to_dynamic(x.extensions.clone())
+            })
+            .register_set_result("extensions", |x: &mut Response, om: Map| {
+                x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Register a series of logging functions
@@ -791,6 +1059,24 @@ impl Rhai {
                 },
             )
             .register_fn("to_string", |x: &mut Request| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut ResponseBody| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Response| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Vec<Error>| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Error| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Object| -> String {
+                format!("{:?}", x)
+            })
+            .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
             });
 
