@@ -187,7 +187,7 @@ err() {
 
 need_cmd() {
     if ! check_cmd "$1"
-    then err "need '$1' (command not found)"
+    then err "Installation halted. Reason: [command not found '$1' - please install this command]"
     fi
 }
 
