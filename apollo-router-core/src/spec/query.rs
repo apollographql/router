@@ -887,6 +887,78 @@ mod tests {
         )
     }
 
+    macro_rules! assert_format_response_fed2 {
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
+            assert_format_response_fed2!(
+                $schema,
+                $query,
+                $response,
+                $operation,
+                Value::Object(Object::default()),
+                $expected
+            );
+        }};
+
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
+            let schema = with_supergraph_boilerplate_fed2($schema)
+                .parse::<Schema>()
+                .expect("could not parse schema");
+            let api_schema = schema.api_schema();
+            println!("generated API chema:\n{}", api_schema.as_str());
+            let query = Query::parse($query, &schema).expect("could not parse query");
+            let mut response = Response::builder().data($response.clone()).build();
+
+            query.format_response(
+                &mut response,
+                $operation,
+                $variables.as_object().unwrap().clone(),
+                api_schema,
+            );
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
+        }};
+    }
+
+    fn with_supergraph_boilerplate_fed2(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+            schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+            {
+                query: Query
+            }
+
+            directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ENUM | ENUM_VALUE | SCALAR | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ARGUMENT_DEFINITION
+
+            scalar join__FieldSet
+            scalar link__Import
+            enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+            }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+        "#,
+            content
+        )
+    }
+
     #[test]
     fn reformat_response_data_field() {
         assert_format_response!(
