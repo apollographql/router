@@ -9,7 +9,7 @@ use tower::{BoxError, ServiceBuilder, ServiceExt};
 
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct CSRFConfig {
+pub struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
     /// Note that setting this to true is deemed unsafe https://developer.mozilla.org/en-US/docs/Glossary/CSRF
@@ -74,7 +74,7 @@ static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[
 /// won't execute operations at the request of origins who our CORS policy will
 /// block.
 #[derive(Debug, Clone)]
-struct Csrf {
+pub struct Csrf {
     config: CSRFConfig,
 }
 
@@ -95,18 +95,18 @@ impl Plugin for Csrf {
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
                     if is_preflighted(&req, required_headers.as_slice()) {
+                        tracing::warn!("request is preflighted");
                         Ok(ControlFlow::Continue(req))
                     } else {
-                        let error = crate::Error {
-                            message: format!("This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
-                            Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
-                            or provide one of the following headers: {}", 
-                            NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
-                            required_headers.join(", ")),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        };
+                        tracing::warn!("request is not preflighted");
+                        let error = crate::Error::builder().message(
+                            format!(
+                                "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+                                Please either specify a 'content-type' header (with a mime-type that is not one of {}) \
+                                or provide one of the following headers: {}", 
+                                NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
+                                required_headers.join(", ")
+                            )).build();
                         let res = RouterResponse::builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)

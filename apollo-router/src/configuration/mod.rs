@@ -85,6 +85,10 @@ pub struct Configuration {
 
 const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
+// Add your plugin to this list so it gets automatically set up if its not been provided a custom configuration.
+// ! requires the plugin configuration to implement Default
+const MANDATORY_APOLLO_PLUGINS: &[&str] = &["csrf"];
+
 fn default_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
@@ -105,11 +109,26 @@ impl Configuration {
 
         // Add all the apollo plugins
         for (plugin, config) in &self.apollo_plugins.plugins {
-            plugins.push((
-                format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin),
-                config.clone(),
-            ));
+            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin);
+            tracing::debug!(
+                "adding plugin {} with user provided configuration",
+                plugin_full_name.as_str()
+            );
+            plugins.push((plugin_full_name, config.clone()));
         }
+
+        // Add the mandatory apollo plugins with defaults,
+        // if a custom configuration hasn't been provided by the user
+        MANDATORY_APOLLO_PLUGINS.iter().for_each(|plugin_name| {
+            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin_name);
+            if !plugins.iter().any(|p| p.0 == plugin_full_name) {
+                tracing::debug!(
+                    "adding plugin {} with default configuration",
+                    plugin_full_name.as_str()
+                );
+                plugins.push((plugin_full_name, Value::Object(Map::new())));
+            }
+        });
 
         // Add all the user plugins
         if let Some(config_map) = self.plugins.plugins.as_ref() {
