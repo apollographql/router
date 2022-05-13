@@ -67,7 +67,7 @@ Configure by updating your values.yaml or by specifying the value on your helm i
 
 e.g.: helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true <etc...>
 
-Note: prometheus metrics are not enabled by default in the helm chart.
+> Note: Prometheus metrics are not enabled by default in the helm chart.
 
 ### Extend capabilities of rhai processing engine [PR #1021](https://github.com/apollographql/router/pull/1021)
 
