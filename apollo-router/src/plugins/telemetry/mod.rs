@@ -2,7 +2,9 @@
 // This entire file is license key functionality
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config::{MetricsCommon, Trace};
-use crate::plugins::telemetry::metrics::apollo::Sender;
+use crate::plugins::telemetry::metrics::apollo::studio::{
+    SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
+};
 use crate::plugins::telemetry::metrics::{
     AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
     MetricsExporterHandle,
@@ -17,9 +19,11 @@ use apollo_router_core::{
     ServiceBuilderExt, SubgraphRequest, SubgraphResponse, USAGE_REPORTING,
 };
 use apollo_spaceport::server::ReportSpaceport;
+use apollo_spaceport::StatsContext;
 use bytes::Bytes;
 use futures::FutureExt;
 use http::{HeaderValue, StatusCode};
+use metrics::apollo::Sender;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::{
     BaggagePropagator, TextMapCompositePropagator, TraceContextPropagator,
@@ -36,7 +40,7 @@ use tower::util::BoxService;
 use tower::{service_fn, BoxError, ServiceBuilder, ServiceExt};
 use url::Url;
 
-mod apollo;
+pub mod apollo;
 pub mod config;
 mod metrics;
 mod otlp;
@@ -145,9 +149,10 @@ impl Plugin for Telemetry {
 
     async fn new(mut config: Self::Config) -> Result<Self, BoxError> {
         // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = config.apollo.get_or_insert_with(|| {
-            serde_json::from_str("{}").expect("could not create default telemetry apollo config")
-        });
+        let apollo = config
+            .apollo
+            .as_mut()
+            .expect("telemetry apollo config must be present");
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let (spaceport, shutdown_tx) = match apollo {
@@ -469,38 +474,63 @@ impl Telemetry {
         _result: &Result<RouterResponse, BoxError>,
         duration: Duration,
     ) {
-        if let Some(usage_reporting) = context
+        let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
         {
-            let exclude: Option<bool> = context.get(STUDIO_EXCLUDE).unwrap_or_default();
             let operation_count = operation_count(&usage_reporting.stats_report_key);
 
-            //The basic metrics only has operation count
-            let mut apollo_metrics = metrics::apollo::Metrics {
-                operation_count,
-                client_name: context
-                    .get(CLIENT_NAME)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-                client_version: context
-                    .get(CLIENT_VERSION)
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-                stats_report_key: usage_reporting.stats_report_key.to_string(),
+            if context
+                .get(STUDIO_EXCLUDE)
+                .map_or(false, |x| x.unwrap_or_default())
+            {
+                // The request was excluded don't report the details, but do report the operation count
+                SingleReport {
+                    operation_count,
+                    ..Default::default()
+                }
+            } else {
+                metrics::apollo::studio::SingleReport {
+                    operation_count,
+                    traces_and_stats: HashMap::from([(
+                        usage_reporting.stats_report_key.to_string(),
+                        SingleTracesAndStats {
+                            stats_with_context: SingleContextualizedStats {
+                                context: StatsContext {
+                                    client_name: context
+                                        .get(CLIENT_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_version: context
+                                        .get(CLIENT_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                },
+                                query_latency_stats: SingleQueryLatencyStats {
+                                    latency_count: duration,
+                                    request_count: 1,
+                                    requests_without_field_instrumentation: 1,
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
+                            referenced_fields_by_type: usage_reporting
+                                .referenced_fields_by_type
+                                .into_iter()
+                                .map(|(k, v)| (k, convert(v)))
+                                .collect(),
+                        },
+                    )]),
+                }
+            }
+        } else {
+            // Usage reporting was missing, so it counts as one operation.
+            SingleReport {
+                operation_count: 1,
                 ..Default::default()
-            };
-            if !exclude.unwrap_or_default() {
-                apollo_metrics.referenced_fields_by_type = usage_reporting
-                    .referenced_fields_by_type
-                    .into_iter()
-                    .map(|(k, v)| (k, convert(v)))
-                    .collect();
-                apollo_metrics.query_latency_stats.latency_count = duration;
-                apollo_metrics.query_latency_stats.request_count = 1;
-            };
-            sender.send(apollo_metrics);
+            }
         };
+        sender.send(metrics);
     }
 
     fn update_metrics(metrics: BasicMetrics, result: &Result<RouterResponse, BoxError>) {
@@ -600,7 +630,7 @@ mod tests {
         apollo_router_core::plugins()
             .get("apollo.telemetry")
             .expect("Plugin not found")
-            .create_instance(&serde_json::json!({ "tracing": null }))
+            .create_instance(&serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}))
             .await
             .unwrap();
     }
@@ -611,8 +641,8 @@ mod tests {
             .get("apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(&serde_json::json!({
+                "apollo": {"schema_id":"abc"},
                 "tracing": {
-
                     "trace_config": {
                         "service_name": "router",
                         "attributes": {
