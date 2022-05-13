@@ -347,8 +347,7 @@ mod test {
             .into_iter()
             .map(|mut m| {
                 m.traces_and_stats.iter_mut().for_each(|(_k, v)| {
-                    v.stats_with_context.query_latency_stats.latency_count =
-                        Duration::from_millis(100)
+                    v.stats_with_context.query_latency_stats.latency = Duration::from_millis(100)
                 });
                 m
             })
