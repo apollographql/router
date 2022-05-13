@@ -33,11 +33,14 @@ impl std::str::FromStr for Schema {
         return Ok(schema);
 
         fn api_schema(schema: &str) -> Result<Schema, SchemaError> {
-            let api_schema = api_schema::api_schema(schema)
-                .map_err(|e| SchemaError::Api(e.to_string()))?
-                .map_err(|e| {
-                    SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
-                })?;
+            let api_schema = format!(
+                "{}\n",
+                api_schema::api_schema(schema)
+                    .map_err(|e| SchemaError::Api(e.to_string()))?
+                    .map_err(|e| {
+                        SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
+                    })?
+            );
 
             parse(&api_schema)
         }
@@ -759,19 +762,25 @@ mod tests {
 
     #[test]
     fn schema_id() {
-        let schema = Schema::from_str(include_str!("../testdata/contract_schema.graphql")).unwrap();
-
-        // Line endings affect the schema hash.
-        #[cfg(windows)]
-        assert_eq!(
-            schema.schema_id,
-            Some("c081a7ff570f630bdf22cb6ca73a2bb1d46657ef69fc66749f5a1f99332b5ecb".to_string())
-        );
         #[cfg(not(windows))]
-        assert_eq!(
-            schema.schema_id,
-            Some("6881633761291f4a6e4f9a4a6bbe7ad69a80c63ebebfc357464b7a6ef276ef0a".to_string())
-        );
+        {
+            let schema =
+                Schema::from_str(include_str!("../testdata/starstuff@current.graphql")).unwrap();
+
+            assert_eq!(
+                schema.schema_id,
+                Some(
+                    "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8".to_string()
+                )
+            );
+
+            assert_eq!(
+                schema.api_schema().schema_id,
+                Some(
+                    "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909".to_string()
+                )
+            );
+        }
     }
 
     // test for https://github.com/apollographql/federation/pull/1769
