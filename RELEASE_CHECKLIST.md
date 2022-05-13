@@ -25,8 +25,11 @@ in lieu of an official changelog.
     breaking change, also add a BREAKING label.
 4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
     `CHANGELOG.md`. Use the structure of previous entries.
-5. Update `docker.mdx` with the release version.
-6. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+5. Update `docker.mdx` and `kubernetes.mdx` with the release version.
+6. Update `helm/chart/router/Chart.yaml` as follows:
+   - increment the version. e.g. `version: 0.1.2` becomes `version: 0.1.3`
+   - update the appVersion to the release version. e.g.: `appVersion: "v0.9.0"`
+7. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
 
 ### Start a release PR
 
