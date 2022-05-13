@@ -85,6 +85,9 @@ Studio reporting now aggregates at the Router only. This architectural change al
 ### Add message to logs when Apollo usage reporting is enabled [PR #1029](https://github.com/apollographql/router/pull/1029)
 When studio reporting is enabled the user is notified in the router logs that data is sent to Apollo.
 
+### Check that an object's `__typename` is part of the schema [PR #1033](https://github.com/apollographql/router/pull/1033)
+In case a subgraph returns an object with a `__typename` field referring to a type that is not in the API schema, as with usage of the `@inaccessible` directive on object types, the whole object should be replaced with a `null`.
+
 ## 🛠 Maintenance ( :hammer_and_wrench: )
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
