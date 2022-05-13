@@ -158,6 +158,20 @@ mod router_plugin_mod {
         obj.with_mut(get_originating_headers_response_response_body)
     }
 
+    #[rhai_fn(get = "headers", return_raw)]
+    pub fn get_originating_headers_execution_response(
+        obj: &mut SharedExecutionResponse,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_headers_response_response)
+    }
+
+    #[rhai_fn(get = "headers", return_raw)]
+    pub fn get_originating_headers_subgraph_response(
+        obj: &mut SharedSubgraphResponse,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        obj.with_mut(get_originating_headers_response_response)
+    }
+
     #[rhai_fn(get = "body", return_raw)]
     pub fn get_originating_body_router_response(
         obj: &mut SharedRouterResponse,
@@ -185,6 +199,22 @@ mod router_plugin_mod {
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| set_originating_headers_response_response_body(response, headers))
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub fn set_originating_headers_execution_response(
+        obj: &mut SharedExecutionResponse,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub fn set_originating_headers_subgraph_response(
+        obj: &mut SharedSubgraphResponse,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| set_originating_headers_response_response(response, headers))
     }
 
     #[rhai_fn(set = "body", return_raw)]
@@ -251,6 +281,12 @@ mod router_plugin_mod {
         Ok(obj.accessor().body().clone())
     }
 
+    fn get_originating_headers_response_response<T: Accessor<http_compat::Response<Response>>>(
+        obj: &mut T,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.accessor().headers().clone())
+    }
+
     fn get_originating_body_response_response<T: Accessor<http_compat::Response<Response>>>(
         obj: &mut T,
     ) -> Result<Response, Box<EvalAltResult>> {
@@ -290,6 +326,14 @@ mod router_plugin_mod {
         body: ResponseBody,
     ) -> Result<(), Box<EvalAltResult>> {
         *obj.accessor_mut().body_mut() = body;
+        Ok(())
+    }
+
+    fn set_originating_headers_response_response<T: Accessor<http_compat::Response<Response>>>(
+        obj: &mut T,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        *obj.accessor_mut().headers_mut() = headers;
         Ok(())
     }
 

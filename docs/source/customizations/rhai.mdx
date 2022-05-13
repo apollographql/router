@@ -5,16 +5,17 @@ description: Extend router functionality without compiling a custom plugin
 
 > ⚠️ Apollo Router support for Rhai scripting is currently experimental. For details, see [experimental limitations](#experimental-limitations).
 
-The Apollo Router provides experimental support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
+The Apollo Router provides experimental support for scripts that use the [Rhai](http://rhai.rs) scripting language. Rhai is useful for performing common script-based tasks (manipulating strings, processing headers, etc.) in a Rust-based project. If you want to learn more about simple programming with Rhai, the [book](https://rhai.rs/book/) has a [language reference](https://rhai.rs/book/language/) which is very helpful.
 
 Rhai scripts hook into the same [Apollo Router lifecycle events](./overview/#how-customizations-work) as native Rust plugins.
 
 ## Experimental limitations
 
-Like the rest of the Apollo Router, Rhai support is in active development. During this preview, functionality is limited.
+Like the rest of the Apollo Router, Rhai support is in active development. At this time, functionality is limited.
 
 **What you can do:**
-* Manipulate request HTTP headers
+* Manipulate request/response HTTP headers
+* Manipulate request/response context
 * Perform `checkpoint`-style short circuiting of requests
 * Modify the status codes of requests/responses
 * Modify the body of requests (excluding variables)
@@ -35,31 +36,140 @@ plugins:
     filename: "location_of_your_rhai_script.rhai"
 ```
 
-## Service hooks
+## Rhai Router Execution Environment
+The main source of information about Rhai is the book (see above). That's where to look for general rhai programming questions or advice on how to interact with arrays or manipulate strings or program control flow or (...).
 
-Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like  native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
+This section covers functionality specific to how router functionality is exposed to Rhai.
+
+### Global State
+
+The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the EPOCH in unix environments.)
+
+```javascript
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        let start = apollo_start.elapsed;
+        // ... Do some processing
+        let duration = apollo_start.elapsed - start;
+        print(`response processing took: ${duration}`);
+
+        // Log out any errors we may have
+        print(response.body.errors);
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+### Logging
+
+If you print() a message then it will be logged to the router logs at info level. If you want more control over the log level, then there are a series of logging functions:
+
+```javascript
+print("this is a sample message");
+log_error("this is error level log message");
+log_warn("this is warn level log message");
+log_info("this is info level log message");
+log_debug("this is debug level log message");
+log_trace("this is trace level log message");
+```
+
+### Exceptions
+
+If you wish to indicate to the client that an error has occurred, Rhai supports exceptions. Throwing an exception will terminate processing and return an INTERNAL_SERVER_ERROR to the client.
+
+For example:
+```javascript
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw "an error occurred setting up the router_service...");
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+
+### Service hooks
+
+Similar to native Rust plugins, Rhai scripts can hook into the Apollo Router's [four services](./overview/#how-customizations-work) that handle requests. Just like native Rust plugins, Rhai scripts use a single hook for each service. Like native Rust plugins, the script author can then choose to map requests/response and generally configure the service for different behaviour.
 
   - `router_service`
   - `query_planner_service`
   - `execution_service`
   - `subgraph_service`
 
-Each of these hooks is optional—define only the functions you want to use custom logic for.
+Each of these hooks is optional. Define only the functions you want to use custom logic for.
 
 Each function takes a single parameter: `service`, this is typed for each of the different services. The various service functions are not required to return anything. If they do, the return is ignored.
+
+```javascript
+fn router_service(service) {}
+fn query_planner_service(service) {}
+fn execution_service(service) {}
+fn subgraph_service(service) {}
+```
+
+### Service Interface
 
 The full functionality of a Rust plugin is not available, but the following methods are available for service interactions.
 
   - `map_request`
   - `map_response`
 
-These can be invoked as methods on the supplied service object and are expected to provide a callback function which is invoked for actual request or response processing.
+These can be invoked as methods on the supplied service object and are expected to provide a callback function (or closure) which is invoked for actual request or response processing.
 
-All request/response callback functions are provided with a typed Request/Response which may be interacted with to manipulate headers and context. In addition, request details (query, operation name, variables and extensions) are available to be read/written for all requests as sub-fields of the body. For example to read a request query, simply access "request.body.query" in your rhai script. The examples illustrate how to interact with request/response objects.
+For example:
+```javascript
+fn router_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Log out any errors we may have
+        print(response.body.errors);
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
 
-Note: You currently may only read the "variables" field and cannot modify it.
+### Request Interface
 
-## Examples
+All requests expose a mechanism for interacting with request Body, Headers and Context.
+
+```
+request.context
+request.headers
+request.body.query
+request.body.operation_name
+request.body.variables
+request.body.extensions
+```
+
+In addition, SubgraphRequest, exposes the additional ability to interact with headers sent to subgraphs:
+
+```
+request.sub_headers
+```
+
+All of the above are read/write *apart* from `request.body.variables` which is read-only.
+
+### Response Interface
+
+Most responses expose a mechanism for interacting with response Body, Headers and Context. QueryPlannerResponse only exposes a Context, since there are no Body or Headers accessible at that stage.
+
+```
+response.context
+response.headers
+response.body.label
+response.body.data
+response.body.errors
+response.body.extensions
+```
+
+All of the above are read/write.
+
+## Full Examples
 
 ### Example 1
 
