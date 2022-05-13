@@ -162,7 +162,10 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
         }
     }
 
-    if let (Some(schema_id), Some(apollo)) = (&schema.schema_id, configuration.get_mut("apollo")) {
+    if let (Some(schema_id), Some(apollo)) = (
+        &schema.api_schema().schema_id,
+        configuration.get_mut("apollo"),
+    ) {
         if let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
@@ -366,12 +369,16 @@ mod test {
 
     #[test]
     fn test_inject_schema_id() {
-        let mut schema = Schema::default();
-        schema.schema_id = Some("schema_sha".to_string());
+        let schema = include_str!("testdata/starstuff@current.graphql")
+            .parse()
+            .unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
-        assert_eq!(&config.apollo.unwrap().schema_id, "schema_sha");
+        assert_eq!(
+            &config.apollo.unwrap().schema_id,
+            "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
+        );
     }
 }
