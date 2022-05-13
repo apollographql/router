@@ -5,7 +5,7 @@
 
 # Apollo Router
 
-The **Apollo Router** is a configurable, high-performance **graph router** for a [federated graph](https://www.apollographql.com/docs/federation/) written in Rust that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
+The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
 
 Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.  Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes.  Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format.  We will clearly convey such changes in the release notes.
 
