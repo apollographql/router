@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use deadpool::{managed, Runtime};
 use futures::channel::mpsc;
 use futures_batch::ChunksTimeoutStreamExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use studio::Report;
 use studio::SingleReport;
@@ -57,7 +58,7 @@ impl MetricsConfigurator for Config {
         _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         tracing::debug!("configuring Apollo metrics");
-
+        static ENABLED: AtomicBool = AtomicBool::new(false);
         Ok(match self {
             Config {
                 endpoint: Some(endpoint),
@@ -66,13 +67,19 @@ impl MetricsConfigurator for Config {
                 schema_id,
                 ..
             } => {
+                if !ENABLED.swap(true, Ordering::Relaxed) {
+                    tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
+                }
                 let exporter = ApolloMetricsExporter::new(endpoint, key, reference, schema_id)?;
 
                 builder
                     .with_apollo_metrics_collector(exporter.provider())
                     .with_exporter(exporter)
             }
-            _ => builder,
+            _ => {
+                ENABLED.swap(false, Ordering::Relaxed);
+                builder
+            }
         })
     }
 }
