@@ -9,7 +9,6 @@ set -u
 
 download_binary() {
     need_cmd curl
-    need_cmd jq
     need_cmd chmod
     need_cmd mkdir
     need_cmd rm
@@ -46,7 +45,7 @@ download_binary() {
 
     ARG_OUT_FILE=${3:-"./router"}
 
-    GITHUB_REPO="https://api.github.com/repos/apollographql/router"
+    GITHUB_REPO="https://github.com/apollographql/router"
 
     # Validate token.
     curl -o /dev/null -s $GITHUB_REPO || { echo "Error: Invalid repo, token or network issue!";  exit 1; }
@@ -58,24 +57,19 @@ download_binary() {
     local _router="$_dir/router$_ext"
 
     local _release_download_url="$GITHUB_REPO/releases"
+    local _router_version=$DOWNLOAD_VERSION
     if [ "$DOWNLOAD_VERSION" == "latest" ]; then
-      # Github should return the latest release first.
-      parser=".[0].assets | map(select(.name | contains(\"$ARG_ARCH\")))[0]"
-    else
-      parser=". | map(select(.tag_name == \"$DOWNLOAD_VERSION\"))[0].assets | map(select(.name | contains(\"$ARG_ARCH\")))[0]"
+        local _response=$(curl -Ls -o /dev/null -w %{url_effective} $GITHUB_REPO/releases/latest)
+        _router_version=$(echo "$_response" | cut -d'/' -f 8)
+        [ "$_router_version" ] || { echo "Error: Failed to get asset version for '$ARG_ARCH', response: $_response" | awk 'length($0)<100' >&2; exit 1; }
     fi;
 
     say "Downloading release info for '$_release_download_url'" 1>&2
-    local _response=$(curl -s $_release_download_url)
-    #echo $_response | jq
 
-    local _id=$(echo "$_response" | jq "${parser}.id")
-    [ "$_id" ] || { echo "Error: Failed to get asset id for '$ARG_ARCH', response: $_response" | awk 'length($0)<100' >&2; exit 1; }
+    # Cut the 'v' prefix
+    local _name="router-$(echo "$_router_version" | cut -c2-)$_ext-$ARG_ARCH.tar.gz"
 
-    local _name=$(echo "$_response" | jq "${parser}.name")
-    [ "$_name" ] || { echo "Error: Failed to get asset name, response: $_response" | awk 'length($0)<100' >&2; exit 1; }
-
-    local _url="$GITHUB_REPO/releases/assets/$_id"
+    local _url="$GITHUB_REPO/releases/download/$_router_version/$_name"
 
     say "Found $_name" 1>&2
 
