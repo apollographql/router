@@ -88,7 +88,7 @@ Using the reqwest blocking client feature was panicking due to incompatible asyn
 Studio reporting now aggregates at the Router only. This architectural change allows us to move towards full reporting functionality.
 
 ### Field usage reporting is now reported against the correct schema [PR #1043](https://github.com/apollographql/router/pull/1043)
-Previously this was empty, new code will uses API schema hash.
+Previously this was empty. It now uses API schema hash.
 
 ### Add message to logs when Apollo usage reporting is enabled [PR #1029](https://github.com/apollographql/router/pull/1029)
 When studio reporting is enabled the user is notified in the router logs that data is sent to Apollo.
