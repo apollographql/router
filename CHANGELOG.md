@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [v0.9.0] - 2022-05-13
 
-## 🎉 **The Apollo Router is has graduated from Preview to Generally Availability (GA)!** 🎉
+## 🎉 **The Apollo Router has graduated from _Preview_ to _General Availability (GA)_!** 🎉
 
 We're so grateful for all the feedback we've received from our early Router adopters and we're excited to bring the Router to our General Availability (GA) release.
 
