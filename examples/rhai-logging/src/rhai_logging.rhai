@@ -44,7 +44,8 @@ fn execution_service(service) {
 
 // At the subgraph_service stage, register callbacks for processing requests and
 // responses.
-fn subgraph_service(service) {
+fn subgraph_service(service, subgraph) {
+    print(`in subgraph ${subgraph}`);
     let request_callback = Fn("process_request");
     service.map_request(request_callback);
     let response_callback = Fn("process_response");

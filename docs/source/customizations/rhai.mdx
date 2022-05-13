@@ -18,10 +18,10 @@ Like the rest of the Apollo Router, Rhai support is in active development. Durin
 * Perform `checkpoint`-style short circuiting of requests
 * Modify the status codes of requests/responses
 * Modify the body of requests (excluding variables)
+* Modify the body of responses
 
 **What you can't do (yet):**
 * Execute calls to external services
-* Modify the body of responses
 
 > ⚠️ As Rhai script is experimental, we may introduce breaking changes to Rhai script functionality after the general availability (GA) release of the Apollo Router. However, any required updates to your existing scripts will probably be minor.
 
@@ -125,7 +125,7 @@ This example converts cookies into headers for transmission to subgraphs. There 
 ```javascript
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
-fn subgraph_service(service) {
+fn subgraph_service(service, name) {
     print("registering request callback"); // print() is the same as using log_info()
     let request_callback = Fn("process_request");
     map_request(service, request_callback);
@@ -155,4 +155,4 @@ fn process_request(request) {
 }
 ```
 
-There are four complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
+There are six complete working examples (with tests) of rhai in the [examples directory](https://github.com/apollographql/router/tree/main/examples). The rhai examples are listed in the README.md.
