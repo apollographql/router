@@ -4,6 +4,129 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [v0.9.0-rc.0] - 2022-05-10
+
+## 🎉 **The Apollo Router has graduated to its Release Candidate (RC) phase!** 🎉
+
+We're so grateful for all the feedback we've received from our early Router adopters and we're excited to bring things even closer to our General Availability (GA) release.
+
+We hope you continue to report your experiences and bugs to our team as we continue to move things forward.  If you're having any problems adopting the Router or finding the right migration path from Apollo Gateway which isn't already covered [in our migration guide](https://www.apollographql.com/docs/router/migrating-from-gateway), please open an issue or discussion on this repository!
+## ❗ BREAKING ❗
+
+### Renamed environment variables for consistency [PR #990](https://github.com/apollographql/router/pull/990) [PR #992](https://github.com/apollographql/router/pull/992)
+
+We've adjusted the environment variables that the Router supports to be consistently prefixed with `APOLLO_` and to remove some inconsistencies in their previous naming.
+
+You'll need to adjust to the new environment variable names, as follows:
+
+- `RUST_LOG` -> `APOLLO_ROUTER_LOG`
+- `CONFIGURATION_PATH` -> `APOLLO_ROUTER_CONFIG_PATH`
+- `SUPERGRAPH_PATH` -> `APOLLO_ROUTER_SUPERGRAPH_PATH`
+- `ROUTER_HOT_RELOAD` -> `APOLLO_ROUTER_HOT_RELOAD`
+- `APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT` -> `APOLLO_UPLINK_ENDPOINTS`
+- `APOLLO_SCHEMA_POLL_INTERVAL`-> `APOLLO_UPLINK_POLL_INTERVAL`
+
+In addition, the following command line flags have changed:
+- `--apollo-schema-config-delivery-endpoint` -> `--apollo-uplink-url`
+- `--apollo-schema-poll-interval` -> `--apollo-uplink-poll-interval`
+
+### Configurable URL request path [PR #976](https://github.com/apollographql/router/pull/976)
+
+The default router endpoint is now `/` (previously, it was `/graphql`). It's now possible to customize that value by defining an `endpoint` in your Router configuration file's `server` section:
+
+```yaml
+server:
+  # The socket address and port to listen on
+  # Defaults to 127.0.0.1:4000
+  listen: 127.0.0.1:4000
+  # Default is /
+  endpoint: /graphql
+```
+
+If you necessitated the previous behavior (using `/graphql`), you should use the above configuration.
+
+### Do even more with rhai scripts  [PR #971](https://github.com/apollographql/router/pull/971)
+
+The rhai scripting support in the Router has been re-worked to bring its capabilities closer to that native Rust plugin.  This includes full participation in the service plugin lifecycle and new capabilities like logging support!
+
+See our [`examples`](https://github.com/apollographql/router/tree/main/examples/) directory and [the documentation](https://www.apollographql.com/docs/router/customizations/rhai) for updated examples of how to use the new capabilities.
+
+## 🚀 Features
+
+### Did we already mention doing more with rhai?
+
+It's listed as a breaking change above because it is, but it's worth highlighting that it's now possible to do even more using rhai scripting which previously necessitated writing native Rust plugins and compiling your own binary.
+
+See our [`examples`](https://github.com/apollographql/router/tree/main/examples/) directory and [the documentation](https://www.apollographql.com/docs/router/customizations/rhai) for updated examples of how to use the new capabilities.
+
+### Panics now output to the console [PR #1001](https://github.com/apollographql/router/pull/1001) [PR #1004](https://github.com/apollographql/router/pull/1004)
+Previously, panics would get swallowed but are now output to the console/logs.  The use of the Rust-standard environment variables `RUST_BACKTRACE=1` (or `RUST_BACKTRACE=full`) will result in emitting the full backtrace.
+
+### Apollo Studio Usage Reporting [PR #898](https://github.com/apollographql/router/pull/898)
+If you have [enabled telemetry in the Router](https://www.apollographql.com/docs/router/configuration/apollo-telemetry#enabling-usage-reporting), you can now see field usage reporting for your queries by heading to the Fields page for your graph in Apollo Studio.
+
+Learn more about our field usage reporting in the Studio [documentation for field usage](https://www.apollographql.com/docs/studio/metrics/field-usage).
+
+### `PluginTestHarness` [PR #898](https://github.com/apollographql/router/pull/898)
+Added a simple plugin test harness that can provide canned responses to queries. This harness is early in development and the functionality and APIs will probably change.
+```rust
+ let mut test_harness = PluginTestHarness::builder()
+            .plugin(plugin)
+            .schema(Canned)
+            .build()
+            .await?;
+
+let _ = test_harness
+    .call(
+        RouterRequest::fake_builder()
+            .header("name_header", "test_client")
+            .header("version_header", "1.0-test")
+            .query(query)
+            .and_operation_name(operation_name)
+            .and_context(context)
+            .build()?,
+    )
+    .await;
+```
+## 🐛 Fixes
+
+### Improve the diagnostics when encountering a configuration error [PR #963](https://github.com/apollographql/router/pull/963)
+In the case of unrecognized properties in your Router's configuration, we will now point you directly to the unrecognized value.  Previously, we pointed to the parent property even if it wasn't the source of the misconfiguration.
+
+### Only allow mutations on HTTP POST requests [PR #975](https://github.com/apollographql/router/pull/975)
+Mutations are now only accepted when using the HTTP POST method.
+
+### Fix incorrectly omitting content of interface's fragment [PR #949](https://github.com/apollographql/router/pull/949)
+The Router now distinguishes between fragments on concrete types and interfaces.
+If an interface is encountered and  `__typename` is being queried, we now check that the returned type implements the interface.
+
+### Set the service name if not specified in config or environment [PR #960](https://github.com/apollographql/router/pull/960)
+The router now sets `router` as the default service name in OpenTelemetry traces, along with `process.executable_name`.   This can be adjusted through the configuration file or environment variables.
+
+### Accept an endpoint URL without scheme for telemetry [PR #964](https://github.com/apollographql/router/pull/964)
+
+Endpoint configuration for Datadog and OTLP take a URL as argument, but was incorrectly recognizing addresses of the format "host:port" (i.e., without a scheme, like `grpc://`) as the wrong protocol.  This has been corrected!
+
+### Stricter application of `@inaccessible` [PR #985](https://github.com/apollographql/router/pull/985)
+
+The Router's query planner has been updated to v2.0.2 and stricter behavior for the `@inaccessible` directive.  This also fully supports the new [Apollo Studio Contracts](https://www.apollographql.com/docs/studio/contracts/) feature which just went generally available (GA).
+
+### Impose recursion limits on selection processing [PR #995](https://github.com/apollographql/router/pull/995)
+
+We now limit operations to a depth of 512 to prevent cycles.
+
+## 🛠 Maintenance
+
+### Use official SPDX license identifier for Elastic License v2 (ELv2) [Issue #418](https://github.com/apollographql/router/issues/418)
+
+Rather than pointing to our `LICENSE` file, we now use the `Elastic-2.0` SPDX license identifier to indicate that a particular component is governed by the Elastic License 2.0 (ELv2).  This should facilitate automated compatibility with licensing tools which assist with compliance.
+
+## 📚 Documentation
+
+### Router startup messaging now includes version and license notice  [PR #986](https://github.com/apollographql/router/pull/986)
+
+We now display the version of the Router at startup, along with clarity that the Router is licensed under [ELv2](https://go.apollo.dev/elv2).
+
 # [v0.1.0-preview.7] - 2022-05-04
 ## ❗ BREAKING ❗
 

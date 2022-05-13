@@ -4,6 +4,12 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+  {{- if .Values.router.configuration.telemetry.metrics.prometheus.enabled }}
+  annotations:
+    prometheus.io/path: /plugins/apollo.telemetry/prometheus
+    prometheus.io/port: "{{ .Values.containerPorts.http }}"
+    prometheus.io/scrape: "true"
+  {{- end }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}

@@ -3,4 +3,4 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      endpoint: default
+      endpoint: http://zipkin:9411/api/v2/spans

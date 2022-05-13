@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 657
 expression: "&schema"
 ---
 {
@@ -1083,10 +1084,13 @@ expression: "&schema"
               "nullable": true
             },
             "zipkin": {
-              "type": [
-                "object",
-                "string"
-              ],
+              "type": "object",
+              "properties": {
+                "endpoint": {
+                  "default": "default",
+                  "type": "string"
+                }
+              },
               "nullable": true
             }
           },

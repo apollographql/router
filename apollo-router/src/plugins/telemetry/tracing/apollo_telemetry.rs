@@ -26,7 +26,7 @@
 //!     shutdown_tracer_provider(); // sending remaining spans
 //! }
 //! ```
-use apollo_spaceport::{Reporter, ReporterGraph};
+use apollo_spaceport::Reporter;
 use async_trait::async_trait;
 use derivative::Derivative;
 use opentelemetry::{
@@ -59,6 +59,7 @@ pub struct SpaceportConfig {
     pub(crate) collector: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
 #[derivative(Debug)]
 pub struct StudioGraph {
@@ -297,15 +298,6 @@ impl From<JoinError> for ApolloError {
 impl ExportError for ApolloError {
     fn exporter_name(&self) -> &'static str {
         "apollo-telemetry"
-    }
-}
-
-impl From<&StudioGraph> for ReporterGraph {
-    fn from(graph: &StudioGraph) -> Self {
-        ReporterGraph {
-            reference: graph.reference.clone(),
-            key: graph.key.clone(),
-        }
     }
 }
 

@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "anyhow",
  "apollo-router-core",
@@ -98,6 +98,7 @@ dependencies = [
  "async-trait",
  "atty",
  "axum",
+ "backtrace",
  "buildstructor",
  "bytes",
  "clap 3.1.9",
@@ -141,6 +142,7 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "serde_yaml",
+ "sys-info",
  "tempfile",
  "test-log",
  "test-span",
@@ -158,6 +160,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "typed-builder 0.10.0",
+ "uname",
  "url",
  "uuid 1.0.0",
  "walkdir",
@@ -166,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -183,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "apollo-parser",
  "async-trait",
@@ -253,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "bytes",
  "clap 3.1.9",
@@ -274,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "futures",
  "graphql_client",
@@ -1871,6 +1874,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -5520,7 +5524,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0-preview.7"
+version = "0.9.0-rc.0"
 dependencies = [
  "ansi_term",
  "anyhow",
