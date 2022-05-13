@@ -7,6 +7,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 # [v0.9.0] - 2022-05-13
 
 ## 🎉 **The Apollo Router has graduated to its General Release (GA) phase!** 🎉
+
 We're so grateful for all the feedback we've received from our early Router adopters and we're excited to bring the Router to our General Availability (GA) release.
 
 We hope you continue to report your experiences and bugs to our team as we continue to move things forward.  If you're having any problems adopting the Router or finding the right migration path from Apollo Gateway which isn't already covered [in our migration guide](https://www.apollographql.com/docs/router/migrating-from-gateway), please open an issue or discussion on this repository!
@@ -14,9 +15,8 @@ We hope you continue to report your experiences and bugs to our team as we conti
 ## ❗ BREAKING ❗
 
 ### Remove the agent endpoint configuration for Zipkin [PR #1025](https://github.com/apollographql/router/pull/1025)
-Zipkin only supports the collector endpoint URL configuration.
 
-The Zipkin configuration changes from:
+Zipkin only supports `endpoint` URL configuration rather than `endpoint` within `collector`, this means Zipkin configuration changes from:
 
 ```yaml
 telemetry:
@@ -40,21 +40,22 @@ telemetry:
 ```
 
 ### CSRF Protection is enabled by default [PR #1006](https://github.com/apollographql/router/pull/1006)
-A [Cross-Site Request Forgery protection plugin](https://developer.mozilla.org/en-US/docs/Glossary/CSRF) is enabled by default.
 
-This means [simple requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests) will be rejected from now on (they represent a security risk).
+A [Cross-Site Request Forgery (CSRF) protection plugin](https://developer.mozilla.org/en-US/docs/Glossary/CSRF) is now enabled by default.
 
-The plugin can be customized as explained in the [CORS and CSRF example](https://github.com/apollographql/router/tree/main/examples/cors-and-csrf/custom-headers.router.yaml)
+This means [simple requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests) will be rejected from now on, since they represent security risks without the correct CSRF protections in place.
+
+The plugin can be customized as explained in the [CORS and CSRF example](https://github.com/apollographql/router/tree/main/examples/cors-and-csrf/custom-headers.router.yaml).
 
 ### CORS default behavior update [PR #1006](https://github.com/apollographql/router/pull/1006)
-The CORS allow_headers default behavior changes from:
-  - allow only `Content-Type`, `apollographql-client-name` and `apollographql-client-version`
-to:
-  - mirror the received `access-control-request-headers`
 
-This change loosens the CORS related headers restrictions, so it shouldn't have any impact on your setup.
+The CORS `allow_headers` default behavior has changed from its previous configuration.
 
-## 🚀 Features ( :rocket: )
+The Router will now _reflect_ the values received in the [`Access-Control-Request-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Request-Headers) header, rather than only allowing `Content-Type`, `apollographql-client-name` and `apollographql-client-version` as it did previously.
+
+This change loosens the CORS-related headers restrictions, so it shouldn't have any impact on your setup.
+
+## 🚀 Features
 
 ### CSRF Protection [PR #1006](https://github.com/apollographql/router/pull/1006)
 The router now embeds a CSRF protection plugin, which is enabled by default. Have a look at the [CORS and CSRF example](https://github.com/apollographql/router/tree/main/examples/cors-and-csrf/custom-headers.router.yaml) to learn how to customize it. [Documentation](https://www.apollographql.com/docs/router/configuration/cors/) will be updated soon!
@@ -69,15 +70,22 @@ e.g.: helm install --set router.configuration.telemetry.metrics.prometheus.enabl
 Note: prometheus metrics are not enabled by default in the helm chart.
 
 ### Extend capabilities of rhai processing engine [PR #1021](https://github.com/apollographql/router/pull/1021)
-Rhai plugins can now interact more fully with Responses. Including body and header manipulation where available. Closures are now supported for callback processing and Subgraph services are identified by name. There is more documentation about how to use the various rhai interfaces into the router and we now have six examples of Rhai scripts doing various request and response manipulations.
 
-## 🐛 Fixes ( :bug: )
+- Rhai plugins can now interact more fully with responses, including **body and header manipulation** where available.
+- Closures are now supported for callback processing.
+- Subgraph services are now identified by name.
 
-### Delete the requirement of jq command in our install script [PR #1034](https://github.com/apollographql/router/pull/1034)
-We're now using `cut` command instead of `jq` which is more standard.
+There is more documentation about how to use the various rhai interfaces to the Router and we now have _six_ [examples of rhai scripts](https://github.com/apollographql/router/tree/main/examples) (look for examples prefixed with `rhai-`) doing various request and response manipulations!
+
+## 🐛 Fixes
+
+### Remove the requirement on `jq` in our install script [PR #1034](https://github.com/apollographql/router/pull/1034)
+
+We're now using `cut` command instead of `jq` which allows using our installer without installing `jq` first.  (Don't get us wrong, we love `jq`, but not everyone has it installed!).
 
 ### Configuration for Jaeger/Zipkin agent requires an URL instead of a socket address [PR #1018](https://github.com/apollographql/router/pull/1018)
-The router now support URL for a Jaeger or Zipkin agent. So you are able to provide this kind of configuration:
+The router now supports URLs for a Jaeger **or** Zipkin agent allowing configuration as follows in this `jaeger` example:
+
 ```yaml
 telemetry:
   tracing:
@@ -88,28 +96,32 @@ telemetry:
         endpoint: jaeger:14268
 ```
 ### Fix a panic in Zipkin telemetry configuration [PR #1019](https://github.com/apollographql/router/pull/1019)
-Using the reqwest blocking client feature was panicking due to incompatible asynchronous runtime usage.
+Using the `reqwest` blocking client feature was causing panicking due to an incompatible usage of an asynchronous runtime.
 
-### Improvements to Studio reporting [PR #1020](https://github.com/apollographql/router/pull/1020), [PR #1037](https://github.com/apollographql/router/pull/1037)
-Studio reporting now aggregates at the Router only. This architectural change allows us to move towards full reporting functionality.
+### Improvements to Apollo Studio reporting [PR #1020](https://github.com/apollographql/router/pull/1020), [PR #1037](https://github.com/apollographql/router/pull/1037)
+
+This architectural change, which moves the location that we do aggregations internally in the Router, allows us to move towards full reporting functionality.  It shouldn't affect most users.
 
 ### Field usage reporting is now reported against the correct schema [PR #1043](https://github.com/apollographql/router/pull/1043)
-Previously this was empty. It now uses API schema hash.
 
-### Add message to logs when Apollo usage reporting is enabled [PR #1029](https://github.com/apollographql/router/pull/1029)
-When studio reporting is enabled the user is notified in the router logs that data is sent to Apollo.
+When using Managed Federation, we now report usage identified by the schema it was processed on, improving reporting in Apollo Studio.
 
 ### Check that an object's `__typename` is part of the schema [PR #1033](https://github.com/apollographql/router/pull/1033)
-In case a subgraph returns an object with a `__typename` field referring to a type that is not in the API schema, as with usage of the `@inaccessible` directive on object types, the whole object should be replaced with a `null`.
 
-## 🛠 Maintenance ( :hammer_and_wrench: )
+In case a subgraph returns an object with a `__typename` field referring to a type that is not in the API schema, as is the case when using the `@inaccessible` directive on object types, the requested object tree is now replaced with a `null` value in order to conform with the API schema.  This improves our behavior with the recently launched Contracts feature from Apollo Studio.
+
+## 🛠 Maintenance
 
 ### OpenTracing examples [PR #1015](https://github.com/apollographql/router/pull/1015)
+
 We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipkin, that can be started with docker-compose.
 
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
+
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
+
+Also, we reached issue / pull-request number ONE THOUSAND! (💯0)
 
 # [v0.9.0-rc.0] - 2022-05-10
 
