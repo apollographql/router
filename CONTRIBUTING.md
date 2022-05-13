@@ -61,9 +61,6 @@ and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-the
 .
 
 To contribute to these docs, you can add or edit the markdown & MDX files in the `docs/source` directory.
-<!-- 
-TODO: port @everlastingbugstopper s work on rover https://github.com/apollographql/rover/pull/1118
-and update this file
 
 To build and run the documentation site locally, you'll have to install the relevant packages by doing the following
 from the root of the `router` repository:
@@ -71,7 +68,7 @@ from the root of the `router` repository:
 ```sh
 cd docs
 npm i
-npm start -->
+npm start
 ```
 
 This will start up a development server with live reload enabled. You can see the docs by
