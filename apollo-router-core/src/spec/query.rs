@@ -217,6 +217,15 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
+                        if let Some(input_type) =
+                            input_object.get(TYPENAME).and_then(|val| val.as_str())
+                        {
+                            if !schema.object_types.contains_key(input_type) {
+                                *output = Value::Null;
+                                return Ok(());
+                            }
+                        }
+
                         if output.is_null() {
                             *output = Value::Object(Object::default());
                         }
@@ -4212,10 +4221,9 @@ mod tests {
                 "test_union2": {
                     "__typename": "B",
                     "common": "hello",
-                    "b": "B"
                 },
                 "test_enum": null,
-                "test4": "Z"
+                "test_enum2": "Z"
             }},
         );
     }
