@@ -22,7 +22,7 @@ mod tests {
     async fn test_subgraph_mutates_data() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_response_mutate.rhai",
+            "filename": "src/rhai_data_response_mutate.rhai",
         }))
         .expect("valid conf supplied");
 

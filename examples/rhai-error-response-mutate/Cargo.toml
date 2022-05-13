@@ -1,5 +1,5 @@
 [package]
-name = "rhai-response-mutate"
+name = "rhai-error-response-mutate"
 version = "0.1.0"
 edition = "2021"
 

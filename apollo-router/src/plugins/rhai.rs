@@ -7,7 +7,7 @@ use apollo_router_core::{
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
 use http::{HeaderMap, StatusCode};
-use rhai::serde::to_dynamic;
+use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -796,6 +796,8 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
+            // Register "==" for Error so Vec<Error> can be interacted with
+            .register_fn("==", |this: &mut Error, that: Error| this == &that)
             // Register a HeaderMap indexer so we can get/set headers
             .register_indexer_get_result(|x: &mut HeaderMap, key: &str| {
                 let search_name =
@@ -854,7 +856,8 @@ impl Rhai {
             })
             /* XXX CANNOT DO BECAUSE variables is Arc
             .register_set_result("variables", |x: &mut Request, om: Map| {
-                x.variables = from_dynamic(om)
+                x.variables = from_dynamic(&om.into())?;
+                Ok(())
             })
             */
             // Request.extensions
@@ -862,14 +865,37 @@ impl Rhai {
                 to_dynamic(x.extensions.clone())
             })
             .register_set_result("extensions", |x: &mut Request, om: Map| {
-                let v = rhai::format_map_as_json(&om);
-                x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
+            // ResponseBody "short-cuts" to bypass the enum
+            // ResponseBody.label
+            .register_get_result("label", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the label from our resp
+                        to_dynamic(resp.label.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("label", |x: &mut ResponseBody, value: Dynamic| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to update the label on our resp
+                        resp.label = from_dynamic(&value)?;
+                        Ok(())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            // ResponseBody.data
             .register_get_result("data", |x: &mut ResponseBody| match x {
                 ResponseBody::GraphQL(resp) => {
                     // Because we are short-cutting the response here
-                    // we need to select the data we need from our resp
+                    // we need to select the data from our resp
                     to_dynamic(resp.data.clone())
                 }
                 _ => Err("wrong type of response".into()),
@@ -877,19 +903,55 @@ impl Rhai {
             .register_set_result("data", |x: &mut ResponseBody, om: Map| match x {
                 ResponseBody::GraphQL(resp) => {
                     // Because we are short-cutting the response here
-                    // we need to wrap our data.
-                    let v = rhai::format_map_as_json(&om);
-                    let v_j: Value = serde_json::from_str(&v).map_err(|e| e.to_string())?;
-                    let data_json = serde_json::json!({ "data": v_j });
-                    let data: Response =
-                        serde_json::from_value(data_json).map_err(|e| e.to_string())?;
-                    let _ = std::mem::replace(resp, data);
+                    // we need to update the data on our resp
+                    resp.data = from_dynamic(&om.into())?;
                     Ok(())
                 }
                 _ => Err("wrong type of response".into()),
             })
+            // ResponseBody.path (Not Implemented)
+            // ResponseBody.errors
+            .register_get_result("errors", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the errors from our resp
+                        to_dynamic(resp.errors.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("errors", |x: &mut ResponseBody, value: Dynamic| match x {
+                ResponseBody::GraphQL(resp) => {
+                    resp.errors = from_dynamic(&value)?;
+                    Ok(())
+                }
+                _ => Err("wrong type of response".into()),
+            })
+            // ResponseBody.extensions
+            .register_get_result("extensions", |x: &mut ResponseBody| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to select the extensions from our resp
+                        to_dynamic(resp.extensions.clone())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
+            .register_set_result("extensions", |x: &mut ResponseBody, om: Map| {
+                match x {
+                    ResponseBody::GraphQL(resp) => {
+                        // Because we are short-cutting the response here
+                        // we need to update the extensions on our resp
+                        resp.extensions = from_dynamic(&om.into())?;
+                        Ok(())
+                    }
+                    _ => Err("wrong type of response".into()),
+                }
+            })
             // ResponseBody.response
-            /* XXX: We short-cut the treatment of ResponseBody processing to directly
+            /* We short-cut the treatment of ResponseBody processing to directly
              * manipulate "data" rather than moving the enum as we probably should.
              * We do this to "harmonise" the interactions with response data for Rhai
              * scripts and (effectively) hide the ResponseBody enum from sight.
@@ -917,23 +979,22 @@ impl Rhai {
             // Response.data
             .register_get_result("data", |x: &mut Response| to_dynamic(x.data.clone()))
             .register_set_result("data", |x: &mut Response, om: Map| {
-                let v = rhai::format_map_as_json(&om);
-                x.data = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                x.data = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Response.path (Not Implemented)
             // Response.errors
-            .register_get("errors", |x: &mut Response| x.errors.clone())
-            .register_set("errors", |x: &mut Response, value: Vec<Error>| {
-                x.errors = value;
+            .register_get_result("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
+            .register_set_result("errors", |x: &mut Response, value: Dynamic| {
+                x.errors = from_dynamic(&value)?;
+                Ok(())
             })
             // Response.extensions
             .register_get_result("extensions", |x: &mut Response| {
                 to_dynamic(x.extensions.clone())
             })
             .register_set_result("extensions", |x: &mut Response, om: Map| {
-                let v = rhai::format_map_as_json(&om);
-                x.extensions = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+                x.extensions = from_dynamic(&om.into())?;
                 Ok(())
             })
             // Register a series of logging functions

@@ -3694,7 +3694,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rhai-logging"
+name = "rhai-data-response-mutate"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3707,7 +3707,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "rhai-response-mutate"
+name = "rhai-error-response-mutate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "apollo-router-core",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "rhai-logging"
 version = "0.1.0"
 dependencies = [
  "anyhow",
