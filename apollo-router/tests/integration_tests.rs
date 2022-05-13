@@ -5,8 +5,9 @@
 use apollo_router::plugins::telemetry::config::Tracing;
 use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router_core::{
-    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
+    ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -44,11 +45,13 @@ macro_rules! assert_federated_response {
         };
 
         let originating_request = http_compat::Request::fake_builder().method(Method::POST)
+            // otherwise the query would be a simple one,
+            // and CSRF protection would reject it
+            .header("content-type", "application/json")
             .body(request)
             .build().expect("expecting valid originating request");
 
         let (actual, registry) = query_rust(originating_request.into()).await;
-
 
         tracing::debug!("query:\n{}\n", $query);
 
@@ -110,6 +113,7 @@ async fn api_schema_hides_field() {
 
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -198,6 +202,7 @@ async fn queries_should_work_over_get() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -205,6 +210,47 @@ async fn queries_should_work_over_get() {
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_queries_should_not_work() {
+    let expected_error =apollo_router_core::Error {
+        message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+        Please either specify a 'content-type' header \
+        (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
+        or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight".to_string(),
+        ..Default::default()
+    };
+
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, registry) = query_rust(originating_request.into()).await;
+
+    assert_eq!(
+        1,
+        actual.errors.len(),
+        "CSRF should have rejected this query"
+    );
+    assert_eq!(expected_error, actual.errors[0]);
+    assert_eq!(registry.totals(), hashmap! {});
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -232,6 +278,7 @@ async fn queries_should_work_over_post() {
 
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -263,6 +310,7 @@ async fn service_errors_should_be_propagated() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -306,6 +354,7 @@ async fn mutation_should_not_work_over_get() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -351,6 +400,7 @@ async fn mutation_should_work_over_post() {
 
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -402,6 +452,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -425,6 +476,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_request_with_query)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -443,6 +495,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -501,6 +554,7 @@ async fn missing_variables() {
 
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -568,7 +622,10 @@ async fn setup_router_and_registry() -> (
     })
     .await
     .unwrap();
-    builder = builder.with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin));
+    let csrf_plugin = csrf::Csrf::new(Default::default()).await.unwrap();
+    builder = builder
+        .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
+        .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
     for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

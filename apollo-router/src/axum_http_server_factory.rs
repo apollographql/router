@@ -1284,7 +1284,10 @@ mod tests {
             .header(ACCEPT, "text/html")
             .header(ORIGIN, "http://studio")
             .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-            .header(ACCESS_CONTROL_REQUEST_HEADERS, "Content-type")
+            .header(
+                ACCESS_CONTROL_REQUEST_HEADERS,
+                "Content-type, x-an-other-test-header, apollo-require-preflight",
+            )
             .send()
             .await
             .unwrap();
@@ -1295,11 +1298,12 @@ mod tests {
             vec!["http://studio"],
             "Incorrect access control allow origin header"
         );
+        let headers = response.headers().get_all(ACCESS_CONTROL_ALLOW_HEADERS);
         assert_header_contains!(
             &response,
             ACCESS_CONTROL_ALLOW_HEADERS,
-            &["content-type"],
-            "Incorrect access control allow header header"
+            &["Content-type, x-an-other-test-header, apollo-require-preflight"],
+            "Incorrect access control allow header header {headers:?}"
         );
         assert_header_contains!(
             &response,

@@ -51,7 +51,25 @@ telemetry:
       endpoint: default
 ```
 
+### CSRF Protection is enabled by default [PR #1006](https://github.com/apollographql/router/pull/1006)
+A [Cross-Site Request Forgery protection plugin](https://developer.mozilla.org/en-US/docs/Glossary/CSRF) is enabled by default.
+
+This means [simple requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS#simple_requests) will be rejected from now on (they represent a security risk).
+
+The plugin can be customized as explained in the [CORS and CSRF example](https://github.com/apollographql/router/tree/main/examples/cors-and-csrf/custom-headers.router.yaml)
+
+### CORS default behavior update [PR #1006](https://github.com/apollographql/router/pull/1006)
+The CORS allow_headers default behavior changes from:
+  - allow only `Content-Type`, `apollographql-client-name` and `apollographql-client-version`
+to:
+  - mirror the received `access-control-request-headers`
+
+This change loosens the CORS related headers restrictions, so it shouldn't have any impact on your setup.
+
 ## 🚀 Features ( :rocket: )
+
+### CSRF Protection [PR #1006](https://github.com/apollographql/router/pull/1006)
+The router now embeds a CSRF protection plugin, which is enabled by default. Have a look at the [CORS and CSRF example](https://github.com/apollographql/router/tree/main/examples/cors-and-csrf/custom-headers.router.yaml) to learn how to customize it. [Documentation](https://www.apollographql.com/docs/router/configuration/cors/) will be updated soon!
 
 ### helm chart now supports prometheus metrics [PR #1005](https://github.com/apollographql/router/pull/1005)
 The router has supported exporting prometheus metrics for a while. This change updates our helm chart to enable router deployment prometheus metrics. 
