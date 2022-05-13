@@ -4100,4 +4100,123 @@ mod tests {
             }},
         );
     }
+
+    #[test]
+    fn inaccessible_on_interface() {
+        let schema = "type Query
+        {
+            test_interface: Interface
+            test_union: U
+            test_enum: E
+        }
+        
+        type Object implements Interface @inaccessible {
+            foo: String
+            other: String
+        }
+
+        type Object2 implements Interface {
+            foo: String
+            other: String @inaccessible
+        }
+          
+        interface Interface {
+            foo: String
+        }
+
+        type A @inaccessible {
+            common: String
+            a: String
+        }
+
+        type B {
+            common: String
+            b: String
+        }
+        
+        union U = A | B
+
+        enum E {
+            X @inaccessible
+            Y @inaccessible
+            Z
+        }
+        ";
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                }
+
+                test_interface2: test_interface {
+                    __typename
+                    foo
+                }
+
+                test_union {
+                    ...on B {
+                        __typename
+                        common
+                    }
+                }
+
+                test_union2: test_union {
+                    ...on B {
+                        __typename
+                        common
+                    }
+                }
+
+                test_enum
+                test_enum2: test_enum
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "Object",
+                    "foo": "bar",
+                    "other": "a"
+                },
+
+                "test_interface2": {
+                    "__typename": "Object2",
+                    "foo": "bar",
+                    "other": "a"
+                },
+
+                "test_union": {
+                    "__typename": "A",
+                    "common": "hello",
+                    "a": "A"
+                },
+
+                "test_union2": {
+                    "__typename": "B",
+                    "common": "hello",
+                    "b": "B"
+                },
+
+                "test_enum": "X",
+                "test_enum2": "Z"
+            }},
+            None,
+            json! {{
+                "test_interface": null,
+                "test_interface2": {
+                    "__typename": "Object2",
+                    "foo": "bar",
+                },
+                "test_union": null,
+                "test_union2": {
+                    "__typename": "B",
+                    "common": "hello",
+                    "b": "B"
+                },
+                "test_enum": null,
+                "test4": "Z"
+            }},
+        );
+    }
 }
