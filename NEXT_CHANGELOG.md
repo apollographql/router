@@ -25,8 +25,8 @@ Description! And a link to a [reference](http://url)
 # [0.9.1] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-## 🚀 Features ( :rocket: )
-## 🐛 Fixes ( :bug: )
-## 🛠 Maintenance ( :hammer_and_wrench: )
-## 📚 Documentation ( :books: )
-## 🐛 Fixes ( :bug: )
+## 🚀 Features
+## 🐛 Fixes
+## 🛠 Maintenance
+## 📚 Documentation
+## 🐛 Fixes
