@@ -32,6 +32,11 @@ pub struct Config {
         default = "client_version_header_default"
     )]
     pub client_version_header: HeaderName,
+
+    // This'll get overridden if a user tries to set it.
+    // The purpose is to allow is to pass this in to the plugin.
+    #[schemars(skip)]
+    pub(crate) schema_id: String,
 }
 
 fn apollo_key_env_str() -> Option<String> {
@@ -74,6 +79,7 @@ impl Default for Config {
             apollo_graph_ref: None,
             client_name_header: client_name_header_default(),
             client_version_header: client_version_header_default(),
+            schema_id: "<no_schema_id>".to_string(),
         }
     }
 }

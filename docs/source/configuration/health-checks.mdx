@@ -1,10 +1,8 @@
 ---
-title: Health checks
-description: Determining the health status of the Apollo Router
+title: Health checks in the Apollo Router
+description: Determining the router's status
 ---
 
-Health checks are often used by load balancers to determine if a server is available and ready to start serving traffic.
+Health checks are often used by load balancers to determine whether a server is available and ready to start serving traffic.
 
-## HTTP-level health checks
-
-The Apollo Router supports a simple HTTP-level health check. This is enabled by default and is served at the URL path `/.well-known/apollo/server-health`. This returns the 200 status code if the HTTP server is successfully serving. It does not invoke any of the GraphQL execution machinery.
+The Apollo Router supports a basic HTTP-level health check. This is enabled by default and is served at the URL path `/.well-known/apollo/server-health`. This returns a `200` status code if the HTTP server is successfully serving. It does not invoke any GraphQL execution machinery.

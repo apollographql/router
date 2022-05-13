@@ -1,13 +1,10 @@
 ---
-title: Metrics in the Apollo Router
-description: Collect metrics
+title: Collecting metrics in the Apollo Router
 ---
 
-import { Link } from "gatsby";
+The Apollo Router provides built-in support for metrics collection via [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector).
 
-## Collecting Metrics
-
-### Using Prometheus
+## Using Prometheus
 
 You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
 
@@ -35,7 +32,7 @@ http_request_duration_seconds_bucket{le="0.9"} 1
 
 Note that if you have not run a query against the router you will see a blank page as no metrics will have been generated yet!
 
-### Using OpenTelemetry Collector
+## Using OpenTelemetry Collector
 
 You may send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and eporting metrics.
 
@@ -45,11 +42,11 @@ telemetry:
     otlp:
       # Either 'default' or a URL
       endpoint: default
-      
-      # Optional protocol. Only grpc is supported currently. 
+
+      # Optional protocol. Only grpc is supported currently.
       # Setting to http will result in configuration failure.
       protocol: grpc
-      
+
       # Optional Grpc configuration
       grpc:
         domain_name: "my.domain"
@@ -64,7 +61,7 @@ telemetry:
           # env: ""
         metadata:
           foo: bar
-      
-      # Optional timeout in humatime form       
+
+      # Optional timeout in humatime form
       timeout: 2s
 ```
