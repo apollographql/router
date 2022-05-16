@@ -29,4 +29,8 @@ Description! And a link to a [reference](http://url)
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### Document available metrics in Prometheus [PR #1067](https://github.com/apollographql/router/pull/1067)
+Add the list of metrics you can have using Prometheus
+
 ## 🐛 Fixes
