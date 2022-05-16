@@ -20,7 +20,7 @@ use url::Url;
 mod duration_histogram;
 pub(crate) mod studio;
 
-const DEFAULT_BATCH_SIZE: usize = 65_536;
+const DEFAULT_BATCH_SIZE: usize = 50;
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 
 #[derive(Clone)]
@@ -156,7 +156,7 @@ impl ApolloMetricsExporter {
             // We want to collect stats into batches, but also send periodically if a batch is not filled.
             // This implementation is not ideal as we do have to store all the data when really it could be folded as it is generated.
             // But in the interested of getting something over the line quickly let's go with this as it is simple to understand.
-            rx.chunks_timeout(DEFAULT_BATCH_SIZE, Duration::from_secs(10))
+            rx.chunks_timeout(DEFAULT_BATCH_SIZE, Duration::from_secs(1))
                 .for_each(|reports| async {
                     let aggregated_report = Report::new(reports);
 
