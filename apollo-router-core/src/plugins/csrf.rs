@@ -95,10 +95,10 @@ impl Plugin for Csrf {
             ServiceBuilder::new()
                 .checkpoint(move |req: RouterRequest| {
                     if is_preflighted(&req, required_headers.as_slice()) {
-                        tracing::debug!("request is preflighted");
+                        tracing::trace!("request is preflighted");
                         Ok(ControlFlow::Continue(req))
                     } else {
-                        tracing::debug!("request is not preflighted");
+                        tracing::trace!("request is not preflighted");
                         let error = crate::Error::builder().message(
                             format!(
                                 "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
