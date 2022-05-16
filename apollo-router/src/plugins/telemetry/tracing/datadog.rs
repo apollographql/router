@@ -5,25 +5,14 @@ use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tower::BoxError;
-use url::Url;
+
+use super::{deser_endpoint, AgentEndpoint};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(deserialize_with = "deser_endpoint")]
     pub endpoint: AgentEndpoint,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub enum AgentEndpoint {
-    Default(AgentDefault),
-    Url(Url),
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum AgentDefault {
-    Default,
 }
 
 impl TracingConfigurator for Config {
@@ -41,5 +30,35 @@ impl TracingConfigurator for Config {
             .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::Url;
+
+    use crate::plugins::telemetry::tracing::AgentDefault;
+
+    use super::*;
+
+    #[test]
+    fn endpoint_configuration() {
+        let config: Config = serde_yaml::from_str("endpoint: default").unwrap();
+        assert_eq!(
+            AgentEndpoint::Default(AgentDefault::Default),
+            config.endpoint
+        );
+
+        let config: Config = serde_yaml::from_str("endpoint: collector:1234").unwrap();
+        assert_eq!(
+            AgentEndpoint::Url(Url::parse("http://collector:1234").unwrap()),
+            config.endpoint
+        );
+
+        let config: Config = serde_yaml::from_str("endpoint: https://collector:1234").unwrap();
+        assert_eq!(
+            AgentEndpoint::Url(Url::parse("https://collector:1234").unwrap()),
+            config.endpoint
+        );
     }
 }

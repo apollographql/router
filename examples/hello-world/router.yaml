@@ -1,4 +1,5 @@
 plugins:
-  # this plugin doesn't have any configuration
-  # mention it here and you're set!
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
   example.hello_world:
+    name: "Bob"

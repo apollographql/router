@@ -36,6 +36,7 @@ pub struct Response {
 }
 
 impl Response {
+    /// If path is None, this is a primary query.
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
     }
@@ -45,6 +46,9 @@ impl Response {
         self.errors.append(errors)
     }
 
+    /// Create a [`Response`] from the supplied [`Bytes`].
+    ///
+    /// This will return an error (identifying the faulty service) if the input is invalid.
     pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {

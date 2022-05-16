@@ -1,4 +1,5 @@
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::apollo::Sender;
 use apollo_router_core::{http_compat, Handler, ResponseBody};
 use bytes::Bytes;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider, Number, ValueRecorder};
@@ -9,29 +10,35 @@ use std::sync::Arc;
 use tower::util::BoxService;
 use tower::BoxError;
 
-pub mod otlp;
-pub mod prometheus;
+pub(crate) mod apollo;
+pub(crate) mod otlp;
+pub(crate) mod prometheus;
 
-pub type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
-pub type CustomEndpoint =
+pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
+pub(crate) type CustomEndpoint =
     BoxService<http_compat::Request<Bytes>, http_compat::Response<ResponseBody>, BoxError>;
 
 #[derive(Default)]
-pub struct MetricsBuilder {
+pub(crate) struct MetricsBuilder {
     exporters: Vec<MetricsExporterHandle>,
     meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
     custom_endpoints: HashMap<String, Handler>,
+    apollo_metrics: Sender,
 }
 
 impl MetricsBuilder {
-    pub fn exporters(&mut self) -> Vec<MetricsExporterHandle> {
+    pub(crate) fn exporters(&mut self) -> Vec<MetricsExporterHandle> {
         std::mem::take(&mut self.exporters)
     }
-    pub fn meter_provider(&mut self) -> AggregateMeterProvider {
+    pub(crate) fn meter_provider(&mut self) -> AggregateMeterProvider {
         AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
     }
-    pub fn custom_endpoints(&mut self) -> HashMap<String, Handler> {
+    pub(crate) fn custom_endpoints(&mut self) -> HashMap<String, Handler> {
         std::mem::take(&mut self.custom_endpoints)
+    }
+
+    pub(crate) fn apollo_metrics_provider(&mut self) -> Sender {
+        std::mem::take(&mut self.apollo_metrics)
     }
 }
 
@@ -54,9 +61,14 @@ impl MetricsBuilder {
             .insert(path.to_string(), Handler::new(endpoint));
         self
     }
+
+    fn with_apollo_metrics_collector(mut self, apollo_metrics: Sender) -> Self {
+        self.apollo_metrics = apollo_metrics;
+        self
+    }
 }
 
-pub trait MetricsConfigurator {
+pub(crate) trait MetricsConfigurator {
     fn apply(
         &self,
         builder: MetricsBuilder,
@@ -65,7 +77,7 @@ pub trait MetricsConfigurator {
 }
 
 #[derive(Clone)]
-pub struct BasicMetrics {
+pub(crate) struct BasicMetrics {
     pub http_requests_total: AggregateCounter<u64>,
     pub http_requests_error_total: AggregateCounter<u64>,
     pub http_requests_duration: AggregateValueRecorder<f64>,
@@ -95,7 +107,7 @@ impl BasicMetrics {
 }
 
 #[derive(Clone, Default)]
-pub struct AggregateMeterProvider(Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>);
+pub(crate) struct AggregateMeterProvider(Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>);
 impl AggregateMeterProvider {
     pub fn new(
         meters: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,

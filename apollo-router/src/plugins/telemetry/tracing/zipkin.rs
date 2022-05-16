@@ -3,68 +3,59 @@ use crate::plugins::telemetry::config::{GenericWith, Trace};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use serde::{Deserialize, Deserializer, Serialize};
 use tower::BoxError;
 use url::Url;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct Config {
-    #[serde(flatten)]
-    #[schemars(with = "String")]
-    pub endpoint: Endpoint,
-}
+use super::{AgentDefault, AgentEndpoint};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Endpoint {
-    Agent {
-        #[schemars(with = "String", default = "default_agent_endpoint")]
-        endpoint: AgentEndpoint,
-    },
-    Collector {
-        endpoint: Url,
-    },
+pub struct Config {
+    #[schemars(with = "String", default = "default_agent_endpoint")]
+    #[serde(deserialize_with = "deser_endpoint")]
+    pub endpoint: AgentEndpoint,
 }
 
 fn default_agent_endpoint() -> &'static str {
     "default"
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", untagged)]
-pub enum AgentEndpoint {
-    Default(AgentDefault),
-    Socket(SocketAddr),
-}
+pub(crate) fn deser_endpoint<'de, D>(deserializer: D) -> Result<AgentEndpoint, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut s = String::deserialize(deserializer)?;
+    if s == "default" {
+        return Ok(AgentEndpoint::Default(AgentDefault::Default));
+    }
+    let mut url = Url::parse(&s).map_err(serde::de::Error::custom)?;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentDefault {
-    Default,
+    // support the case of 'collector:4317' where url parses 'collector'
+    // as the scheme instead of the host
+    if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
+        s = format!("http://{}/api/v2/spans", s);
+
+        url = Url::parse(&s).map_err(serde::de::Error::custom)?;
+    }
+    Ok(AgentEndpoint::Url(url))
 }
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
         tracing::debug!("configuring Zipkin tracing");
-        let exporter = match &self.endpoint {
-            Endpoint::Agent { endpoint } => {
-                let socket = match endpoint {
-                    AgentEndpoint::Default(_) => None,
-                    AgentEndpoint::Socket(s) => Some(s),
-                };
-                opentelemetry_zipkin::new_pipeline()
-                    .with_trace_config(trace_config.into())
-                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
-                    .with(&socket, |b, s| b.with_service_address(*(*s)))
-                    .init_exporter()?
-            }
-            Endpoint::Collector { endpoint } => opentelemetry_zipkin::new_pipeline()
-                .with_trace_config(trace_config.into())
-                .with(&trace_config.service_name, |b, n| b.with_service_name(n))
-                .with_collector_endpoint(&endpoint.to_string())
-                .init_exporter()?,
+        let collector_endpoint = match &self.endpoint {
+            AgentEndpoint::Default(_) => None,
+            AgentEndpoint::Url(url) => Some(url),
         };
+
+        let exporter = opentelemetry_zipkin::new_pipeline()
+            .with_trace_config(trace_config.into())
+            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with(&collector_endpoint, |b, endpoint| {
+                b.with_collector_endpoint(&endpoint.to_string())
+            })
+            .init_exporter()?;
+
         Ok(builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio))
     }
 }

@@ -217,6 +217,15 @@ impl Query {
 
                 match input {
                     Value::Object(ref mut input_object) => {
+                        if let Some(input_type) =
+                            input_object.get(TYPENAME).and_then(|val| val.as_str())
+                        {
+                            if !schema.object_types.contains_key(input_type) {
+                                *output = Value::Null;
+                                return Ok(());
+                            }
+                        }
+
                         if output.is_null() {
                             *output = Value::Object(Object::default());
                         }
@@ -399,15 +408,26 @@ impl Query {
                         continue;
                     }
 
-                    // known_type = true means that from the query's shape, we know
-                    // we should get the right type here. But in the case we get a
-                    // __typename field and it does not match, we should not apply
-                    // that fragment
-                    if input
-                        .get(TYPENAME)
-                        .map(|val| val.as_str() == Some(type_condition.as_str()))
-                        .unwrap_or(*known_type)
+                    let is_apply = if let Some(input_type) =
+                        input.get(TYPENAME).and_then(|val| val.as_str())
                     {
+                        //First determine if fragment is for interface
+                        //Otherwise we assume concrete type is expected
+                        if let Some(interface) = schema.interfaces.get(type_condition) {
+                            //Check if input implements interface
+                            schema.is_subtype(interface.name.as_str(), input_type)
+                        } else {
+                            input_type == type_condition.as_str()
+                        }
+                    } else {
+                        // known_type = true means that from the query's shape, we know
+                        // we should get the right type here. But in the case we get a
+                        // __typename field and it does not match, we should not apply
+                        // that fragment
+                        *known_type
+                    };
+
+                    if is_apply {
                         self.apply_selection_set(selection_set, variables, input, output, schema)?;
                     }
                 }
@@ -442,13 +462,25 @@ impl Query {
                             continue;
                         }
 
-                        if input
-                            .get(TYPENAME)
-                            .map(|val| val.as_str() == Some(fragment.type_condition.as_str()))
-                            .unwrap_or_else(|| {
-                                known_type.as_deref() == Some(fragment.type_condition.as_str())
-                            })
+                        let is_apply = if let Some(input_type) =
+                            input.get(TYPENAME).and_then(|val| val.as_str())
                         {
+                            //First determine if fragment is for interface
+                            //Otherwise we assume concrete type is expected
+                            if let Some(interface) = known_type
+                                .as_deref()
+                                .and_then(|known_type| schema.interfaces.get(known_type))
+                            {
+                                //Check if input implements interface
+                                schema.is_subtype(interface.name.as_str(), input_type)
+                            } else {
+                                input_type == fragment.type_condition.as_str()
+                            }
+                        } else {
+                            known_type.as_deref() == Some(fragment.type_condition.as_str())
+                        };
+
+                        if is_apply {
                             self.apply_selection_set(
                                 &fragment.selection_set,
                                 variables,
@@ -677,7 +709,7 @@ impl Operation {
             .selection_set()
             .expect("the node SelectionSet is not optional in the spec; qed")
             .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema))
+            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
             .collect::<Option<_>>()?;
 
         let variables = operation
@@ -824,7 +856,10 @@ mod tests {
         }};
 
         ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
-            let schema: Schema = $schema.parse().expect("could not parse schema");
+            let schema = with_supergraph_boilerplate($schema)
+                .parse::<Schema>()
+                .expect("could not parse schema");
+            let api_schema = schema.api_schema();
             let query = Query::parse($query, &schema).expect("could not parse query");
             let mut response = Response::builder().data($response.clone()).build();
 
@@ -832,10 +867,105 @@ mod tests {
                 &mut response,
                 $operation,
                 $variables.as_object().unwrap().clone(),
-                &schema,
+                api_schema,
             );
             assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
         }};
+    }
+
+    fn with_supergraph_boilerplate(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+             {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        "#,
+            content
+        )
+    }
+
+    macro_rules! assert_format_response_fed2 {
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $expected:expr $(,)?) => {{
+            assert_format_response_fed2!(
+                $schema,
+                $query,
+                $response,
+                $operation,
+                Value::Object(Object::default()),
+                $expected
+            );
+        }};
+
+        ($schema:expr, $query:expr, $response:expr, $operation:expr, $variables:expr, $expected:expr $(,)?) => {{
+            let schema = with_supergraph_boilerplate_fed2($schema)
+                .parse::<Schema>()
+                .expect("could not parse schema");
+            let api_schema = schema.api_schema();
+            println!("generated API chema:\n{}", api_schema.as_str());
+            let query = Query::parse($query, &schema).expect("could not parse query");
+            let mut response = Response::builder().data($response.clone()).build();
+
+            query.format_response(
+                &mut response,
+                $operation,
+                $variables.as_object().unwrap().clone(),
+                api_schema,
+            );
+            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &$expected);
+        }};
+    }
+
+    fn with_supergraph_boilerplate_fed2(content: &str) -> String {
+        format!(
+            "{}\n{}",
+            r#"
+            schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+            {
+                query: Query
+            }
+
+            directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ENUM | ENUM_VALUE | SCALAR | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ARGUMENT_DEFINITION
+
+            scalar join__FieldSet
+            scalar link__Import
+            enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+            }
+
+            enum join__Graph {
+                TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+            }
+        "#,
+            content
+        )
     }
 
     #[test]
@@ -1120,14 +1250,14 @@ mod tests {
 
     macro_rules! assert_validation {
         ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-            let res = run_validation!($schema, $query, $variables);
+            let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
             assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
         }};
     }
 
     macro_rules! assert_validation_error {
         ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-            let res = run_validation!($schema, $query, $variables);
+            let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
             assert!(res.is_err(), "validation should have failed");
         }};
     }
@@ -3274,6 +3404,192 @@ mod tests {
     }
 
     #[test]
+    fn check_fragment_on_interface() {
+        let schema = "type Query {
+            get: Product
+        }
+
+        interface Product {
+            id: String!
+            name: String
+        }
+
+        type Vodka {
+            id: String!
+            name: String
+        }
+
+        type Beer implements Product {
+            id: String!
+            name: String
+        }";
+
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "__typename": "Beer",
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+            None,
+            json! {{
+                "get": {
+                    "id": "a",
+                    "name": "Asahi",
+                },
+            }},
+        );
+
+        // Make sure we do not return data for type that doesn't implement interface
+        assert_format_response!(
+            schema,
+            "
+            fragment ProductBase on Product {
+              __typename
+              id
+              name
+            }
+            query  {
+                get {
+                  ...ProductBase
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
+            }},
+        );
+
+        assert_format_response!(
+            schema,
+            "
+            query  {
+                get {
+                  ... on Product {
+                    __typename
+                    id
+                    name
+                  }
+                }
+            }",
+            json! {{
+                "get": {
+                    "__typename": "Vodka",
+                    "id": "a",
+                    "name": "Crystal",
+                },
+            }},
+            None,
+            json! {{
+                "get": {}
+            }},
+        );
+    }
+
+    #[test]
     fn include() {
         let schema = "type Query {
             get: Product
@@ -3790,6 +4106,124 @@ mod tests {
                     "__typename": "Product",
                     "symbol": "1"
                 },
+            }},
+        );
+    }
+
+    #[test]
+    fn inaccessible_on_interface() {
+        let schema = "type Query
+        {
+            test_interface: Interface
+            test_union: U
+            test_enum: E
+        }
+        
+        type Object implements Interface @inaccessible {
+            foo: String
+            other: String
+        }
+
+        type Object2 implements Interface {
+            foo: String
+            other: String @inaccessible
+        }
+          
+        interface Interface {
+            foo: String
+        }
+
+        type A @inaccessible {
+            common: String
+            a: String
+        }
+
+        type B {
+            common: String
+            b: String
+        }
+        
+        union U = A | B
+
+        enum E {
+            X @inaccessible
+            Y @inaccessible
+            Z
+        }
+        ";
+
+        assert_format_response_fed2!(
+            schema,
+            "query  {
+                test_interface {
+                    __typename
+                    foo
+                }
+
+                test_interface2: test_interface {
+                    __typename
+                    foo
+                }
+
+                test_union {
+                    ...on B {
+                        __typename
+                        common
+                    }
+                }
+
+                test_union2: test_union {
+                    ...on B {
+                        __typename
+                        common
+                    }
+                }
+
+                test_enum
+                test_enum2: test_enum
+            }",
+            json! {{
+                "test_interface": {
+                    "__typename": "Object",
+                    "foo": "bar",
+                    "other": "a"
+                },
+
+                "test_interface2": {
+                    "__typename": "Object2",
+                    "foo": "bar",
+                    "other": "a"
+                },
+
+                "test_union": {
+                    "__typename": "A",
+                    "common": "hello",
+                    "a": "A"
+                },
+
+                "test_union2": {
+                    "__typename": "B",
+                    "common": "hello",
+                    "b": "B"
+                },
+
+                "test_enum": "X",
+                "test_enum2": "Z"
+            }},
+            None,
+            json! {{
+                "test_interface": null,
+                "test_interface2": {
+                    "__typename": "Object2",
+                    "foo": "bar",
+                },
+                "test_union": null,
+                "test_union2": {
+                    "__typename": "B",
+                    "common": "hello",
+                },
+                "test_enum": null,
+                "test_enum2": "Z"
             }},
         );
     }

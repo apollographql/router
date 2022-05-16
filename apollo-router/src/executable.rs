@@ -29,20 +29,30 @@ pub struct Opt {
         long = "log",
         default_value = "info",
         alias = "log-level",
-        env = "RUST_LOG"
+        env = "APOLLO_ROUTER_LOG"
     )]
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "ROUTER_HOT_RELOAD")]
+    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
-    #[clap(short, long = "config", parse(from_os_str), env)]
-    configuration_path: Option<PathBuf>,
+    #[clap(
+        short,
+        long = "config",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_CONFIG_PATH"
+    )]
+    config_path: Option<PathBuf>,
 
     /// Schema location relative to the project directory.
-    #[clap(short, long = "supergraph", parse(from_os_str), env)]
+    #[clap(
+        short,
+        long = "supergraph",
+        parse(from_os_str),
+        env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
+    )]
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
@@ -59,11 +69,11 @@ pub struct Opt {
 
     /// The endpoint polled to fetch the latest supergraph schema.
     #[clap(long, env)]
-    apollo_schema_config_delivery_endpoint: Option<Url>,
+    apollo_uplink_endpoints: Option<Url>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
-    apollo_schema_poll_interval: Duration,
+    apollo_uplink_poll_interval: Duration,
 
     /// Display version and exit
     #[clap(parse(from_flag), long, short = 'V')]
@@ -115,7 +125,7 @@ impl fmt::Display for ProjectDir {
 pub fn main() -> Result<()> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("ROUTER_NUM_CORES")
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
@@ -153,8 +163,9 @@ pub async fn rt_main() -> Result<()> {
     // a FmtSubscriber to set_global_subscriber(), but we can't because of the
     // generic nature of FmtSubscriber. See: https://github.com/tokio-rs/tracing/issues/380
     // for more details.
-    let builder = tracing_subscriber::fmt::fmt()
-        .with_env_filter(EnvFilter::try_new(&opt.log_level).context("could not parse log")?);
+    let builder = tracing_subscriber::fmt::fmt().with_env_filter(
+        EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
+    );
 
     let subscriber: RouterSubscriber = if atty::is(atty::Stream::Stdout) {
         RouterSubscriber::TextSubscriber(builder.finish())
@@ -169,7 +180,7 @@ pub async fn rt_main() -> Result<()> {
     let current_directory = std::env::current_dir()?;
 
     let configuration = opt
-        .configuration_path
+        .config_path
         .as_ref()
         .map(|path| {
             let path = if path.is_relative() {
@@ -185,14 +196,12 @@ pub async fn rt_main() -> Result<()> {
             }
         })
         .unwrap_or_else(|| ConfigurationKind::Instance(Configuration::builder().build().boxed()));
-
+    let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
     let schema = match (opt.supergraph_path, opt.apollo_key) {
         (Some(supergraph_path), _) => {
-            tracing::info!(
-                "{}@{}",
-                std::env!("CARGO_PKG_NAME"),
-                std::env!("CARGO_PKG_VERSION")
-            );
+            tracing::info!("{apollo_router_msg}");
+            setup_panic_handler();
+
             let supergraph_path = if supergraph_path.is_relative() {
                 current_directory.join(supergraph_path)
             } else {
@@ -205,28 +214,22 @@ pub async fn rt_main() -> Result<()> {
             }
         }
         (None, Some(apollo_key)) => {
-            tracing::info!(
-                "{}@{}",
-                std::env!("CARGO_PKG_NAME"),
-                std::env!("CARGO_PKG_VERSION")
-            );
+            tracing::info!("{apollo_router_msg}");
             let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-            if opt.apollo_schema_poll_interval < Duration::from_secs(10) {
+            if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
                 return Err(anyhow!("Apollo poll interval must be at least 10s"));
             }
 
             SchemaKind::Registry {
                 apollo_key,
                 apollo_graph_ref,
-                url: opt.apollo_schema_config_delivery_endpoint,
-                poll_interval: opt.apollo_schema_poll_interval,
+                url: opt.apollo_uplink_endpoints,
+                poll_interval: opt.apollo_uplink_poll_interval,
             }
         }
         _ => {
-            let version = std::env!("CARGO_PKG_VERSION");
             return Err(anyhow!(
-                r#"
-APOLLO ROUTER v{version}
+                r#"{apollo_router_msg}
 
 ⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
@@ -273,6 +276,24 @@ APOLLO ROUTER v{version}
     }
 
     Ok(())
+}
+
+fn setup_panic_handler() {
+    // Redirect panics to the logs.
+    let backtrace_env = std::env::var("RUST_BACKTRACE");
+    let show_backtraces =
+        backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
+    if show_backtraces {
+        tracing::warn!("RUST_BACKTRACE={} detected. This use useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+    }
+    std::panic::set_hook(Box::new(move |e| {
+        if show_backtraces {
+            let backtrace = backtrace::Backtrace::new();
+            tracing::error!("{}\n{:?}", e, backtrace)
+        } else {
+            tracing::error!("{}", e)
+        }
+    }));
 }
 
 fn copy_args_to_env() {

@@ -1,8 +1,13 @@
+//!
+//! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
+//!
+
 use apollo_router::plugins::telemetry::config::Tracing;
-use apollo_router::plugins::telemetry::{self, Telemetry};
+use apollo_router::plugins::telemetry::{self, apollo, Telemetry};
 use apollo_router_core::{
-    http_compat, prelude::*, Object, PluggableRouterServiceBuilder, Plugin, ResponseBody,
-    RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService, ValueExt,
+    http_compat, plugins::csrf, prelude::*, Object, PluggableRouterServiceBuilder, Plugin,
+    ResponseBody, RouterRequest, RouterResponse, Schema, SubgraphRequest, TowerSubgraphService,
+    ValueExt,
 };
 use http::Method;
 use maplit::hashmap;
@@ -32,14 +37,21 @@ macro_rules! assert_federated_response {
 
 
 
-        let expected = query_node(&request).await.unwrap();
+        let expected = match query_node(&request).await {
+            Ok(e) => e,
+            Err(err) => {
+                panic!("query_node failed: {err}. Probably caused by missing gateway during testing");
+            }
+        };
 
         let originating_request = http_compat::Request::fake_builder().method(Method::POST)
+            // otherwise the query would be a simple one,
+            // and CSRF protection would reject it
+            .header("content-type", "application/json")
             .body(request)
             .build().expect("expecting valid originating request");
 
         let (actual, registry) = query_rust(originating_request.into()).await;
-
 
         tracing::debug!("query:\n{}\n", $query);
 
@@ -51,13 +63,19 @@ macro_rules! assert_federated_response {
         tracing::debug!("expected: {}", to_string_pretty(&expected).unwrap());
         tracing::debug!("actual: {}", to_string_pretty(&actual).unwrap());
 
-        assert!(expected.data.as_ref().expect("expected data should not be none")
-        .eq_and_ordered(&actual.data.as_ref().expect("received data should not be none")));
+        let expected = expected.data.as_ref().expect("expected data should not be none");
+        let actual = actual.data.as_ref().expect("received data should not be none");
+        assert!(
+            expected.eq_and_ordered(actual),
+            "the gateway and the router didn't return the same data:\ngateway:\n{}\nrouter\n{}",
+            expected,
+            actual
+        );
         assert_eq!(registry.totals(), $service_requests);
     };
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_request() {
     assert_federated_response!(
         r#"{ topProducts { name name2:name } }"#,
@@ -67,7 +85,7 @@ async fn basic_request() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_composition() {
     assert_federated_response!(
         r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
@@ -79,7 +97,7 @@ async fn basic_composition() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn api_schema_hides_field() {
     let request = graphql::Request::builder()
         .query(Some(r#"{ topProducts { name inStock } }"#.to_string()))
@@ -95,6 +113,7 @@ async fn api_schema_hides_field() {
 
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -107,7 +126,7 @@ async fn api_schema_hides_field() {
         .contains("Cannot query field \"inStock\" on type \"Product\"."));
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
@@ -117,10 +136,10 @@ async fn traced_basic_request() {
             "products".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!("traced_basic_request", get_spans());
+    insta::assert_json_snapshot!(get_spans());
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
@@ -132,10 +151,10 @@ async fn traced_basic_composition() {
             "accounts".to_string()=>1,
         },
     );
-    insta::assert_json_snapshot!("traced_basic_composition", get_spans());
+    insta::assert_json_snapshot!(get_spans());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
@@ -158,7 +177,7 @@ async fn basic_mutation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -183,6 +202,7 @@ async fn queries_should_work_over_get() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -192,7 +212,48 @@ async fn queries_should_work_over_get() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
+async fn simple_queries_should_not_work() {
+    let expected_error =apollo_router_core::Error {
+        message :"This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+        Please either specify a 'content-type' header \
+        (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
+        or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight".to_string(),
+        ..Default::default()
+    };
+
+    let request = graphql::Request::builder()
+        .query(Some(
+            r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+                .to_string(),
+        ))
+        .variables(Arc::new(
+            vec![
+                ("topProductsFirst".into(), 2.into()),
+                ("reviewsForAuthorAuthorId".into(), 1.into()),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .build();
+
+    let originating_request = http_compat::Request::fake_builder()
+        .body(request)
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, registry) = query_rust(originating_request.into()).await;
+
+    assert_eq!(
+        1,
+        actual.errors.len(),
+        "CSRF should have rejected this query"
+    );
+    assert_eq!(expected_error, actual.errors[0]);
+    assert_eq!(registry.totals(), hashmap! {});
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_post() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -217,6 +278,7 @@ async fn queries_should_work_over_post() {
 
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -232,10 +294,10 @@ async fn queries_should_work_over_post() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn service_errors_should_be_propagated() {
     let expected_error =apollo_router_core::Error {
-        message :"value retrieval failed: couldn't plan query: query validation errors: UNKNOWN: Unknown operation named \"invalidOperationName\"".to_string(),
+        message :"value retrieval failed: couldn't plan query: query validation errors: Unknown operation named \"invalidOperationName\"".to_string(),
         ..Default::default()
     };
 
@@ -248,6 +310,7 @@ async fn service_errors_should_be_propagated() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -257,7 +320,7 @@ async fn service_errors_should_be_propagated() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -291,6 +354,7 @@ async fn mutation_should_not_work_over_get() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -300,7 +364,7 @@ async fn mutation_should_not_work_over_get() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_work_over_post() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -336,6 +400,7 @@ async fn mutation_should_work_over_post() {
 
     let http_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -351,7 +416,7 @@ async fn mutation_should_work_over_post() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn automated_persisted_queries() {
     let (router, registry) = setup_router_and_registry().await;
 
@@ -387,6 +452,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -410,6 +476,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_request_with_query)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -428,6 +495,7 @@ async fn automated_persisted_queries() {
 
     let originating_request = http_compat::Request::fake_builder()
         .body(apq_only_request)
+        .header("content-type", "application/json")
         .build()
         .expect("expecting valid request");
 
@@ -437,7 +505,7 @@ async fn automated_persisted_queries() {
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
-#[test_span(tokio::test)]
+#[test_span(tokio::test(flavor = "multi_thread"))]
 async fn variables() {
     assert_federated_response!(
         r#"
@@ -462,7 +530,7 @@ async fn variables() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
     let request = graphql::Request::builder()
         .query(Some(
@@ -486,6 +554,7 @@ async fn missing_variables() {
 
     let originating_request = http_compat::Request::fake_builder()
         .method(Method::POST)
+        .header("content-type", "application/json")
         .body(request)
         .build()
         .expect("expecting valid request");
@@ -509,15 +578,21 @@ async fn missing_variables() {
 }
 
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
-    Ok(reqwest::Client::new()
+    reqwest::Client::new()
         .post("http://localhost:4100/graphql")
         .json(request)
         .send()
         .await
-        .expect("couldn't send request")
+        .map_err(|err| graphql::FetchError::SubrequestHttpError {
+            service: "test node".to_string(),
+            reason: err.to_string(),
+        })?
         .json()
         .await
-        .expect("couldn't deserialize response"))
+        .map_err(|err| graphql::FetchError::SubrequestMalformedResponse {
+            service: "test node".to_string(),
+            reason: err.to_string(),
+        })
 }
 
 async fn query_rust(
@@ -531,6 +606,10 @@ async fn setup_router_and_registry() -> (
     BoxCloneService<RouterRequest, RouterResponse, BoxError>,
     CountingServiceRegistry,
 ) {
+    std::panic::set_hook(Box::new(|e| {
+        let backtrace = backtrace::Backtrace::new();
+        tracing::error!("{}\n{:?}", e, backtrace)
+    }));
     let schema: Arc<Schema> =
         Arc::new(include_str!("fixtures/supergraph.graphql").parse().unwrap());
     let counting_registry = CountingServiceRegistry::new();
@@ -539,11 +618,14 @@ async fn setup_router_and_registry() -> (
     let telemetry_plugin = Telemetry::new(telemetry::config::Conf {
         metrics: Option::default(),
         tracing: Some(Tracing::default()),
-        apollo: Option::default(),
+        apollo: Some(apollo::Config::default()),
     })
     .await
     .unwrap();
-    builder = builder.with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin));
+    let csrf_plugin = csrf::Csrf::new(Default::default()).await.unwrap();
+    builder = builder
+        .with_dyn_plugin("apollo.telemetry".to_string(), Box::new(telemetry_plugin))
+        .with_dyn_plugin("apollo.csrf".to_string(), Box::new(csrf_plugin));
     for (name, _url) in subgraphs {
         let cloned_counter = counting_registry.clone();
         let cloned_name = name.clone();

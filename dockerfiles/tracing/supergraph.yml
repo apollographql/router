@@ -1,0 +1,6 @@
+subgraphs:
+  accounts:
+    routing_url: http://localhost:4001/
+    schema:
+      subgraph_url: http://localhost:4001
+federation_version: 2

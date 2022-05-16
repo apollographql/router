@@ -11,15 +11,28 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower_service::Service;
 use tracing::Instrument;
-use typed_builder::TypedBuilder;
 
 /// [`Service`] for query execution.
-#[derive(TypedBuilder, Clone)]
+#[derive(Clone)]
 pub struct ExecutionService {
     schema: Arc<Schema>,
-
-    #[builder(setter(transform = |services: HashMap<String, Buffer<BoxService<SubgraphRequest, SubgraphResponse, BoxError>, SubgraphRequest>>| Arc::new(ServiceRegistry::new(services))))]
     subgraph_services: Arc<ServiceRegistry>,
+}
+
+#[buildstructor::builder]
+impl ExecutionService {
+    pub fn new(
+        schema: Arc<Schema>,
+        subgraph_services: HashMap<
+            String,
+            Buffer<BoxService<SubgraphRequest, SubgraphResponse, BoxError>, SubgraphRequest>,
+        >,
+    ) -> Self {
+        Self {
+            schema,
+            subgraph_services: Arc::new(ServiceRegistry::new(subgraph_services)),
+        }
+    }
 }
 
 impl Service<ExecutionRequest> for ExecutionService {

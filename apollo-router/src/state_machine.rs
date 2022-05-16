@@ -496,10 +496,7 @@ mod tests {
     async fn startup_reload_schema() {
         let router_factory = create_mock_router_factory(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
-        let minimal_schema = r#"       
-        type Query {
-          me: String
-        }"#;
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert!(matches!(
             execute(
                 server_factory,

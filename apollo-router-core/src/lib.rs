@@ -29,7 +29,7 @@ mod context;
 mod error;
 mod introspection;
 mod json_ext;
-mod layers;
+pub mod layers;
 pub mod plugin;
 pub mod plugins;
 mod query_cache;
@@ -48,7 +48,6 @@ pub use introspection::*;
 pub use json_ext::*;
 pub use layers::*;
 pub use plugin::*;
-pub use plugins::*;
 pub use query_cache::*;
 pub use query_planner::*;
 pub use request::*;
@@ -78,6 +77,7 @@ pub mod prelude {
 
 /// Useful reexports.
 pub mod reexports {
+    pub use router_bridge;
     pub use serde_json;
     pub use startup;
 }

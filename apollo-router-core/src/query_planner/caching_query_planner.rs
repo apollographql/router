@@ -3,6 +3,7 @@ use crate::CacheResolver;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
@@ -100,7 +101,31 @@ where
         Box::pin(async move {
             cm.get(key)
                 .await
-                .map_err(|err| err.into())
+                .map(|query_plan| {
+                    if let Err(e) = request
+                        .context
+                        .insert(USAGE_REPORTING, query_plan.usage_reporting.clone())
+                    {
+                        tracing::error!("usage reporting was not serializable to context, {}", e);
+                    }
+                    query_plan
+                })
+                .map_err(|e| {
+                    let CacheResolverError::RetrievalError(re) = &e;
+                    if let QueryPlannerError::PlanningErrors(pe) = re.deref() {
+                        if let Err(inner_e) = request
+                            .context
+                            .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                        {
+                            tracing::error!(
+                                "usage reporting was not serializable to context, {}",
+                                inner_e
+                            );
+                        }
+                    }
+
+                    e.into()
+                })
                 .map(|query_plan| QueryPlannerResponse::new(query_plan, request.context))
         })
     }
@@ -110,6 +135,7 @@ where
 mod tests {
     use super::*;
     use mockall::{mock, predicate::*};
+    use router_bridge::planner::{PlanErrors, UsageReporting};
     use test_log::test;
 
     mock! {
@@ -142,7 +168,13 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::from(Vec::<PlanError>::new())));
+            .return_const(Err(QueryPlannerError::from(PlanErrors {
+                errors: Default::default(),
+                usage_reporting: UsageReporting {
+                    stats_report_key: "this is a test key".to_string(),
+                    referenced_fields_by_type: Default::default(),
+                },
+            })));
 
         let planner = CachingQueryPlanner::new(delegate, 10);
 

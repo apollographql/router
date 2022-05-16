@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 698
+assertion_line: 748
 expression: error.to_string()
 ---
 configuration had errors: 
@@ -8,14 +8,16 @@ configuration had errors:
 
 
 plugins:
-  non_existant:
-              ^----- Additional properties are not allowed ('non_existant' was unexpected)
+┌   non_existant:
+|     foo: "bar"
+└-----> Additional properties are not allowed ('non_existant' was unexpected)
 
 2. /telemetry
 
+plugins:
   non_existant:
     foo: "bar"
 
 telemetry:  
-  another_non_existant: 3
-                      ^----- Additional properties are not allowed ('another_non_existant' was unexpected)
+┌   another_non_existant: 3
+└-----> Additional properties are not allowed ('another_non_existant' was unexpected)

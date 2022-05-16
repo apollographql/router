@@ -1,9 +1,9 @@
 //! Implements the router phase of the request lifecycle.
 
-use crate::apq::APQLayer;
-use crate::ensure_query_presence::EnsureQueryPresence;
-use crate::forbid_http_get_mutations::ForbidHttpGetMutationsLayer;
 use crate::services::execution_service::ExecutionService;
+use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::{
     BridgeQueryPlanner, CachingQueryPlanner, DynPlugin, ExecutionRequest, ExecutionResponse,
     Introspection, Plugin, QueryCache, QueryPlanOptions, QueryPlannerRequest, QueryPlannerResponse,
@@ -19,22 +19,41 @@ use tower::buffer::Buffer;
 use tower::util::{BoxCloneService, BoxService};
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 use tower_service::Service;
-use typed_builder::TypedBuilder;
 
+/// An [`IndexMap`] of available plugins.
 pub type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
-#[derive(TypedBuilder, Clone)]
+#[derive(Clone)]
 pub struct RouterService<QueryPlannerService, ExecutionService> {
     query_planner_service: QueryPlannerService,
     query_execution_service: ExecutionService,
-    #[builder(default)]
     ready_query_planner_service: Option<QueryPlannerService>,
-    #[builder(default)]
     ready_query_execution_service: Option<ExecutionService>,
     schema: Arc<Schema>,
     query_cache: Arc<QueryCache>,
     introspection: Option<Arc<Introspection>>,
+}
+
+#[buildstructor::builder]
+impl<QueryPlannerService, ExecutionService> RouterService<QueryPlannerService, ExecutionService> {
+    pub fn new(
+        query_planner_service: QueryPlannerService,
+        query_execution_service: ExecutionService,
+        schema: Arc<Schema>,
+        query_cache: Arc<QueryCache>,
+        introspection: Option<Arc<Introspection>>,
+    ) -> RouterService<QueryPlannerService, ExecutionService> {
+        RouterService {
+            query_planner_service,
+            query_execution_service,
+            ready_query_planner_service: None,
+            ready_query_execution_service: None,
+            schema,
+            query_cache,
+            introspection,
+        }
+    }
 }
 
 impl<QueryPlannerService, ExecutionService> Service<RouterRequest>
@@ -348,7 +367,7 @@ impl PluggableRouterServiceBuilder {
         // NB: Cannot use .buffer() here or the code won't compile...
         let execution_service = Buffer::new(
             ServiceBuilder::new()
-                .layer(ForbidHttpGetMutationsLayer::default())
+                .layer(AllowOnlyHttpPostMutationsLayer::default())
                 .service(
                     self.plugins.iter_mut().rev().fold(
                         ExecutionService::builder()
@@ -415,7 +434,7 @@ impl PluggableRouterServiceBuilder {
                             .query_execution_service(execution_service)
                             .schema(self.schema)
                             .query_cache(query_cache)
-                            .introspection(introspection)
+                            .and_introspection(introspection)
                             .build()
                             .boxed(),
                         |acc, (_, e)| e.router_service(acc),

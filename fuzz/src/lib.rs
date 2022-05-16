@@ -6,11 +6,10 @@ use libfuzzer_sys::arbitrary::{Result, Unstructured};
 use log::debug;
 
 /// This generate an arbitrary valid GraphQL operation
-pub fn generate_valid_operation(input: &[u8]) -> Result<String> {
+pub fn generate_valid_operation(input: &[u8], schema_path: &'static str) -> Result<String> {
     drop(env_logger::try_init());
 
-    let parser =
-        Parser::new(&fs::read_to_string("fuzz/supergraph-fed2.graphql").expect("cannot read file"));
+    let parser = Parser::new(&fs::read_to_string(schema_path).expect("cannot read file"));
 
     let tree = parser.parse();
     if tree.errors().len() > 0 {
