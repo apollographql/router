@@ -301,7 +301,7 @@ This example illustrates how to register router request handling.
 
 // At the router_service stage, register callbacks for processing requests
 fn router_service(service) {
-    let request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
+    const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the callback
 }
 
@@ -319,9 +319,9 @@ This example manipulates headers and the request context:
 // At the router_service stage, register callbacks for processing requests and
 // responses.
 fn router_service(service) {
-    let request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
+    const request_callback = Fn("process_request"); // This is standard Rhai functionality for creating a function pointer
     service.map_request(request_callback); // Register the request callback
-    let response_callback = Fn("process_response"); // This is standard Rhai functionality for creating a function pointer
+    const response_callback = Fn("process_response"); // This is standard Rhai functionality for creating a function pointer
     service.map_response(response_callback); // Register the response callback
 }
 
@@ -362,7 +362,7 @@ fn subgraph_service(service, subgraph) {
     // In this case we are doing the same thing for all subgraphs
     // and logging out details for each.
     print(`registering request callback for: ${subgraph}`); // print() is the same as using log_info()
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
 }
 

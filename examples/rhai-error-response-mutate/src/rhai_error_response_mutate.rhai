@@ -22,7 +22,7 @@ fn router_service(service) {
         //   - a message string
         //   - an empty locations array
         // extensions are optional. Added here to illustrate syntax.
-        let error_to_add = #{
+        const error_to_add = #{
             message: "this is an added error",
             locations: [],
             extensions:

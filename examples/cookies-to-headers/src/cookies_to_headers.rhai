@@ -2,7 +2,7 @@
 // of the function to callback
 fn subgraph_service(service, subgraph) {
     print(`registering request callback for ${subgraph}`);
-    let request_callback = Fn("process_request");
+    const request_callback = Fn("process_request");
     service.map_request(request_callback);
 }
 
