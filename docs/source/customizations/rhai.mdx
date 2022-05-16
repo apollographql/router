@@ -39,11 +39,11 @@ plugins:
 ## Rhai Router Execution Environment
 The main source of information about Rhai is the book (see above). That's where to look for general rhai programming questions or advice on how to interact with arrays or manipulate strings or program control flow or (...).
 
-This section covers functionality specific to how router functionality is exposed to Rhai.
+This section covers functionality that the router explicitly exposes to Rhai.
 
 ### Global State
 
-The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the EPOCH in unix environments.)
+The execution state of all router rhai scripts contains a constant, `apollo_start`, which may be used for relative timing operations. (Consider it similar to the `Epoch` in Unix environments.)
 
 ```javascript
 fn router_service(service) {
@@ -76,7 +76,7 @@ log_trace("this is trace level log message");
 
 ### Exceptions
 
-If you wish to indicate to the client that an error has occurred, Rhai supports exceptions. Throwing an exception will terminate processing and return an INTERNAL_SERVER_ERROR to the client.
+If you wish to indicate to the client that an error has occurred, Rhai supports exceptions. Throwing an exception will terminate processing and return an `Internal Server Error` to the client.
 
 For example:
 ```javascript
@@ -113,7 +113,7 @@ fn subgraph_service(service) {}
 
 ### Service Interface
 
-The full functionality of a Rust plugin is not available, but the following methods are available for service interactions.
+The full functionality of a Rust plugin is not available. The following methods are available for service interactions.
 
   - `map_request`
   - `map_response`
@@ -154,6 +154,78 @@ request.sub_headers
 
 All of the above are read/write *apart* from `request.body.variables` which is read-only.
 
+#### request.context
+
+The context is a key/value store which has a lifespan of router request to router response. Key's must be strings, but values can be any rhai object. See [context](./native#5-define-necessary-context) for more information about contexts.
+
+```javascript
+// You can interact with request.context as an indexed variable
+request.context["contextual"] = 42; // inserts a new key in the context "contextual" with value 42
+print(`${request.context["contextual"]}`); // writes 42 into the router log at info level
+// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+request.context.contextual = 42;
+```
+
+#### request.headers
+
+The headers of a request are accessible as a read/write indexed variable. The keys and values must be valid header name and value strings.
+
+```javascript
+// You can interact with request.headers as an indexed variable
+request.headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
+print(`${request.headers["x-my-new-header"]}`); // writes "42" into the router log at info level
+// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+request.headers.x-my-new-header = 42.to_string();
+```
+
+#### request.sub_headers
+
+Only present when processing subgraph requests. The interface is exactly the same as for request.header.
+
+```javascript
+// You can interact with request.sub_headers as an indexed variable
+request.sub_headers["x-my-new-header"] = 42.to_string(); // inserts a new header "x-my-new-header" with value "42"
+print(`${request.sub_headers["x-my-new-header"]}`); // writes "42" into the router log at info level
+// Rhai also supports extended dot notation for indexed variables so, this is equivalent
+request.sub_headers.x-my-new-header = 42.to_string();
+```
+
+#### request.body.query
+
+The request query is accessible. If modified make sure to do this before QueryPlanning is performed (i.e.: `router_service()` or `query_planner_service()`) or the modification will have no effect on the query. For example, let's modify the query at the router_service stage and turn it into a completely invalid query.
+
+```javascript
+print(`${request.body.query}`); // log the query before modification
+request.body.query="query menotvalid { name }}"; // update the query (in this case to an invalid query)
+print(`${request.body.query}`); // log the query after modification
+```
+
+#### request.body.operation_name
+
+If an operation name was defined in the request, then it is accessible. There is a complete example of interacting with the operation name in the [examples/op-name-to-header directory](https://github.com/apollographql/router/tree/main/examples/op-name-to-header).
+
+```javascript
+print(`${request.body.operation_name}`); // log the operation_name before modification
+request.body.operation_name +="-my-suffix"; // append "-my-suffix" to the operation_name
+print(`${request.body.operation_name}`); // log the operation_name after modification
+```
+
+#### request.body.variables
+
+Request Variables may be read. They cannot be written (this may change in the future). They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+```javascript
+print(`${request.body.variables}`); // log the variables
+```
+
+#### request.body.extensions
+
+Request extensions may be read or modified. They are exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+```javascript
+print(`${request.body.extensions}`); // log the extensions
+```
+
 ### Response Interface
 
 Most responses expose a mechanism for interacting with response Body, Headers and Context. QueryPlannerResponse only exposes a Context, since there are no Body or Headers accessible at that stage.
@@ -168,6 +240,56 @@ response.body.extensions
 ```
 
 All of the above are read/write.
+
+Many of these variables are identical in behaviour to their `request` counterparts: context, headers, body.extensions. In addition, responses contain:
+
+#### response.body.label
+
+A response may contain a label and this may be read/written as a String.
+
+```javascript
+print(`${response.body.label}`); // logs the response label
+```
+
+#### response.body.data
+
+A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
+
+There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
+
+```javascript
+print(`${response.body.data}`); // logs the response data
+```
+
+#### response.body.errors
+
+A response may contain errors. Errors are represented in rhai as an array of Object Maps.
+
+Each Error must contain at least:
+ - a message (String)
+ - a location (Array)
+
+(The location can be an empty array.)
+
+Optionally, an error may also contain extensions, which are represented as an Object Map.
+
+There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
+
+```javascript
+// Create an error with our message
+let error_to_add = #{
+    message: "this is an added error",
+    locations: [],
+    // Extensions are optional, adding some arbitrary extensions to illustrate syntax
+    extensions: #{
+        field_1: "field 1",
+        field_2: "field_2"
+    }
+};
+// Add this error to any existing errors
+response.body.errors += error_to_add;
+print(`${response.body.errors}`); // logs the response errors
+```
 
 ## Full Examples
 
@@ -235,10 +357,13 @@ This example converts cookies into headers for transmission to subgraphs. There 
 ```javascript
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
-fn subgraph_service(service, name) {
-    print("registering request callback"); // print() is the same as using log_info()
+fn subgraph_service(service, subgraph) {
+    // Choose how to treat each subgraph using the "subgraph" parameter.
+    // In this case we are doing the same thing for all subgraphs
+    // and logging out details for each.
+    print(`registering request callback for: ${subgraph}`); // print() is the same as using log_info()
     let request_callback = Fn("process_request");
-    map_request(service, request_callback);
+    service.map_request(request_callback);
 }
 
 // This will convert all cookie pairs into headers.

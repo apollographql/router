@@ -1,9 +1,9 @@
 // Call map_request with our service and pass in a string with the name
 // of the function to callback
 fn subgraph_service(service, subgraph) {
-    print("registering request callback");
+    print(`registering request callback for ${subgraph}`);
     let request_callback = Fn("process_request");
-    map_request(service, request_callback);
+    service.map_request(request_callback);
 }
 
 // This will convert all cookie pairs into headers.
