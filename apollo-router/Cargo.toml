@@ -71,7 +71,7 @@ reqwest = { version = "0.11.10", default-features = false, features = [
     "json",
     "stream",
 ] }
-schemars = { version = "0.8.8", features = ["url"] }
+schemars = { version = "=0.8.8", features = ["url"] } # https://github.com/apollographql/router/issues/1074
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }

@@ -9,7 +9,7 @@ anyhow = "1.0.55"
 apollo-router = { path = "../../apollo-router" }
 apollo-router-core = { path = "../../apollo-router-core" }
 async-trait = "0.1.52"
-schemars = "0.8.8"
+schemars = { version = "=0.8.8", features = ["url"] } # https://github.com/apollographql/router/issues/1074
 serde = "1.0.136"
 serde_json = "1.0.79"
 tokio = { version = "1.17.0", features = ["full"] }
