@@ -21,8 +21,11 @@ static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 
 /// Options for the router
 #[derive(Parser, Debug)]
-#[clap(global_setting(AppSettings::NoAutoVersion))]
-#[structopt(name = "router", about = "Apollo federation router")]
+#[clap(
+    name = "router",
+    about = "Apollo federation router",
+    global_setting(AppSettings::NoAutoVersion)
+)]
 pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
@@ -59,12 +62,12 @@ pub struct Opt {
     #[clap(long)]
     schema: bool,
 
-    /// Your Apollo key
-    #[clap(long, env)]
+    /// Your Apollo key.
+    #[clap(skip = std::env::var("APOLLO_KEY").ok())]
     apollo_key: Option<String>,
 
-    /// Your Apollo graph reference
-    #[clap(long, env)]
+    /// Your Apollo graph reference.
+    #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
 
     /// The endpoint polled to fetch the latest supergraph schema.
@@ -75,7 +78,7 @@ pub struct Opt {
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
     apollo_uplink_poll_interval: Duration,
 
-    /// Display version and exit
+    /// Display version and exit.
     #[clap(parse(from_flag), long, short = 'V')]
     pub version: bool,
 }
