@@ -119,3 +119,6 @@ We now have complete examples of OpenTracing usage with Datadog, Jaeger and Zipk
 ## 📚 Documentation ( :books: )
 ### Add documentation for the endpoint configuration in server ([PR #1000](https://github.com/apollographql/router/pull/1000))
 Documentation about setting a custom endpoint path for GraphQL queries has been added.
+
+### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
+We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
