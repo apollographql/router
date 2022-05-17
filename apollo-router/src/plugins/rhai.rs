@@ -6,6 +6,7 @@ use apollo_router_core::{
     RouterRequest, RouterResponse, ServiceBuilderExt, SubgraphRequest, SubgraphResponse, Value,
 };
 use http::header::{HeaderName, HeaderValue, InvalidHeaderName};
+use http::uri::{Parts, PathAndQuery};
 use http::{HeaderMap, StatusCode, Uri};
 use rhai::serde::{from_dynamic, to_dynamic};
 use rhai::{plugin::*, Dynamic, Engine, EvalAltResult, FnPtr, Instant, Map, Scope, Shared, AST};
@@ -952,10 +953,27 @@ impl Rhai {
                 Ok(())
             })
             // Request.uri.path
-            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path().clone()))
+            .register_get_result("path", |x: &mut Uri| to_dynamic(x.path()))
             .register_set_result("path", |x: &mut Uri, value: &str| {
-                let new_uri = Uri::from_str(value).map_err(|e| e.to_string())?;
-                *x = new_uri;
+                // Because there is no simple way to update parts on an existing
+                // Uri (no parts_mut()), then we need to create a new Uri from our
+                // existing parts, preserving any query, and update our existing
+                // Uri.
+                let mut parts: Parts = x.clone().into_parts();
+                parts.path_and_query = match parts
+                    .path_and_query
+                    .ok_or("path and query are missing")?
+                    .query()
+                {
+                    Some(query) => Some(
+                        PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
+                            .map_err(|e| e.to_string())?,
+                    ),
+                    None => {
+                        Some(PathAndQuery::from_maybe_shared(value).map_err(|e| e.to_string())?)
+                    }
+                };
+                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
             })
             // ResponseBody "short-cuts" to bypass the enum
