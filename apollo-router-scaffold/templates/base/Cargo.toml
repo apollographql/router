@@ -1,0 +1,32 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package]
+name = "{{name}}"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = [
+    "xtask",
+]
+
+[[bin]]
+name = "router"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.55"
+{{#if integration_test}}
+apollo-router = {path ="{{integration_test}}/../apollo-router" }
+apollo-router-core = { path="{{integration_test}}/../apollo-router-core" }
+{{else}}
+# Note if you update these dependencies then also update xtask/Cargo.toml
+apollo-router = { git="https://github.com/apollographql/router.git", tag="0.9.2" }
+apollo-router-core = { git="https://github.com/apollographql/router.git", tag="0.9.2" }
+{{/if}}
+async-trait = "0.1.52"
+schemars = "0.8.8"
+serde = "1.0.136"
+serde_json = "1.0.79"
+tokio = { version = "1.17.0", features = ["full"] }
+tower = { version = "0.4.12", features = ["full"] }
+tracing = "0.1.34"

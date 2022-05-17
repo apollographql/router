@@ -5,6 +5,7 @@ members = [
     "apollo-router",
     "apollo-router-core",
     "apollo-router-benchmarks",
+    "apollo-router-scaffold",
     "examples/add-timestamp-header",
     "examples/async-auth",
     "examples/cookies-to-headers",

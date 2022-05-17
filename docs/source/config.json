@@ -41,6 +41,7 @@
     "Customizations": {
       "Overview": "/customizations/overview",
       "Native Rust plugins": "/customizations/native",
+      "Native Rust plugins - Tutorial": "/customizations/native-tutorial",
       "Rhai scripts (experimental)": "/customizations/rhai"
     },
     "Third-Party Support": {
