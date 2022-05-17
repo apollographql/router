@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/mod.rs
-assertion_line: 657
 expression: "&schema"
 ---
 {
@@ -300,6 +299,7 @@ expression: "&schema"
           "additionalProperties": false
         },
         "experimental.rhai": {
+          "description": "Configuration for the Rhai Plugin",
           "type": "object",
           "required": [
             "filename"
@@ -449,16 +449,6 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
-            "apollo_graph_ref": {
-              "default": "${APOLLO_GRAPH_REF}",
-              "type": "string",
-              "nullable": true
-            },
-            "apollo_key": {
-              "default": "${APOLLO_KEY}",
-              "type": "string",
-              "nullable": true
-            },
             "client_name_header": {
               "default": "apollographql-client-name",
               "type": "string",
