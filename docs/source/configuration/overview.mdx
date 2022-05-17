@@ -13,6 +13,60 @@ You run the Apollo Router with the following command (assuming you're in the sam
 
 Arguments for this command are described below.
 
+## Environment variables
+
+
+To use [managed federation](https://www.apollographql.com/docs/federation/managed-federation/overview/)
+set these environment variables when running the router:
+```bash
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+```
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Argument / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_REF`
+
+</td>
+<td>
+
+The graph ref of the registered Apollo graph and variant that the router fetches its supergraph schema from.
+
+One of this or [`-s` / `--supergraph`](#-s----supergraph) is **required**.
+
+If you provide this argument, you must also provide [`APOLLO_KEY`](#APOLLO_KEY).
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY`
+
+</td>
+<td>
+
+The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with Apollo Studio when fetching its supergraph schema.
+
+If you provide the [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) env variable, this argument is **required**.
+
+</td>
+</tr>
+
+<tr>
+</tr>
+</tbody>
+</table>
+
 ## Command arguments
 
 Where indicated, some of these arguments can also be set via an environment variable. Command-line arguments always take precedence over environment variables if an option is provided both ways.
@@ -41,42 +95,7 @@ The absolute or relative path to the Apollo Router's [supergraph schema](/federa
 
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
 
-One of this or [`--apollo-graph-ref`](#--apollo-graph-ref) is **required**.
-
-</td>
-</tr>
-
-<tr class="required">
-<td style="min-width: 150px;">
-
-##### `--apollo-graph-ref`
-
-`APOLLO_GRAPH_REF`
-
-</td>
-<td>
-
-The graph ref of the registered Apollo graph and variant that the router fetches its supergraph schema from.
-
-One of this or [`-s` / `--supergraph`](#-s----supergraph) is **required**.
-
-If you provide this argument, you must also provide [`--apollo-key`](#--apollo-key).
-
-</td>
-</tr>
-<tr class="required">
-<td style="min-width: 150px;">
-
-##### `--apollo-key`
-
-`APOLLO_KEY`
-
-</td>
-<td>
-
-The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with Apollo Studio when fetching its supergraph schema.
-
-If you provide the [`--apollo-graph-ref`](#--apollo-graph-ref) argument, this argument is **required**.
+One of this or env [`APOLLO_GRAPH_REF`](#APOLLO_GRAPH_REF) is **required**.
 
 </td>
 </tr>

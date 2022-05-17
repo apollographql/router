@@ -5,6 +5,4 @@ telemetry:
     endpoint: "http://example.com"
     client_version_header: apollographql-client-version
     client_name_header: apollographql-client-name
-    apollo_graph_ref: ""
-    apollo_key: ""
 

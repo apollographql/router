@@ -27,8 +27,11 @@ Description! And a link to a [reference](http://url)
 ## ❗ BREAKING ❗
 
 ### Simplify Context::upsert() [PR #1073](https://github.com/apollographql/router/pull/1073)
-
 Removes the `default` parameter and requires inserted values to implement `Default`.
+
+### Remove command line options `--apollo-graph-key` and `--apollo-graph-ref` [PR #1069](https://github.com/apollographql/router/pull/1069)
+Using these command lime options exposes sensitive data in the process list. Setting via environment variables is now the only way that these can be set.   
+In addition these setting have also been removed from the telemetry configuration in yaml.
 
 ## 🚀 Features
 ## 🐛 Fixes
