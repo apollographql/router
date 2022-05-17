@@ -35,6 +35,10 @@ In addition these setting have also been removed from the telemetry configuratio
 ### Pin schemars version to 0.8.8 [PR #1075](https://github.com/apollographql/router/pull/1075)
 The Schemars 0.8.9 causes compile errors due to it validating default types. Pin the version to 0.8.8.
 See issue [#1074](https://github.com/apollographql/router/issues/1074)
+
+### Fix infinite recursion on during parsing [PR #1078](https://github.com/apollographql/router/pull/1078)
+During parsing of queries the use of `"` in a parameter value caused infinite recursion. This preliminary fix will be revisited shortly.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
