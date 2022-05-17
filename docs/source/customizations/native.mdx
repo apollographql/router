@@ -196,10 +196,12 @@ Fetches a value from the `context` object.
 #### `upsert`
 
 ```rust
-context.upsert("key1", |v| v + 1, || 0)?;
+context.upsert("key1", |v: u32| v + 1)?;
 ```
 
 Use `upsert` if you might need to resolve multiple simultaneous writes to a single `context` key (this is most likely for the `subgraph_service` hook, because it might be called by multiple threads in parallel). Rust is multi-threaded, and you will get unexpected results if multiple threads write to `context` at the same time. This function prevents issues by guaranteeing that modifications happen serially.
+
+Note: `upsert` requires v to implement `Default`.
 
 ### 6. Register your plugin
 
