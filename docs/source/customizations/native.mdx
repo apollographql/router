@@ -133,7 +133,7 @@ To define custom logic for a service hook, you can use [`ServiceBuilder`](https:
 // Replaces the default definition in the example above
 use tower::ServiceBuilderExt;
 use apollo_router_core::ServiceBuilderExt as ApolloServiceBuilderExt;
- 
+
 fn router_service(
     &mut self,
     service: BoxService<RouterRequest, RouterResponse, BoxError>,
@@ -221,7 +221,7 @@ Choose a group name that represents your organization and a name that represents
 
 ### 7. Configure your plugin
 
-After you register your plugin, you can add custom configuration for it to your [YAML configuration file](../configuration/overview/#configuration-file) in the `plugins:` section:
+After you register your plugin, you can add custom configuration for it to your [YAML configuration file](../configuration/overview/#yaml-config-file) in the `plugins:` section:
 
 ```yaml
 plugins:
@@ -235,13 +235,13 @@ Like individual requests, plugins follow their own strict lifecycle that helps p
 
 ### Creation
 
-When the router starts, all plugins included in the executable are registered. At this time, the router calls the `new` method of all plugins. If any of these methods fail, the router terminates with helpful error messages. 
+When the router starts, all plugins included in the executable are registered. At this time, the router calls the `new` method of all plugins. If any of these methods fail, the router terminates with helpful error messages.
 
 There is no sequencing for plugin registration, and registrations might even execute in parallel. A plugin should _never_ rely on the existence of _another_ plugin during initialization.
 
 ### Activate
 
-When the router is ready to start serving requests, it calls each plugin's `activate` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#configuration-file).
+When the router is ready to start serving requests, it calls each plugin's `activate` method. Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
 
 Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
 
