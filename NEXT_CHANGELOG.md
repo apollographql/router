@@ -25,6 +25,11 @@ Description! And a link to a [reference](http://url)
 # [0.9.1] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Simplify Context::upsert() [PR #1073](https://github.com/apollographql/router/pull/1073)
+
+Removes the `default` parameter and requires inserted values to implement `Default`.
+
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
