@@ -32,6 +32,9 @@ In addition these setting have also been removed from the telemetry configuratio
 
 ## 🚀 Features
 ## 🐛 Fixes
+### Pin schemars version to 0.8.8 [PR #1075](https://github.com/apollographql/router/pull/1075)
+The Schemars 0.8.9 causes compile errors due to it validating default types. Pin the version to 0.8.8.
+See issue [#1074](https://github.com/apollographql/router/issues/1074)
 ## 🛠 Maintenance
 ## 📚 Documentation
 
