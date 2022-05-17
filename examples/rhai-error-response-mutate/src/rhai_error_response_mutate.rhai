@@ -21,9 +21,15 @@ fn router_service(service) {
         // Define a minimal error. You need at least:
         //   - a message string
         //   - an empty locations array
-        let error_to_add = #{
+        // extensions are optional. Added here to illustrate syntax.
+        const error_to_add = #{
             message: "this is an added error",
-            locations: []
+            locations: [],
+            extensions:
+                #{
+                field_1: "field 1",
+                field_2: "field_2"
+                }
         };
         response.body.errors += error_to_add;
 
