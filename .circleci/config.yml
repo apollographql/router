@@ -398,7 +398,7 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - initialize_submodules
+      #- initialize_submodules
       - when:
           condition:
             equal: [*rust_linux_executor, << parameters.platform >>]
