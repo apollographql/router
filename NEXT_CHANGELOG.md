@@ -31,6 +31,10 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
+Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🐛 Fixes
