@@ -4,6 +4,8 @@
 
 It is possible to run the router outside the default bundled web server (Axum). 
 
+> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  This applies to its source code and all distributions, including any embedded usage.  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+
 ## Reasons to avoid this
 
 * Router APIs are not stable. You will effectively be making a fork of the Router.
