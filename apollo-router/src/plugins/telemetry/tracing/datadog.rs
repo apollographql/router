@@ -12,7 +12,11 @@ use super::{deser_endpoint, AgentEndpoint};
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
+    #[schemars(with = "String", default = "default_agent_endpoint")]
     pub endpoint: AgentEndpoint,
+}
+const fn default_agent_endpoint() -> &'static str {
+    "default"
 }
 
 impl TracingConfigurator for Config {
