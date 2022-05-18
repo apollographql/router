@@ -2,6 +2,7 @@
 schema
   @core(feature: "https://specs.apollo.dev/core/v0.2"),
   @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+  @core(feature: "https://specs.apollo.dev/inaccessible/v0.1", for: SECURITY)
 {
   query: Query
   mutation: Mutation
