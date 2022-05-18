@@ -579,7 +579,7 @@ async fn missing_variables() {
 
 async fn query_node(request: &graphql::Request) -> Result<graphql::Response, graphql::FetchError> {
     reqwest::Client::new()
-        .post("http://localhost:4100/graphql")
+        .post("https://federation-demo-gateway.fly.dev/")
         .json(request)
         .send()
         .await
