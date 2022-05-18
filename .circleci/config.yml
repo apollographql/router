@@ -81,6 +81,86 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-1.33.0-windows-amd64 jaeger
 
+  # This job sets up our nodejs dependencies,
+  # and makes sure everything is ready to run integration tests
+  macos_prepare_node_env:
+    steps:
+      #TODO[igni]: check for node version before we try to install it
+      # Installing this with the curl nvm command was proving difficult,
+      # so I've opted to just install the .pkg.  Should be the same net
+      # result, even if liked the opportunity for symmetry with Linux.
+      - run:
+          name: Installing Node.js with a .pkg.
+          command: |
+            curl "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}.pkg" > "$HOME/Downloads/node.pkg" && sudo installer -store -pkg "$HOME/Downloads/node.pkg" -target "/"
+            sudo npm install --global npm@${NPM_VERSION}
+      - run:
+          name: Assert Node.js version
+          command: test "$(node --version)" = "v${NODE_VERSION}"
+      - run:
+          name: Assert npm version
+          command: test "$(npm --version)" = "${NPM_VERSION}"
+      - run:
+          # The jaeger exporter won't work without this
+          name: Increase udp packet size
+          command: |
+            sudo sysctl net.inet.udp.maxdgram=65536
+            sudo sysctl net.inet.udp.maxdgram
+  linux_prepare_node_env:
+    steps:
+      #TODO[igni]: check for node version before we try to install it
+      - run:
+          name: Install nvm
+          command: |
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+            echo '. ~/.nvm/nvm.sh' >> $BASH_ENV
+      - run:
+          name: Install desired Node.js version
+          command: |
+            nvm install $NODE_VERSION
+            nvm alias default $NODE_VERSION
+            npm install --global npm@${NPM_VERSION}
+      - run:
+          name: Assert Node.js version
+          command: test "$(node --version)" = "v${NODE_VERSION}"
+      - run:
+          name: Assert npm version
+          command: test "$(npm --version)" = "${NPM_VERSION}"
+
+  windows_prepare_node_env:
+    #TODO[igni]: check for node version before we try to install it
+    steps:
+      - run:
+          name: Install desired Node.js version with nvm
+          command: |
+            nvm install ${Env:NODE_VERSION}
+            nvm on
+      - run:
+          # https://github.com/coreybutler/nvm-windows/issues/300
+          # Have to move the command out of the way because it can't
+          # overwrite itself otherwise.   This is madness, but apparently
+          # accepted.  Other things I tried: using yarn to install npm,
+          # using http://npm.im/npm-windows-upgrade and even shouting.
+          name: Install specific version of npm in a crazy Windows way
+          command: |
+            $node_dir = (get-item (get-command npm).source).directory.fullname
+            foreach ($cmd in @("npm", "npx")) {
+              foreach ($ext in @(".ps1", ".cmd", "")) {
+                if (Test-Path "$node_dir/$cmd$ext") {
+                  rename-item -path (join-path -path $node_dir -childpath "$cmd$ext") "${cmd}-orig${ext}"
+                }
+              }
+            }
+            npm-orig install --global "npm@${Env:NPM_VERSION}"
+      - run:
+          name: Assert Node.js version
+          command: |
+            if ((node --version) -Ne "v${Env:NODE_VERSION}") { exit 1 }
+      - run:
+          name: Assert npm version
+          command: |
+            if ((npm --version) -Ne "${Env:NPM_VERSION}") { exit 1 }
+
   windows_prepare_rust_env:
     steps:
       - run:
@@ -252,6 +332,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - linux_prepare_node_env
             - prepare_rust_env
             - xtask_lint:
                 os: linux
@@ -269,6 +350,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - linux_prepare_node_env
             - prepare_rust_env
             - xtask_check_compliance:
                 os: linux
@@ -294,6 +376,7 @@ jobs:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - windows_install_baseline
+            - windows_prepare_node_env
             - windows_prepare_rust_env
             - windows_build_workspace
       - when:
@@ -301,6 +384,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
+            - macos_prepare_node_env
             - prepare_rust_env
             - build_workspace:
                 os: macos
@@ -327,6 +411,7 @@ jobs:
             equal: [*rust_windows_executor, << parameters.platform >>]
           steps:
             - windows_install_baseline
+            - windows_prepare_node_env
             - windows_prepare_rust_env
             - windows_test_workspace
       - when:
@@ -334,6 +419,7 @@ jobs:
             equal: [*rust_macos_executor, << parameters.platform >>]
           steps:
             - macos_install_baseline
+            - macos_prepare_node_env
             - prepare_rust_env
             - test_workspace:
                 os: macos
