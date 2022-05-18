@@ -43,7 +43,6 @@ impl Plugin for PropagateStatusCode {
                     // upsert allows us to:
                     // - check for the presence of a value for `status_codes` (first parameter)
                     // update the value if present (second parameter)
-                    // insert a value if not (third parameter)
                     res.context
                         .upsert(&"status_code".to_string(), |status_code: u16| {
                             // return the status code with the highest priority
