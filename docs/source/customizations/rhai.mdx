@@ -135,7 +135,7 @@ fn router_service(service) {
 
 ### Request Interface
 
-All requests expose a mechanism for interacting with request Body, Headers and Context.
+All requests expose a mechanism for interacting with request Body, Headers, Uri and Context.
 
 ```
 request.context
@@ -144,6 +144,7 @@ request.body.query
 request.body.operation_name
 request.body.variables
 request.body.extensions
+request.uri.path
 ```
 
 In addition, SubgraphRequest, exposes the additional ability to interact with headers sent to subgraphs:
@@ -224,6 +225,15 @@ Request extensions may be read or modified. They are exposed to Rhai as an [Obje
 
 ```javascript
 print(`${request.body.extensions}`); // log the extensions
+```
+
+#### request.uri.path
+
+Request path may be read or modified. The path is exposed to Rhai as a string and may be set from a string which is a valid Uri Path.
+
+```javascript
+print(`${request.uri.path}`); // log the request path
+request.uri.path += "/added-context"; // Add an extra element to the query path
 ```
 
 ### Response Interface
