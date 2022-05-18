@@ -85,7 +85,7 @@ impl Plugin for ContextData {
                 // A single context is created for the entire request.
                 // We use upsert because there may be multiple downstream subgraph requests.
                 // Upserts are guaranteed to be applied serially.
-                match &resp.context.upsert("response_count", |v| v + 1, || 0) {
+                match &resp.context.upsert("response_count", |v: usize| v + 1) {
                     Ok(_) => (),
                     Err(_) => {
                         // This code will never be executed because we know that an integer can be

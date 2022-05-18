@@ -56,20 +56,15 @@ impl Context {
         }
     }
 
-    pub fn upsert<K, V>(
-        &self,
-        key: K,
-        upsert: impl Fn(V) -> V,
-        default: impl Fn() -> V,
-    ) -> Result<(), BoxError>
+    pub fn upsert<K, V>(&self, key: K, upsert: impl Fn(V) -> V) -> Result<(), BoxError>
     where
         K: Into<String>,
-        V: for<'de> serde::Deserialize<'de> + Serialize,
+        V: for<'de> serde::Deserialize<'de> + Serialize + Default,
     {
         let key = key.into();
         self.entries
             .entry(key.clone())
-            .or_try_insert_with(|| serde_json_bytes::to_value((default)()))?;
+            .or_try_insert_with(|| serde_json_bytes::to_value::<V>(Default::default()))?;
         let mut result = Ok(());
         self.entries
             .alter(&key, |_, v| match serde_json_bytes::from_value(v.clone()) {
@@ -118,9 +113,9 @@ mod test {
     fn test_context_upsert() {
         let c = Context::new();
         assert!(c.insert("present", 1).is_ok());
-        assert!(c.upsert("present", |v| v + 1, || 0).is_ok());
+        assert!(c.upsert("present", |v: usize| v + 1).is_ok());
         assert_eq!(c.get("present").unwrap(), Some(2));
-        assert!(c.upsert("not_present", |v| v + 1, || 0).is_ok());
+        assert!(c.upsert("not_present", |v: usize| v + 1).is_ok());
         assert_eq!(c.get("not_present").unwrap(), Some(1));
     }
 
@@ -128,6 +123,6 @@ mod test {
     fn test_context_marshall_errors() {
         let c = Context::new();
         assert!(c.insert("string", "Some value".to_string()).is_ok());
-        assert!(c.upsert("string", |v| v + 1, || 0).is_err());
+        assert!(c.upsert("string", |v: usize| v + 1).is_err());
     }
 }

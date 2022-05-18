@@ -43,21 +43,16 @@ impl Plugin for PropagateStatusCode {
                     // upsert allows us to:
                     // - check for the presence of a value for `status_codes` (first parameter)
                     // update the value if present (second parameter)
-                    // insert a value if not (third parameter)
                     res.context
-                        .upsert(
-                            &"status_code".to_string(),
-                            |status_code: u16| {
-                                // return the status code with the highest priority
-                                for &code in all_status_codes.iter() {
-                                    if code == response_status_code || code == status_code {
-                                        return code;
-                                    }
+                        .upsert(&"status_code".to_string(), |status_code: u16| {
+                            // return the status code with the highest priority
+                            for &code in all_status_codes.iter() {
+                                if code == response_status_code || code == status_code {
+                                    return code;
                                 }
-                                status_code
-                            },
-                            || res.response.status().as_u16(),
-                        )
+                            }
+                            status_code
+                        })
                         .expect("couldn't insert status codes");
                 }
                 res
