@@ -368,6 +368,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - linux_prepare_node_env
             - prepare_rust_env
             - build_workspace:
                 os: linux
@@ -403,6 +404,7 @@ jobs:
             equal: [*rust_linux_executor, << parameters.platform >>]
           steps:
             - linux_install_baseline
+            - linux_prepare_node_env
             - prepare_rust_env
             - test_workspace:
                 os: linux
