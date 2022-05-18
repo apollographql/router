@@ -11,6 +11,7 @@
     "Configuration": {
       "Overview": "/configuration/overview",
       "CORS": "/configuration/cors",
+      "CSRF prevention": "/configuration/csrf",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Traffic shaping": "/configuration/traffic-shaping",

@@ -22,23 +22,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 -->
 
-# [0.9.1] (unreleased) - 2022-mm-dd
+# [0.9.2] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
 ### Simplify Context::upsert() [PR #1073](https://github.com/apollographql/router/pull/1073)
 Removes the `default` parameter and requires inserted values to implement `Default`.
 
-### Remove command line options `--apollo-graph-key` and `--apollo-graph-ref` [PR #1069](https://github.com/apollographql/router/pull/1069)
-Using these command lime options exposes sensitive data in the process list. Setting via environment variables is now the only way that these can be set.   
-In addition these setting have also been removed from the telemetry configuration in yaml.
-
 ## 🚀 Features
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
-
-### Document available metrics in Prometheus [PR #1067](https://github.com/apollographql/router/pull/1067)
-Add the list of metrics you can have using Prometheus
-
 ## 🐛 Fixes
