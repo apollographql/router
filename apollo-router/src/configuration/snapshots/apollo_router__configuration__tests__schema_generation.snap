@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/mod.rs
+assertion_line: 687
 expression: "&schema"
 ---
 {
@@ -461,7 +462,6 @@ expression: "&schema"
             },
             "endpoint": {
               "type": "string",
-              "format": "uri",
               "nullable": true
             }
           },
@@ -507,18 +507,7 @@ expression: "&schema"
               ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "type": "string"
                 },
                 "grpc": {
                   "type": "object",
@@ -676,23 +665,10 @@ expression: "&schema"
           "properties": {
             "datadog": {
               "type": "object",
-              "required": [
-                "endpoint"
-              ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "default": "default",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
@@ -736,8 +712,7 @@ expression: "&schema"
                       ],
                       "properties": {
                         "endpoint": {
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "type": "string",
@@ -772,18 +747,7 @@ expression: "&schema"
               ],
               "properties": {
                 "endpoint": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "default"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "format": "uri"
-                    }
-                  ]
+                  "type": "string"
                 },
                 "grpc": {
                   "type": "object",
