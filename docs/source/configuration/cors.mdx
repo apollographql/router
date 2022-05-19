@@ -59,7 +59,7 @@ Depending on what you're building, the origins you specify in your CORS configur
 
 If your browser is running your API on a private network (i.e., not on the public internet) and it relies on the privacy of that network for security, we strongly recommend [specifying which origins](#configuring-cors-options-for-apollo-server) can access your server's resources.
 
-If you instead rely on `allow_any_origin`, while your personal computer is on your private network, a script on any website could potentially make your browser talk to your private API. [Some browsers, such as Chrome, have features under development](https://wicg.github.io/private-network-access/) to solve this problem. But in the meantime, all servers on private networks should *always* specify origins in their CORS configuration.
+> If you instead rely on `allow_any_origin`, while your personal computer is on your private network, a script on any website could potentially make your browser talk to your private API. [Some browsers, such as Chrome, have features under development](https://wicg.github.io/private-network-access/) to solve this problem. But in the meantime, all servers on private networks should *always* specify origins in their CORS configuration.
 
 #### APIs that require cookies
 
@@ -90,11 +90,11 @@ You can always specify origins in your CORS configuration later.
 
 ##  Configuring CORS options for Apollo Server
 
-By default, the apollo router only allows requests from https://studio.apollographql.com. If your Apollo Router is serving data for web applications, you want to either add their origin to the list of allowed origins, or switch to `allow_any_origin`.
+By default, the Apollo Router only allows requests from https://studio.apollographql.com. If your Apollo Router is serving data for web applications, you want to either add their origin to the list of allowed origins, or switch to `allow_any_origin`.
 
 > If you need to pass credentials to your server (e.g., via cookies), you can't use the `allow_any_origin` flag. You _must_ provide specific origins. For examples, see [Passing credentials with CORS](#passing-credentials-with-cors).
 
-The batteries-included `apollo-server` [has a `cors` option](../api/apollo-server/#cors), which you can use to change your server's default CORS behavior:
+The Apollo Router has a `cors` section in the yml configuration, which you can use to change your server's default CORS behavior:
 
 ```yml
 server:
@@ -108,7 +108,7 @@ The example above enables CORS requests from `https://www.your-app.example`, alo
 
 > Note if you plan to use [Apollo Studio Explorer](https://www.apollographql.com/docs/studio/explorer/explorer/) as a GraphQL web IDE you should include `https://studio.apollographql.com` in your list of valid origins.
 
-If you want to disable CORS entirely, set origins to an empty list:
+To disable CORS entirely, set origins to an empty list:
 
 ```yml
 server:
@@ -124,7 +124,7 @@ You can enable credentials with CORS by setting the [`Access-Control-Allow-Crede
 
 > You *must* [specify an origin](#configuring-cors-options-for-apollo-server) to enable credentialed requests. If your server sends the `*` wildcard value for the `Access-Control-Allow-Origin` HTTP header, your browser will refuse to send credentials.
 
-To  enable your browser to pass credentials with the batteries-included `apollo-server` you can use the [`cors` option](../api/apollo-server/#cors) to specify `origins` and set `credentials` to `true`:
+To  enable your browser to pass credentials with the Apollo Router you can use the `cors` section to specify `origins` and set `allow_credentials` to `true`:
 
 ```yml
 server:
