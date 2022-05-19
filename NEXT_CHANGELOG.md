@@ -35,6 +35,9 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
 Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
 
+### Fix the introspection query detection [PR #1100](https://github.com/apollographql/router/pull/1100)
+Fix the introspection query detection, for example if you only have `__typename` in the query then it's an introspection query, if it's used with other fields (not prefixed by `__`) then it's not an introspection query.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 ### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
