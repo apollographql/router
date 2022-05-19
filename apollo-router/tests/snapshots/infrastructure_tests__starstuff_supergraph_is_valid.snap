@@ -1,34 +1,26 @@
 ---
 source: apollo-router/tests/infrastructure_tests.rs
+assertion_line: 13
 expression: "include_str!(\"../../examples/graphql/supergraph.graphql\")"
-
 ---
+
 schema
-  @core(feature: "https://specs.apollo.dev/core/v0.1"),
-  @core(feature: "https://specs.apollo.dev/join/v0.1")
+  @core(feature: "https://specs.apollo.dev/core/v0.2"),
+  @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
 {
   query: Query
   mutation: Mutation
 }
 
-directive @core(feature: String!) repeatable on SCHEMA
+directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
-scalar join__FieldSet
+directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
 
-enum join__Graph {
-  ACCOUNTS @join__graph(name: "accounts" url: "https://accounts.demo.starstuff.dev")
-  INVENTORY @join__graph(name: "inventory" url: "https://inventory.demo.starstuff.dev")
-  PRODUCTS @join__graph(name: "products" url: "https://products.demo.starstuff.dev")
-  REVIEWS @join__graph(name: "reviews" url: "https://reviews.demo.starstuff.dev")
-}
+directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on INTERFACE | OBJECT
 
 type Mutation {
   createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)
@@ -75,5 +67,26 @@ type User
   name: String @join__field(graph: ACCOUNTS)
   reviews: [Review] @join__field(graph: REVIEWS)
   username: String @join__field(graph: ACCOUNTS)
+}
+
+enum core__Purpose {
+  """
+  `EXECUTION` features provide metadata necessary to for operation execution.
+  """
+  EXECUTION
+
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ACCOUNTS @join__graph(name: "accounts" url: "https://accounts.demo.starstuff.dev")
+  INVENTORY @join__graph(name: "inventory" url: "https://inventory.demo.starstuff.dev")
+  PRODUCTS @join__graph(name: "products" url: "https://products.demo.starstuff.dev")
+  REVIEWS @join__graph(name: "reviews" url: "https://reviews.demo.starstuff.dev")
 }
 
