@@ -35,7 +35,7 @@ In addition these setting have also been removed from the telemetry configuratio
 
 
 ### Aggregate usage reports in streaming and set the timeout to 5 seconds [PR #1066](https://github.com/apollographql/router/pull/1066)
-The metrics plugin was allocating chunks of usagen reports to aggregate them right after, this was replaced by a streaming loop. The interval for sending the reports to spaceport was reduced from 10s to 5s.
+The metrics plugin was allocating chunks of usage reports to aggregate them right after, this was replaced by a streaming loop. The interval for sending the reports to spaceport was reduced from 10s to 5s.
 
 ## 🛠 Maintenance
 ## 📚 Documentation
