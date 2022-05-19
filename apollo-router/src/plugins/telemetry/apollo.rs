@@ -9,6 +9,7 @@ use url::Url;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[schemars(with = "Option<String>")]
     pub endpoint: Option<Url>,
 
     #[schemars(skip)]
