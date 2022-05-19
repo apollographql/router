@@ -33,4 +33,7 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
+We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
+
 ## 🐛 Fixes
