@@ -42,7 +42,7 @@ opentelemetry = "0.17.0"
 opentelemetry-http = "0.6.0"
 paste = "1.0.6"
 regex = "1.5.5"
-router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "ef47767e80ef7e362105f73e88288a3acca7ea37" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs.git", rev = "2837a6ce1afc1342f0817bc270b27b07b3f000b3" }
 schemars = { version = "=0.8.8", features = ["url"] } # https://github.com/apollographql/router/issues/1074
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 serde_json = { version = "1.0.79", features = ["preserve_order"] }
