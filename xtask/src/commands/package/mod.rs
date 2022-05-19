@@ -40,8 +40,7 @@ impl Package {
             self.output.to_owned()
         } else if self.output.is_dir() {
             self.output.join(format!(
-                "{}-{}-{}-{}.tar.gz",
-                RELEASE_BIN,
+                "router-{}-{}-{}.tar.gz",
                 *PKG_VERSION,
                 // NOTE: same as xtask
                 platforms::TARGET_ARCH,
