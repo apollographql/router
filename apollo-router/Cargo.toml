@@ -27,7 +27,6 @@ directories = "4.0.1"
 displaydoc = "0.2"
 envmnt = "0.9.1"
 futures = { version = "0.3.21", features = ["thread-pool"] }
-futures-batch = "0.6.0"
 hotwatch = "0.4.6"
 http = "0.2.7"
 humantime = "2.1.0"

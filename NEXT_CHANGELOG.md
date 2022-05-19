@@ -35,6 +35,15 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ### Fix the installation and releasing script for Windows [PR #1098](https://github.com/apollographql/router/pull/1098)
 Do not put .exe for Windows in the name of the tarball when releasing new version
 
+### Aggregate usage reports in streaming and set the timeout to 5 seconds [PR #1066](https://github.com/apollographql/router/pull/1066)
+The metrics plugin was allocating chunks of usage reports to aggregate them right after, this was replaced by a streaming loop. The interval for sending the reports to spaceport was reduced from 10s to 5s.
+
+### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
+Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
+
 ## 🛠 Maintenance
 ## 📚 Documentation
+### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
+We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
+
 ## 🐛 Fixes
