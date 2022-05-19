@@ -22,19 +22,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 -->
 
-# [0.9.1] (unreleased) - 2022-mm-dd
+# [0.9.2] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
-### Remove command line options `--apollo-graph-key` and `--apollo-graph-ref` [PR #1069](https://github.com/apollographql/router/pull/1069)
-Using these command lime options exposes sensitive data in the process list. Setting via environment variables is now the only way that these can be set.   
-In addition these setting have also been removed from the telemetry configuration in yaml.
+### Simplify Context::upsert() [PR #1073](https://github.com/apollographql/router/pull/1073)
+Removes the `default` parameter and requires inserted values to implement `Default`.
 
 ## 🚀 Features
 ## 🐛 Fixes
-### Pin schemars version to 0.8.8 [PR #1075](https://github.com/apollographql/router/pull/1075)
-The Schemars 0.8.9 causes compile errors due to it validating default types. Pin the version to 0.8.8.
-See issue [#1074](https://github.com/apollographql/router/issues/1074)
+
+### Aggregate usage reports in streaming and set the timeout to 5 seconds [PR #1066](https://github.com/apollographql/router/pull/1066)
+The metrics plugin was allocating chunks of usage reports to aggregate them right after, this was replaced by a streaming loop. The interval for sending the reports to spaceport was reduced from 10s to 5s.
+
+### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
+Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
 
 ## 🛠 Maintenance
 
@@ -44,8 +46,7 @@ report every 5s. Now spaceport will put the incoming reports in a
 bounded queue and send them in order, with backpressure.
 
 ## 📚 Documentation
-
-### Document available metrics in Prometheus [PR #1067](https://github.com/apollographql/router/pull/1067)
-Add the list of metrics you can have using Prometheus
+### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
+We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
 
 ## 🐛 Fixes

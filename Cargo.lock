@@ -88,8 +88,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.2.5"
+source = "git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227#bbfb74c682e86cdefcfcfcd5be9eefafefc796e2"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
 name = "apollo-router"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "apollo-router-core",
@@ -109,7 +117,6 @@ dependencies = [
  "displaydoc",
  "envmnt",
  "futures",
- "futures-batch",
  "hotwatch",
  "http",
  "humantime",
@@ -169,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "apollo-router",
  "apollo-router-core",
@@ -186,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.2.5 (git+https://github.com/apollographql/apollo-rs.git?tag=hotfix_227)",
  "async-trait",
  "atty",
  "axum",
@@ -249,14 +256,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec51b82f6dad598b00d48bbe02c4f5b5c0231e5376b22278466701d767bcdd9d"
 dependencies = [
  "apollo-encoder 0.3.1",
- "apollo-parser",
+ "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "arbitrary",
  "once_cell",
 ]
 
 [[package]]
 name = "apollo-spaceport"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "clap 3.1.9",
@@ -277,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-uplink"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "futures",
  "graphql_client",
@@ -1565,17 +1572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures-batch"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f5c372b0c5d1023cce2a0ff7667b589ba88dae751b5f65c400b5d0803b30cbf"
-dependencies = [
- "futures",
- "futures-timer",
- "pin-utils",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,12 +1642,6 @@ name = "futures-task"
 version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c66a976bf5909d801bbef33416c41372779507e7a6b3a5e25e4749c58f776a"
-
-[[package]]
-name = "futures-timer"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1de7508b218029b0f01662ed8f61b1c964b3ae99d6f25462d0f55a595109df6"
 
 [[package]]
 name = "futures-util"
@@ -3795,7 +3785,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -5550,7 +5540,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "ansi_term",
  "anyhow",

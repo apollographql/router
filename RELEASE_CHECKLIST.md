@@ -37,6 +37,8 @@ in lieu of an official changelog.
 2. Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
 3. Update the version in `*/Cargo.toml`.
+4. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
+5. Put a Release date and the version number on the new `CHANGELOG.md` section
 4. Update the version in `NEXT_CHANGELOG.md`.
 5. Clear `NEXT_CHANGELOG.md` leaving only the template.
 6. Run `cargo check` so the lock file gets updated.
