@@ -79,9 +79,12 @@ impl QueryPlanner for BridgeQueryPlanner {
             .planner
             .plan(query, operation)
             .await
-            .map_err(QueryPlannerError::RouterBridgeError)?
+            .map_err(QueryPlannerError::RouterBridgeError)?;
+        println!(">>>>> {planner_result:?}");
+        let planner_result = planner_result
             .into_result()
             .map_err(QueryPlannerError::from)?;
+        // TODO here, check error here
 
         match planner_result {
             PlanSuccess {
@@ -113,6 +116,7 @@ struct QueryPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use router_bridge::planner::PlanErrors;
     use serde_json::json;
     use test_log::test;
 
@@ -150,11 +154,14 @@ mod tests {
             .unwrap_err();
 
         match err {
-            QueryPlannerError::PlanningErrors(plan_errors) => {
+            QueryPlannerError::PlanningErrors(PlanErrors::Catched {
+                errors,
+                usage_reporting,
+            }) => {
                 insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", plan_errors.usage_reporting);
+                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", usage_reporting);
                 });
-                insta::assert_debug_snapshot!("plan_invalid_query_errors", plan_errors.errors);
+                insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
             }
             _ => {
                 panic!("invalid query planning should have failed");

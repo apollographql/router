@@ -2,6 +2,7 @@ use crate::prelude::graphql::*;
 use crate::CacheResolver;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
+use router_bridge::planner::PlanErrors;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -104,10 +105,15 @@ where
                 })
                 .map_err(|e| {
                     let CacheResolverError::RetrievalError(re) = &e;
-                    if let QueryPlannerError::PlanningErrors(pe) = re.deref() {
+                    println!("re --- {:?}", re);
+                    if let QueryPlannerError::PlanningErrors(PlanErrors::Catched {
+                        usage_reporting,
+                        ..
+                    }) = re.deref()
+                    {
                         if let Err(inner_e) = request
                             .context
-                            .insert(USAGE_REPORTING, pe.usage_reporting.clone())
+                            .insert(USAGE_REPORTING, usage_reporting.clone())
                         {
                             tracing::error!(
                                 "usage reporting was not serializable to context, {}",
@@ -160,7 +166,7 @@ mod tests {
         delegate
             .expect_sync_get()
             .times(2)
-            .return_const(Err(QueryPlannerError::from(PlanErrors {
+            .return_const(Err(QueryPlannerError::from(PlanErrors::Catched {
                 errors: Default::default(),
                 usage_reporting: UsageReporting {
                     stats_report_key: "this is a test key".to_string(),
