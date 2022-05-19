@@ -746,7 +746,7 @@ impl Operation {
     }
 
     fn is_introspection(&self) -> bool {
-        self.selection_set.iter().any(|sel| match sel {
+        self.selection_set.iter().all(|sel| match sel {
             Selection::Field { name, .. } => name.as_str().starts_with("__"),
             _ => false,
         })
