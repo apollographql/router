@@ -166,9 +166,7 @@ impl ApolloMetricsExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        if report.operation_count != 0 {
-                            Self::send_report(&pool, &apollo_key, &header, std::mem::take(&mut report)).await;
-                        }
+                        Self::send_report(&pool, &apollo_key, &header, std::mem::take(&mut report)).await;
                     }
                 };
             }
@@ -188,6 +186,10 @@ impl ApolloMetricsExporter {
         header: &ReportHeader,
         report: Report,
     ) {
+        if report.operation_count == 0 {
+            return;
+        }
+
         match pool.get().await {
             Ok(mut reporter) => {
                 let report = report.into_report(header.clone());
