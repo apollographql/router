@@ -7,7 +7,8 @@ use std::ops::AddAssign;
 use std::time::{Duration, SystemTime};
 
 impl Report {
-    pub(crate) fn new(reports: Vec<SingleReport>) -> Report {
+    #[cfg(test)]
+    fn new(reports: Vec<SingleReport>) -> Report {
         let mut aggregated_report = Report::default();
         for report in reports {
             aggregated_report += report;
@@ -89,7 +90,7 @@ pub(crate) struct SingleFieldStat {
 #[derive(Default, Serialize)]
 pub(crate) struct Report {
     traces_per_query: HashMap<String, TracesAndStats>,
-    operation_count: u64,
+    pub(crate) operation_count: u64,
 }
 
 impl AddAssign<SingleReport> for Report {
