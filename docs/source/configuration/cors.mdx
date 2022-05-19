@@ -124,7 +124,10 @@ You can enable credentials with CORS by setting the [`Access-Control-Allow-Crede
 
 > You *must* [specify an origin](#configuring-cors-options-for-apollo-server) to enable credentialed requests. If your server sends the `*` wildcard value for the `Access-Control-Allow-Origin` HTTP header, your browser will refuse to send credentials.
 
-To  enable your browser to pass credentials with the Apollo Router you can use the `cors` section to specify `origins` and set `allow_credentials` to `true`:
+To  enable your browser to pass credentials with the Apollo Router:
+
+1. Use the `cors` section to specify `origins`
+2. Set `allow_credentials` to `true`:
 
 ```yml
 server:
