@@ -5,10 +5,7 @@ use crate::plugins::telemetry::config::{MetricsCommon, Trace};
 use crate::plugins::telemetry::metrics::apollo::studio::{
     SingleContextualizedStats, SingleQueryLatencyStats, SingleReport, SingleTracesAndStats,
 };
-use crate::plugins::telemetry::metrics::{
-    AggregateMeterProvider, BasicMetrics, MetricsBuilder, MetricsConfigurator,
-    MetricsExporterHandle,
-};
+use crate::plugins::telemetry::metrics::{AggregateMeterProvider, BasicMetrics, duration_to_observation, MetricsBuilder, MetricsConfigurator, MetricsExporterHandle};
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::subscriber::replace_layer;
 use ::tracing::{info_span, Span};
@@ -312,7 +309,7 @@ impl Plugin for Telemetry {
                     }
                     metrics
                         .http_requests_duration
-                        .record(now.elapsed().as_secs_f64(), &[subgraph_attribute.clone()]);
+                        .record(duration_to_observation(&now.elapsed()), &[subgraph_attribute.clone()]);
                     r
                 })
             })
@@ -562,7 +559,7 @@ impl Telemetry {
         }
         metrics
             .http_requests_duration
-            .record(now.elapsed().as_secs_f64(), &[]);
+            .record(duration_to_observation(&now.elapsed()), &[]);
     }
 
     fn populate_context(config: &Config, req: &RouterRequest) {

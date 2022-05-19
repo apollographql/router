@@ -7,6 +7,7 @@ use opentelemetry::KeyValue;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tower::util::BoxService;
 use tower::BoxError;
 
@@ -81,6 +82,10 @@ pub(crate) struct BasicMetrics {
     pub http_requests_total: AggregateCounter<u64>,
     pub http_requests_error_total: AggregateCounter<u64>,
     pub http_requests_duration: AggregateValueRecorder<f64>,
+}
+
+pub fn duration_to_observation(duration: &Duration) -> f64 {
+    (duration.as_secs() as f64) + f64::from(duration.subsec_nanos()) / 1_000_000_000_f64
 }
 
 impl BasicMetrics {
