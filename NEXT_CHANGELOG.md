@@ -31,6 +31,10 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 
 ## 🚀 Features
 ## 🐛 Fixes
+
+### Fix the installation script for windows[PR #1098](https://github.com/apollographql/router/pull/1098)
+Change the position of the `.exe` extension when building the link to download the release
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🐛 Fixes
