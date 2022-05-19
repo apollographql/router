@@ -537,14 +537,15 @@ impl Query {
                     }
 
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
+                    let field_name_str = field_name.as_str();
+                    if let Some(input_value) = input.get_mut(field_name_str) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
                         // the input value with Null
                         // - the value was already null and is already present in output
                         // if we expect an object or list at that key, output will already contain
                         // an object or list and then input_value cannot be null
-                        if input_value.is_null() && output.contains_key(field_name.as_str()) {
+                        if input_value.is_null() && output.contains_key(field_name_str) {
                             continue;
                         }
 
@@ -559,6 +560,13 @@ impl Query {
                             selection_set,
                             schema,
                         )?;
+                    } else if field_name_str == TYPENAME {
+                        if !output.contains_key(field_name_str) {
+                            output.insert(
+                                field_name.clone(),
+                                Value::String(operation.kind.to_string().into()),
+                            );
+                        }
                     } else if field_type.is_non_null() {
                         return Err(InvalidValue);
                     }
@@ -1221,6 +1229,34 @@ mod tests {
                     ],
                     "other": null,
                 },
+            }},
+        );
+    }
+
+    #[test]
+    fn reformat_response_query_with_root_typename() {
+        assert_format_response!(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                foo: String
+            }
+            ",
+            "{get {foo __typename} __typename}",
+            json! {{
+                "get": {
+                    "foo": "1",
+                    "__typename": "Thing"
+                }
+            }},
+            None,
+            json! {{
+                "get": {
+                    "foo": "1",
+                    "__typename": "Thing"
+                },
+                "__typename": "Query",
             }},
         );
     }

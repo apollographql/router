@@ -32,6 +32,9 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Return top `__typename` field when it's not an introspection query [PR #1102](https://github.com/apollographql/router/pull/1102)
+When `__typename` is used at the top of the query in combination with other fields it was not returned in the output.
+
 ### Fix the installation and releasing script for Windows [PR #1098](https://github.com/apollographql/router/pull/1098)
 Do not put .exe for Windows in the name of the tarball when releasing new version
 
