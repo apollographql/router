@@ -32,6 +32,9 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 ## 🚀 Features
 ## 🐛 Fixes
 
+### Return top `__typename` field when it's not an introspection query [PR #1102](https://github.com/apollographql/router/pull/1102)
+When `__typename` is used at the top of the query in combination with other fields it was not returned in the output.
+
 ### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
 Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
 
