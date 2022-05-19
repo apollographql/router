@@ -4,6 +4,26 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [0.9.1] - 2022-05-17
+
+## ❗ BREAKING ❗
+
+### Remove command line options `--apollo-graph-key` and `--apollo-graph-ref` [PR #1069](https://github.com/apollographql/router/pull/1069)
+Using these command lime options exposes sensitive data in the process list. Setting via environment variables is now the only way that these can be set.
+In addition these setting have also been removed from the telemetry configuration in yaml.
+
+## 🐛 Fixes
+### Pin schemars version to 0.8.8 [PR #1075](https://github.com/apollographql/router/pull/1075)
+The Schemars 0.8.9 causes compile errors due to it validating default types. Pin the version to 0.8.8.
+See issue [#1074](https://github.com/apollographql/router/issues/1074)
+
+### Fix infinite recursion on during parsing [PR #1078](https://github.com/apollographql/router/pull/1078)
+During parsing of queries the use of `"` in a parameter value caused infinite recursion. This preliminary fix will be revisited shortly.
+## 📚 Documentation
+
+### Document available metrics in Prometheus [PR #1067](https://github.com/apollographql/router/pull/1067)
+Add the list of metrics you can have using Prometheus
+
 # [v0.9.0] - 2022-05-13
 
 ## 🎉 **The Apollo Router has graduated from _Preview_ to _General Availability (GA)_!** 🎉

@@ -1,0 +1,6 @@
+telemetry:
+  tracing:
+    trace_config:
+      service_name: router
+    zipkin:
+      endpoint: ${ENDPOINT}

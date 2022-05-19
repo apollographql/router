@@ -8,6 +8,9 @@ Each release of the Apollo Router includes both default and debug images. Each i
 
 Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v0.1.0-preview.1`):
 
+> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  This applies to its source code and all distributions, including versions embedded within a Docker image.  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+
+
 ```bash title="Docker"
 docker run -p 4000:4000 \
   --env APOLLO_GRAPH_REF="<your graph>" \
