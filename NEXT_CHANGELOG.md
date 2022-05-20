@@ -48,6 +48,12 @@ Adds the ability to use environment variable expansion for the configuration of 
 Fix the introspection query detection, for example if you only have `__typename` in the query then it's an introspection query, if it's used with other fields (not prefixed by `__`) then it's not an introspection query.
 
 ## 🛠 Maintenance
+
+### Remove the batching and timeout from spaceport  [PR #1080](https://github.com/apollographql/router/pull/1080)
+apollo-router is already handling report aggregation and sends the
+report every 5s. Now spaceport will put the incoming reports in a
+bounded queue and send them in order, with backpressure.
+
 ## 📚 Documentation
 ### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
 We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
