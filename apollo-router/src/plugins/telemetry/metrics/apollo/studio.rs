@@ -388,7 +388,7 @@ mod test {
                         query_latency_stats: SingleQueryLatencyStats {
                             latency: Duration::from_secs(1),
                             cache_hit: true,
-                            persisted_query_hit: true,
+                            persisted_query_hit: Some(true),
                             cache_latency: Some(Duration::from_secs(1)),
                             root_error_stats: SinglePathErrorStats {
                                 children: HashMap::from([(
