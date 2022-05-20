@@ -49,6 +49,10 @@ Fix the introspection query detection, for example if you only have `__typename`
 
 ## 🛠 Maintenance
 
+### Add well known query to `PluginTestHarness` [PR #1114](https://github.com/apollographql/router/pull/1114)
+Add `call_canned` on `PluginTestHarness`. It performs a well known query that will generate a valid response.
+
+
 ### Remove the batching and timeout from spaceport  [PR #1080](https://github.com/apollographql/router/pull/1080)
 apollo-router is already handling report aggregation and sends the
 report every 5s. Now spaceport will put the incoming reports in a
