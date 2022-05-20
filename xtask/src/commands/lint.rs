@@ -8,13 +8,13 @@ pub struct Lint {}
 impl Lint {
     pub fn run(&self) -> Result<()> {
         Self::check_fmt()?;
-        cargo!(["clippy", "--all", "--tests", "--", "-D", "warnings"]);
+        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
 
         Ok(())
     }
 
     pub fn run_local(&self) -> Result<()> {
-        cargo!(["clippy", "--all", "--tests", "--", "-D", "warnings"]);
+        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings"]);
 
         if Self::check_fmt().is_err() {
             // cargo fmt check failed, this means there is some formatting to do
