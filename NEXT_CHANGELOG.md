@@ -30,6 +30,10 @@ Description! And a link to a [reference](http://url)
 Removes the `default` parameter and requires inserted values to implement `Default`.
 
 ## 🚀 Features
+
+### DIY docker images [PR #1106](https://github.com/apollographql/router/pull/1106)
+The build_docker_image.sh script is now provided as a working example of how to build docker images from our GH release tarballs or from a commit hash/tag against the router repo.
+
 ## 🐛 Fixes
 
 ### Return top `__typename` field when it's not an introspection query [PR #1102](https://github.com/apollographql/router/pull/1102)
