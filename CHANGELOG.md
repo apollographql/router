@@ -12,8 +12,8 @@ Removes the `default` parameter and requires inserted values to implement `Defau
 
 ## 🚀 Features
 
-### DIY docker images [PR #1106](https://github.com/apollographql/router/pull/1106)
-The build_docker_image.sh script is now provided as a working example of how to build docker images from our GH release tarballs or from a commit hash/tag against the router repo.
+### DIY docker images script [PR #1106](https://github.com/apollographql/router/pull/1106)
+The `build_docker_image.sh` script shows how to build docker images from our GH release tarballs or from a commit hash/tag against the router repo.
 
 ## 🐛 Fixes
 
@@ -26,7 +26,7 @@ Do not put .exe for Windows in the name of the tarball when releasing new versio
 ### Aggregate usage reports in streaming and set the timeout to 5 seconds [PR #1066](https://github.com/apollographql/router/pull/1066)
 The metrics plugin was allocating chunks of usage reports to aggregate them right after, this was replaced by a streaming loop. The interval for sending the reports to spaceport was reduced from 10s to 5s.
 
-### Put back the ability to use environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
+### Fix the environment variable expansion for telemetry endpoints [PR #1092](https://github.com/apollographql/router/pull/1092)
 Adds the ability to use environment variable expansion for the configuration of agent/collector endpoint for Jaeger, OTLP, Datadog.
 
 ### Fix the introspection query detection [PR #1100](https://github.com/apollographql/router/pull/1100)
@@ -37,15 +37,13 @@ Fix the introspection query detection, for example if you only have `__typename`
 ### Add well known query to `PluginTestHarness` [PR #1114](https://github.com/apollographql/router/pull/1114)
 Add `call_canned` on `PluginTestHarness`. It performs a well known query that will generate a valid response.
 
-
 ### Remove the batching and timeout from spaceport  [PR #1080](https://github.com/apollographql/router/pull/1080)
-apollo-router is already handling report aggregation and sends the
-report every 5s. Now spaceport will put the incoming reports in a
-bounded queue and send them in order, with backpressure.
+Apollo Router is already handling report aggregation and sends the report every 5s. Now spaceport will put the incoming reports in a bounded queue and send them in order, with backpressure.
 
 ## 📚 Documentation
+
 ### Add CORS documentation ([PR #1044](https://github.com/apollographql/router/pull/1044))
-We've updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
+Updated the CORS documentation to reflect the recent [CORS and CSRF](https://github.com/apollographql/router/pull/1006) updates.
 
 
 # [0.9.1] - 2022-05-17
