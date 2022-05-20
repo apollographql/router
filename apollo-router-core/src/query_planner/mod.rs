@@ -10,7 +10,10 @@ use opentelemetry::trace::SpanKind;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use std::collections::HashSet;
-use tracing::Instrument;
+use tracing::{
+    field::{self, Field},
+    Instrument,
+};
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
 pub struct QueryPlanOptions {}
@@ -218,7 +221,11 @@ impl PlanNode {
                         )
                         .instrument(tracing::info_span!(
                             "fetch",
-                            "otel.kind" = %SpanKind::Internal
+                            "otel.kind" = %SpanKind::Client,
+                            "net.peer.name" = &field::Empty,
+                            "net.peer.port" = &field::Empty,
+                            "http.route" = &field::Empty,
+                            "net.transport" = "ip_tcp"
                         ))
                         .await
                     {
@@ -282,7 +289,7 @@ pub(crate) mod fetch {
     use serde::Deserialize;
     use std::{fmt::Display, sync::Arc};
     use tower::ServiceExt;
-    use tracing::{instrument, Instrument};
+    use tracing::{field::display, instrument, Instrument, Span};
 
     #[derive(Copy, Clone, Debug, PartialEq, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -420,24 +427,31 @@ pub(crate) mod fetch {
                     return Ok((Value::from_path(current_dir, Value::Null), Vec::new()));
                 }
             };
+            let schema_uri = schema
+                .subgraphs()
+                .find_map(|(name, url)| (name == service_name).then(|| url))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "schema uri for subgraph '{}' should already have been checked",
+                        service_name
+                    )
+                })
+                .clone();
+            let current_span = Span::current();
+            if let Some(host) = schema_uri.host() {
+                current_span.record("net.peer.name", &display(host));
+            }
+            if let Some(port) = schema_uri.port_u16() {
+                current_span.record("net.peer.port", &port);
+            }
+            current_span.record("http.route", &display(schema_uri.path()));
 
             let subgraph_request = SubgraphRequest::builder()
                 .originating_request(Arc::new(originating_request))
                 .subgraph_request(
                     http_compat::Request::builder()
                         .method(http::Method::POST)
-                        .uri(
-                            schema
-                                .subgraphs()
-                                .find_map(|(name, url)| (name == service_name).then(|| url))
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                    "schema uri for subgraph '{}' should already have been checked",
-                                    service_name
-                                )
-                                })
-                                .clone(),
-                        )
+                        .uri(schema_uri)
                         .body(
                             Request::builder()
                                 .query(Some(operation.to_string()))
