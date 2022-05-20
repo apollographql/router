@@ -176,7 +176,56 @@ impl PluginTestHarness {
         Ok(Self { router_service })
     }
 
+    /// Call the test harness with a request. Not that you will need to have set up appropriate responses via mocks.
     pub async fn call(&mut self, request: RouterRequest) -> Result<RouterResponse, BoxError> {
         self.router_service.ready().await?.call(request).await
+    }
+
+    /// If using the canned schema this canned request will give a response.
+    pub async fn call_canned(&mut self) -> Result<RouterResponse, BoxError> {
+        self.router_service
+            .ready()
+            .await?
+            .call(
+                RouterRequest::fake_builder()
+                    .query("query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }")
+                    .variable("first", 2usize)
+                    .build()?,
+            )
+            .await
+    }
+}
+
+#[cfg(test)]
+mod testing {
+    use super::*;
+    use insta::assert_json_snapshot;
+
+    struct EmptyPlugin {}
+    #[async_trait::async_trait]
+    impl Plugin for EmptyPlugin {
+        type Config = ();
+
+        async fn new(_config: Self::Config) -> Result<Self, tower::BoxError> {
+            Ok(Self {})
+        }
+    }
+
+    #[tokio::test]
+    async fn test_test_harness() -> Result<(), BoxError> {
+        let mut harness = PluginTestHarness::builder()
+            .plugin(EmptyPlugin {})
+            .schema(IntoSchema::Canned)
+            .build()
+            .await?;
+        let result = harness.call_canned().await?;
+        if let crate::ResponseBody::GraphQL(graphql) = result.response.body() {
+            insta::with_settings!({sort_maps => true}, {
+                assert_json_snapshot!(graphql.data);
+            });
+        } else {
+            panic!("Should have got response body");
+        }
+        Ok(())
     }
 }
