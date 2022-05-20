@@ -7,11 +7,14 @@
 # docker_build_image.sh -h
 #
 # Requirements: To run successfully, you need quite a few utilities installed.
-# Most of them are likely to be installed on your OS. Some will require installation,
-# such as: docker, git, curl, mktemp, getopt
+# Most of them are likely to be installed on your OS. Some will require
+# installation, such as: docker, git, curl, mktemp, getopt
 #
 # Note: git is only required if you are building an image from source with the
 #       -b flag.
+# Note: This utility makes assumptions about the existence of files relative
+#       to the directory where it is executed. To work correctly you must
+#       execute in the "repo"/dockerfiles/diy directory.
 ###
 
 ###
