@@ -55,7 +55,7 @@ pub(crate) struct SingleContextualizedStats {
 pub(crate) struct SingleQueryLatencyStats {
     pub(crate) latency: Duration,
     pub(crate) cache_hit: bool,
-    pub(crate) persisted_query_hit: bool,
+    pub(crate) persisted_query_hit: Option<bool>,
     pub(crate) cache_latency: Option<Duration>,
     pub(crate) root_error_stats: SinglePathErrorStats,
     pub(crate) has_errors: bool,
@@ -158,8 +158,11 @@ impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     fn add_assign(&mut self, stats: SingleQueryLatencyStats) {
         self.request_latencies
             .increment_duration(Some(stats.latency), 1);
-        self.persisted_query_hits += stats.persisted_query_hit as u64;
-        self.persisted_query_misses += !stats.persisted_query_hit as u64;
+        match stats.persisted_query_hit {
+            Some(true) => self.persisted_query_hits += 1,
+            Some(false) => self.persisted_query_misses += 1,
+            None => {}
+        }
         self.cache_hits.increment_duration(stats.cache_latency, 1);
         self.root_error_stats += stats.root_error_stats;
         self.requests_with_errors_count += stats.has_errors as u64;

@@ -79,10 +79,12 @@ where
                     }
                     (Some(apq_hash), _) => {
                         if let Some(cached_query) = cache.get(&apq_hash) {
+                            let _ = req.context.insert("persisted_query_hit", true);
                             tracing::trace!("apq: cache hit");
                             req.originating_request.body_mut().query = Some(cached_query);
                             Ok(ControlFlow::Continue(req))
                         } else {
+                            let _ = req.context.insert("persisted_query_hit", false);
                             tracing::trace!("apq: cache miss");
                             let errors = vec![crate::Error {
                                 message: "PersistedQueryNotFound".to_string(),
