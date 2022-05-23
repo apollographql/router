@@ -126,7 +126,7 @@ async fn api_schema_hides_field() {
         .contains("Cannot query field \"inStock\" on type \"Product\"."));
 }
 
-#[test_span(tokio::test(flavor = "multi_thread"))]
+#[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
@@ -139,7 +139,7 @@ async fn traced_basic_request() {
     insta::assert_json_snapshot!(get_spans());
 }
 
-#[test_span(tokio::test(flavor = "multi_thread"))]
+#[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 #[target(apollo_router_core=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
