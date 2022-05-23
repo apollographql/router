@@ -43,8 +43,8 @@ impl Package {
                 "router-{}-{}-{}.tar.gz",
                 *PKG_VERSION,
                 // NOTE: same as xtask
-                TARGET_ARCH,
-                TARGET_OS,
+                std::env::consts::ARCH,
+                std::env::consts::OS,
             ))
         } else {
             self.output.to_owned()
@@ -79,43 +79,3 @@ impl Package {
         Ok(())
     }
 }
-
-#[cfg(target_arch = "aarch64")]
-pub const TARGET_ARCH: &str = "x86_64";
-
-#[cfg(target_arch = "arm")]
-pub const TARGET_ARCH: &str = "arm";
-
-#[cfg(target_arch = "x86")]
-pub const TARGET_ARCH: &str = "x86";
-
-#[cfg(target_arch = "x86_64")]
-pub const TARGET_ARCH: &str = "x86_64";
-
-#[cfg(not(any(
-    target_arch = "aarch64",
-    target_arch = "arm",
-    target_arch = "x86",
-    target_arch = "x86_64"
-)))]
-pub const TARGET_ARCH: &str = "unknown";
-
-#[cfg(target_os = "linux")]
-pub const TARGET_OS: &str = "linux";
-
-#[cfg(target_os = "macos")]
-pub const TARGET_OS: &str = "macos";
-
-#[cfg(target_os = "windows")]
-pub const TARGET_OS: &str = "windows";
-
-#[cfg(target_os = "freebsd")]
-pub const TARGET_OS: &str = "freebsd";
-
-#[cfg(not(any(
-    target_os = "freebsd",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "windows",
-)))]
-pub const TARGET_OS: &str = "unknown";
