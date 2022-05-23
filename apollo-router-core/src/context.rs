@@ -31,13 +31,19 @@ impl Context {
     pub fn get<K, V>(&self, key: K) -> Result<Option<V>, BoxError>
     where
         K: Into<String>,
-        V: for<'de> serde::Deserialize<'de>,
+        V: for<'de> serde::Deserialize<'de> + std::fmt::Debug,
     {
-        self.entries
+        let result = self
+            .entries
             .get(&key.into())
-            .map(|v| serde_json_bytes::from_value(v.value().clone()))
+            .map(|v| {
+                eprintln!("CONTEXT GET v: {:?}", v.value());
+                serde_json_bytes::from_value(v.value().clone())
+            })
             .transpose()
-            .map_err(|e| e.into())
+            .map_err(|e| e.into());
+        eprintln!("result: {:?}", result);
+        result
     }
 
     pub fn insert<K, V>(&self, key: K, value: V) -> Result<Option<V>, BoxError>
