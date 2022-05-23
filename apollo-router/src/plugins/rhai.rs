@@ -901,16 +901,11 @@ impl Rhai {
             })
             // Register a Context indexer so we can get/set context
             .register_indexer_get_result(|x: &mut Context, key: &str| {
-                eprintln!("TRYING TO GET A CONTEXT KEY: {}", key);
                 x.get(key)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                    .map_err(|e: BoxError| {
-                        eprintln!("WE ARE MAPPING A GET ERROR: {}", e);
-                        e.to_string().into()
-                    })
+                    .map_err(|e: BoxError| e.to_string().into())
             })
             .register_indexer_set_result(|x: &mut Context, key: &str, value: Dynamic| {
-                eprintln!("WE ARE INSERTING CONTEXT KEY: {}, VALUE: {}", key, value);
                 x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
@@ -920,23 +915,14 @@ impl Rhai {
             .register_result_fn(
                 "upsert",
                 |x: &mut Context, key: &str, value: Dynamic| -> Result<(), Box<EvalAltResult>> {
-                    eprintln!("WE ARE UPSERTING CONTEXT KEY: {}, VALUE: {}", key, value);
-                    let result = x
-                        .upsert(key, move |v: Dynamic| {
-                            eprintln!("UPSERT OLD VALUE v: {:?}", v);
-                            eprintln!("UPSERT NEW VALUE value: {:?}", value);
-                            value.clone()
-                        })
-                        .map_err(|e: BoxError| e.to_string().into());
-                    let have_it: Result<Dynamic, String> = x
-                        .get(key)
-                        .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                        .map_err(|e: BoxError| {
-                            eprintln!("WE ARE MAPPING A GET ERROR: {}", e);
-                            e.to_string().into()
-                        });
-                    eprintln!("WE ARE FINDING CONTEXT KEY: {}, VALUE: {:?}", key, have_it);
-                    result
+                    x.upsert(key, |_v: Dynamic| {
+                        // Note: We are always ignoring the existing value in the map
+                        // I'm not sure if this is the right thing to do, but seems difficult
+                        // to imagine doing anything else from rhai (although, I suppose we
+                        // could provide a callback to rhai...)
+                        value.clone()
+                    })
+                    .map_err(|e: BoxError| e.to_string().into())
                 },
             )
             // Register get for Header Name/Value from a tuple pair

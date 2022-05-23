@@ -19,10 +19,10 @@ mod tests {
     use http::StatusCode;
 
     #[tokio::test]
-    async fn test_subgraph_mutates_data() {
+    async fn test_surrogate_cache_key_created() {
         // Define a configuration to use with our plugin
         let conf: Conf = serde_json::from_value(serde_json::json!({
-            "filename": "src/rhai_data_response_mutate.rhai",
+            "filename": "src/rhai_surrogate_cache_key.rhai",
         }))
         .expect("valid conf supplied");
 
@@ -58,15 +58,12 @@ mod tests {
             .await
             .expect("a router response");
 
-        assert_eq!(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            service_response.response.status()
-        );
-        /* TBD: Figure out how to run this as a test
+        assert_eq!(StatusCode::OK, service_response.response.status());
         // Rhai should return a 200...
         println!("RESPONSE: {:?}", service_response);
         assert_eq!(StatusCode::OK, service_response.response.status());
 
+        /* TBD: Figure out how to run this as a test
         // with the expected message
         if let apollo_router_core::ResponseBody::GraphQL(response) =
             service_response.response.body()
