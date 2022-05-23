@@ -28,7 +28,7 @@ mod test {
     use inflector::Inflector;
     use std::collections::BTreeMap;
     use std::env;
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -70,7 +70,7 @@ mod test {
         Ok(())
     }
 
-    fn scaffold_plugin(current_dir: &PathBuf, dir: &TempDir, plugin_type: &str) -> Result<()> {
+    fn scaffold_plugin(current_dir: &Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
         let opts = Opts::builder()
             .project_name(plugin_type)
             .target_dir(dir.path())
