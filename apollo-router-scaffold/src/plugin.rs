@@ -39,7 +39,7 @@ impl PluginAction {
 }
 
 fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
-    let plugin_path = plugin_path(&name);
+    let plugin_path = plugin_path(name);
     if plugin_path.exists() {
         return Err(anyhow::anyhow!("plugin '{}' already exists", name));
     }
@@ -52,11 +52,13 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         .map(|n| n.to_string().to_snake_case())
         .unwrap_or_else(|| "default".to_string());
 
+    let version = get_router_version(cargo_toml);
+
     let opts = cargo_scaffold::Opts::builder()
         .template_path(template_path.as_ref().unwrap_or(&PathBuf::from(
             "https://github.com/apollographql/router.git",
         )))
-        .git_ref(format!("v{}", std::env!("CARGO_PKG_VERSION")))
+        .git_ref(version)
         .repository_template_path("apollo-router-scaffold/templates/plugin")
         .target_dir(".")
         .project_name(name)
@@ -100,7 +102,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
 
     let snake_name = name.to_snake_case();
     let re = Regex::new(&format!(r"(?m)^mod {};$", snake_name)).unwrap();
-    if let None = re.find(&mod_rs) {
+    if re.find(&mod_rs).is_none() {
         mod_rs = format!("mod {};\n{}", snake_name, mod_rs);
     }
 
@@ -113,8 +115,31 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn get_router_version(cargo_toml: Value) -> String {
+    match cargo_toml
+        .get("dependencies")
+        .cloned()
+        .unwrap_or_else(|| Value::Table(toml::value::Table::default()))
+        .get("apollo-router")
+    {
+        Some(Value::String(version)) => version.clone(),
+        Some(Value::Table(table)) => {
+            if let Some(Value::String(branch)) = table.get("branch") {
+                branch.clone()
+            } else if let Some(Value::String(tag)) = table.get("tag") {
+                tag.clone()
+            } else if let Some(Value::String(rev)) = table.get("rev") {
+                rev.clone()
+            } else {
+                format!("v{}", std::env!("CARGO_PKG_VERSION"))
+            }
+        }
+        _ => format!("v{}", std::env!("CARGO_PKG_VERSION")),
+    }
+}
+
 fn remove_plugin(name: &str) -> Result<()> {
-    let plugin_path = plugin_path(&name);
+    let plugin_path = plugin_path(name);
     let snake_name = name.to_snake_case();
 
     std::fs::remove_file(&plugin_path)?;
