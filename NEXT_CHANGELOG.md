@@ -30,6 +30,10 @@ Description! And a link to a [reference](http://url)
 
 ## 🐛 Fixes
 
+- **Prevent memory leaks when tasks are cancelled** [PR #767](https://github.com/apollographql/router/pull/767)
+
+  Cancelling a request could put the router in an unresponsive state where the deduplication layer or cache would make subgraph requests hang.
+
 ## 🛠 Maintenance
 
 ## 📚 Documentation
