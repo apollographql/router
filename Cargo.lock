@@ -3,16 +3,6 @@
 version = 3
 
 [[package]]
-name = "Inflector"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
-dependencies = [
- "lazy_static",
- "regex",
-]
-
-[[package]]
 name = "add-timestamp-header"
 version = "0.1.0"
 dependencies = [
@@ -430,21 +420,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "attohttpc"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a8bda305457262b339322106c776e3fd21df860018e566eb6a5b1aa4b6ae02d"
-dependencies = [
- "flate2",
- "http",
- "log",
- "native-tls",
- "openssl",
- "url",
- "wildmatch",
-]
-
-[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -792,9 +767,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb8e978a56f9ae1ff74f724ecab75d7b15d004a6e881f810d64a592d1563e941"
+checksum = "732fef218fe718ef07a8459dff3a3d3d12ec2430fa0bed28d84f9ac5987164e8"
 dependencies = [
  "anyhow",
  "buildstructor 0.2.0",
@@ -805,7 +780,6 @@ dependencies = [
  "git2",
  "globset",
  "handlebars",
- "handlebars_misc_helpers",
  "indicatif",
  "md5",
  "serde",
@@ -1671,15 +1645,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enquote"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06c36cb11dbde389f4096111698d8b567c0720e3452fd5ac3e6b4e47e1939932"
-dependencies = [
- "thiserror",
-]
-
-[[package]]
 name = "env_logger"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2236,26 +2201,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "handlebars_misc_helpers"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8988751386607e16876907136f6f005a2254f936f41dccf541ea3b5d3474e8ea"
-dependencies = [
- "Inflector",
- "attohttpc",
- "enquote",
- "handlebars",
- "jsonnet-rs",
- "lazy_static",
- "log",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
- "toml",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2728,26 +2673,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "671a26f820db17c2a2750743f1dd03bafd15b98c9f30c7c2628c024c05d73397"
 dependencies = [
  "wasm-bindgen",
-]
-
-[[package]]
-name = "jsonnet-rs"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b396bdfc3ae94965555c9ec3efa2214e5f3921545a943ef9fc9873ff5e4723"
-dependencies = [
- "jsonnet-sys",
- "libc",
-]
-
-[[package]]
-name = "jsonnet-sys"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02347cbdf34234f30f0d92f0f8f678a15883bd5e1e4b3def4ed4a14f691d9add"
-dependencies = [
- "cc",
- "libc",
 ]
 
 [[package]]
@@ -5591,7 +5516,6 @@ version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d82e1a7758622a465f8cee077614c73484dac5b836c02ff6a40d5d1010324d7"
 dependencies = [
- "indexmap",
  "serde",
 ]
 
@@ -6258,12 +6182,6 @@ dependencies = [
  "lazy_static",
  "libc",
 ]
-
-[[package]]
-name = "wildmatch"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f44b95f62d34113cf558c93511ac93027e03e9c29a60dd0fd70e6e025c7270a"
 
 [[package]]
 name = "winapi"
